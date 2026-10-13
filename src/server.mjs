@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { RepositoryService } from './service.mjs';
 import { HttpError, RateLimiter, randomSecret, equal } from './security.mjs';
+import { SourceHttp } from './source-http.mjs';
+import { SourceScheduler } from './source-scheduler.mjs';
 
 const publicDirectory = fileURLToPath(new URL('../public/', import.meta.url));
 const idPattern = '[a-f0-9-]{36}';
@@ -41,6 +43,9 @@ export async function createApplication({ directory, service, secureCookies = tr
   const downloadFailures = new RateLimiter(30, 60 * 1000);
   const downloadLimiter = new RateLimiter(60, 60 * 1000);
   const adminLimiter = new RateLimiter(120, 60 * 1000);
+  const sourceHttp = new SourceHttp(service);
+  const scheduler = new SourceScheduler(service);
+  scheduler.start();
   const assets = new Map(await Promise.all([
     ['/', 'index.html', 'text/html; charset=utf-8'], ['/app.js', 'app.js', 'text/javascript; charset=utf-8'],
     ['/style.css', 'style.css', 'text/css; charset=utf-8'],
@@ -86,6 +91,7 @@ export async function createApplication({ directory, service, secureCookies = tr
         res.setHeader('Set-Cookie', sessionCookie(key, secureCookies));
         json(res, 200, { username, csrf }); return;
       }
+      if (await sourceHttp.handle(req, res, route, body)) return;
       const download = new RegExp(`^/api/projects/(${idPattern})/source/latest$`).exec(route);
       if (req.method === 'GET' && download) {
         const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || '')?.[1];
@@ -145,6 +151,8 @@ export async function createApplication({ directory, service, secureCookies = tr
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxRequestsPerSocket = 100;
+  const close = server.close.bind(server);
+  server.close = (...args) => { scheduler.stop(); sourceHttp.close(); return close(...args); };
   server.on('clientError', (_, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'));
   return { server, service };
 }

@@ -9,6 +9,6 @@
     "start": "node src/server.mjs",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:browser": "node test/browser-smoke.mjs",
-    "check": "node --check src/server.mjs && node --check src/service.mjs && node --check src/archive.mjs && node --check public/app.js"
+    "check": "node --check src/server.mjs && node --check src/service.mjs && node --check src/archive.mjs && node --check src/source-snapshots.mjs && node --check src/source-scheduler.mjs && node --check src/source-http.mjs && node --check public/app.js"
   }
 }

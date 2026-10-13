@@ -74,6 +74,8 @@
     <label>Gitee 仓库地址<input name="repository" type="url" required placeholder="https://gitee.com/team/project.git"><small>使用 HTTPS 地址，不要在地址中填写用户名或密码。</small></label>
     <div class="form-grid"><label>交付分支<input name="branch" required maxlength="200" placeholder="main / master / release"></label><label>访问凭证<select name="credentialId" id="project-credential"></select></label></div>
     <label class="checkbox-label"><input name="enabled" type="checkbox" checked>启用项目下载</label>
+    <label class="checkbox-label"><input name="sourceEnabled" type="checkbox">启用 AI 运维源码快照与增量下载</label>
+    <label>自动同步<select name="syncIntervalSeconds"><option value="0">关闭（仅下载或手动同步）</option><option value="60">每分钟</option><option value="300">每 5 分钟</option><option value="900">每 15 分钟</option><option value="1800">每 30 分钟</option><option value="3600">每小时</option></select><small>启用源码快照后生效。客户端收到新版本提示后自行选择更新。</small></label>
     <div class="info-box">项目创建后即可使用。首次下载会拉取代码并打包；下载密码仅在创建或重置时显示，请及时保存。</div>
     <p class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-close>取消</button><button class="primary" type="submit">保存项目</button></div>
   </form></dialog>
@@ -94,6 +96,8 @@
     <label>项目下载密码<div class="copy-row"><input id="secret-value" readonly><button class="secondary" data-copy="secret-value">复制</button></div><small>仅本次显示。关闭后无法找回，可在项目卡片中重置。</small></label>
     <label>浏览器下载地址<div class="copy-row"><input id="secret-page" readonly><button class="secondary" data-copy="secret-page">复制</button></div></label>
     <label>Jenkins / API 地址<div class="copy-row"><input id="secret-url" readonly><button class="secondary" data-copy="secret-url">复制</button></div></label>
+    <label>AI 运维源码服务地址<div class="copy-row"><input id="secret-source-url" readonly><button class="secondary" data-copy="secret-source-url">复制</button></div><small>在项目设置启用源码快照，使用同一项目下载密码，只提供读取权限。</small></label>
+    <label>AI 运维源码项目 ID<div class="copy-row"><input id="secret-source-project" readonly><button class="secondary" data-copy="secret-source-project">复制</button></div></label>
     <div class="info-box">Jenkins 将密码保存在 Secret text 凭据中，通过 Authorization: Bearer 请求头发送。普通浏览器打开下载地址后输入密码即可。</div>
     <div class="dialog-actions"><button class="primary" data-close>已保存，完成</button></div>
   </div></dialog>

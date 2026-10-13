@@ -74,6 +74,8 @@ function openProject(project) {
   if (project) {
     for (const key of ['id', 'name', 'repository', 'branch', 'credentialId']) form.elements[key].value = project[key] || '';
     form.elements.enabled.checked = project.enabled;
+    form.elements.sourceEnabled.checked = !!project.sourceEnabled;
+    form.elements.syncIntervalSeconds.value = String(project.syncIntervalSeconds || 0);
   }
   openDialog('project-dialog');
 }
@@ -87,6 +89,7 @@ function openCredential(credential) {
 function showSecret(project, token) {
   $('#secret-project-name').textContent = project.name;
   $('#secret-value').value = token; $('#secret-url').value = downloadUrl(project.id); $('#secret-page').value = downloadPage(project.id);
+  $('#secret-source-url').value = location.origin; $('#secret-source-project').value = project.id;
   openDialog('secret-dialog');
 }
 
@@ -132,6 +135,17 @@ function renderProjects() {
       await send(`/api/projects/${project.id}/enabled`, { enabled: !project.enabled }); await refresh();
     }));
     card.append(heading, repository, branch, meta);
+    if (project.sourceEnabled) {
+      const snapshot = project.sourceStatus?.snapshot;
+      const source = element('div', 'info-box');
+      source.append(element('strong', '', 'AI 源码快照'), element('p', '', snapshot
+        ? `${snapshot.revision.slice(0, 8)} · ${snapshot.fileCount} 个文件 · ${formatSize(snapshot.totalBytes)}` : '尚未生成，请立即同步或等待自动同步'));
+      source.append(element('small', '', project.syncIntervalSeconds ? `每 ${project.syncIntervalSeconds / 60} 分钟自动同步` : '按需同步'),
+        button('复制源码服务地址', 'text-button', () => copy(location.origin)),
+        button('复制项目 ID', 'text-button', () => copy(project.id)));
+      if (project.sourceStatus?.error) source.append(element('p', 'card-error', project.sourceStatus.error));
+      card.append(source);
+    }
     if (project.error) card.append(element('p', 'card-error', project.error));
     card.append(actions); list.append(card);
   }
@@ -209,6 +223,8 @@ handleForm('#auth-form', async (input, form) => {
 });
 handleForm('#project-form', async (input, form) => {
   input.enabled = form.elements.enabled.checked;
+  input.sourceEnabled = form.elements.sourceEnabled.checked;
+  input.syncIntervalSeconds = Number(form.elements.syncIntervalSeconds.value);
   const result = await send(input.id ? `/api/projects/${input.id}` : '/api/projects', input, input.id ? 'PUT' : 'POST');
   $('#project-dialog').close(); await refresh();
   if (result.token) showSecret(result.project, result.token); else toast('项目配置已保存');

@@ -1,9 +1,11 @@
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { Store } from './store.mjs';
 import { ArchiveBuilder, validateBranch, validateRepository } from './archive.mjs';
 import { HttpError, randomSecret, digest, equal, encrypt, decrypt, requireText, hashPassword, checkPassword } from './security.mjs';
+import { SourceSnapshots, SOURCE_PROTOCOL, SOURCE_LIMITS } from './source-snapshots.mjs';
 
 const timestamp = () => new Date().toISOString();
 function audit(state, projectId, action, message) {
@@ -41,6 +43,8 @@ export class RepositoryService {
     this.builder = builder || new ArchiveBuilder(path.join(directory, 'cache'), archiveOptions);
     this.queue = new WorkQueue(maxConcurrent, maxPending);
     this.inFlight = new Map();
+    this.snapshots = new SourceSnapshots(path.join(directory, 'sources'));
+    this.events = new EventEmitter();
   }
   async initialize() {
     await this.store.open();
@@ -141,7 +145,11 @@ export class RepositoryService {
     const repository = validateRepository(input.repository);
     const branch = validateBranch(input.branch);
     const token = id ? undefined : randomSecret();
-    return this.store.change(state => {
+    if (input.sourceEnabled !== undefined && typeof input.sourceEnabled !== 'boolean') throw new HttpError(400, '源码快照开关无效');
+    if (input.syncIntervalSeconds !== undefined && ![0, 60, 300, 900, 1800, 3600].includes(input.syncIntervalSeconds)) throw new HttpError(400, '自动同步间隔无效');
+    const previous = id && this.store.state.projects.find(item => item.id === id);
+    const changedSource = previous && (previous.repository !== repository || previous.branch !== branch);
+    const result = await this.store.change(state => {
       if (input.credentialId && !state.credentials.some(item => item.id === input.credentialId)) throw new HttpError(400, '请选择有效的 Gitee 凭证');
       let project;
       if (id) {
@@ -155,12 +163,18 @@ export class RepositoryService {
       }
       if (project.repository !== repository || project.branch !== branch) {
         project.status = 'idle'; project.lastSuccess = null; project.error = null;
+        project.sourceStatus = null;
       }
       Object.assign(project, { name, repository, branch, credentialId: input.credentialId || null,
-        enabled: input.enabled !== false, updatedAt: timestamp() });
+        enabled: input.enabled !== false, updatedAt: timestamp(),
+        sourceEnabled: input.sourceEnabled ?? project.sourceEnabled ?? false,
+        syncIntervalSeconds: input.syncIntervalSeconds ?? project.syncIntervalSeconds ?? 0 });
       audit(state, project.id, 'project', `已保存项目：${name}`);
       return { project: publicProject(project), ...(token ? { token } : {}) };
     });
+    if (changedSource) await this.snapshots.clearHead(id);
+    if (id) this.events.emit('access-changed', id);
+    return result;
   }
   async rotateToken(id) {
     const token = randomSecret();
@@ -170,6 +184,7 @@ export class RepositoryService {
       project.tokenHash = digest(token);
       audit(state, id, 'token', `已重置下载密码：${project.name}`);
     });
+    this.events.emit('access-changed', id);
     return { token };
   }
   async setEnabled(id, enabled) {
@@ -180,6 +195,7 @@ export class RepositoryService {
       project.enabled = enabled;
       audit(state, id, 'enabled', `${enabled ? '启用' : '停用'}项目：${project.name}`);
     });
+    this.events.emit('access-changed', id);
   }
   authorizeDownload(id, token) {
     const project = this.store.state.projects.find(item => item.id === id);
@@ -187,6 +203,19 @@ export class RepositoryService {
       throw new HttpError(401, '项目下载密码无效，或项目已停用');
     }
     return project;
+  }
+  authorizeSource(id, token) {
+    const project = this.authorizeDownload(id, token);
+    if (!project.sourceEnabled) throw new HttpError(409, '管理员尚未启用此项目的源码快照');
+    return project;
+  }
+  async sourceHead(id, token) {
+    const project = this.authorizeSource(id, token);
+    const snapshot = project.sourceStatus?.snapshot ?? null;
+    return { protocol: SOURCE_PROTOCOL, projectId: id, name: project.name, branch: project.branch,
+      snapshot, sync: { status: project.status, lastAttemptAt: project.lastAttemptAt ?? null,
+        lastSuccessAt: project.lastSuccess?.at ?? null, error: project.sourceStatus?.error || project.error || null },
+      limits: SOURCE_LIMITS, capabilities: { batchFiles: true, events: true } };
   }
   async sync(id) {
     if (this.inFlight.has(id)) return this.inFlight.get(id);
@@ -218,6 +247,17 @@ export class RepositoryService {
           current.lastSuccess = { revision: result.revision, sha256: result.sha256, size: result.size, at: timestamp(), cached: result.cached };
           audit(state, project.id, 'sync', `${project.name}：${result.cached ? '已确认最新，复用源码包' : '新版本源码包已生成'}`);
         });
+        if (project.sourceEnabled) {
+          try {
+            const snapshot = await this.snapshots.publish(project.id, result, digest(`${project.repository}\n${project.branch}`));
+            const changed = this.store.state.projects.find(item => item.id === project.id)?.sourceStatus?.snapshot?.snapshotId !== snapshot.snapshotId;
+            await update({ sourceStatus: { snapshot, error: null } });
+            if (changed) this.events.emit('source-change', { projectId: project.id, snapshotId: snapshot.snapshotId });
+          } catch (error) {
+            const previous = this.store.state.projects.find(item => item.id === project.id)?.sourceStatus?.snapshot ?? null;
+            await update({ sourceStatus: { snapshot: previous, error: error instanceof HttpError ? error.message : '源码快照生成失败，请检查存储后重试' } });
+          }
+        }
         return result;
       });
     } catch (error) {

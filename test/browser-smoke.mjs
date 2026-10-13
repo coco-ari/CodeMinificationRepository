@@ -1,4 +1,6 @@
-import { spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { ArchiveBuilder } from '../src/archive.mjs';
+import { spawn, execFile } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, mkdir, rm, access } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,13 +15,13 @@ for (const candidate of candidates) { try { await access(candidate); executable 
 if (!executable) throw new Error('未找到浏览器，请设置 BROWSER_PATH 后重试');
 
 const dataDirectory = path.join(temporary, 'data');
-const builder = {
-  async initialize() { await mkdir(dataDirectory, { recursive: true }); await writeFile(path.join(dataDirectory, 'test.zip'), 'test'); },
-  async build() {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    return { file: path.join(dataDirectory, 'test.zip'), revision: 'abcdef12'.repeat(5), sha256: '1'.repeat(64), size: 4, cached: false };
-  },
-};
+const localRepository = path.join(temporary,'repository');
+await mkdir(localRepository);
+const exec = promisify(execFile);
+const git = (...args) => exec('git',['-c','user.name=测试','-c','user.email=test@example.invalid','-c','commit.gpgsign=false',...args],{cwd:localRepository});
+await git('init','-b','release/vietnam'); await writeFile(path.join(localRepository,'app.js'),'export const answer = 42;\n'); await git('add','.'); await git('commit','-m','浏览器测试源码');
+const archive = new ArchiveBuilder(path.join(temporary,'cache'),{allowLocal:true});
+const builder = { initialize:() => archive.initialize(),build:project => archive.build({...project,repository:localRepository},null) };
 const { server, service } = await createApplication({ directory: dataDirectory, builder, secureCookies: false });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -81,13 +83,19 @@ try {
   await fill('#project-form [name=repository]', 'https://gitee.com/example/sol-standard.git');
   await fill('#project-form [name=branch]', 'release/vietnam');
   await fill('#project-form [name=credentialId]', service.store.state.credentials[0].id);
+  await click('#project-form [name=sourceEnabled]'); await fill('#project-form [name=syncIntervalSeconds]','300');
   await click('#project-form [type=submit]'); await visible('#secret-dialog');
   const secret = await evaluate('document.querySelector("#secret-value").value'); assert.equal(secret.length, 43);
+  assert.equal(await evaluate('document.querySelector("#secret-source-url").value'),base);
+  assert.equal(await evaluate('document.querySelector("#secret-source-project").value'),service.store.state.projects[0].id);
   const publicUrl = await evaluate('document.querySelector("#secret-page").value');
   await click('#secret-dialog [data-close]');
   await until(() => evaluate('document.querySelector("#secret-value").value === ""'), '关闭弹窗后清除密码');
   await evaluate('Array.from(document.querySelectorAll(".card-actions button")).find(x => x.textContent === "立即同步").click()');
   await until(() => evaluate('document.querySelector(".project-card .badge").textContent === "已就绪"'), '手动同步');
+  await until(() => evaluate('document.querySelector(".project-card").textContent.includes("1 个文件")'),'源码快照生成');
+  assert.equal(service.store.state.projects[0].sourceEnabled,true); assert.equal(service.store.state.projects[0].syncIntervalSeconds,300);
+  const head=await fetch(`${base}/api/v1/projects/${service.store.state.projects[0].id}/source/head`,{headers:{Authorization:`Bearer ${secret}`}});assert.equal(head.status,200);assert.equal((await head.json()).snapshot.fileCount,1);
   assert.equal(service.store.state.projects.length, 1);
   assert.equal(service.store.state.projects[0].branch, 'release/vietnam');
   assert.ok(!await evaluate('document.body.textContent.includes("test-only-password")'));
@@ -104,7 +112,7 @@ try {
   await until(() => evaluate('document.querySelector("#download-error").textContent.includes("密码无效")'), '无效下载密码');
   assert.deepEqual(errors, []);
   assert.ok(!warnings.some(item => /Content Security Policy|Refused to/.test(item)), warnings.join('\n'));
-  console.log('浏览器验证通过：初始化、凭证配置、新增项目、密码显示与清理、手动同步、桌面与手机布局、下载页鉴权。');
+  console.log('浏览器验证通过：初始化、凭证配置、新增项目、密码显示与清理、手动同步、快照开关/调度设置/源码 API、桌面与手机布局、下载页鉴权。');
   console.log(`截图目录：${artifactDirectory}`);
 } finally {
   socket?.close();
