@@ -1,0 +1,52 @@
+pipeline {
+    agent any
+    options {
+        skipDefaultCheckout(true)
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+    environment {
+        SOURCE_URL = 'https://source.example.com/api/projects/替换为项目ID/source/latest'
+    }
+    stages {
+        stage('下载源码') {
+            steps {
+                deleteDir()
+                withCredentials([string(credentialsId: 'source-download-password', variable: 'SOURCE_PASSWORD')]) {
+                    sh '''
+                        set +x
+                        set -eu
+                        umask 077
+                        auth_file=$(mktemp)
+                        trap 'rm -f "$auth_file"' EXIT
+                        printf 'Authorization: Bearer %s\n' "$SOURCE_PASSWORD" > "$auth_file"
+                        curl --fail --silent --show-error \
+                          --connect-timeout 15 --max-time 3300 \
+                          --header "@$auth_file" \
+                          --dump-header source.headers \
+                          --output source.zip.part "$SOURCE_URL"
+                        expected=$(awk 'tolower($1) == "x-archive-sha256:" {gsub("\\r", "", $2); print $2}' source.headers)
+                        test "${#expected}" -eq 64
+                        printf '%s  source.zip.part\n' "$expected" | sha256sum -c -
+                        mv source.zip.part source.zip
+                        mkdir source
+                        unzip -q source.zip -d source
+                    '''
+                }
+            }
+        }
+        stage('编译打包') {
+            steps {
+                dir('source') {
+                    // 按项目替换此处，例如 mvn -B clean package 或 npm ci && npm run build。
+                    sh 'test -f pom.xml && mvn -B clean package'
+                }
+            }
+        }
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: 'source.headers', allowEmptyArchive: true
+        }
+    }
+}

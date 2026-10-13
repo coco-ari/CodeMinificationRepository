@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+data
+node_modules
+test
+coverage
+.test-artifacts
+.deployment
+*.log

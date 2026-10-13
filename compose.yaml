@@ -1,0 +1,38 @@
+services:
+  code-minification-repository:
+    build: .
+    image: code-minification-repository:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:8080"
+    environment:
+      DATA_DIR: /data
+      PORT: 8080
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-http://localhost:8080}"
+      MAX_CONCURRENT_SYNCS: "${MAX_CONCURRENT_SYNCS:-2}"
+      MAX_PENDING_SYNCS: "${MAX_PENDING_SYNCS:-20}"
+      SYNC_TIMEOUT_SECONDS: "${SYNC_TIMEOUT_SECONDS:-180}"
+      MAX_ARCHIVE_MB: "${MAX_ARCHIVE_MB:-1024}"
+    volumes:
+      - repository-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  repository-data:

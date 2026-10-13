@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>源码分发 · CodeMinificationRepository</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div id="auth-view" class="auth-layout" hidden>
+    <section class="auth-intro">
+      <a class="brand" href="/"><span class="brand-icon">C</span><span>CodeMinification<span class="brand-sub">REPOSITORY</span></span></a>
+      <div><p class="eyebrow">SOURCE DELIVERY, SIMPLIFIED</p><h1>源码到位，<br>交付就绪。</h1><p class="intro-copy">连接 Gitee，在需要时同步最新源码。<br>每个项目，独立访问；每次交付，清晰可查。</p></div>
+      <div class="flow"><span>Gitee 仓库</span><b>→</b><span>源码压缩包</span><b>→</b><span>Jenkins</span></div>
+    </section>
+    <section class="auth-form-wrap"><form id="auth-form" class="auth-form">
+      <span class="label-pill">管理控制台</span><h2 id="auth-title">登录工作台</h2><p id="auth-description" class="muted">管理项目、连接凭证与源码交付。</p>
+      <label id="bootstrap-field" hidden>初始化口令<input name="bootstrapToken" type="password" autocomplete="off"><small>首次部署后，读取数据目录内的 bootstrap-token 文件。</small></label>
+      <label>管理员账号<input name="username" autocomplete="username" required maxlength="80" placeholder="输入管理员账号"></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="输入管理员密码"></label>
+      <p class="form-error" id="auth-error" role="alert"></p><button class="primary large" type="submit">登录工作台 <span>→</span></button>
+      <p class="auth-footer">Gitee 凭证仅用于服务端拉取，项目使用独立下载密码。</p>
+    </form></section>
+  </div>
+
+  <div id="download-view" class="download-layout" hidden>
+    <form id="download-form" class="auth-form panel">
+      <span class="brand-icon">C</span><p class="eyebrow">SOURCE DELIVERY</p><h1>下载最新源码</h1>
+      <p class="muted">输入项目下载密码。验证后，服务会同步指定分支并生成源码压缩包。</p>
+      <label>项目下载密码<input name="token" type="password" autocomplete="off" required placeholder="粘贴项目下载密码"></label>
+      <p id="download-error" class="form-error" role="alert"></p>
+      <button type="submit" class="primary large">同步并下载 ZIP <span>↓</span></button>
+      <p id="download-progress" class="muted" role="status">首次同步可能需要数分钟，请保持页面打开。</p>
+    </form>
+  </div>
+
+  <div id="app-view" class="app-layout" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-icon">C</span><span>源码分发<span class="brand-sub">CODE REPOSITORY</span></span></a>
+      <div class="nav-caption">工作空间</div>
+      <nav aria-label="主导航">
+        <button data-view="projects" class="nav-item active"><span>▦</span>项目仓库<span id="nav-count" class="count">0</span></button>
+        <button data-view="credentials" class="nav-item"><span>⌘</span>Gitee 凭证</button>
+        <button data-view="activity" class="nav-item"><span>◷</span>操作记录</button>
+      </nav>
+      <div class="sidebar-note"><span class="live-dot"></span>按需同步<br><small>下载时检查远端版本<br>无变更时复用源码包</small></div>
+      <div class="account"><span class="avatar">管</span><div><strong id="admin-name">管理员</strong><button id="password-button" class="text-button">修改密码</button></div><button id="logout-button" class="icon-button" title="退出登录" aria-label="退出登录">↗</button></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><span>工作空间 <b>/</b> <span id="breadcrumb">项目仓库</span></span><span class="topbar-label">CodeMinificationRepository</span></header>
+      <div id="connection-error" class="error-banner" role="alert" hidden></div>
+      <section class="workspace">
+        <div class="page-heading"><div><p class="eyebrow">YOUR SOURCE, READY TO SHIP</p><h1 id="page-title">项目仓库</h1><p id="page-description" class="muted">从源码到交付，只需一个专属下载地址。</p></div><button id="create-button" class="primary">＋ 新增项目</button></div>
+        <div id="project-summary" class="summary-grid">
+          <article><span>交付项目</span><strong id="stat-total">0</strong><small>独立管理的源码仓库</small></article>
+          <article><span>已启用</span><strong id="stat-enabled">0</strong><small><i class="live-dot"></i>随时响应下载请求</small></article>
+          <article><span>已完成下载</span><strong id="stat-downloads">0</strong><small>成功传输的源码压缩包</small></article>
+        </div>
+        <div id="project-toolbar" class="toolbar"><div class="section-label">全部项目 <span id="project-count">0</span></div><input id="search" type="search" placeholder="搜索项目、仓库或分支…" aria-label="搜索项目"></div>
+        <div id="project-list" class="project-grid"></div>
+        <div id="credential-list" hidden></div>
+        <div id="activity-list" hidden></div>
+        <footer class="workspace-footer"><span>源码快照交付 · 不包含 Git 历史</span><span>每次下载，先确认最新版本</span></footer>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="project-dialog"><form id="project-form">
+    <div class="dialog-heading"><div><p class="eyebrow">PROJECT</p><h2 id="project-dialog-title">新增项目</h2></div><button type="button" class="icon-button" data-close aria-label="关闭">×</button></div>
+    <input type="hidden" name="id">
+    <label>项目名称<input name="name" required maxlength="80" placeholder="例如：客户 A 标准版"></label>
+    <label>Gitee 仓库地址<input name="repository" type="url" required placeholder="https://gitee.com/team/project.git"><small>使用 HTTPS 地址，不要在地址中填写用户名或密码。</small></label>
+    <div class="form-grid"><label>交付分支<input name="branch" required maxlength="200" placeholder="main / master / release"></label><label>访问凭证<select name="credentialId" id="project-credential"></select></label></div>
+    <label class="checkbox-label"><input name="enabled" type="checkbox" checked>启用项目下载</label>
+    <div class="info-box">项目创建后即可使用。首次下载会拉取代码并打包；下载密码仅在创建或重置时显示，请及时保存。</div>
+    <p class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-close>取消</button><button class="primary" type="submit">保存项目</button></div>
+  </form></dialog>
+
+  <dialog id="credential-dialog"><form id="credential-form">
+    <div class="dialog-heading"><div><p class="eyebrow">GITEE CONNECTION</p><h2 id="credential-dialog-title">新增 Gitee 凭证</h2></div><button type="button" class="icon-button" data-close aria-label="关闭">×</button></div>
+    <input type="hidden" name="id">
+    <label>凭证名称<input name="name" required maxlength="80" placeholder="例如：交付专用账号"></label>
+    <label>Gitee 用户名<input name="username" required maxlength="100" autocomplete="off" placeholder="具有目标仓库读取权限的账号"></label>
+    <label>Gitee 密码 / 访问令牌<input name="password" type="password" maxlength="2048" autocomplete="new-password" placeholder="输入 HTTPS Git 可用的密码或令牌"><small>启用两步验证时，请使用 Gitee 支持的访问令牌。修改时留空表示保留原值。</small></label>
+    <div class="info-box">凭证加密保存在服务数据目录中，不向下载方提供。建议使用仅能读取所需仓库的专用账号。</div>
+    <p class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-close>取消</button><button class="primary" type="submit">保存凭证</button></div>
+  </form></dialog>
+
+  <dialog id="secret-dialog"><div>
+    <div class="dialog-heading"><div><p class="eyebrow">READY TO CONNECT</p><h2>项目访问已就绪</h2></div><button type="button" class="icon-button" data-close aria-label="关闭">×</button></div>
+    <p id="secret-project-name" class="muted"></p>
+    <label>项目下载密码<div class="copy-row"><input id="secret-value" readonly><button class="secondary" data-copy="secret-value">复制</button></div><small>仅本次显示。关闭后无法找回，可在项目卡片中重置。</small></label>
+    <label>浏览器下载地址<div class="copy-row"><input id="secret-page" readonly><button class="secondary" data-copy="secret-page">复制</button></div></label>
+    <label>Jenkins / API 地址<div class="copy-row"><input id="secret-url" readonly><button class="secondary" data-copy="secret-url">复制</button></div></label>
+    <div class="info-box">Jenkins 将密码保存在 Secret text 凭据中，通过 Authorization: Bearer 请求头发送。普通浏览器打开下载地址后输入密码即可。</div>
+    <div class="dialog-actions"><button class="primary" data-close>已保存，完成</button></div>
+  </div></dialog>
+
+  <dialog id="password-dialog"><form id="password-form">
+    <div class="dialog-heading"><h2>修改管理员密码</h2><button type="button" class="icon-button" data-close aria-label="关闭">×</button></div>
+    <label>原密码<input name="currentPassword" type="password" required autocomplete="current-password"></label>
+    <label>新密码<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password"><small>至少 12 个字符。修改后所有管理会话失效。</small></label>
+    <p class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-close>取消</button><button class="primary" type="submit">更新密码</button></div>
+  </form></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

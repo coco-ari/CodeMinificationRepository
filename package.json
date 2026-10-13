@@ -1,0 +1,14 @@
+{
+  "name": "code-minification-repository",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "按需同步 Gitee 并分发指定分支的源码压缩包",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:browser": "node test/browser-smoke.mjs",
+    "check": "node --check src/server.mjs && node --check src/service.mjs && node --check src/archive.mjs && node --check public/app.js"
+  }
+}
