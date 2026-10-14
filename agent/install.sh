@@ -32,8 +32,13 @@ if docker container inspect cmr-agent >/dev/null 2>&1; then
   printf '已有 cmr-agent 容器，拒绝覆盖。\n' >&2
   exit 1
 fi
+static_directory="${agent_directory}-static"
+[[ ! -e "$static_directory" ]] || { printf '前端发布目录已存在，拒绝覆盖，请按文档保留挂载并升级。\n' >&2; exit 1; }
 printf '即将安装 Agent：挂载宿主机 Docker Socket，具备管理宿主机容器的权限。管理范围仍受中心模式和资源归属检查约束。\n'
 mkdir -m 700 "$agent_directory"
+mkdir -m 755 "$static_directory"
+printf '%s' "$static_directory" > "$static_directory/.cmr-static-root"
+chmod 644 "$static_directory/.cmr-static-root"
 temporary_directory=$(mktemp -d /tmp/cmr-agent-install.XXXXXX)
 trap 'rm -rf -- "$temporary_directory"' EXIT
 curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 300 "${center_url%/}/agent/bundle.tar.gz" -o "$temporary_directory/bundle.tar.gz"
@@ -50,6 +55,7 @@ docker run -d --name cmr-agent --restart unless-stopped --memory 256m --memory-s
   --label io.cmr.component=agent \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
   --mount "type=bind,src=$agent_directory,dst=$agent_directory" \
+  --mount "type=bind,src=$static_directory,dst=$static_directory" \
   --mount type=bind,src=/proc,dst=/host/proc,readonly \
   --env "CMR_CENTER_URL=${center_url%/}" --env "CMR_AGENT_DIR=$agent_directory" \
   --env "CMR_REGISTRATION_TOKEN_FILE=$agent_directory/registration-token" \

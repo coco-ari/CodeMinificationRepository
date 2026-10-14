@@ -2,6 +2,8 @@
 
 Agent 主动通过 HTTPS 接入中心，不开放入站端口。Linux、Docker Engine 和 Docker Compose 必须预先安装。中心生成的安装命令会构建本目录 Docker 镜像，并把 `/opt/cmr-agent` 持久化到宿主机同一路径。
 
+Agent 1.1.0 增加 `static-site-v1` 能力，支持 Vue / React 静态产物部署到已有 Docker Nginx。只启动临时 Node 构建容器，不创建或操作共用 Nginx。首次目录挂载及站点配置由运维完成，参见 [前端部署与升级说明](../examples/static-sites.md)。
+
 Agent 挂载 `/var/run/docker.sock`，具有近似宿主机 root 的容器管理能力。请只在受信任的内部服务器安装。仅观察模式会同时在中心和 Agent 拒绝所有部署、重启、回退及清理动作。Agent 仅检查明确登记的容器；不能把监控失联理解为业务停止。
 
 ## 接入和升级
@@ -16,9 +18,12 @@ Agent 挂载 `/var/run/docker.sock`，具有近似宿主机 root 的容器管理
 - `tasks/`、`events/`：任务日志、执行游标及可断点补报事件。
 - `work/<任务 ID>/`：完整源码 ZIP、解压源码、JAR 及镜像构建目录。
 - `cache/<业务项目 ID>/maven/`：独立 Maven 缓存，不共享 Jenkins 缓存。
+- `cache/<项目 ID>/node/`：前端 npm/pnpm 依赖缓存。
 - `targets/<目标 ID>/`：当前成功版本与保留的历史版本。
 
-每个目标的容器和 Compose 项目名为 `cmr-<目标 ID>`，镜像为 `cmr/<目标 ID>:<任务 ID>`。镜像、容器、平台网络和卷均带 `io.cmr.*` 归属标签。发现同名但归属不符的资源时立即拒绝写操作。平台只清理自己拥有的过期镜像，不执行全局 prune，不清理外部网络或持久卷。
+前端的公共产物单独放在 `${CMR_AGENT_DIR}-static/<目标 ID>/releases/<版本 ID>/`，`current` 是当前版本指针。新安装会创建并挂载公共目录；旧 Agent 升级必须补充挂载。Nginx 只读挂载整个公共目录，不得挂载 Agent 私有身份目录。备份和恢复需同时包含这两个目录。
+
+Java 目标的容器和 Compose 项目名为 `cmr-<目标 ID>`，镜像为 `cmr/<目标 ID>:<任务 ID>`。镜像、容器、平台网络和卷均带 `io.cmr.*` 归属标签。发现同名但归属不符的资源时立即拒绝写操作。平台只清理自己拥有的过期镜像，不执行全局 prune，不清理外部网络或持久卷。静态目标通过目录归属标记隔离，只清理自己保留范围以外的静态版本。
 
 构建容器使用用户 `1000:1000`，只挂载当前源码和独立 Maven 缓存，不挂载 Docker Socket。运行容器按配置映射端口并加入网络；数据卷仅允许自动命名卷挂载到 `/app/` 子目录，不允许任意宿主机目录。
 

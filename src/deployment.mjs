@@ -2,6 +2,8 @@ import { EventEmitter } from 'node:events';
 import { mkdir, copyFile, readFile, stat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { sourceKey } from './archive.mjs';
+import { migrateWorkspaces, sourceSnapshot } from './workspaces.mjs';
 import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
 
@@ -26,6 +28,7 @@ function relative(value, label, allowGlob = false) {
   return value;
 }
 function mode(value) { if (!['observe', 'managed'].includes(value)) fail('管理模式无效'); return value; }
+function capabilities(value) { return [...new Set(list(value, 20, 'Agent 能力').map(item => requireText(item, 'Agent 能力', 80)))]; }
 function transition(task, stage, done = false, occurredAt = now()) {
   task.stageHistory ||= [];
   const previous = task.stageHistory.at(-1);
@@ -50,13 +53,16 @@ function safeServer(server) {
   return { ...safe, online: !server.revoked && !!server.lastSeenAt && Date.now() - Date.parse(server.lastSeenAt) <= 60000 };
 }
 
-export function validateConfig(input = {}, module = '.') {
+export function validateConfig(input = {}, module = '.', kind = input?.kind || 'java') {
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail('部署配置格式错误');
+  if (!['java', 'static'].includes(kind)) fail('服务类型无效');
+  const isStatic = kind === 'static';
   const result = {
-    module: module === '.' || module === '' ? '' : relative(module, 'Maven 模块'),
-    artifactPath: relative(input.artifactPath || `${module === '.' || module === '' ? '' : `${module}/`}target/*.jar`, 'JAR 路径', true),
-    buildImage: input.buildImage || 'maven:3.9.9-eclipse-temurin-8',
-    runtimeImage: input.runtimeImage || 'eclipse-temurin:8-jre',
+    kind,
+    module: module === '.' || module === '' ? '' : relative(module, isStatic ? '前端项目目录' : 'Maven 模块'),
+    artifactPath: relative(input.artifactPath || `${module === '.' || module === '' ? '' : `${module}/`}${isStatic ? 'dist' : 'target/*.jar'}`, isStatic ? '静态产物目录' : 'JAR 路径', !isStatic),
+    buildImage: input.buildImage || (isStatic ? 'node:24-bookworm-slim' : 'maven:3.9.9-eclipse-temurin-8'),
+    runtimeImage: isStatic ? undefined : input.runtimeImage || 'eclipse-temurin:8-jre',
     jvmArgs: list(input.jvmArgs ?? ['-Xms64m', '-Xmx192m'], 40, 'JVM 参数').map(value => requireText(value, 'JVM 参数', 1024)),
     args: list(input.args, 40, '启动参数').map(value => requireText(value, '启动参数', 1024)),
     profile: input.profile || '',
@@ -65,10 +71,29 @@ export function validateConfig(input = {}, module = '.') {
     volumes: list(input.volumes, 16, '数据卷').map(volume => ({ name: requireText(volume.name, '数据卷名称', 63), mountPath: requireText(volume.mountPath, '挂载目录', 200) })),
     build: { cpus: number(input.build?.cpus, 1, 0.1, 32, '构建 CPU'), memoryMb: integer(input.build?.memoryMb, 1024, 256, 65536, '构建内存') },
     runtime: { cpus: number(input.runtime?.cpus, 0.5, 0.1, 32, '运行 CPU'), memoryMb: integer(input.runtime?.memoryMb, 512, 128, 65536, '运行内存') },
-    health: { path: input.health?.path || '/health', port: integer(input.health?.port, 8080, 1, 65535, '健康检查端口'), status: integer(input.health?.status, 200, 200, 399, '健康检查状态码'),
+    health: { path: input.health?.path || (isStatic ? '/' : '/health'), port: integer(input.health?.port, 8080, 1, 65535, '健康检查端口'), status: integer(input.health?.status, 200, 200, 399, '健康检查状态码'),
       bodyIncludes: input.health?.bodyIncludes || '', timeoutSeconds: integer(input.health?.timeoutSeconds, 180, 10, 900, '健康检查超时'), intervalSeconds: integer(input.health?.intervalSeconds, 5, 2, 60, '健康检查间隔') },
   };
-  if (![result.buildImage, result.runtimeImage].every(value => typeof value === 'string' && imagePattern.test(value))) fail('容器镜像名称无效');
+  if (isStatic) {
+    Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || '10.11.0',
+      buildScript: input.buildScript || 'build', buildArgs: list(input.buildArgs, 40, '构建参数').map(value => requireText(value, '构建参数', 1024)),
+      jvmArgs: [], args: [], profile: '' });
+    if (!['npm', 'pnpm'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) fail('请选择 npm 或指定准确版本的 pnpm');
+    if (result.buildArgs.some(value => /[\x00-\x1f]/.test(value))) fail('构建参数不能包含控制字符');
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,79}$/.test(result.buildScript)) fail('构建脚本必须是 package.json 中的脚本名称');
+    if (result.artifactPath === '.' || result.artifactPath.split('/').some(part => part === 'node_modules' || part === '.git')) fail('静态产物必须是独立的构建输出目录');
+    if (result.volumes.length || result.ports.length || result.networks.length) fail('静态站点使用已有 Nginx，不单独配置容器端口、网络和存储');
+    result.health.url = input.health?.url || '';
+    if (result.health.url.length > 2000 || result.health.status !== 200) fail('静态站点访问地址过长或成功状态码不是 200');
+    if (result.health.url) {
+      let url; try { url = new URL(result.health.url); } catch { fail('站点访问地址无效'); }
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) fail('站点访问地址必须是无凭据和查询参数的 HTTP(S) 地址');
+      if (!url.pathname.endsWith('/')) url.pathname += '/';
+      result.health.url = url.href;
+    }
+    delete result.runtimeImage; delete result.runtime;
+  }
+  if (!(isStatic ? [result.buildImage] : [result.buildImage, result.runtimeImage]).every(value => typeof value === 'string' && imagePattern.test(value))) fail('容器镜像名称无效');
   if (typeof result.profile !== 'string' || !/^[a-zA-Z0-9_,.-]{0,100}$/.test(result.profile)) fail('Spring Profile 无效');
   if (result.jvmArgs.some(arg => !arg.startsWith('-') || /^-(?:jar|cp|classpath|javaagent|agentlib|agentpath)(?:[:=]|$)/.test(arg))) fail('JVM 参数不能替换程序入口或加载代理');
   if (result.ports.some(port => !['127.0.0.1', '0.0.0.0'].includes(port.host))) fail('端口只允许绑定 127.0.0.1 或 0.0.0.0');
@@ -86,19 +111,20 @@ export class DeploymentService extends EventEmitter {
     this.root = path.join(repository.directory, 'deployments'); this.pins = new Map(); this.pinErrors = new Map(); this.archivePending = new Map(); this.preparations = new Map();
   }
   get data() { return this.store.state.deployments; }
-  changed(type, id) { this.emit('update', { type, id, at: now() }); }
+  changed(type, id, applicationId) { this.emit('update', { type, id, applicationId, at: now() }); }
   async initialize() {
     await mkdir(path.join(this.root, 'tasks'), { recursive: true, mode: 0o700 });
     await this.store.change(state => {
       state.deployments ||= { version: 1 };
-      if (state.deployments.version !== 1) throw new Error('不支持的部署数据版本');
+      if (![1, 2].includes(state.deployments.version)) throw new Error('不支持的部署数据版本');
       for (const key of collections) state.deployments[key] ||= [];
     });
+    await migrateWorkspaces(this.store, this.repository.directory);
     const original = this.repository.builder.build.bind(this.repository.builder);
     // 固定任务源码与原缓存清理共享锁，复制完成后才允许下一次构建清理旧缓存。
-    this.repository.builder.build = (project, credential) => this.archiveLock(project.id, async () => {
+    this.repository.builder.build = (project, credential) => this.archiveLock(sourceKey(project), async () => {
       const archive = await original(project, credential);
-      for (const pin of this.pins.get(project.id) || []) {
+      for (const pin of this.pins.get(sourceKey(project)) || []) {
         // 新平台快照失败不能破坏共用这次同步的旧 Jenkins 下载请求。
         try { await this.copyArchive(archive, pin); } catch (error) { this.pinErrors.set(pin, error); }
       }
@@ -128,7 +154,9 @@ export class DeploymentService extends EventEmitter {
     const registrationToken = randomSecret(); const expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
     const server = { id: randomUUID(), name, mode: serverMode, createdAt: now(), registrationHash: digest(registrationToken), registrationExpiresAt: expiresAt,
       registeredAt: null, lastSeenAt: null, version: null, revoked: false, metrics: null, containers: [] };
-    await this.store.change(state => { if (state.deployments.servers.length >= 500) fail('服务器数量已达到上限'); state.deployments.servers.push(server); });
+    await this.store.change(state => { if (state.deployments.servers.length >= 500) fail('服务器数量已达到上限'); if (input.applicationId) find(state.deployments.applications, input.applicationId, '项目');
+      state.deployments.servers.push(server);
+      if (input.applicationId) state.deployments.serverBindings.push({ applicationId: input.applicationId, serverId: server.id, createdAt: now() }); });
     this.changed('server', server.id);
     const origin = this.publicOrigin;
     return { server: safeServer(server), registrationToken, expiresAt,
@@ -141,13 +169,29 @@ export class DeploymentService extends EventEmitter {
     });
     this.changed('server', id);
   }
+  async setServerMode(id, input) {
+    const next = mode(input.mode);
+    const result = await this.store.change(state => {
+      const server = find(state.deployments.servers, id, '服务器');
+      if (server.revoked) throw new HttpError(409, '服务器接入已撤销');
+      if (server.mode === next) return safeServer(server);
+      if (state.deployments.tasks.some(task => task.serverId === id && !terminal.has(task.status))) throw new HttpError(409, '服务器存在未完成任务，请完成后再切换管理方式');
+      const previous = server.mode;
+      Object.assign(server, { mode: next, updatedAt: now() });
+      state.events.unshift({ id: randomUUID(), projectId: null, action: 'server-mode', serverId: id, at: now(),
+        message: `服务器 ${server.name}：${previous === 'observe' ? '仅观察' : '平台管理'} → ${next === 'observe' ? '仅观察' : '平台管理'}；已有部署目标管理方式保持不变` });
+      state.events = state.events.slice(0, 100);
+      return safeServer(server);
+    });
+    this.changed('server', id); return result;
+  }
   async register(input) {
     if (typeof input.registrationToken !== 'string') throw new HttpError(401, '接入口令无效');
     const token = randomSecret(); let id;
     await this.store.change(state => {
       const server = state.deployments.servers.find(server => !server.revoked && server.registrationHash && equal(server.registrationHash, digest(input.registrationToken)));
       if (!server || server.registeredAt || Date.parse(server.registrationExpiresAt) <= Date.now()) throw new HttpError(401, '接入口令无效、已使用或已过期');
-      id = server.id; server.tokenHash = digest(token); server.registeredAt = now(); server.lastSeenAt = now(); server.version = requireText(input.version || 'unknown', 'Agent 版本', 80);
+      id = server.id; server.tokenHash = digest(token); server.registeredAt = now(); server.lastSeenAt = now(); server.version = requireText(input.version || 'unknown', 'Agent 版本', 80); server.capabilities = capabilities(input.capabilities);
       delete server.registrationHash;
     });
     this.changed('server', id);
@@ -169,6 +213,7 @@ export class DeploymentService extends EventEmitter {
       if (server.revoked) throw new HttpError(401, 'Agent 已撤销');
       Object.assign(server, { lastSeenAt: now(), metrics: input.metrics || null, activeTaskId: input.activeTaskId || null });
       if (version !== undefined) server.version = version;
+      if (input.capabilities !== undefined || version !== undefined) server.capabilities = capabilities(input.capabilities);
       const targets = state.deployments.targets.filter(target => target.serverId === serverId);
       server.containers = containers.filter(container => container && targets.some(target => container.targetId === target.id)).map(container => structuredClone(container));
       for (const target of targets) {
@@ -178,7 +223,7 @@ export class DeploymentService extends EventEmitter {
     });
     this.changed('heartbeat', serverId); return this.assignment(serverId);
   }
-  async saveEntity(kind, input, id) {
+  async saveEntity(kind, input, id, { defaultEnvironments = false } = {}) {
     if (!['applications', 'environments', 'services', 'targets'].includes(kind)) fail('配置类型错误');
     const result = await this.store.change(state => {
       const data = state.deployments; let item = id ? find(data[kind], id) : { id: randomUUID(), createdAt: now() };
@@ -190,17 +235,29 @@ export class DeploymentService extends EventEmitter {
         fields = { name: requireText(input.name, '业务项目名称', 80), description: input.description || '' };
       }
       if (kind === 'environments') {
-        find(data.applications, input.applicationId, '业务项目'); find(state.projects, input.sourceProjectId, '源码项目');
+        find(data.applications, input.applicationId, '项目');
+        if (input.sourceProjectId) {
+          const source = find(state.projects, input.sourceProjectId, '源码仓库');
+          if (source.applicationId && source.applicationId !== input.applicationId) fail('仓库不属于当前项目');
+          source.applicationId = input.applicationId;
+        }
         if (id && item.applicationId !== input.applicationId) fail('不能修改环境所属项目');
         fields = { applicationId: input.applicationId, sourceProjectId: input.sourceProjectId, name: requireText(input.name, '环境名称', 80) };
       }
       if (kind === 'services') {
         find(data.applications, input.applicationId, '业务项目'); if (id && item.applicationId !== input.applicationId) fail('不能修改服务所属项目');
-        fields = { applicationId: input.applicationId, name: requireText(input.name, '服务名称', 80), module: relative(input.module || '.', 'Maven 模块') };
+        const serviceKind = input.kind || item.kind || 'java';
+        if (!['java', 'static'].includes(serviceKind)) fail('服务类型无效');
+        if (id && serviceKind !== (item.kind || 'java') && data.targets.some(target => target.serviceId === id)) fail('已有部署目标的服务不能切换类型，请新建服务');
+        fields = { applicationId: input.applicationId, name: requireText(input.name, '服务名称', 80), kind: serviceKind, module: relative(input.module || '.', '项目目录或模块') };
       }
       if (kind === 'targets') {
         const environment = find(data.environments, input.environmentId, '环境'); const service = find(data.services, input.serviceId, '服务'); const server = find(data.servers, input.serverId, '服务器');
         if (environment.applicationId !== service.applicationId) fail('环境与服务不属于同一个项目');
+        if (!data.serverBindings.some(item => item.applicationId === environment.applicationId && item.serverId === server.id)) {
+          if (!environment.sourceProjectId) fail('请先在项目内绑定服务器');
+          data.serverBindings.push({ applicationId: environment.applicationId, serverId: server.id, createdAt: now() });
+        }
         const targetMode = mode(input.mode || 'observe');
         if (server.revoked) fail('服务器已撤销'); if (targetMode === 'managed' && server.mode !== 'managed') fail('仅观察服务器禁止创建平台管理目标');
         if (id && ['mode', 'serverId', 'environmentId', 'serviceId'].some(key => item[key] !== input[key])) fail('不能改变已有目标的归属或管理模式，请新建隔离目标');
@@ -208,10 +265,18 @@ export class DeploymentService extends EventEmitter {
         let containerName;
         if (targetMode === 'observe') { containerName = requireText(input.containerName, '观察容器名称', 150); if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(containerName)) fail('容器名称无效'); }
         else if (input.containerName) fail('平台目标不能指定外部容器名称');
-        fields = { environmentId: environment.id, serviceId: service.id, serverId: server.id, applicationId: environment.applicationId, mode: targetMode, containerName: containerName || `cmr-${item.id}`,
-          config: validateConfig(input.config, service.module), owner: targetMode === 'observe' ? (input.owner === 'external' ? 'external' : 'Jenkins') : 'platform' };
+        fields = { environmentId: environment.id, serviceId: service.id, serverId: server.id, applicationId: environment.applicationId, mode: targetMode, containerName: containerName || (service.kind === 'static' ? null : `cmr-${item.id}`),
+          config: validateConfig(input.config, service.module, service.kind || 'java'), owner: targetMode === 'observe' ? (input.owner === 'external' ? 'external' : 'Jenkins') : 'platform' };
       }
-      Object.assign(item, fields, { updatedAt: now() }); if (!id) data[kind].push(item); return structuredClone(item);
+      Object.assign(item, fields, { updatedAt: now() });
+      if (!id) {
+        data[kind].push(item);
+        if (kind === 'applications' && defaultEnvironments) {
+          if (data.environments.length + 2 > 2000) fail('环境数量已达到上限');
+          for (const name of ['测试', '生产']) data.environments.push({ id: randomUUID(), applicationId: item.id, name, createdAt: now() });
+        }
+      }
+      return structuredClone(item);
     });
     this.changed(kind, result.id); return result;
   }
@@ -227,8 +292,13 @@ export class DeploymentService extends EventEmitter {
     const task = await this.store.change(state => {
       if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
       const data = state.deployments; const target = this.ensureManaged(data, input.targetId); const environment = find(data.environments, target.environmentId); const service = find(data.services, target.serviceId);
+      if (service.kind === 'static' && !find(data.servers, target.serverId).capabilities?.includes('static-site-v1')) throw new HttpError(409, '请先升级目标服务器 Agent，使其支持静态站点发布');
+      if (service.kind === 'static' && input.action === 'restart') throw new HttpError(400, '静态站点无需重启共用 Nginx，请使用发布或回退');
+      if (service.kind === 'static' && input.action === 'deploy' && !target.config.health?.url) throw new HttpError(400, '请先配置站点访问地址，并将已有 Nginx 指向该目标的发布目录');
       if (data.tasks.filter(task => !terminal.has(task.status)).length >= 200) throw new HttpError(503, '部署队列已满');
-      const sourceProject = find(state.projects, environment.sourceProjectId, '源码项目');
+      const selected = data.environmentSources.find(item => item.environmentId === environment.id && item.serviceId === service.id);
+      const sourceProject = find(state.projects, selected?.sourceProjectId || environment.sourceProjectId, '源码仓库');
+      if (sourceProject.applicationId && sourceProject.applicationId !== target.applicationId) fail('仓库不属于当前项目');
       if (!sourceProject.enabled && input.action === 'deploy') throw new HttpError(409, '源码项目已停用');
       let release;
       if (input.action === 'rollback') {
@@ -237,7 +307,7 @@ export class DeploymentService extends EventEmitter {
       }
       if (input.action === 'restart' && !target.currentRelease) throw new HttpError(409, '目标尚未成功发布');
       const task = { id: randomUUID(), targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: input.action === 'deploy' ? 'preparing' : 'queued', stage: 'queued',
-        createdAt: now(), updatedAt: now(), config: validateConfig(target.config, service.module), sourceProjectId: sourceProject.id, source: null, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
+        createdAt: now(), updatedAt: now(), config: validateConfig(target.config, service.module, service.kind || 'java'), sourceProjectId: sourceProject.id, sourceSnapshot: sourceSnapshot(sourceProject, selected?.branch || sourceProject.branch), source: null, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
       transition(task, task.status);
       data.tasks.push(task); return structuredClone(task);
     });
@@ -251,17 +321,19 @@ export class DeploymentService extends EventEmitter {
   }
   async prepare(id) {
     const task = find(this.data.tasks, id, '任务'); const sourceId = task.sourceProjectId;
-    if (!this.pins.has(sourceId)) this.pins.set(sourceId, new Set()); this.pins.get(sourceId).add(id);
+    const snapshot = task.sourceSnapshot || sourceSnapshot(find(this.store.state.projects, sourceId));
+    const key = sourceKey(snapshot);
+    if (!this.pins.has(key)) this.pins.set(key, new Set()); this.pins.get(key).add(id);
     try {
       let source;
       try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); await stat(path.join(this.root, 'tasks', id, 'source.zip')); }
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        const archive = await this.repository.sync(sourceId);
+        const archive = await this.repository.sync(sourceId, snapshot);
         if (this.pinErrors.has(id)) throw this.pinErrors.get(id);
         // 兼容准备任务加入时已有同步即将结束的情况。
         try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); }
-        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(sourceId, () => this.copyArchive(archive, id)); source = { revision: archive.revision, sha256: archive.sha256, size: archive.size }; }
+        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(key, () => this.copyArchive(archive, id)); source = { revision: archive.revision, sha256: archive.sha256, size: archive.size }; }
       }
       await this.store.change(state => {
         const current = find(state.deployments.tasks, id); if (current.status !== 'preparing') return;
@@ -274,10 +346,11 @@ export class DeploymentService extends EventEmitter {
         transition(current, 'failed', true);
         Object.assign(current, { status: 'failed', stage: 'failed', error: error instanceof HttpError ? error.message : '固定源码失败，请检查服务存储', finishedAt: now(), updatedAt: now() });
       });
-    } finally { this.pins.get(sourceId)?.delete(id); this.pinErrors.delete(id); if (!this.pins.get(sourceId)?.size) this.pins.delete(sourceId); this.changed('task', id); }
+    } finally { this.pins.get(key)?.delete(id); this.pinErrors.delete(id); if (!this.pins.get(key)?.size) this.pins.delete(key); this.changed('task', id); }
   }
   async claim(serverId) {
     if (this.closing) return null;
+    let interruptedId;
     const task = await this.store.change(state => {
       if (this.closing) return null;
       const data = state.deployments; const server = find(data.servers, serverId);
@@ -288,10 +361,17 @@ export class DeploymentService extends EventEmitter {
       const next = data.tasks.find(task => task.serverId === serverId && ['preparing', 'queued'].includes(task.status));
       if (!next || next.status !== 'queued') return null;
       const target = this.ensureManaged(data, next.targetId);
+      if (next.config?.kind === 'static' && !server.capabilities?.includes('static-site-v1')) {
+        transition(next, 'interrupted', true);
+        Object.assign(next, { status: 'interrupted', stage: 'interrupted', finishedAt: now(), updatedAt: now(), error: '当前 Agent 不支持静态站点发布，请升级后重试' });
+        interruptedId = next.id;
+        return null;
+      }
       Object.assign(next, { status: 'running', startedAt: now(), updatedAt: now(), previousRelease: target.currentRelease || null });
       if (next.action !== 'deploy') next.revision = (next.release || target.currentRelease)?.revision || null;
       return structuredClone(next);
     });
+    if (interruptedId) this.changed('task', interruptedId);
     if (task) this.changed('task', task.id); return task;
   }
   async waitForTask(serverId, milliseconds = 25000, signal) {
@@ -332,7 +412,10 @@ export class DeploymentService extends EventEmitter {
       if (terminal.has(task.status)) throw new HttpError(409, '任务已完成');
       const release = result?.release;
       if (release) {
-        if (typeof release.id !== 'string' || !/^[a-f0-9-]{36}$/.test(release.id) || release.image !== `cmr/${target.id}:${release.id}`) fail('发布版本不属于平台目标');
+        const validArtifact = task.config.kind === 'static'
+          ? release.kind === 'static' && release.artifact === `static/${target.id}/${release.id}`
+          : release.image === `cmr/${target.id}:${release.id}`;
+        if (typeof release.id !== 'string' || !/^[a-f0-9-]{36}$/.test(release.id) || !validArtifact) fail('发布版本不属于平台目标');
         if (task.action === 'deploy' && status === 'succeeded' && (release.id !== task.id || release.revision !== task.revision)) fail('发布版本与任务源码不一致');
         if (task.action !== 'deploy' && !data.releases.some(existing => existing.targetId === target.id && existing.id === release.id)) fail('目标历史版本不存在');
       }
@@ -347,7 +430,7 @@ export class DeploymentService extends EventEmitter {
       if (terminal.has(status)) {
         task.finishedAt = timing.at; task.resultReceivedAt = timing.receivedAt; task.result = result || {}; if (status !== 'succeeded') task.error = input.message || '任务执行失败';
         if (release && status === 'succeeded') {
-          const saved = { id: release.id, image: release.image, revision: release.revision, config: task.action === 'deploy' ? task.config : release.config, targetId: target.id, createdAt: timing.at, available: true };
+          const saved = { id: release.id, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision, config: task.action === 'deploy' ? task.config : release.config, targetId: target.id, createdAt: timing.at, available: true };
           if (!data.releases.some(existing => existing.id === saved.id && existing.targetId === target.id)) data.releases.push(saved);
           target.currentRelease = structuredClone(data.releases.find(existing => existing.id === saved.id && existing.targetId === target.id));
           target.lastDeployedAt = timing.at;
@@ -355,7 +438,7 @@ export class DeploymentService extends EventEmitter {
         const rollbackRelease = result?.rollback?.release;
         if (status === 'rolled_back' && rollbackRelease) {
           const saved = data.releases.find(existing => existing.id === rollbackRelease.id && existing.targetId === target.id);
-          if (!saved || saved.image !== rollbackRelease.image) fail('回退版本不属于此目标'); target.currentRelease = structuredClone(saved);
+          if (!saved || saved.image !== rollbackRelease.image || saved.artifact !== rollbackRelease.artifact) fail('回退版本不属于此目标'); target.currentRelease = structuredClone(saved);
         }
         const recent = data.releases.filter(existing => existing.targetId === target.id).slice(-5).map(existing => existing.id);
         const baseline = task.previousRelease?.id;

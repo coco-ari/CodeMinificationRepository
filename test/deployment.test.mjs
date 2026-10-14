@@ -42,6 +42,47 @@ async function ready(f, targetId, action = 'deploy', extra = {}) {
 }
 function release(task) { return { id: task.id, image: `cmr/${task.targetId}:${task.id}`, revision: task.revision, config: task.config }; }
 
+test('前端目标按服务类型固定配置，旧 Agent 拒绝任务，版本与回退使用静态产物引用', async t => {
+  const f = await fixture(t), base = await targetFixture(f);
+  const frontend = await f.deployment.saveEntity('services', { applicationId: base.application.id, name: '前端', kind: 'static', module: 'web' });
+  const input = { serverId: base.server.server.id, environmentId: base.environment.id, serviceId: frontend.id, mode: 'managed', config: { kind: 'java', health: { url: 'https://app.example.com' } } };
+  const target = await f.deployment.saveEntity('targets', input);
+  assert.equal(target.config.kind, 'static'); assert.equal(target.config.artifactPath, 'web/dist');
+  assert.equal(target.config.health.url, 'https://app.example.com/'); assert.equal(target.containerName, null);
+  assert.equal(target.config.runtimeImage, undefined);
+  await assert.rejects(f.deployment.createTask({ targetId: target.id, action: 'deploy' }), /升级/);
+  await f.deployment.heartbeat(base.agent.serverId, { version: '1.1.0', capabilities: ['static-site-v1'], containers: [] });
+  await assert.rejects(f.deployment.createTask({ targetId: target.id, action: 'restart' }), /无需重启/);
+  await assert.rejects(f.deployment.saveEntity('services', { ...frontend, kind: 'java' }, frontend.id), /不能切换类型/);
+  const first = await ready(f, target.id); await f.deployment.claim(base.agent.serverId);
+  const artifact = { id: first.id, kind: 'static', artifact: `static/${target.id}/${first.id}`, revision: first.revision, config: first.config };
+  await assert.rejects(f.deployment.events(base.agent.serverId, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: { ...artifact, artifact: `static/${base.target.id}/${first.id}` } } }), /不属于/);
+  await f.deployment.events(base.agent.serverId, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: artifact } });
+  assert.equal(f.deployment.releases(target.id)[0].artifact, artifact.artifact);
+  const second = await ready(f, target.id); await f.deployment.claim(base.agent.serverId);
+  await f.deployment.events(base.agent.serverId, second.id, { seq: 1, stage: 'verifying', status: 'rolled_back', result: { release: artifact, rollback: { status: 'succeeded', release: artifact } } });
+  const rollback = await ready(f, target.id, 'rollback', { releaseId: first.id }); await f.deployment.claim(base.agent.serverId);
+  await f.deployment.events(base.agent.serverId, rollback.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: artifact } });
+  assert.equal(f.deployment.data.targets.find(item => item.id === target.id).currentRelease.id, first.id);
+  assert.equal(base.target.currentRelease, undefined);
+  const queued = await ready(f, target.id), updates = [];
+  f.deployment.on('update', value => updates.push(value));
+  await f.deployment.heartbeat(base.agent.serverId, { version: '1.0.0', containers: [] });
+  assert.equal(await f.deployment.claim(base.agent.serverId), null);
+  assert.equal(f.deployment.data.tasks.find(item => item.id === queued.id).status, 'interrupted');
+  assert.ok(updates.some(value => value.type === 'task' && value.id === queued.id));
+  const java = await ready(f, base.target.id);
+  assert.equal((await f.deployment.claim(base.agent.serverId)).id, java.id);
+  await f.deployment.close(); await f.repository.store.close();
+});
+
+test('静态站点配置拒绝目录逃逸、外部容器配置和无效站点地址', () => {
+  for (const config of [{ artifactPath: '../dist' }, { artifactPath: 'node_modules/site' }, { buildScript: 'build;rm' }, { packageManager: 'other' }, { health: { url: 'file:///etc/passwd' } }, { ports: [{ hostPort: 18080, containerPort: 80 }] }, { buildArgs: ['--mode\nproduction'] }]) {
+    assert.throws(() => validateConfig(config, '.', 'static'), { status: 400 });
+  }
+  assert.equal(validateConfig({}, '.', 'java').buildImage, 'maven:3.9.9-eclipse-temurin-8');
+});
+
 test('SQLite 迁移保留管理员、凭证、项目和密钥，事务失败不提交', async t => {
   const root = await directory(t); const key = randomBytes(32); const original = { version: 1, admin: { username: 'admin', passwordHash: 'old-hash' }, credentials: [{ id: 'credential', secret: 'encrypted' }], projects: [{ id: 'old-project', tokenHash: 'old-download-hash' }], events: [{ action: 'old' }] };
   await writeFile(path.join(root, 'state.json'), JSON.stringify(original)); await writeFile(path.join(root, 'master.key'), key);
@@ -86,6 +127,31 @@ test('观察目标只上报登记容器，禁止发布、重启、回退及转�
   assert.equal(f.deployment.overview().servers[0].containers.length, 1); assert.equal(f.deployment.overview().targets[0].observation.health, 'healthy');
   assert.equal(await f.deployment.claim(records.agent.serverId), null);
   await assert.rejects(f.deployment.saveEntity('targets', { ...records.target, mode: 'managed' }, records.target.id), { status: 400 });
+});
+
+test('保留 Agent 身份启用平台部署，原 Jenkins 观察目标不变，任务执行时禁止切换', async t => {
+  const f = await fixture(t), records = await targetFixture(f, 'observe');
+  const before = structuredClone(f.deployment.data.targets.find(item => item.id === records.target.id));
+  const changed = await f.deployment.setServerMode(records.agent.serverId, { mode: 'managed' });
+  assert.equal(changed.mode, 'managed'); assert.equal(changed.tokenHash, undefined);
+  assert.equal(f.deployment.authenticate(records.agent.token), records.agent.serverId);
+  assert.deepEqual(f.deployment.data.targets.find(item => item.id === records.target.id), before);
+  assert.equal(f.deployment.assignment(records.agent.serverId).mode, 'managed');
+  await assert.rejects(f.deployment.createTask({ targetId: before.id, action: 'deploy' }), { status: 403 });
+  const service = await f.deployment.saveEntity('services', { applicationId: records.application.id, name: '验证副本', module: 'demo' });
+  const target = await f.deployment.saveEntity('targets', { environmentId: records.environment.id, serviceId: service.id, serverId: records.agent.serverId, mode: 'managed', config: {} });
+  const task = await ready(f, target.id); await f.deployment.claim(records.agent.serverId);
+  await assert.rejects(f.deployment.setServerMode(records.agent.serverId, { mode: 'observe' }), { status: 409 });
+  await f.deployment.events(records.agent.serverId, task.id, { seq: 1, stage: 'failed', message: '结束验证任务' });
+  await f.deployment.setServerMode(records.agent.serverId, { mode: 'observe' });
+  await assert.rejects(f.deployment.createTask({ targetId: target.id, action: 'deploy' }), { status: 403 });
+  assert.equal(f.deployment.data.targets.find(item => item.id === target.id).mode, 'managed');
+  assert.equal(f.repository.store.state.events.filter(item => item.action === 'server-mode').length, 2);
+  await f.deployment.setServerMode(records.agent.serverId, { mode: 'observe' });
+  assert.equal(f.repository.store.state.events.filter(item => item.action === 'server-mode').length, 2);
+  await f.deployment.revokeServer(records.agent.serverId);
+  await assert.rejects(f.deployment.setServerMode(records.agent.serverId, { mode: 'managed' }), { status: 409 });
+  await f.deployment.close(); await f.repository.store.close();
 });
 
 test('部署配置拒绝目录逃逸、外部容器名称及跨项目目标', async t => {
@@ -253,6 +319,10 @@ test('HTTP 管理接口沿用登录与 CSRF，Agent 来源文件严格隔离', a
   assert.equal((await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, { Cookie: auth.Cookie })).status, 403);
   assert.equal((await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, auth)).status, 201);
   const f = { repository: app.service, deployment: app.deployment }; const first = await targetFixture(f); const other = await targetFixture(f); const task = await ready(f, first.target.id); await app.deployment.claim(first.agent.serverId);
+  const observer = await targetFixture(f, 'observe');
+  assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, { Cookie: auth.Cookie })).status, 403);
+  assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, auth)).status, 200);
+  assert.equal(app.deployment.data.targets.find(item => item.id === observer.target.id).mode, 'observe');
   const own = await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, { Authorization: `Bearer ${first.agent.token}` }); assert.equal(own.status, 200); assert.equal(await own.text(), '测试源码第一版');
   assert.equal((await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, { Authorization: `Bearer ${other.agent.token}` })).status, 403);
   assert.equal((await request('/api/deploy/overview', 'GET', null, { Authorization: `Bearer ${first.agent.token}` })).status, 401);

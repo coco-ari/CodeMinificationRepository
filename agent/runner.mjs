@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
-import { identifier, VERSION } from './config.mjs';
+import { identifier, VERSION, CAPABILITIES } from './config.mjs';
 import { readJson, writeJson, TaskJournal } from './state.mjs';
 import { Docker } from './docker.mjs';
 import { CenterClient } from './client.mjs';
@@ -49,7 +49,7 @@ export class AgentRunner {
   saveIdentity() { return writeJson(path.join(this.root, 'identity.json'), this.identity); }
   async heartbeat() {
     const [metrics, containers] = await Promise.all([this.monitor.metrics(), this.monitor.containers(this.identity)]);
-    const response = await this.client.post('heartbeat', { version: VERSION, metrics, containers, activeTaskId: this.activeTaskId });
+    const response = await this.client.post('heartbeat', { version: VERSION, capabilities: CAPABILITIES, metrics, containers, activeTaskId: this.activeTaskId });
     if (!['managed', 'observe'].includes(response.mode) || !Array.isArray(response.targets)) throw new Error('中心心跳响应无效');
     this.identity.mode = response.mode; this.identity.targets = response.targets; await this.saveIdentity();
   }

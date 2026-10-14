@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { readFile, open } from 'node:fs/promises';
+import { readFile, open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { pipeline } from 'node:stream/promises';
@@ -7,9 +7,11 @@ import { RepositoryService } from './service.mjs';
 import { HttpError, RateLimiter, randomSecret, equal } from './security.mjs';
 import { DeploymentService } from './deployment.mjs';
 import { handleAgentRequest, handleDeployRequest } from './deploy-http.mjs';
+import { WorkspaceService, historyWorkspace } from './workspaces.mjs';
+import { handleWorkspaceRequest } from './workspace-http.mjs';
 import { handleInstallRequest } from './install-http.mjs';
 
-const publicDirectory = fileURLToPath(new URL('../public/', import.meta.url));
+const publicDirectory = fileURLToPath(new URL('../dist/web/', import.meta.url));
 const idPattern = '[a-f0-9-]{36}';
 const SESSION_MS = 8 * 60 * 60 * 1000;
 
@@ -41,6 +43,7 @@ export async function createApplication({ directory, service, secureCookies = tr
   await service.initialize();
   const deployment = new DeploymentService(service, { publicOrigin });
   await deployment.initialize();
+  const workspaces = new WorkspaceService(service, deployment);
   const sessions = new Map();
   const revokeSession = key => {
     const session = sessions.get(key); sessions.delete(key);
@@ -52,11 +55,18 @@ export async function createApplication({ directory, service, secureCookies = tr
   const downloadFailures = new RateLimiter(30, 60 * 1000);
   const downloadLimiter = new RateLimiter(60, 60 * 1000);
   const adminLimiter = new RateLimiter(120, 60 * 1000);
-  const assets = new Map(await Promise.all([
-    ['/', 'index.html', 'text/html; charset=utf-8'], ['/app.js', 'app.js', 'text/javascript; charset=utf-8'],
-    ['/style.css', 'style.css', 'text/css; charset=utf-8'],
-    ['/deploy.js', 'deploy.js', 'text/javascript; charset=utf-8'],
-  ].map(async ([url, file, type]) => [url, { content: await readFile(path.join(publicDirectory, file)), type }])));
+  // 仅提供构建目录内的已知静态资源，不把请求路径拼接为文件系统路径。
+  const assets = new Map();
+  const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
+  async function loadAssets(directory, prefix = '') {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name), url = `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) await loadAssets(file, url);
+      else if (mime[path.extname(entry.name)]) assets.set(url === '/index.html' ? '/' : url, { content: await readFile(file), type: mime[path.extname(entry.name)] });
+    }
+  }
+  try { await loadAssets(publicDirectory); }
+  catch (error) { if (error.code === 'ENOENT') throw new Error('缺少前端构建产物，请先执行 pnpm install --frozen-lockfile 和 pnpm build'); throw error; }
   const server = http.createServer((req, res) => {
     const pending = handleRequest(req, res); activeRequests.add(pending);
     pending.finally(() => activeRequests.delete(pending)).catch(() => {});
@@ -76,7 +86,13 @@ export async function createApplication({ directory, service, secureCookies = tr
       if (await handleInstallRequest(req, res, route, { publicOrigin })) return;
       if (req.method === 'GET' && (assets.has(route) || new RegExp(`^/download/${idPattern}$`).test(route))) {
         const asset = assets.get(route) || assets.get('/');
-        res.writeHead(200, { 'Content-Type': asset.type }); res.end(asset.content); return;
+        let content = asset.content;
+        if (asset.type.startsWith('text/html')) {
+          const nonce = randomSecret();
+          res.setHeader('Content-Security-Policy', res.getHeader('Content-Security-Policy').replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'`));
+          content = content.toString('utf8').replace('__CMR_STYLE_NONCE__', nonce);
+        }
+        res.writeHead(200, { 'Content-Type': asset.type }); res.end(content); return;
       }
       if (req.method === 'GET' && route === '/healthz') { json(res, 200, { status: 'ok' }); return; }
       const now = Date.now();
@@ -128,6 +144,10 @@ export async function createApplication({ directory, service, secureCookies = tr
         if (!equal(req.headers['x-csrf-token'] || '', session.csrf)) throw new HttpError(403, '会话校验失败，请刷新页面');
         adminLimiter.take(cookie);
       }
+      if (await handleWorkspaceRequest(req, res, url, { workspaces, deployment, service, body, json, expiresAt: session.expires,
+        sessionValid: () => !stopping && sessions.get(cookie) === session && session.expires > Date.now(),
+        trackStream: stream => { session.streams.add(stream); stream.once('close', () => session.streams.delete(stream)); },
+      })) return;
       if (await handleDeployRequest(req, res, url, { deployment, body, json, expiresAt: session.expires,
         sessionValid: () => !stopping && sessions.get(cookie) === session && session.expires > Date.now(),
         trackStream: stream => { session.streams.add(stream); stream.once('close', () => session.streams.delete(stream)); },
@@ -140,11 +160,14 @@ export async function createApplication({ directory, service, secureCookies = tr
         res.setHeader('Set-Cookie', sessionCookie('', secureCookies, 0)); json(res, 200, { ok: true }); return;
       }
       if (req.method === 'GET' && route === '/api/overview') { json(res, 200, service.overview()); return; }
+      if (req.method === 'GET' && route === '/api/credentials') { json(res, 200, { credentials: service.overview().credentials }); return; }
       if (req.method === 'POST' && route === '/api/credentials') { json(res, 201, await service.saveCredential(await body(req))); return; }
       const credential = new RegExp(`^/api/credentials/(${idPattern})$`).exec(route);
       if (credential && req.method === 'PUT') { json(res, 200, await service.saveCredential(await body(req), credential[1])); return; }
       if (credential && req.method === 'DELETE') { await service.deleteCredential(credential[1]); json(res, 200, { ok: true }); return; }
-      if (req.method === 'POST' && route === '/api/projects') { json(res, 201, await service.saveProject(await body(req))); return; }
+      if (req.method === 'POST' && route === '/api/projects') { const input = await body(req);
+        if (!input.applicationId) input.applicationId = await service.store.change(state => historyWorkspace(state).id);
+        json(res, 201, await service.saveProject(input)); return; }
       const project = new RegExp(`^/api/projects/(${idPattern})(?:/(rotate-token|sync|enabled))?$`).exec(route);
       if (project) {
         const [, id, action] = project;
@@ -190,7 +213,7 @@ export async function createApplication({ directory, service, secureCookies = tr
     return closePromise;
   };
   server.on('close', () => { settleResources().catch(() => {}); });
-  return { server, service, deployment, close };
+  return { server, service, deployment, workspaces, close };
 }
 
 function integerEnv(name, fallback, min, max) {

@@ -14,5 +14,5 @@ async function check(directory) {
     }
   }
 }
-for (const directory of ['src', 'public', 'agent', 'scripts', 'test']) await check(path.join(root, directory));
+for (const directory of ['src', 'agent', 'scripts', 'test']) await check(path.join(root, directory));
 console.log('中心、Agent 和测试脚本语法检查通过。');

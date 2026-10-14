@@ -19,5 +19,7 @@ async function collect(directory, prefix = '') {
 await collect(source);
 if (!files.includes('install.sh') || !files.includes('Dockerfile')) throw new Error('Agent 安装文件尚未完整生成');
 await mkdir(path.join(root, 'dist'), { recursive: true });
-await promisify(execFile)('tar', ['-czf', path.join(root, 'dist/agent-bundle.tar.gz'), '-C', source, ...files.sort()], { windowsHide: true });
+// macOS 的扩展属性不能进入 Linux 安装包，避免生成 AppleDouble 文件和 PAX 警告。
+const metadataOptions = process.platform === 'darwin' ? ['--no-xattrs', '--no-mac-metadata'] : [];
+await promisify(execFile)('tar', [...metadataOptions, '-czf', path.join(root, 'dist/agent-bundle.tar.gz'), '-C', source, ...files.sort()], { windowsHide: true, env: { ...process.env, COPYFILE_DISABLE: '1' } });
 console.log(`Agent 安装包已生成，共 ${files.length} 个程序文件。`);

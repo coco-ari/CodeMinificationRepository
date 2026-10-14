@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
-import { VERSION, identifier } from './config.mjs';
+import { VERSION, CAPABILITIES, identifier } from './config.mjs';
 
 export class CenterClient {
   constructor(url, { allowHttpTest = false, token = null, timeoutMs = 35000 } = {}) {
@@ -14,7 +14,7 @@ export class CenterClient {
     const text = await response.text(); if (text.length > 4 * 1024 * 1024) throw new Error('中心响应过大');
     return JSON.parse(text);
   }
-  register(registrationToken) { return this.post('register', { registrationToken, version: VERSION }); }
+  register(registrationToken) { return this.post('register', { registrationToken, version: VERSION, capabilities: CAPABILITIES }); }
   async download(task, destination, maxBytes = 64 * 1024 * 1024) {
     identifier(task.id);
     const expectedPath = `/api/agent/v1/tasks/${task.id}/source`, url = new URL(task.source.url, this.url);

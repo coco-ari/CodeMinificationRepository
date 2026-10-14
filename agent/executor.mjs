@@ -5,6 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { identifier, safeChild, normalizeConfig, managedName, releaseImage, labels, owns, assertManaged } from './config.mjs';
 import { readJson, writeJson } from './state.mjs';
 import { extractZip } from './archive.mjs';
+import { StaticDeployment } from './static-deployment.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 export const terminal = status => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(status);
@@ -27,6 +28,7 @@ export function composeFor(identity, task, release) {
 export class DeploymentExecutor {
   constructor({ root, identity, journal, client, docker, sleepFn = sleep }) {
     this.root = root; this.identity = identity; this.journal = journal; this.client = client; this.docker = docker; this.sleep = sleepFn;
+    this.static = new StaticDeployment(this);
   }
   getIdentity() { return typeof this.identity === 'function' ? this.identity() : this.identity; }
   targetRoot(task) { return safeChild(this.root, 'targets', identifier(task.targetId)); }
@@ -69,9 +71,12 @@ export class DeploymentExecutor {
     const name = `cmr-build-${task.id}-${suffix}`;
     await this.requireOwned(task, name);
     const labelArgs = Object.entries(labels(this.getIdentity().serverId, task.targetId, task.id)).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
+    const environment = config.kind === 'static'
+      ? ['HOME=/tmp', 'CI=true', 'npm_config_cache=/cache/npm', 'npm_config_update_notifier=false', `NODE_OPTIONS=--max-old-space-size=${Math.floor(config.build.memoryMb * 0.65)}`]
+      : ['HOME=/tmp', 'MAVEN_CONFIG=/tmp/.m2', `MAVEN_OPTS=-Xmx${Math.floor(config.build.memoryMb * 0.6)}m -XX:MaxMetaspaceSize=${Math.max(96, Math.floor(config.build.memoryMb * 0.18))}m -Duser.home=/tmp`];
     const run = ['run', '--rm', '--name', name, ...labelArgs, '--cpus', String(config.build.cpus), '--memory', `${config.build.memoryMb}m`, '--memory-swap', `${Math.round(config.build.memoryMb * 1.5)}m`, '--pids-limit', '256', '--user', '1000:1000', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
-      '--env', 'HOME=/tmp', '--env', 'MAVEN_CONFIG=/tmp/.m2', '--env', `MAVEN_OPTS=-Xmx${Math.floor(config.build.memoryMb * 0.6)}m -XX:MaxMetaspaceSize=${Math.max(96, Math.floor(config.build.memoryMb * 0.18))}m -Duser.home=/tmp`,
-      ...mounts.flatMap(([hostPath, containerPath, readOnly]) => ['--mount', `type=bind,src=${hostPath},dst=${containerPath}${readOnly ? ',readonly' : ''}`]), '--workdir', '/workspace', config.buildImage, ...args];
+      ...environment.flatMap(value => ['--env', value]),
+      ...mounts.flatMap(([hostPath, containerPath, readOnly]) => ['--mount', `type=bind,src=${hostPath},dst=${containerPath}${readOnly ? ',readonly' : ''}`]), '--workdir', config.kind === 'static' && config.module ? `/workspace/${config.module}` : '/workspace', config.buildImage, ...args];
     try { return await this.mutation(task, run, { onOutput: text => this.output(task, stage, text) }); }
     finally {
       const leftover = await this.requireOwned(task, name);
@@ -170,6 +175,7 @@ export class DeploymentExecutor {
     }
   }
   async execute(task) {
+    if (task.config?.kind === 'static') return this.static.execute(task);
     const existing = await this.journal.get(task.id); if (existing) { if (terminal(existing.status)) return; return this.recover(existing); }
     await this.journal.create(task);
     let previous = null, deploying = false;
@@ -205,6 +211,7 @@ export class DeploymentExecutor {
     }
   }
   async recover(record) {
+    if (record.task.config?.kind === 'static') return this.static.recover(record);
     const task = record.task;
     try {
       assertManaged(this.getIdentity(), task);
@@ -223,6 +230,7 @@ export class DeploymentExecutor {
     finally { if (terminal((await this.journal.get(task.id))?.status)) await this.cleanupWork(task).catch(() => {}); }
   }
   async cleanupWork(task) {
+    if (task.config?.kind === 'static') return this.static.cleanupWork(task);
     assertManaged(this.getIdentity(), task);
     const record = await this.journal.get(task.id);
     if (task.action === 'deploy' && record?.status !== 'succeeded') {

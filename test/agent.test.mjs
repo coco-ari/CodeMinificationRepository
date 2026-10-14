@@ -1,6 +1,7 @@
+import { fakeOwnership } from './fake-ownership.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, readdir, symlink, readlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -14,6 +15,8 @@ import { AgentRunner } from '../agent/runner.mjs';
 import { Monitor } from '../agent/monitor.mjs';
 import { acquireAgentLock } from '../agent/lock.mjs';
 import { Docker } from '../agent/docker.mjs';
+import { checkStaticResponse } from '../agent/static-deployment.mjs';
+import { copyStaticSite } from '../agent/static-site.mjs';
 
 const revision = 'a'.repeat(40);
 function zip(entries) {
@@ -64,8 +67,116 @@ async function fixture(t, currentIdentity = identity()) {
   const docker = new FakeDocker(), journal = new TaskJournal(root), archive = zip([{ name: 'pom.xml', content: '<project />' }]);
   const client = { download: async (_, file) => writeFile(file, archive) };
   const executor = new DeploymentExecutor({ root, identity: currentIdentity, journal, client, docker, sleepFn: async () => {} });
+  fakeOwnership(executor);
   return { root, docker, journal, client, executor, identity: currentIdentity };
 }
+
+async function staticFixture(t) {
+  const f = await fixture(t), publicRoot = `${f.root}-static`;
+  await mkdir(publicRoot, { mode: 0o755 }); await writeFile(path.join(publicRoot, '.cmr-static-root'), publicRoot);
+  t.after(() => rm(publicRoot, { recursive: true, force: true }));
+  const server = http.createServer(async (request, response) => {
+    try {
+      const parts = new URL(request.url, 'http://localhost').pathname.split('/').filter(Boolean);
+      const body = await readFile(path.join(publicRoot, parts[0], 'current', parts.slice(1).join('/') || 'index.html'));
+      response.writeHead(200); response.end(body);
+    } catch { response.writeHead(404); response.end('missing'); }
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const url = `http://127.0.0.1:${server.address().port}/target-1/`;
+  const staticConfig = normalizeConfig({ kind: 'static', module: 'web', health: { url, timeoutSeconds: 10, intervalSeconds: 2, bodyIncludes: 'ready' } });
+  const archive = zip([{ name: 'web/package.json', content: '{"scripts":{"build":"vite build"}}' }, { name: 'web/package-lock.json', content: '{}' }]);
+  f.client.download = async (_, file) => writeFile(file, archive);
+  const run = f.docker.run.bind(f.docker);
+  f.docker.run = async (args, options) => {
+    if (args.includes('/cmr/static-build.mjs')) {
+      if (f.docker.failStaticBuild) throw new Error('前端编译失败');
+      const mount = args.find(value => value.includes('dst=/workspace')), source = mount.match(/src=(.*?),dst=/)[1];
+      await mkdir(path.join(source, 'web', 'dist'), { recursive: true });
+      await writeFile(path.join(source, 'web', 'dist', 'index.html'), '<html>ready</html>');
+    }
+    return run(args, options);
+  };
+  return { ...f, publicRoot, url, staticConfig, staticTask: (id, extra = {}) => task(id, { config: staticConfig, ...extra }) };
+}
+
+test('前端通过共用站点目录发布、单独回退，不创建或重启 Web 容器', async t => {
+  const f = await staticFixture(t), shared = { Config: { Image: 'nginx:existing', Labels: {} } };
+  f.docker.containers.set('shared-nginx', shared);
+  await f.executor.execute(f.staticTask('static-1'));
+  assert.equal((await f.journal.get('static-1')).status, 'succeeded');
+  const first = (await f.journal.get('static-1')).result.release;
+  assert.equal(await readlink(path.join(f.publicRoot, 'target-1', 'current')), 'releases/static-1');
+  await checkStaticResponse(first);
+  const count = f.docker.calls.length; await f.executor.execute(f.staticTask('static-1')); assert.equal(f.docker.calls.length, count);
+  await f.executor.execute(f.staticTask('static-2'));
+  assert.equal((await f.journal.get('static-2')).status, 'succeeded');
+  await f.executor.execute(f.staticTask('static-rollback', { action: 'rollback', release: first }));
+  assert.equal((await f.journal.get('static-rollback')).status, 'succeeded');
+  assert.equal((await f.executor.current(f.staticTask('unused'))).id, first.id);
+  assert.equal(f.docker.containers.get('shared-nginx'), shared);
+  assert.equal(f.docker.calls.some(args => ['compose', 'build', 'restart'].includes(args[0])), false);
+  for (const args of f.docker.calls.filter(args => args[0] === 'run')) {
+    assert.equal(args.filter((_, index) => args[index - 1] === '--mount').some(value => value.includes('docker.sock') || value.includes(f.publicRoot)), false);
+    assert.equal(args[args.indexOf('--workdir') + 1], '/workspace/web');
+    assert.ok(args.includes('1000:1000'));
+  }
+  const monitoring = await new Monitor({ docker: f.docker, root: f.root }).containers({ ...f.identity, targets: [{ ...f.identity.targets[0], config: f.staticConfig }] });
+  assert.equal(monitoring[0].health, 'healthy'); assert.equal(monitoring[0].containerName, null);
+});
+
+test('前端构建失败保留当前站点，验证失败恢复旧版本，首次失败不留下当前指针', async t => {
+  const f = await staticFixture(t);
+  await f.executor.execute(f.staticTask('baseline'));
+  f.docker.failStaticBuild = true;
+  await f.executor.execute(f.staticTask('build-failed'));
+  assert.equal((await f.journal.get('build-failed')).status, 'failed');
+  assert.equal(await readlink(path.join(f.publicRoot, 'target-1', 'current')), 'releases/baseline');
+  f.docker.failStaticBuild = false;
+  const health = f.executor.static.health.bind(f.executor.static);
+  f.executor.static.health = (task, release) => release.id.startsWith('bad-') ? Promise.reject(new Error('模拟站点验证失败')) : health(task, release);
+  await f.executor.execute(f.staticTask('bad-health'));
+  assert.equal((await f.journal.get('bad-health')).status, 'rolled_back');
+  assert.equal(await readlink(path.join(f.publicRoot, 'target-1', 'current')), 'releases/baseline');
+  f.identity.targets.push({ id: 'target-2', serverId: 'server-1', mode: 'managed' });
+  await f.executor.execute(f.staticTask('bad-first', { targetId: 'target-2' }));
+  assert.equal((await f.journal.get('bad-first')).status, 'failed');
+  await assert.rejects(readlink(path.join(f.publicRoot, 'target-2', 'current')), { code: 'ENOENT' });
+  assert.equal(await readlink(path.join(f.publicRoot, 'target-1', 'current')), 'releases/baseline');
+});
+
+test('前端任务恢复核对版本，不重复构建；目录归属和仅观察模式仍生效', async t => {
+  const f = await staticFixture(t), value = f.staticTask('recover-static');
+  await f.executor.static.preflight(value);
+  await f.journal.create(value);
+  const release = await f.executor.static.build(value, f.staticConfig);
+  await f.executor.static.activate(value, release);
+  await f.journal.update(value.id, { stage: 'deploying', release, previousRelease: null });
+  const before = f.docker.calls.filter(args => args[0] === 'run').length;
+  await f.executor.recover(await f.journal.get(value.id));
+  assert.equal((await f.journal.get(value.id)).status, 'succeeded');
+  assert.equal(f.docker.calls.filter(args => args[0] === 'run').length, before);
+  await writeJson(path.join(f.publicRoot, 'target-1', '.cmr-owner.json'), { serverId: 'another-server', targetId: 'target-1' });
+  await f.executor.execute(f.staticTask('foreign-site'));
+  assert.equal((await f.journal.get('foreign-site')).status, 'failed');
+  assert.equal(f.docker.calls.filter(args => args[0] === 'run').length, before);
+  f.identity.mode = 'observe';
+  await f.executor.execute(f.staticTask('observed-static'));
+  assert.equal((await f.journal.get('observed-static')).status, 'failed');
+});
+
+test('静态产物拒绝源码目录和符号链接，HTTP 200 也必须对应本次发布标识', async t => {
+  const { root } = await fixture(t), source = path.join(root, 'source'), output = path.join(source, 'dist');
+  await mkdir(output, { recursive: true }); await writeFile(path.join(output, 'index.html'), 'ready');
+  await symlink('/etc/passwd', path.join(output, 'outside.txt'));
+  await assert.rejects(copyStaticSite(source, 'dist', path.join(root, 'copy')), /符号链接/);
+  await rm(path.join(output, 'outside.txt')); await writeFile(path.join(output, 'package.json'), '{}');
+  await assert.rejects(copyStaticSite(source, 'dist', path.join(root, 'copy')), /源码目录/);
+  const release = { id: 'expected', config: { kind: 'static', health: { url: 'https://example.com/' } } };
+  await assert.rejects(checkStaticResponse(release, { fetchFn: async () => new Response('old-version') }), /本次发布版本/);
+  assert.throws(() => normalizeConfig({ kind: 'static', artifactPath: '../dist', health: { url: 'https://example.com' } }));
+});
 
 test('Agent 配置限制资源、路径、入口和卷，同时支持 Maven 根模块', () => {
   assert.equal(config().module, '');
@@ -250,6 +361,6 @@ test('领取任务后刷新白名单，刚创建的目标可正常部署', async
     throw new Error('未知接口');
   } };
   const runner = new AgentRunner({ root, centerUrl: 'https://center.example', docker, client });
-  runner.identity = { ...currentIdentity, targets: [] };
+  fakeOwnership(runner.executor); runner.identity = { ...currentIdentity, targets: [] };
   await runner.tick(); assert.equal((await runner.journal.get('new-target-task')).status, 'succeeded');
 });

@@ -2,7 +2,7 @@ import { readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from './store.mjs';
-import { ArchiveBuilder, validateBranch, validateRepository } from './archive.mjs';
+import { ArchiveBuilder, validateBranch, validateRepository, sourceKey } from './archive.mjs';
 import { HttpError, randomSecret, digest, equal, encrypt, decrypt, requireText, hashPassword, checkPassword } from './security.mjs';
 
 const timestamp = () => new Date().toISOString();
@@ -132,7 +132,7 @@ export class RepositoryService {
   }
   async deleteCredential(id) {
     await this.store.change(state => {
-      if (state.projects.some(project => project.credentialId === id)) throw new HttpError(409, '仍有项目使用此凭证，请先修改项目配置');
+      if (state.projects.some(project => project.credentialId === id) || state.deployments?.tasks.some(task => task.sourceSnapshot?.credentialId === id && ['preparing', 'queued', 'running'].includes(task.status))) throw new HttpError(409, '仍有仓库或未完成任务使用此凭证，请先修改配置或等待任务完成');
       state.credentials = state.credentials.filter(item => item.id !== id);
     });
   }
@@ -147,7 +147,7 @@ export class RepositoryService {
       if (id) {
         project = state.projects.find(item => item.id === id);
         if (!project) throw new HttpError(404, '项目不存在');
-        if (this.inFlight.has(id)) throw new HttpError(409, '该项目正在同步，请完成后再修改');
+        if ([...this.inFlight.keys()].some(key => key.startsWith(`${id}:`))) throw new HttpError(409, '该项目正在同步，请完成后再修改');
       } else {
         if (state.projects.length >= 100) throw new HttpError(400, '项目数量已达到上限');
         project = { id: randomUUID(), createdAt: timestamp(), tokenHash: digest(token), status: 'idle', lastSuccess: null };
@@ -155,6 +155,11 @@ export class RepositoryService {
       }
       if (project.repository !== repository || project.branch !== branch) {
         project.status = 'idle'; project.lastSuccess = null; project.error = null;
+      }
+      if (input.applicationId !== undefined) {
+        if (!state.deployments?.applications.some(item => item.id === input.applicationId)) throw new HttpError(400, '项目不存在');
+        if (project.applicationId && project.applicationId !== input.applicationId) throw new HttpError(400, '不能更改仓库所属项目');
+        project.applicationId = input.applicationId;
       }
       Object.assign(project, { name, repository, branch, credentialId: input.credentialId || null,
         enabled: input.enabled !== false, updatedAt: timestamp() });
@@ -167,7 +172,7 @@ export class RepositoryService {
     await this.store.change(state => {
       const project = state.projects.find(item => item.id === id);
       if (!project) throw new HttpError(404, '项目不存在');
-      project.tokenHash = digest(token);
+      project.tokenHash = digest(token); delete project.needsDownloadTokenReset;
       audit(state, id, 'token', `已重置下载密码：${project.name}`);
     });
     return { token };
@@ -188,22 +193,24 @@ export class RepositoryService {
     }
     return project;
   }
-  async sync(id) {
-    if (this.inFlight.has(id)) return this.inFlight.get(id);
+  async sync(id, frozen) {
     const project = this.store.state.projects.find(item => item.id === id);
     if (!project) throw new HttpError(404, '项目不存在');
     if (!project.enabled) throw new HttpError(409, '项目已停用');
-    const snapshot = structuredClone(project);
-    // 同步任务按项目合并，每次新任务仍向远端检查最新提交。
+    const snapshot = structuredClone(frozen || project);
+    if (snapshot.id !== id) throw new HttpError(400, '源码快照不匹配');
+    const key = sourceKey(snapshot);
+    if (this.inFlight.has(key)) return this.inFlight.get(key);
+    // 仅合并同仓库地址和分支的任务；每次新任务仍向远端检查最新提交。
     const task = this.performSync(snapshot);
-    this.inFlight.set(id, task);
+    this.inFlight.set(key, task);
     try { return await task; }
-    finally { if (this.inFlight.get(id) === task) this.inFlight.delete(id); }
+    finally { if (this.inFlight.get(key) === task) this.inFlight.delete(key); }
   }
   async performSync(project) {
     const update = async fields => this.store.change(state => {
       const current = state.projects.find(item => item.id === project.id);
-      if (current) Object.assign(current, fields);
+      if (current && sourceKey(current) === sourceKey(project)) Object.assign(current, fields);
     });
     try {
       await update({ status: 'queued', error: null, lastAttemptAt: timestamp() });
@@ -214,9 +221,11 @@ export class RepositoryService {
         const result = await this.builder.build(project, credential);
         await this.store.change(state => {
           const current = state.projects.find(item => item.id === project.id);
-          current.status = 'ready'; current.error = null;
-          current.lastSuccess = { revision: result.revision, sha256: result.sha256, size: result.size, at: timestamp(), cached: result.cached };
-          audit(state, project.id, 'sync', `${project.name}：${result.cached ? '已确认最新，复用源码包' : '新版本源码包已生成'}`);
+          if (current && sourceKey(current) === sourceKey(project)) {
+            current.status = 'ready'; current.error = null;
+            current.lastSuccess = { revision: result.revision, sha256: result.sha256, size: result.size, at: timestamp(), cached: result.cached };
+          }
+          audit(state, project.id, 'sync', `${project.name} / ${project.branch}：${result.cached ? '已确认最新，复用源码包' : '新版本源码包已生成'}`);
         });
         return result;
       });
@@ -224,7 +233,7 @@ export class RepositoryService {
       const safe = error instanceof HttpError ? error : new HttpError(500, '同步失败，请检查凭证数据和服务存储');
       await this.store.change(state => {
         const current = state.projects.find(item => item.id === project.id);
-        if (current) { current.status = 'failed'; current.error = safe.message; }
+        if (current && sourceKey(current) === sourceKey(project)) { current.status = 'failed'; current.error = safe.message; }
         audit(state, project.id, 'failure', `${project.name}：${safe.message}`);
       });
       throw safe;

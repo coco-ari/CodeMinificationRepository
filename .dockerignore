@@ -8,3 +8,5 @@ coverage
 .test-artifacts
 .deployment
 *.log
+
+dist

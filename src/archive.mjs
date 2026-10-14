@@ -21,6 +21,10 @@ export function validateBranch(value) {
   return value;
 }
 
+export function sourceKey(project) {
+  return `${project.id}:${createHash('sha256').update(JSON.stringify([project.repository, project.branch])).digest('hex')}`;
+}
+
 export class ArchiveBuilder {
   constructor(directory, { timeoutMs = 180000, maxArchiveBytes = 1024 * 1024 * 1024, allowLocal = false } = {}) {
     this.directory = directory;
@@ -61,7 +65,7 @@ export class ArchiveBuilder {
     validateBranch(project.branch);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    const root = path.join(this.directory, project.id);
+    const root = path.join(this.directory, project.id, sourceKey(project).split(':')[1]);
     const repository = path.join(root, 'repository.git');
     const temporary = path.join(root, `${randomUUID()}.tmp.zip`);
     const run = async args => {

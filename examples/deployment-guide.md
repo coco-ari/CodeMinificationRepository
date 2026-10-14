@@ -1,14 +1,17 @@
 # 集中部署平台运维指南
 
-本指南适用于第一版中心与 Agent。现有 Jenkins 继续运行，自研平台先观察已有服务，再在独立环境验证发布；正式切换需要单独安排。本指南不代表已经完成真实 Docker 验收或远程上线。
+本指南适用于项目工作空间版中心与兼容的现有 Agent。现有 Jenkins 继续运行，自研平台先观察已有服务，再在独立环境验证发布；正式切换需要单独安排。A / B 当前部署的直接操作步骤见 [Java 操作手册](java-operator-manual.md)，已执行的远程与 Docker 验收见 [本版验收清单](release-checklist-20261015.md)。
 
 ## 接入顺序
 
-1. 按 [README](../README.md#docker-部署) 部署中心，设置实际 HTTPS `PUBLIC_ORIGIN`、安全 Cookie 和持久数据卷。
-2. 原「Gitee 凭证」「项目仓库」继续管理仓库及分支。旧浏览器下载地址、项目密码与 Jenkins API 不变。
-3. 在「服务器」点击「接入服务器」，填写名称。现有 Jenkins 服务器选择默认的 **仅观察**；独立验证服务器才选择 **平台管理**。
-4. 复制生成的安装命令，在对应 Linux 服务器执行。服务器须已有 Docker Engine、Docker Compose、curl、tar，以及访问中心和镜像源的网络能力。
-5. 安装完成后返回中心，确认服务器在线、最近采集时间及资源指标。首次 CPU 采样可能暂未有值。
+1. 部署中心，设置实际 HTTPS `PUBLIC_ORIGIN`、安全 Cookie 和持久数据卷。
+2. 登录后创建或进入项目。新项目默认有“测试”和“生产”两个环境；在「代码仓库」添加仓库、默认下载分支和凭证。
+3. 在项目的「服务器」选择「接入新服务器」，或「绑定已接入服务器」。现有 Jenkins 服务器选择默认的 **仅观察**，独立验证服务器选择 **平台管理**。
+4. 新接入时复制生成的命令，在对应 Linux 服务器执行。服务器须已有 Docker Engine、Docker Compose、curl、tar，并能访问中心和镜像/软件包源。
+5. 返回项目确认服务器在线、采集时间和整机资源指标。同一服务器可绑定多个项目，无需重复安装 Agent。
+6. 进入「环境与服务」创建 Java 或前端静态服务，选择顶部环境，逐个服务配置仓库和发布分支；再进入「部署发布」创建目标。前端共用现有 Docker Nginx，首次目录挂载、Node 构建配置和 Agent 升级步骤见 [前端静态站点部署](static-sites.md)。
+
+项目内解除绑定只适用于没有本项目部署目标引用的服务器，不停止容器。撤销 Agent 接入需到系统管理的「服务器总览」，会影响共享它的全部项目。
 
 安装命令下载 `/agent/install.sh` 与 `/agent/bundle.tar.gz`，在目标机构建 `cmr-agent:local` 并启动 `cmr-agent` 容器。注册令牌有效期 15 分钟，只能使用一次；注册后换为服务器专属凭据，原令牌文件自动删除。不要把安装命令、`identity.json` 或备份上传到公开仓库。
 
@@ -21,13 +24,26 @@ docker inspect cmr-agent --format '{{.State.Status}}'
 
 Agent 不开放入站服务，通过出站 HTTPS 长轮询领取任务、每 10 秒回报心跳。安装时挂载 Docker Socket，拥有近似宿主机管理员的容器管理能力；中心和 Agent 再按观察模式、目标归属限制具体操作。Agent 默认限制为 256 MiB 内存、384 MiB 内存加交换空间、0.25 核 CPU，编译容器和业务容器资源分别配置。
 
+### Docker 镜像源返回 HTML 时
+
+若安装时出现 `encountered unknown type text/html`，检查宿主机 Docker 镜像代理是否返回网页。2026-10-15 在 B 遇到此情况：保留全局 Docker 配置，从 Docker Official Images 的 Amazon ECR Public 镜像源预拉取基础镜像并赋予原标签后，原安装脚本构建成功。
+
+```bash
+docker pull public.ecr.aws/docker/library/node:24-alpine
+docker tag public.ecr.aws/docker/library/node:24-alpine node:24-alpine
+docker pull public.ecr.aws/docker/library/docker:29-cli
+docker tag public.ecr.aws/docker/library/docker:29-cli docker:29-cli
+```
+
+这只是准备安装依赖，不会安装 Agent，也不替换运行中的容器。需要网络能访问 ECR Public 以及 Alpine 包源。若安装已经创建了 Agent 目录后才失败，不要直接删除目录重跑：先核对是否已有身份/容器，确认只是本次未完成的新安装后再由运维清理或恢复。注册口令到期需在中心重新生成接入记录。
+
 ## 登记 Jenkins 管理的现有服务
 
-1. 新建「业务项目」，例如「SOL 标准版」。
-2. 在项目中新增环境，并关联正确的源码项目及分支。
-3. 新增 Java 服务，填写实际 Maven 模块，例如 `brezze-api`。
-4. 在「部署目标」选择环境、服务、观察服务器和 **仅观察**，填写准确的现有容器名称。
-5. 等待心跳后，核对运行状态、健康状态、重启次数和镜像信息。
+1. 进入项目，例如「SOL 标准版」，绑定已经接入的仅观察服务器。
+2. 在项目内添加源码仓库，保留需要继续使用的下载分支。
+3. 在「环境与服务」新增 Java 服务，填写实际 Maven 模块，例如 `brezze-api`；选择环境，为服务配置仓库和发布分支。
+4. 在「部署发布」选择环境、服务、已绑定服务器及 **仅观察**，填写准确的现有容器名称。
+5. 等待心跳，核对运行状态、健康状态、重启次数和镜像信息。仅显示当前项目登记的目标。
 
 可在宿主机使用只读命令核对名称：
 
@@ -37,6 +53,8 @@ docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 
 观察目标的发布、重启、回退按钮不可用，两端接口也会拒绝这些操作。目标的管理方式、服务器和所属服务不能直接编辑转换；平台不会根据名称接管已有容器。不要为了显示更多数据修改现有业务容器、健康检查或 Jenkins 任务。
 
+在同一服务器并行验证自研部署时，可在「系统管理 → 服务器总览」点击「启用平台部署」。此操作保留 Agent 身份和已有观察目标，只允许另外创建平台管理目标；已有 Jenkins 容器仍为只读。整台服务器存在未完成任务时禁止切换。恢复“仅观察”会暂停新发布，保留已有容器、配置及版本记录。
+
 主机失联表示中心暂时收不到消息，页面保留最后的状态和采集时间；不能据此判断业务停止。撤销服务器接入会使其后续认证失败，不停止现有业务容器，也不等同于取消正在运行的本地任务。
 
 ## 独立验证首次发布
@@ -45,7 +63,7 @@ docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 
 仓库内的 [Java 演示项目](demo-java) 不连接数据库或消息队列，适合首次验证。可将 `examples/demo-java/` 的内容作为独立 Gitee 仓库根目录，配置为中心源码项目；真实 Docker 集成测试则直接使用本地源码，不需要创建远程仓库。
 
-在中心建立演示业务项目、环境及服务，Maven 模块填写 `.`。接入独立服务器并选择平台管理，创建部署目标，按下表配置：
+在中心创建演示项目并添加演示源码仓库。在「环境与服务」新增服务，Maven 模块填写 `.`，选测试环境并为服务配置仓库和发布分支。接入平台管理服务器，在「部署发布」创建目标，按下表配置：
 
 | 配置项 | 演示值 |
 | --- | --- |
@@ -139,16 +157,42 @@ Agent 更新失败时，以原镜像、原目录和原环境配置恢复。只�
 在仓库根目录执行：
 
 ```bash
-npm run check
-npm test
-npm run bundle:agent
-npm run test:browser
-npm run test:deploy-browser
-npm run test:docker
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm run check:ui
+pnpm run build
+pnpm test
+pnpm run bundle:agent
+pnpm run test:browser
+pnpm run test:deploy-browser
+pnpm run test:docker
 ```
 
-前两项检查语法和临时数据下的逻辑；`bundle:agent` 生成只含程序文件的安装包。浏览器测试需要 Chrome、Chromium 或 Edge，可用 `BROWSER_PATH` 指定；截图位于 `.test-artifacts`。部署浏览器测试的 Agent 回报是模拟数据，不等同于真实 Docker 验收。
+需要 Node.js 24+ 与 pnpm 11.25.0；前端构建产物位于 `dist/web`，直接启动中心前必须完成构建。`check` 与 `check:ui` 检查语法、类型和格式，`test` 验证临时数据下的逻辑；`bundle:agent` 生成只含程序文件的安装包。浏览器测试需要 Chrome、Chromium 或 Edge，可用 `BROWSER_PATH` 指定；截图位于 `.test-artifacts`。部署浏览器测试的 Agent 回报是模拟数据，不等同于真实 Docker 验收。
 
 `test:docker` 需要开发机可用的 Linux Docker 引擎、镜像下载和 Maven 依赖网络，单独启动临时中心、两个 Agent 及演示 Java 容器。脚本仅使用本次独立标识的 Docker 资源，验证完整 ZIP、真实编译、发布、健康失败回退、手动回退、Agent 重启及观察权限。结果写入 `.test-artifacts/docker-verification.json`；以本次退出码、任务结果与日志判断是否通过。
 
 现有 Jenkins 服务继续通过原流程发布。所有验证成熟并明确安排切换后，再逐个服务转移管理归属，保留原 Jenkins 配置、运行基线和历史记录用于恢复。
+
+## 项目工作空间升级核验
+
+升级前停止中心并保存完整数据卷、Agent 目录、Compose 配置与原镜像。中心启动时会额外保存配置备份 `workspace-backup-*`，执行事务迁移并记录版本标记。配置备份不包含任务源码和日志，不能用于代替整卷恢复。
+
+升级后逐项检查：
+
+1. 项目首页显示原项目，环境、服务、目标和发布历史数量正确；从现有目标生成服务器绑定。
+2. 原浏览器/Jenkins 地址继续用旧下载密码下载默认分支，校验响应中的提交和 SHA-256。
+3. 原 Agent 保持身份，无需重装；服务器管理方式、原容器名称及运行状态保持不变。
+4. 在各项目「环境与服务」确认仓库和分支。共用仓库原记录在“历史源码”，各项目持有独立副本；需要对外下载副本时重置其下载密码。
+5. 只在独立测试环境验证新发布、回退和多项目共享服务器排队。旧任务和源码包仍通过原任务 ID 读取。
+
+独立 Docker 验收脚本已经包含共享 Agent 的跨项目串行发布场景。执行 `pnpm run test:docker` 需要 Linux Docker 引擎及镜像/Maven 依赖网络访问能力。没有 Docker 时退出并报告环境错误，不代表验收通过。回退恢复升级前完整数据卷及原镜像，保留失败数据用于排查。
+
+
+## shadcn/ui 界面升级
+
+本次界面使用 React + Vite + Tailwind CSS，官方 Radix 版 shadcn/ui 组件源码随仓库保存。中心与 Agent 的运行协议、SQLite 数据位置和下载入口保持原有约定。Dockerfile 增加前端构建阶段，需要访问 npm 注册表，最终运行镜像只包含静态界面和中心/Agent 程序。
+
+本地部署步骤为 `pnpm install --frozen-lockfile` → `pnpm build` → `node src/server.mjs`；生产推荐构建镜像后按原整卷备份流程升级。不要只复制后端代码而遗漏 `dist/web`。界面从同源 `/assets/` 加载，反向代理需将 `/`、`/assets/`、`/download/` 和 `/api/` 交给中心，并继续支持 SSE。
+
+中心每次 HTML 响应生成随机样式 nonce，仅授权 Radix 弹窗滚动锁样式；脚本仍限制为同源，未开放 `unsafe-inline` 或 `unsafe-eval`。反向代理不要缓存 HTML 或改写 CSP。键盘 Tab/Escape、手机抽屉导航、任务深链接和迟到响应隔离由浏览器测试覆盖。

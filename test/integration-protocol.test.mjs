@@ -1,3 +1,4 @@
+import { fakeOwnership } from './fake-ownership.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
@@ -75,11 +76,11 @@ async function fixture(t) {
   fixture.agent = async (name, mode = 'managed') => {
     const registration = await fixture.request('/api/deploy/servers', 'POST', { name, mode });
     const runner = new AgentRunner({ root: path.join(root, name), centerUrl: fixture.url, registrationToken: registration.registrationToken, allowHttpTest: true, docker: fixture.docker, procRoot: root, logger: { warn() {} } });
-    fixture.runners.push(runner); await runner.initialize(); return runner;
+    fixture.runners.push(runner); fakeOwnership(runner.executor); await runner.initialize(); return runner;
   };
   fixture.target = async (runner, suffix = '') => {
-    const source = await fixture.request('/api/projects', 'POST', { name: `演示源码${suffix}`, repository: 'https://gitee.com/example/demo.git', branch: 'main' });
     const application = await fixture.request('/api/deploy/applications', 'POST', { name: `演示项目${suffix}` });
+    const source = await fixture.request('/api/projects', 'POST', { name: `演示源码${suffix}`, repository: 'https://gitee.com/example/demo.git', branch: 'main', applicationId: application.id });
     const environment = await fixture.request('/api/deploy/environments', 'POST', { name: '隔离验证', applicationId: application.id, sourceProjectId: source.project.id });
     const service = await fixture.request('/api/deploy/services', 'POST', { name: 'Java 演示', applicationId: application.id, module: '.' });
     const target = await fixture.request('/api/deploy/targets', 'POST', { environmentId: environment.id, serviceId: service.id, serverId: runner.identity.serverId, mode: runner.identity.mode,
@@ -148,7 +149,7 @@ test('Agent 实例重建后中断编译明确失败，已更新容器只核验�
   const createRestored = async () => {
     await runner.close();
     const restored = new AgentRunner({ root: runner.root, centerUrl: f.url, allowHttpTest: true, docker: f.docker, procRoot: f.root, logger: { warn() {} } });
-    f.runners.push(restored); await restored.initialize(); await restored.heartbeat(); return restored;
+    f.runners.push(restored); fakeOwnership(restored.executor); await restored.initialize(); await restored.heartbeat(); return restored;
   };
   const before = f.docker.calls.filter(call => call[0] === 'compose' && call.includes('up')).length;
   runner = await createRestored(); await runner.recover(); await runner.flushEvents();

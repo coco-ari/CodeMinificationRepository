@@ -7,7 +7,7 @@ import { createApplication } from '../src/server.mjs';
 
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'cmr-browser-'));
 const candidates = [process.env.BROWSER_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome'].filter(Boolean);
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/chromium', '/usr/bin/google-chrome'].filter(Boolean);
 let executable;
 for (const candidate of candidates) { try { await access(candidate); executable = candidate; break; } catch {} }
 if (!executable) throw new Error('未找到浏览器，请设置 BROWSER_PATH 后重试');
@@ -62,8 +62,25 @@ try {
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
     return result.result?.value;
   }
-  const fill = (selector, value) => evaluate(`document.querySelector(${JSON.stringify(selector)}).value = ${JSON.stringify(value)}`);
-  const click = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const animationsSettled = () => evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+  const mouseClick = async selector => {
+    await animationsSettled();
+    const point = await evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+    await command('Input.dispatchMouseEvent', {type:'mousePressed', ...point, button:'left', clickCount:1});
+    await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...point, button:'left', clickCount:1});
+  };
+  const key = async (key, code) => {
+    await command('Input.dispatchKeyEvent', {type:'keyDown', key, code:key, windowsVirtualKeyCode:code});
+    await command('Input.dispatchKeyEvent', {type:'keyUp', key, code:key, windowsVirtualKeyCode:code});
+  };
+  const fill = (selector, value) => evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)}); const prototype = input.tagName === 'SELECT' ? HTMLSelectElement.prototype : input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input',{bubbles:true})); input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  const click = async selector => {
+    if (selector.startsWith('[data-view=') && !await evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)})?.getClientRects().length)`)) {
+      await evaluate(`document.querySelector('[data-sidebar="trigger"]').click()`);
+      await visible(selector);
+    }
+    await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  };
   const visible = selector => until(() => evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)})?.getClientRects().length)`), selector);
   await command('Runtime.enable'); await command('Log.enable'); await command('Page.enable');
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -72,34 +89,61 @@ try {
   await fill('#auth-form [name=bootstrapToken]', service.bootstrapToken);
   await fill('#auth-form [name=username]', 'admin'); await fill('#auth-form [name=password]', 'browser-test-password');
   await click('#auth-form [type=submit]'); await visible('#app-view');
-  await click('[data-view=credentials]'); await click('#create-button'); await visible('#credential-dialog');
+  await click('[data-view=credentials]'); await visible('#credential-list'); await click('#create-button'); await visible('#credential-dialog');
   await fill('#credential-form [name=name]', 'Gitee 交付专用账号'); await fill('#credential-form [name=username]', 'delivery-reader');
   await fill('#credential-form [name=password]', 'test-only-password'); await click('#credential-form [type=submit]');
-  await until(() => evaluate('!document.querySelector("#credential-dialog").open'), '保存凭证');
-  await click('[data-view=projects]'); await click('#create-button'); await visible('#project-dialog');
+  await until(() => evaluate('!document.querySelector("#credential-dialog")'), '保存凭证');
+  await click('[data-view=home]'); await visible('#workspace-home'); await click('#create-button'); await visible('.deploy-dialog[data-state=open]');
+  await fill('.deploy-dialog[data-state=open] [name=name]', 'SOL 交付项目'); await click('.deploy-dialog[data-state=open] [type=submit]');
+  await until(() => evaluate('document.querySelector("#workspace-name").textContent === "SOL 交付项目"'), '创建项目并进入空间');
+  await click('[data-view=projects]'); await visible('#project-list'); await click('#create-button'); await visible('#project-dialog');
   await fill('#project-form [name=name]', '越南 SOL 标准版');
   await fill('#project-form [name=repository]', 'https://gitee.com/example/sol-standard.git');
   await fill('#project-form [name=branch]', 'release/vietnam');
-  await fill('#project-form [name=credentialId]', service.store.state.credentials[0].id);
+  await click('#repository-add-credential'); await visible('#credential-dialog');
+  await fill('#credential-form [name=name]', '项目内新建凭证'); await fill('#credential-form [name=username]', 'project-reader');
+  await fill('#credential-form [name=password]', 'inline-test-only-password'); await click('#credential-form [type=submit]');
+  await until(() => evaluate('!document.querySelector("#credential-dialog")'), '项目内创建凭证');
+  assert.equal(await evaluate('document.querySelector("#project-form [name=name]").value'), '越南 SOL 标准版');
+  assert.equal(await evaluate('document.querySelector("#project-credential").selectedOptions[0].textContent'), '项目内新建凭证');
   await click('#project-form [type=submit]'); await visible('#secret-dialog');
   const secret = await evaluate('document.querySelector("#secret-value").value'); assert.equal(secret.length, 43);
   const publicUrl = await evaluate('document.querySelector("#secret-page").value');
   await click('#secret-dialog [data-close]');
-  await until(() => evaluate('document.querySelector("#secret-value").value === ""'), '关闭弹窗后清除密码');
+  await until(() => evaluate('!document.querySelector("#secret-value")'), '关闭弹窗后清除密码');
   await evaluate('Array.from(document.querySelectorAll(".card-actions button")).find(x => x.textContent === "立即同步").click()');
   await until(() => evaluate('document.querySelector(".project-card .badge").textContent === "已就绪"'), '手动同步');
   assert.equal(service.store.state.projects.length, 1);
   assert.equal(service.store.state.projects[0].branch, 'release/vietnam');
   assert.ok(!await evaluate('document.body.textContent.includes("test-only-password")'));
+  // 使用真实鼠标和键盘核对 Radix 焦点圈定、Escape 关闭和焦点返回。
+  await mouseClick('.project-card .card-actions button:nth-child(2)'); await visible('#project-dialog');
+  for (let i = 0; i < 12; i++) {
+    await key('Tab', 9);
+    assert.equal(await evaluate('document.querySelector("#project-dialog").contains(document.activeElement)'), true);
+  }
+  await key('Escape', 27); await until(() => evaluate('!document.querySelector("#project-dialog")'), 'Escape 关闭对话框');
+  await until(() => evaluate('document.activeElement === document.querySelector(".project-card .card-actions button:nth-child(2)")'), '焦点返回编辑按钮');
+  await mouseClick('.project-card .card-actions button:nth-child(4)'); await visible('[role=alertdialog]');
+  await evaluate('Array.from(document.querySelector("[role=alertdialog]").querySelectorAll("button")).find(b=>b.textContent === "取消").click()');
+  await until(() => evaluate('!document.querySelector("[role=alertdialog]")'), '取消重置密码');
+  service.authorizeDownload(service.store.state.projects[0].id, secret);
+  await mouseClick('[data-slot=dropdown-menu-trigger]'); await visible('[role=menu]');
+  await evaluate('Array.from(document.querySelectorAll("[role=menuitem]")).find(b=>b.textContent.includes("修改密码")).click()');
+  await visible('[name=currentPassword]'); await key('Escape', 27);
+  await until(() => evaluate('!document.querySelector("[name=currentPassword]")'), '关闭账号密码弹窗');
+
   const artifactDirectory = path.resolve('.test-artifacts'); await mkdir(artifactDirectory, { recursive: true });
+  await animationsSettled();
   let screenshot = await command('Page.captureScreenshot', { format: 'png' });
   await writeFile(path.join(artifactDirectory, 'dashboard-desktop.png'), Buffer.from(screenshot.data, 'base64'));
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true);
+  await animationsSettled();
   screenshot = await command('Page.captureScreenshot', { format: 'png' });
   await writeFile(path.join(artifactDirectory, 'dashboard-mobile.png'), Buffer.from(screenshot.data, 'base64'));
   await command('Page.navigate', { url: publicUrl }); await visible('#download-view');
-  assert.equal(await evaluate('document.querySelector("#app-view").hidden'), true);
+  assert.equal(await evaluate('!document.querySelector("#app-view")'), true);
   await fill('#download-form [name=token]', 'invalid'); await click('#download-form [type=submit]');
   await until(() => evaluate('document.querySelector("#download-error").textContent.includes("密码无效")'), '无效下载密码');
   assert.deepEqual(errors, []);

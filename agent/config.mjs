@@ -1,6 +1,7 @@
 import path from 'node:path';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
+export const CAPABILITIES = ['static-site-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
   if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error(`${label}无效`);
@@ -33,16 +34,18 @@ export function imageName(value) {
 }
 export function normalizeConfig(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('部署配置无效');
+  const kind = input.kind || 'java', isStatic = kind === 'static';
+  if (!['java', 'static'].includes(kind)) throw new Error('服务类型无效');
   const module = input.module && input.module !== '.' ? relativePath(input.module) : '';
   if (module.startsWith('-')) throw new Error('Maven 模块不能以命令选项开头');
-  const artifactPath = relativePath(input.artifactPath || `${module ? `${module}/` : ''}target/*.jar`, { glob: true });
+  const artifactPath = relativePath(input.artifactPath || `${module ? `${module}/` : ''}${isStatic ? 'dist' : 'target/*.jar'}`, { glob: !isStatic });
   const profile = input.profile ?? 'test';
   if (typeof profile !== 'string' || !/^[a-zA-Z0-9_,.-]{0,100}$/.test(profile)) throw new Error('Spring Profile 无效');
   const ports = input.ports ?? [];
   if (!Array.isArray(ports) || ports.length > 20) throw new Error('端口映射无效');
   const result = {
-    module, artifactPath, buildImage: imageName(input.buildImage || 'maven:3.9.9-eclipse-temurin-8'),
-    runtimeImage: imageName(input.runtimeImage || 'eclipse-temurin:8-jre'), profile,
+    kind, module, artifactPath, buildImage: imageName(input.buildImage || (isStatic ? 'node:24-bookworm-slim' : 'maven:3.9.9-eclipse-temurin-8')),
+    runtimeImage: isStatic ? undefined : imageName(input.runtimeImage || 'eclipse-temurin:8-jre'), profile,
     jvmArgs: strings(input.jvmArgs ?? ['-Xms64m', '-Xmx192m', '-XX:MaxMetaspaceSize=128m', '-XX:+ExitOnOutOfMemoryError']), args: strings(input.args),
     ports: ports.map(p => ({ host: p.host ?? '127.0.0.1', hostPort: number(p.hostPort, undefined, 1024, 65535, true), containerPort: number(p.containerPort, undefined, 1, 65535, true) })),
     networks: strings(input.networks, 10), volumes: input.volumes ?? [],
@@ -51,6 +54,20 @@ export function normalizeConfig(input) {
     health: { port: number(input.health?.port, 8080, 1, 65535, true), path: input.health?.path ?? '/', status: number(input.health?.status, 200, 100, 599, true),
       bodyIncludes: input.health?.bodyIncludes ?? '', timeoutSeconds: number(input.health?.timeoutSeconds, 180, 10, 900, true), intervalSeconds: number(input.health?.intervalSeconds, 5, 2, 60, true) },
   };
+  if (isStatic) {
+    Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || '10.11.0',
+      buildScript: input.buildScript || 'build', buildArgs: strings(input.buildArgs, 40), jvmArgs: [], args: [], profile: '' });
+    if (!['npm', 'pnpm'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) throw new Error('包管理器或版本无效');
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,79}$/.test(result.buildScript)) throw new Error('静态站点构建配置无效');
+    if (artifactPath.split('/').some(part => part === 'node_modules' || part === '.git')) throw new Error('静态产物必须是独立的构建输出目录');
+    if (result.volumes.length || result.ports.length || result.networks.length) throw new Error('静态站点不单独创建容器或网络');
+    let url; try { url = new URL(input.health?.url); } catch { throw new Error('静态站点需要有效的访问地址'); }
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('静态站点访问地址无效');
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    result.health.url = url.href;
+    if (result.health.status !== 200) throw new Error('静态站点发布验证要求 HTTP 200');
+    delete result.runtimeImage; delete result.runtime;
+  }
   if (result.ports.some(p => !['127.0.0.1', '0.0.0.0'].includes(p.host))) throw new Error('仅支持明确的 IPv4 监听地址');
   if (result.networks.some(n => !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(n))) throw new Error('Docker 网络名称无效');
   if (!Array.isArray(result.volumes) || result.volumes.length > 20) throw new Error('数据卷配置无效');

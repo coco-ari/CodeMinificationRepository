@@ -134,6 +134,20 @@ test('HTTP 初始化、登录、CSRF、下载鉴权及响应头完整闭环', as
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const request = (url, method = 'GET', value, headers = {}) => fetch(base + url, { method, headers: { ...(value ? { 'Content-Type': 'application/json' } : {}), ...headers }, ...(value ? { body: JSON.stringify(value) } : {}) });
   assert.equal((await request('/healthz')).status, 200);
+  const page = await request('/'); const html = await page.text();
+  const nonce = /name="csp-nonce" content="([A-Za-z0-9_-]{43})"/.exec(html)?.[1];
+  assert.ok(nonce, '页面提供随机样式 nonce');
+  assert.ok(page.headers.get('content-security-policy').includes(`style-src 'self' 'nonce-${nonce}'`));
+  assert.ok(page.headers.get('content-security-policy').includes("script-src 'self';"));
+  assert.ok(!page.headers.get('content-security-policy').includes('unsafe-inline'));
+  const nextPage = await (await request('/')).text();
+  assert.ok(!nextPage.includes(nonce), '每次页面响应使用不同的 nonce');
+  const script = /src="(\/assets\/[^"]+\.js)"/.exec(html)?.[1];
+  assert.ok(script, '页面引用生产构建的脚本');
+  const asset = await request(script); assert.equal(asset.status, 200);
+  assert.match(asset.headers.get('content-type'), /javascript/);
+  assert.ok((await request('/assets/does-not-exist.js')).status >= 400);
+
   assert.equal((await request('/api/overview')).status, 401);
   const setup = { bootstrapToken: app.service.bootstrapToken, username: 'admin', password: 'safe-admin-password' };
   assert.equal((await request('/api/setup', 'POST', { ...setup, bootstrapToken: 'wrong' })).status, 401);
@@ -275,6 +289,6 @@ test('真实 HTTP Git 鉴权通过 askpass 注入，凭证不写入缓存配置'
   const id = randomUUID();
   const result = await builder.build({ id, repository: `http://127.0.0.1:${server.address().port}/source.git`, branch: 'main' }, credential);
   assert.equal(zipFiles(await readFile(result.file)).get('app.txt'), '需要凭证的源码'); assert.ok(authorized >= 2);
-  const config = await readFile(path.join(directory, 'cache with spaces', id, 'repository.git', 'config'), 'utf8');
+  const config = await readFile(path.join(path.dirname(result.file), 'repository.git', 'config'), 'utf8');
   assert.ok(!config.includes(credential.password)); assert.ok(!config.includes(credential.username));
 });

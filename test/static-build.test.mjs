@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import os from 'node:os';
+
+test('前端构建使用锁定安装与数组参数，pnpm 固定版本，失败不继续构建', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cmr-static-build-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'bin'));
+  await writeFile(path.join(root, 'bin', 'npm'), '#!/bin/sh\nprintf "%s\\n" "$NODE_ENV" "$@" >> "$CMR_TEST_ARGS"\nif [ "$CMR_TEST_FAIL" = "yes" ]; then exit 7; fi\n', { mode: 0o755 });
+  const script = fileURLToPath(new URL('../agent/static-build.mjs', import.meta.url));
+  const run = (manager = 'npm', extra = {}) => spawnSync(process.execPath, [script, manager, '10.11.0', 'build:test', '--mode', 'test'], { cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${path.join(root, 'bin')}:${process.env.PATH}`, CMR_TEST_ARGS: path.join(root, 'calls'), ...extra } });
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { 'build:test': 'vite build' } }));
+  assert.notEqual(run().status, 0);
+  await writeFile(path.join(root, 'package-lock.json'), '{}');
+  assert.equal(run().status, 0);
+  let calls = await readFile(path.join(root, 'calls'), 'utf8');
+  assert.match(calls, /production\nci\n--include=dev/); assert.match(calls, /run\nbuild:test\n--\n--mode\ntest/);
+  await rm(path.join(root, 'calls')); await writeFile(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+  assert.equal(run('pnpm').status, 0);
+  calls = await readFile(path.join(root, 'calls'), 'utf8');
+  assert.match(calls, /--package=pnpm@10\.11\.0/); assert.match(calls, /--frozen-lockfile/);
+  await rm(path.join(root, 'calls')); assert.equal(run('npm', { CMR_TEST_FAIL: 'yes' }).status, 7);
+  assert.doesNotMatch(await readFile(path.join(root, 'calls'), 'utf8'), /build:test/);
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { 'build:test': 'vite build' }, packageManager: 'pnpm@9.0.0' }));
+  assert.notEqual(run('pnpm').status, 0);
+});

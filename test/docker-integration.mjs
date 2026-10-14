@@ -18,7 +18,7 @@ const image = process.env.CMR_IT_AGENT_IMAGE || 'cmr-agent:verification';
 const buildImage = process.env.CMR_IT_BUILD_IMAGE || 'maven:3.9.9-eclipse-temurin-8';
 const root = await mkdtemp(path.join(os.tmpdir(), 'cmr-docker-test-'));
 const workRoot = `/tmp/cmr-it-${runId}`;
-const agents = [], targets = [], outcomes = [], scenarios = [];
+const agents = [], targets = [], outcomes = [], scenarios = [], fixtures = [];
 const adminPassword = `integration-${randomUUID()}`;
 let application, base, csrf, cookie, mavenCacheDirectory, passed = false;
 async function docker(args, tolerate = false) {
@@ -87,15 +87,17 @@ try {
   await new Promise(resolve => application.server.listen(listenPort, '0.0.0.0', resolve));
   base = `http://127.0.0.1:${listenPort}`;
   csrf = (await api('/api/setup', { bootstrapToken: application.service.bootstrapToken, username: 'admin', password: adminPassword })).csrf;
-  const source = (await api('/api/projects', { name: '隔离演示源码', repository: 'https://gitee.com/example/cmr-demo.git', branch: 'main', enabled: true })).project;
-  const project = await api('/api/deploy/applications', { name: '独立验收项目' });
-  const environment = await api('/api/deploy/environments', { applicationId: project.id, sourceProjectId: source.id, name: '隔离测试' });
-  const service = await api('/api/deploy/services', { applicationId: project.id, name: '演示 Java 服务', module: '.' });
-  const first = await api('/api/deploy/servers', { name: '验收部署节点', mode: 'managed' });
-  const second = await api('/api/deploy/servers', { name: '验收观察节点', mode: 'observe' });
+  const project = await api('/api/workspaces', { name: '独立验收项目' });
+  const workspacePath = `/api/workspaces/${project.id}`;
+  const source = (await api(`${workspacePath}/repositories`, { name: '隔离演示源码', repository: 'https://gitee.com/example/cmr-demo.git', branch: 'main', enabled: true })).project;
+  const environment = (await api(workspacePath)).environments.find(item => item.name === '测试');
+  const service = await api(`${workspacePath}/services`, { name: '演示 Java 服务', module: '.' });
+  await api(`${workspacePath}/environment-sources`, { environmentId: environment.id, serviceId: service.id, sourceProjectId: source.id, branch: 'main' }, 'PUT');
+  const first = await api(`${workspacePath}/servers`, { name: '验收部署节点', mode: 'managed' });
+  const second = await api(`${workspacePath}/servers`, { name: '验收观察节点', mode: 'observe' });
   const config = { artifactPath: 'target/demo.jar', buildImage, runtimeImage: buildImage, jvmArgs: ['-Xms32m', '-Xmx96m'], profile: '', args: [], ports: [], networks: [], volumes: [], build: { cpus: 1, memoryMb: 768 }, runtime: { cpus: 0.5, memoryMb: 192 }, health: { path: '/health', port: 18081, status: 200, bodyIncludes: 'cmr-demo-ready', timeoutSeconds: 45, intervalSeconds: 2 } };
-  const target = await api('/api/deploy/targets', { environmentId: environment.id, serviceId: service.id, serverId: first.server.id, mode: 'managed', config }); targets.push(target);
-  const observed = await api('/api/deploy/targets', { environmentId: environment.id, serviceId: service.id, serverId: second.server.id, mode: 'observe', containerName: target.containerName, config });
+  const target = await api(`${workspacePath}/targets`, { environmentId: environment.id, serviceId: service.id, serverId: first.server.id, mode: 'managed', config }); targets.push(target);
+  const observed = await api(`${workspacePath}/targets`, { environmentId: environment.id, serviceId: service.id, serverId: second.server.id, mode: 'observe', containerName: target.containerName, config });
   mavenCacheDirectory = `${workRoot}/agent-0/cache/${project.id}/maven`;
   const seedCache = process.env.CMR_IT_SEED_MAVEN_CACHE;
   if (seedCache) {
@@ -105,24 +107,25 @@ try {
   const centerUrl = `http://${controller || 'host.docker.internal'}:${listenPort}`;
   for (const [index, registered] of [first, second].entries()) {
     const name = `${network}-agent-${index}`, directory = `${workRoot}/agent-${index}`; agents.push(name);
-    await docker(['run', '-d', '--name', name, '--network', network, '--add-host', 'host.docker.internal:host-gateway', '--label', `io.cmr.integration=${runId}`, '--memory', '256m', '--cpus', '0.5', '--mount', 'type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock', '-v', `${directory}:${directory}`, '--env', `CMR_AGENT_DIR=${directory}`, '--env', `CMR_CENTER_URL=${centerUrl}`, '--env', `CMR_REGISTRATION_TOKEN=${registered.registrationToken}`, '--env', 'CMR_ALLOW_HTTP_TEST=1', image]);
+    await docker(['run', '-d', '--name', name, '--network', network, '--add-host', 'host.docker.internal:host-gateway', '--label', `io.cmr.integration=${runId}`, '--memory', '256m', '--cpus', '0.5', '--mount', 'type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock', '-v', `${directory}:${directory}`, '-v', `${directory}-static:${directory}-static`, '--env', `CMR_AGENT_DIR=${directory}`, '--env', `CMR_CENTER_URL=${centerUrl}`, '--env', `CMR_REGISTRATION_TOKEN=${registered.registrationToken}`, '--env', 'CMR_ALLOW_HTTP_TEST=1', image]);
+    await docker(['exec', name, 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; const root=process.argv[1]; await fs.chmod(root, 0o755); await fs.writeFile(root+"/.cmr-static-root", root, {mode:0o644});', `${directory}-static`]);
   }
   await until(async () => (await api('/api/deploy/overview')).servers.every(server => server.online), '两个 Agent 注册', 90000);
-  for (const action of ['deploy', 'restart', 'rollback']) await assert.rejects(api('/api/deploy/tasks', { targetId: observed.id, action }), { status: 403 });
-  const publish = async () => waitTask((await api('/api/deploy/tasks', { targetId: target.id, action: 'deploy' })).task.id);
+  for (const action of ['deploy', 'restart', 'rollback']) await assert.rejects(api(`${workspacePath}/tasks`, { targetId: observed.id, action }), { status: 403 });
+  const publish = async () => waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task.id);
   const good = await publish(); assert.equal(good.status, 'succeeded');
   const inspected = JSON.parse(await docker(['inspect', target.containerName]))[0]; assert.equal(inspected.State.Health.Status, 'healthy');
   await until(async () => (await api('/api/deploy/overview')).targets.find(item => item.id === observed.id)?.observation?.health === 'healthy', '只读节点上报业务健康状态', 45000);
   scenarios.push({ name: '两个 Agent 接入、观察隔离和真实健康状态', passed: true });
-  const restart = await waitTask((await api('/api/deploy/tasks', { targetId: target.id, action: 'restart' })).task.id); assert.equal(restart.status, 'succeeded');
+  const restart = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'restart' })).task.id); assert.equal(restart.status, 'succeeded');
   await docker(['restart', agents[0]]);
   await until(async () => JSON.parse(await docker(['inspect', agents[0]]))[0].State.Running, 'Agent 重启');
   const update = { environmentId: environment.id, serviceId: service.id, serverId: first.server.id, mode: 'managed', config: { ...config, args: ['--unhealthy'], health: { ...config.health, timeoutSeconds: 12 } } };
-  await api(`/api/deploy/targets/${target.id}`, update, 'PUT');
+  await api(`${workspacePath}/targets/${target.id}`, update, 'PUT');
   const bad = await publish(); assert.equal(bad.status, 'rolled_back');
   assert.equal(JSON.parse(await docker(['inspect', target.containerName]))[0].Config.Image, good.result.release.image);
-  const rollback = await waitTask((await api('/api/deploy/tasks', { targetId: target.id, action: 'rollback', releaseId: good.result.release.id })).task.id); assert.equal(rollback.status, 'succeeded');
-  await api(`/api/deploy/targets/${target.id}`, { ...update, config }, 'PUT');
+  const rollback = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'rollback', releaseId: good.result.release.id })).task.id); assert.equal(rollback.status, 'succeeded');
+  await api(`${workspacePath}/targets/${target.id}`, { ...update, config }, 'PUT');
   archive = zip({ ...files, 'src/main/java/com/cmr/demo/Main.java': Buffer.from('这不是可编译的 Java 代码') }); revision = 'b'.repeat(40); await writeFile(archiveFile, archive);
   const failed = await publish(); assert.equal(failed.status, 'failed');
   assert.equal(JSON.parse(await docker(['inspect', target.containerName]))[0].Config.Image, good.result.release.image);
@@ -130,7 +133,7 @@ try {
 
   // 中心关闭期间，已领取并下载完成的任务继续执行；重启后只补报，不重复更新容器。
   archive = zip(files); revision = 'c'.repeat(40); await writeFile(archiveFile, archive);
-  const offline = (await api('/api/deploy/tasks', { targetId: target.id, action: 'deploy' })).task;
+  const offline = (await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task;
   await until(async () => (await agentTask(offline.id))?.stage === 'building', '源码已下载并开始编译');
   const closed = await application.close({ timeoutMs: 10000 }); assert.equal(closed.graceful, true);
   const localCompletion = await until(async () => { const record = await agentTask(offline.id); return record && ['succeeded', 'failed', 'rolled_back'].includes(record.status) ? record : null; }, '中心离线时 Agent 独立完成任务');
@@ -147,7 +150,7 @@ try {
   scenarios.push({ name: '中心离线继续部署、中心重启、日志连续补报、不重复更新容器', passed: true, taskId: offline.id, offlineUnacknowledgedEvents: localCompletion.seq - localCompletion.ackSeq, containerId: whileOffline.Id });
 
   // 暂停本任务的构建容器，使故障注入不依赖 Maven 编译速度；所有目标均为本次随机资源。
-  const interrupted = (await api('/api/deploy/tasks', { targetId: target.id, action: 'deploy' })).task;
+  const interrupted = (await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task;
   const buildContainer = `cmr-build-${interrupted.id}-maven`;
   await until(async () => (await inspectContainer(buildContainer))?.State?.Running, '构建容器启动');
   await docker(['pause', buildContainer]);
@@ -160,8 +163,8 @@ try {
   scenarios.push({ name: '编译中 Agent 崩溃恢复、仅清理自身构建容器、现有业务不变', passed: true, taskId: interrupted.id });
 
   // 健康检查阶段终止 Agent，恢复时应核验当前容器而不是重新执行发布。
-  await api(`/api/deploy/targets/${target.id}`, { ...update, config: { ...config, health: { ...config.health, intervalSeconds: 15 } } }, 'PUT');
-  const verifying = (await api('/api/deploy/tasks', { targetId: target.id, action: 'deploy' })).task;
+  await api(`${workspacePath}/targets/${target.id}`, { ...update, config: { ...config, health: { ...config.health, intervalSeconds: 15 } } }, 'PUT');
+  const verifying = (await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task;
   await until(async () => { const record = await agentTask(verifying.id); return record?.stage === 'verifying' && record.status === 'running'; }, '部署进入健康检查');
   const beforeVerifyCrash = await inspectContainer(target.containerName);
   await docker(['kill', '--signal', 'KILL', agents[0]]); await docker(['start', agents[0]]);
@@ -171,14 +174,88 @@ try {
   const afterVerifyCrash = await inspectContainer(target.containerName);
   assert.equal(afterVerifyCrash.Id, beforeVerifyCrash.Id); assert.equal(afterVerifyCrash.State.StartedAt, beforeVerifyCrash.State.StartedAt);
   scenarios.push({ name: '部署健康检查中 Agent 崩溃恢复，不重复创建或重启业务容器', passed: true, taskId: verifying.id });
+  const otherProject = await api('/api/workspaces', { name: '共享服务器的第二项目' });
+  const otherPath = `/api/workspaces/${otherProject.id}`;
+  const otherSource = (await api(`${otherPath}/repositories`, { name: '第二项目源码', repository: source.repository, branch: 'main' })).project;
+  const otherEnvironment = (await api(otherPath)).environments.find(item => item.name === '测试');
+  const otherService = await api(`${otherPath}/services`, { name: '第二项目服务', module: '.' });
+  await api(`${otherPath}/environment-sources`, { environmentId: otherEnvironment.id, serviceId: otherService.id, sourceProjectId: otherSource.id, branch: 'main' }, 'PUT');
+  await api(`${otherPath}/servers/${first.server.id}`, {}, 'PUT');
+  const otherTarget = await api(`${otherPath}/targets`, { environmentId: otherEnvironment.id, serviceId: otherService.id, serverId: first.server.id, mode: 'managed', config }); targets.push(otherTarget);
+  const queuedA = (await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task;
+  const queuedB = (await api(`${otherPath}/tasks`, { targetId: otherTarget.id, action: 'deploy' })).task;
+  await application.deployment.preparations.get(queuedB.id);
+  assert.ok(application.deployment.data.tasks.filter(item => item.serverId === first.server.id && item.status === 'running').length <= 1);
+  assert.equal((await waitTask(queuedA.id)).status, 'succeeded');
+  assert.equal((await waitTask(queuedB.id)).status, 'succeeded');
+  const firstDone = application.deployment.data.tasks.find(item => item.id === queuedA.id);
+  const secondDone = application.deployment.data.tasks.find(item => item.id === queuedB.id);
+  assert.ok(Date.parse(secondDone.startedAt) >= Date.parse(firstDone.resultReceivedAt));
+  assert.equal((await inspectContainer(otherTarget.containerName)).State.Health.Status, 'healthy');
+  assert.ok(!(await api(workspacePath)).targets.some(item => item.id === otherTarget.id));
+  scenarios.push({ name: '两个项目共享真实 Agent，跨项目串行发布且目标独立', passed: true });
+  // 一个已有 Nginx 同时提供静态页面和 Java API；发布不重建或重启该 Nginx。
+  const nginx = `${network}-nginx`, publicRoot = `${workRoot}/agent-0-static`;
+  const frontendService = await api(`${workspacePath}/services`, { name: '演示前端', kind: 'static', module: '.' });
+  await api(`${workspacePath}/environment-sources`, { environmentId: environment.id, serviceId: frontendService.id, sourceProjectId: source.id, branch: 'main' }, 'PUT');
+  const frontendConfig = { buildImage: process.env.CMR_IT_NODE_IMAGE || 'node:24-bookworm-slim', artifactPath: 'dist', packageManager: 'npm', buildScript: 'build', build: { cpus: 1, memoryMb: 512 }, health: { url: `http://${nginx}/`, bodyIncludes: 'static-ready', timeoutSeconds: 12, intervalSeconds: 2 } };
+  const frontendInput = { environmentId: environment.id, serviceId: frontendService.id, serverId: first.server.id, mode: 'managed', config: frontendConfig };
+  const frontend = await api(`${workspacePath}/targets`, frontendInput); targets.push(frontend);
+  const nginxConfig = `server {
+    listen 80;
+    root /srv/cmr-sites/${frontend.id}/current;
+    index index.html;
+    open_file_cache off;
+    location = /__cmr_release.txt { add_header Cache-Control "no-store" always; try_files $uri =404; }
+    location = /index.html { add_header Cache-Control "no-cache" always; }
+    location /api/ { proxy_pass http://${otherTarget.containerName}:18081/; }
+    location / { try_files $uri $uri/ /index.html; }
+  }`;
+  const nginxConfigPath = `${workRoot}/agent-0/nginx-test.conf`;
+  await docker(['exec', agents[0], 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; await fs.writeFile(process.argv[1], process.argv[2], {mode:0o644}); await fs.chmod(process.argv[1], 0o644);', nginxConfigPath, nginxConfig]);
+  await docker(['network', 'connect', network, otherTarget.containerName]);
+  fixtures.push(nginx);
+  await docker(['run', '-d', '--name', nginx, '--network', network, '--label', `io.cmr.integration=${runId}`, '--mount', `type=bind,src=${publicRoot},dst=/srv/cmr-sites,readonly`, '--mount', `type=bind,src=${nginxConfigPath},dst=/etc/nginx/conf.d/default.conf,readonly`, process.env.CMR_IT_NGINX_IMAGE || 'nginx:stable-alpine']);
+  async function readSite(route = '') {
+    return docker(['exec', agents[0], 'node', '--input-type=module', '-e', 'const r=await fetch(process.argv[1], {signal:AbortSignal.timeout(5000)}); if(r.status!==200) throw Error(`HTTP ${r.status}`); process.stdout.write(await r.text());', `http://${nginx}/${route}`]);
+  }
+  await until(async () => { try { return (await readSite('api/health')).includes('cmr-demo-ready'); } catch { return false; } }, '共用 Nginx 的后端转发', 30000);
+  const nginxBefore = await inspectContainer(nginx), backendBefore = await inspectContainer(otherTarget.containerName);
+  async function frontendSource(label, invalid = false) {
+    const manifest = { name: 'cmr-static-demo', version: '1.0.0', private: true, scripts: { build: 'node build.mjs' } };
+    const lock = { name: manifest.name, version: manifest.version, lockfileVersion: 3, requires: true, packages: { '': { name: manifest.name, version: manifest.version } } };
+    archive = zip({ 'package.json': JSON.stringify(manifest), 'package-lock.json': JSON.stringify(lock), 'build.mjs': invalid ? 'process.exit(1);' : `import fs from 'node:fs/promises'; await fs.mkdir('dist'); await fs.writeFile('dist/index.html', ${JSON.stringify(`<html><body>static-ready ${label}</body></html>`)});` });
+    revision = createHash('sha1').update(archive).digest('hex'); await writeFile(archiveFile, archive);
+  }
+  const publishFrontend = async () => waitTask((await api(`${workspacePath}/tasks`, { targetId: frontend.id, action: 'deploy' })).task.id);
+  await frontendSource('v1'); const frontendV1 = await publishFrontend(); assert.equal(frontendV1.status, 'succeeded');
+  assert.equal(await readSite('__cmr_release.txt'), frontendV1.id); assert.match(await readSite(), /static-ready v1/);
+  await frontendSource('v2'); const frontendV2 = await publishFrontend(); assert.equal(frontendV2.status, 'succeeded');
+  assert.equal(await readSite('__cmr_release.txt'), frontendV2.id);
+  const frontendRollback = await waitTask((await api(`${workspacePath}/tasks`, { targetId: frontend.id, action: 'rollback', releaseId: frontendV1.id })).task.id);
+  assert.equal(frontendRollback.status, 'succeeded'); assert.equal(await readSite('__cmr_release.txt'), frontendV1.id);
+  await frontendSource('bad-build', true); assert.equal((await publishFrontend()).status, 'failed');
+  assert.equal(await readSite('__cmr_release.txt'), frontendV1.id);
+  await api(`${workspacePath}/targets/${frontend.id}`, { ...frontendInput, config: { ...frontendConfig, health: { ...frontendConfig.health, bodyIncludes: 'missing-health-marker' } } }, 'PUT');
+  await frontendSource('bad-health'); assert.equal((await publishFrontend()).status, 'rolled_back');
+  assert.equal(await readSite('__cmr_release.txt'), frontendV1.id); assert.match(await readSite('api/health'), /cmr-demo-ready/);
+  const nginxAfter = await inspectContainer(nginx), backendAfter = await inspectContainer(otherTarget.containerName);
+  assert.equal(nginxAfter.Id, nginxBefore.Id); assert.equal(nginxAfter.State.StartedAt, nginxBefore.State.StartedAt); assert.equal(nginxAfter.RestartCount, nginxBefore.RestartCount);
+  assert.equal(backendAfter.Id, backendBefore.Id); assert.equal(backendAfter.State.StartedAt, backendBefore.State.StartedAt);
+  assert.equal(await docker(['ps', '-aq', '--filter', `label=io.cmr.target=${frontend.id}`]), '');
+  scenarios.push({ name: '真实 Node 构建、共用 Nginx 静态版本切换、手动与失败回退、后端转发和 Nginx 持续运行', passed: true, nginxId: nginxBefore.Id });
   passed = true;
-  console.log('真实 Docker 验收通过：发布与回退、中心离线和重启、日志补报、编译中及部署中 Agent 崩溃恢复、观察隔离。');
+  console.log('真实 Docker 验收通过：Java 与前端发布、共用 Nginx、自动和手动回退、中心离线和重启、日志补报、Agent 崩溃恢复、观察隔离。');
 } finally {
   const artifactDirectory = path.join(repo, '.test-artifacts'); await mkdir(artifactDirectory, { recursive: true });
   for (const name of agents) {
     await writeFile(path.join(artifactDirectory, `${name}.log`), await docker(['logs', name], true));
     const found = await docker(['inspect', '--format', '{{index .Config.Labels "io.cmr.integration"}}', name], true);
     if (found === runId) await docker(['rm', '-f', name], true);
+  }
+  for (const name of fixtures) {
+    await writeFile(path.join(artifactDirectory, `${name}.log`), await docker(['logs', name], true));
+    if (await docker(['inspect', '--format', '{{index .Config.Labels "io.cmr.integration"}}', name], true) === runId) await docker(['rm', '-f', name], true);
   }
   for (const target of targets) {
     const resources = await docker(['ps', '-aq', '--filter', `label=io.cmr.target=${target.id}`], true);
