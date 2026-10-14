@@ -1,0 +1,394 @@
+import { EventEmitter } from 'node:events';
+import { mkdir, copyFile, readFile, stat, rm } from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { atomicWrite } from './store.mjs';
+import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
+
+const now = () => new Date().toISOString();
+const terminal = new Set(['succeeded', 'failed', 'rolled_back', 'interrupted']);
+const stages = new Set(['queued', 'downloading', 'building', 'deploying', 'verifying', ...terminal]);
+const collections = ['servers', 'applications', 'environments', 'services', 'targets', 'tasks', 'releases'];
+const namePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
+const imagePattern = /^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,199}$/;
+function fail(message) { throw new HttpError(400, message); }
+function find(items, id, label = '记录') { const item = items.find(entry => entry.id === id); if (!item) throw new HttpError(404, `${label}不存在`); return item; }
+function number(value, fallback, min, max, label) {
+  value ??= fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) fail(`${label}超出允许范围`);
+  return value;
+}
+function integer(value, fallback, min, max, label) { const result = number(value, fallback, min, max, label); if (!Number.isInteger(result)) fail(`${label}必须是整数`); return result; }
+function list(value, max, label) { value ??= []; if (!Array.isArray(value) || value.length > max) fail(`${label}格式错误`); return value; }
+function relative(value, label, allowGlob = false) {
+  value = requireText(value, label, 240);
+  if (value.startsWith('/') || value.startsWith('-') || value.includes('\\') || value.split('/').some(part => part === '..' || !part || (part === '.' && value !== '.')) || !/^[a-zA-Z0-9_./*+-]+$/.test(value) || (!allowGlob && value.includes('*')) || (allowGlob && value.slice(0, value.lastIndexOf('/') + 1).includes('*'))) fail(`${label}必须是安全的相对路径`);
+  return value;
+}
+function mode(value) { if (!['observe', 'managed'].includes(value)) fail('管理模式无效'); return value; }
+function transition(task, stage, done = false, occurredAt = now()) {
+  task.stageHistory ||= [];
+  const previous = task.stageHistory.at(-1);
+  const at = new Date(Math.max(Date.parse(occurredAt), Date.parse(previous?.startedAt || occurredAt))).toISOString();
+  if (previous && !previous.finishedAt && (previous.stage !== stage || done)) Object.assign(previous, { finishedAt: at, durationMs: Math.max(0, Date.parse(at) - Date.parse(previous.startedAt)) });
+  if (!done && previous?.stage !== stage) task.stageHistory.push({ stage, startedAt: at });
+}
+function agentEventTime(task, timestamp, receivedAt) {
+  const earliest = Date.parse(task.lastEventAt || task.startedAt || task.createdAt);
+  const latest = Math.max(earliest, Date.parse(receivedAt));
+  if (timestamp === undefined) return { at: new Date(latest).toISOString(), receivedAt };
+  const reported = Date.parse(timestamp);
+  // 首条带时间的事件估算固定时钟差，后续沿用，避免离线补报把耗时压缩到接收时刻。
+  if (task.agentClockOffsetMs === undefined) task.agentClockOffsetMs = reported < earliest ? earliest - reported : reported > latest ? latest - reported : 0;
+  const adjusted = reported + task.agentClockOffsetMs;
+  // 异常时钟跳变或乱序日期只钳制到已确认时间和接收时间之间，不永久阻断补报。
+  const accepted = Math.max(earliest, Math.min(adjusted, latest));
+  return { at: new Date(accepted).toISOString(), receivedAt, agentTimestamp: timestamp, ...(accepted !== reported ? { timeAdjusted: true } : {}) };
+}
+function safeServer(server) {
+  const { tokenHash, registrationHash, registrationExpiresAt, ...safe } = server;
+  return { ...safe, online: !server.revoked && !!server.lastSeenAt && Date.now() - Date.parse(server.lastSeenAt) <= 60000 };
+}
+
+export function validateConfig(input = {}, module = '.') {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail('部署配置格式错误');
+  const result = {
+    module: module === '.' || module === '' ? '' : relative(module, 'Maven 模块'),
+    artifactPath: relative(input.artifactPath || `${module === '.' || module === '' ? '' : `${module}/`}target/*.jar`, 'JAR 路径', true),
+    buildImage: input.buildImage || 'maven:3.9.9-eclipse-temurin-8',
+    runtimeImage: input.runtimeImage || 'eclipse-temurin:8-jre',
+    jvmArgs: list(input.jvmArgs ?? ['-Xms64m', '-Xmx192m'], 40, 'JVM 参数').map(value => requireText(value, 'JVM 参数', 1024)),
+    args: list(input.args, 40, '启动参数').map(value => requireText(value, '启动参数', 1024)),
+    profile: input.profile || '',
+    ports: list(input.ports, 16, '端口').map(port => ({ host: port.host || '127.0.0.1', hostPort: integer(port.hostPort, undefined, 1024, 65535, '宿主机端口'), containerPort: integer(port.containerPort, undefined, 1, 65535, '容器端口') })),
+    networks: list(input.networks, 8, '网络').map(value => requireText(value, '网络名称', 100)),
+    volumes: list(input.volumes, 16, '数据卷').map(volume => ({ name: requireText(volume.name, '数据卷名称', 63), mountPath: requireText(volume.mountPath, '挂载目录', 200) })),
+    build: { cpus: number(input.build?.cpus, 1, 0.1, 32, '构建 CPU'), memoryMb: integer(input.build?.memoryMb, 1024, 256, 65536, '构建内存') },
+    runtime: { cpus: number(input.runtime?.cpus, 0.5, 0.1, 32, '运行 CPU'), memoryMb: integer(input.runtime?.memoryMb, 512, 128, 65536, '运行内存') },
+    health: { path: input.health?.path || '/health', port: integer(input.health?.port, 8080, 1, 65535, '健康检查端口'), status: integer(input.health?.status, 200, 200, 399, '健康检查状态码'),
+      bodyIncludes: input.health?.bodyIncludes || '', timeoutSeconds: integer(input.health?.timeoutSeconds, 180, 10, 900, '健康检查超时'), intervalSeconds: integer(input.health?.intervalSeconds, 5, 2, 60, '健康检查间隔') },
+  };
+  if (![result.buildImage, result.runtimeImage].every(value => typeof value === 'string' && imagePattern.test(value))) fail('容器镜像名称无效');
+  if (typeof result.profile !== 'string' || !/^[a-zA-Z0-9_,.-]{0,100}$/.test(result.profile)) fail('Spring Profile 无效');
+  if (result.jvmArgs.some(arg => !arg.startsWith('-') || /^-(?:jar|cp|classpath|javaagent|agentlib|agentpath)(?:[:=]|$)/.test(arg))) fail('JVM 参数不能替换程序入口或加载代理');
+  if (result.ports.some(port => !['127.0.0.1', '0.0.0.0'].includes(port.host))) fail('端口只允许绑定 127.0.0.1 或 0.0.0.0');
+  if (new Set(result.ports.map(port => port.hostPort)).size !== result.ports.length) fail('端口配置重复');
+  if (result.networks.some(value => !namePattern.test(value))) fail('网络名称无效');
+  if (result.volumes.some(volume => !/^[a-z0-9][a-z0-9-]{0,63}$/.test(volume.name) || !/^\/app\/[a-zA-Z0-9_/.-]+$/.test(volume.mountPath) || volume.mountPath.split('/').some(part => ['.', '..'].includes(part)) || volume.mountPath === '/app/app.jar')) fail('数据卷只能使用平台命名卷并挂载到 /app 下的子目录');
+  if (typeof result.health.path !== 'string' || !result.health.path.startsWith('/') || result.health.path.startsWith('//') || /[\x00-\x20]/.test(result.health.path) || result.health.path.length > 512) fail('健康检查路径无效');
+  if (typeof result.health.bodyIncludes !== 'string' || result.health.bodyIncludes.length > 1024) fail('健康检查响应内容过长');
+  return result;
+}
+
+export class DeploymentService extends EventEmitter {
+  constructor(repository, { publicOrigin = '' } = {}) {
+    super(); this.repository = repository; this.store = repository.store; this.publicOrigin = publicOrigin;
+    this.root = path.join(repository.directory, 'deployments'); this.pins = new Map(); this.pinErrors = new Map(); this.archivePending = new Map(); this.preparations = new Map();
+  }
+  get data() { return this.store.state.deployments; }
+  changed(type, id) { this.emit('update', { type, id, at: now() }); }
+  async initialize() {
+    await mkdir(path.join(this.root, 'tasks'), { recursive: true, mode: 0o700 });
+    await this.store.change(state => {
+      state.deployments ||= { version: 1 };
+      if (state.deployments.version !== 1) throw new Error('不支持的部署数据版本');
+      for (const key of collections) state.deployments[key] ||= [];
+    });
+    const original = this.repository.builder.build.bind(this.repository.builder);
+    // 固定任务源码与原缓存清理共享锁，复制完成后才允许下一次构建清理旧缓存。
+    this.repository.builder.build = (project, credential) => this.archiveLock(project.id, async () => {
+      const archive = await original(project, credential);
+      for (const pin of this.pins.get(project.id) || []) {
+        // 新平台快照失败不能破坏共用这次同步的旧 Jenkins 下载请求。
+        try { await this.copyArchive(archive, pin); } catch (error) { this.pinErrors.set(pin, error); }
+      }
+      return archive;
+    });
+    for (const task of this.data.tasks.filter(task => task.status === 'preparing')) this.startPrepare(task.id);
+  }
+  archiveLock(projectId, work) {
+    // 缓存清理只影响本项目；不同项目仍遵守原同步队列的并发额度。
+    const operation = (this.archivePending.get(projectId) || Promise.resolve()).then(work);
+    const pending = operation.catch(() => {}).finally(() => { if (this.archivePending.get(projectId) === pending) this.archivePending.delete(projectId); });
+    this.archivePending.set(projectId, pending); return operation;
+  }
+  async copyArchive(archive, taskId) {
+    if (archive.size > 64 * 1024 * 1024) throw new HttpError(413, 'Agent 第一版仅支持不超过 64 MiB 的源码 ZIP；原 Jenkins 下载接口不受此限制');
+    const directory = path.join(this.root, 'tasks', taskId);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await copyFile(archive.file, path.join(directory, 'source.zip'));
+    await atomicWrite(path.join(directory, 'source.json'), JSON.stringify({ revision: archive.revision, sha256: archive.sha256, size: archive.size }));
+  }
+  overview() {
+    return { servers: this.data.servers.map(safeServer), applications: this.data.applications, environments: this.data.environments,
+      services: this.data.services, targets: this.data.targets, tasks: this.data.tasks.slice(-200).reverse() };
+  }
+  async createServer(input) {
+    const name = requireText(input.name, '服务器名称', 80); const serverMode = mode(input.mode || 'observe');
+    const registrationToken = randomSecret(); const expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
+    const server = { id: randomUUID(), name, mode: serverMode, createdAt: now(), registrationHash: digest(registrationToken), registrationExpiresAt: expiresAt,
+      registeredAt: null, lastSeenAt: null, version: null, revoked: false, metrics: null, containers: [] };
+    await this.store.change(state => { if (state.deployments.servers.length >= 500) fail('服务器数量已达到上限'); state.deployments.servers.push(server); });
+    this.changed('server', server.id);
+    const origin = this.publicOrigin;
+    return { server: safeServer(server), registrationToken, expiresAt,
+      installCommand: origin ? `curl -fsS '${origin}/agent/install.sh' -o /tmp/cmr-agent-install.sh && sudo bash /tmp/cmr-agent-install.sh --url '${origin}' --token '${registrationToken}'` : null };
+  }
+  async revokeServer(id) {
+    await this.store.change(state => {
+      const server = find(state.deployments.servers, id, '服务器'); server.revoked = true; server.revokedAt = now(); delete server.tokenHash; delete server.registrationHash;
+      for (const task of state.deployments.tasks.filter(task => task.serverId === id && ['queued', 'preparing'].includes(task.status))) Object.assign(task, { status: 'interrupted', stage: 'interrupted', finishedAt: now(), error: '服务器接入已撤销' });
+    });
+    this.changed('server', id);
+  }
+  async register(input) {
+    if (typeof input.registrationToken !== 'string') throw new HttpError(401, '接入口令无效');
+    const token = randomSecret(); let id;
+    await this.store.change(state => {
+      const server = state.deployments.servers.find(server => !server.revoked && server.registrationHash && equal(server.registrationHash, digest(input.registrationToken)));
+      if (!server || server.registeredAt || Date.parse(server.registrationExpiresAt) <= Date.now()) throw new HttpError(401, '接入口令无效、已使用或已过期');
+      id = server.id; server.tokenHash = digest(token); server.registeredAt = now(); server.lastSeenAt = now(); server.version = requireText(input.version || 'unknown', 'Agent 版本', 80);
+      delete server.registrationHash;
+    });
+    this.changed('server', id);
+    return { serverId: id, token, ...this.assignment(id) };
+  }
+  authenticate(token) {
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) throw new HttpError(401, 'Agent 凭据无效');
+    const server = this.data.servers.find(server => !server.revoked && server.tokenHash && equal(server.tokenHash, digest(token)));
+    if (!server) throw new HttpError(401, 'Agent 凭据无效或已撤销');
+    return server.id;
+  }
+  assignment(serverId) { const server = find(this.data.servers, serverId, '服务器'); return { mode: server.mode, targets: this.data.targets.filter(target => target.serverId === serverId) }; }
+  async heartbeat(serverId, input) {
+    if (input.metrics !== undefined && (!input.metrics || typeof input.metrics !== 'object' || Array.isArray(input.metrics))) fail('主机指标格式错误');
+    const containers = list(input.containers, 500, '容器状态');
+    const version = input.version === undefined ? undefined : requireText(input.version, 'Agent 版本', 80);
+    await this.store.change(state => {
+      const server = find(state.deployments.servers, serverId, '服务器');
+      if (server.revoked) throw new HttpError(401, 'Agent 已撤销');
+      Object.assign(server, { lastSeenAt: now(), metrics: input.metrics || null, activeTaskId: input.activeTaskId || null });
+      if (version !== undefined) server.version = version;
+      const targets = state.deployments.targets.filter(target => target.serverId === serverId);
+      server.containers = containers.filter(container => container && targets.some(target => container.targetId === target.id)).map(container => structuredClone(container));
+      for (const target of targets) {
+        const observation = server.containers.find(container => container.targetId === target.id);
+        if (observation) { target.observation = observation; target.lastObservedAt = now(); }
+      }
+    });
+    this.changed('heartbeat', serverId); return this.assignment(serverId);
+  }
+  async saveEntity(kind, input, id) {
+    if (!['applications', 'environments', 'services', 'targets'].includes(kind)) fail('配置类型错误');
+    const result = await this.store.change(state => {
+      const data = state.deployments; let item = id ? find(data[kind], id) : { id: randomUUID(), createdAt: now() };
+      if (!id && data[kind].length >= 2000) fail('配置数量已达到上限');
+      if (id && data.tasks.some(task => task.targetId === id && !terminal.has(task.status))) throw new HttpError(409, '目标存在未完成任务，请完成后再修改');
+      let fields;
+      if (kind === 'applications') {
+        if (input.description !== undefined && (typeof input.description !== 'string' || input.description.length > 500)) fail('项目说明最多 500 字');
+        fields = { name: requireText(input.name, '业务项目名称', 80), description: input.description || '' };
+      }
+      if (kind === 'environments') {
+        find(data.applications, input.applicationId, '业务项目'); find(state.projects, input.sourceProjectId, '源码项目');
+        if (id && item.applicationId !== input.applicationId) fail('不能修改环境所属项目');
+        fields = { applicationId: input.applicationId, sourceProjectId: input.sourceProjectId, name: requireText(input.name, '环境名称', 80) };
+      }
+      if (kind === 'services') {
+        find(data.applications, input.applicationId, '业务项目'); if (id && item.applicationId !== input.applicationId) fail('不能修改服务所属项目');
+        fields = { applicationId: input.applicationId, name: requireText(input.name, '服务名称', 80), module: relative(input.module || '.', 'Maven 模块') };
+      }
+      if (kind === 'targets') {
+        const environment = find(data.environments, input.environmentId, '环境'); const service = find(data.services, input.serviceId, '服务'); const server = find(data.servers, input.serverId, '服务器');
+        if (environment.applicationId !== service.applicationId) fail('环境与服务不属于同一个项目');
+        const targetMode = mode(input.mode || 'observe');
+        if (server.revoked) fail('服务器已撤销'); if (targetMode === 'managed' && server.mode !== 'managed') fail('仅观察服务器禁止创建平台管理目标');
+        if (id && ['mode', 'serverId', 'environmentId', 'serviceId'].some(key => item[key] !== input[key])) fail('不能改变已有目标的归属或管理模式，请新建隔离目标');
+        if (data.targets.some(target => target.id !== id && target.environmentId === environment.id && target.serviceId === service.id && target.serverId === server.id)) fail('该服务在此服务器已存在部署目标');
+        let containerName;
+        if (targetMode === 'observe') { containerName = requireText(input.containerName, '观察容器名称', 150); if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(containerName)) fail('容器名称无效'); }
+        else if (input.containerName) fail('平台目标不能指定外部容器名称');
+        fields = { environmentId: environment.id, serviceId: service.id, serverId: server.id, applicationId: environment.applicationId, mode: targetMode, containerName: containerName || `cmr-${item.id}`,
+          config: validateConfig(input.config, service.module), owner: targetMode === 'observe' ? (input.owner === 'external' ? 'external' : 'Jenkins') : 'platform' };
+      }
+      Object.assign(item, fields, { updatedAt: now() }); if (!id) data[kind].push(item); return structuredClone(item);
+    });
+    this.changed(kind, result.id); return result;
+  }
+  ensureManaged(data, targetId) {
+    const target = find(data.targets, targetId, '部署目标'); const server = find(data.servers, target.serverId, '服务器');
+    if (target.mode !== 'managed' || server.mode !== 'managed') throw new HttpError(403, '仅观察目标禁止发布、重启和回退');
+    if (server.revoked) throw new HttpError(409, '服务器已撤销');
+    return target;
+  }
+  async createTask(input) {
+    if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
+    if (!['deploy', 'restart', 'rollback'].includes(input.action)) fail('操作类型无效');
+    const task = await this.store.change(state => {
+      if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
+      const data = state.deployments; const target = this.ensureManaged(data, input.targetId); const environment = find(data.environments, target.environmentId); const service = find(data.services, target.serviceId);
+      if (data.tasks.filter(task => !terminal.has(task.status)).length >= 200) throw new HttpError(503, '部署队列已满');
+      const sourceProject = find(state.projects, environment.sourceProjectId, '源码项目');
+      if (!sourceProject.enabled && input.action === 'deploy') throw new HttpError(409, '源码项目已停用');
+      let release;
+      if (input.action === 'rollback') {
+        release = find(data.releases.filter(release => release.targetId === target.id), input.releaseId, '回退版本');
+        if (!release.available) throw new HttpError(409, '该版本已超出保留范围');
+      }
+      if (input.action === 'restart' && !target.currentRelease) throw new HttpError(409, '目标尚未成功发布');
+      const task = { id: randomUUID(), targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: input.action === 'deploy' ? 'preparing' : 'queued', stage: 'queued',
+        createdAt: now(), updatedAt: now(), config: validateConfig(target.config, service.module), sourceProjectId: sourceProject.id, source: null, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
+      transition(task, task.status);
+      data.tasks.push(task); return structuredClone(task);
+    });
+    if (task.status === 'preparing') this.startPrepare(task.id);
+    this.changed('task', task.id); return task;
+  }
+  startPrepare(id) {
+    if (this.preparations.has(id)) return this.preparations.get(id);
+    const promise = this.prepare(id).catch(error => { this.emit('error-safe', { taskId: id, message: error.message }); }).finally(() => this.preparations.delete(id));
+    this.preparations.set(id, promise); return promise;
+  }
+  async prepare(id) {
+    const task = find(this.data.tasks, id, '任务'); const sourceId = task.sourceProjectId;
+    if (!this.pins.has(sourceId)) this.pins.set(sourceId, new Set()); this.pins.get(sourceId).add(id);
+    try {
+      let source;
+      try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); await stat(path.join(this.root, 'tasks', id, 'source.zip')); }
+      catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        const archive = await this.repository.sync(sourceId);
+        if (this.pinErrors.has(id)) throw this.pinErrors.get(id);
+        // 兼容准备任务加入时已有同步即将结束的情况。
+        try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); }
+        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(sourceId, () => this.copyArchive(archive, id)); source = { revision: archive.revision, sha256: archive.sha256, size: archive.size }; }
+      }
+      await this.store.change(state => {
+        const current = find(state.deployments.tasks, id); if (current.status !== 'preparing') return;
+        transition(current, 'queued');
+        Object.assign(current, { source: { ...source, url: `/api/agent/v1/tasks/${id}/source` }, revision: source.revision, status: 'queued', updatedAt: now() });
+      });
+    } catch (error) {
+      await this.store.change(state => {
+        const current = find(state.deployments.tasks, id); if (current.status !== 'preparing') return;
+        transition(current, 'failed', true);
+        Object.assign(current, { status: 'failed', stage: 'failed', error: error instanceof HttpError ? error.message : '固定源码失败，请检查服务存储', finishedAt: now(), updatedAt: now() });
+      });
+    } finally { this.pins.get(sourceId)?.delete(id); this.pinErrors.delete(id); if (!this.pins.get(sourceId)?.size) this.pins.delete(sourceId); this.changed('task', id); }
+  }
+  async claim(serverId) {
+    if (this.closing) return null;
+    const task = await this.store.change(state => {
+      if (this.closing) return null;
+      const data = state.deployments; const server = find(data.servers, serverId);
+      if (server.revoked) throw new HttpError(401, 'Agent 已撤销'); if (server.mode !== 'managed') return null;
+      const active = data.tasks.find(task => task.serverId === serverId && task.status === 'running');
+      if (active) return structuredClone(active);
+      // 准备源码也占据队列位置，防止后提交的重启越过前面的发布。
+      const next = data.tasks.find(task => task.serverId === serverId && ['preparing', 'queued'].includes(task.status));
+      if (!next || next.status !== 'queued') return null;
+      const target = this.ensureManaged(data, next.targetId);
+      Object.assign(next, { status: 'running', startedAt: now(), updatedAt: now(), previousRelease: target.currentRelease || null });
+      if (next.action !== 'deploy') next.revision = (next.release || target.currentRelease)?.revision || null;
+      return structuredClone(next);
+    });
+    if (task) this.changed('task', task.id); return task;
+  }
+  async waitForTask(serverId, milliseconds = 25000, signal) {
+    let task = await this.claim(serverId); if (task || signal?.aborted || this.closing) return task;
+    await new Promise(resolve => {
+      const finish = () => { clearTimeout(timer); this.off('update', listener); this.off('shutdown', finish); signal?.removeEventListener('abort', finish); resolve(); };
+      const listener = update => { if (update.type !== 'heartbeat') finish(); };
+      const timer = setTimeout(finish, milliseconds); this.on('update', listener); this.once('shutdown', finish); signal?.addEventListener('abort', finish, { once: true });
+      if (this.closing || signal?.aborted) finish();
+    });
+    return signal?.aborted ? null : this.claim(serverId);
+  }
+  ownedTask(serverId, taskId) {
+    const task = find(this.data.tasks, taskId, '任务');
+    if (task.serverId !== serverId || !task.startedAt) throw new HttpError(403, '无权访问此任务');
+    this.ensureManaged(this.data, task.targetId); return task;
+  }
+  source(serverId, taskId) {
+    const task = this.ownedTask(serverId, taskId); if (!task.source) throw new HttpError(409, '任务没有源码包');
+    if (terminal.has(task.status) && !this.data.releases.some(release => release.id === taskId && release.available)) throw new HttpError(410, '已完成任务的源码包已清理');
+    return { ...task.source, file: path.join(this.root, 'tasks', taskId, 'source.zip') };
+  }
+  async events(serverId, taskId, input) {
+    this.ownedTask(serverId, taskId);
+    const seq = integer(input.seq, undefined, 1, Number.MAX_SAFE_INTEGER, '日志序号');
+    if (!stages.has(input.stage)) fail('任务阶段无效');
+    if (input.message !== undefined && (typeof input.message !== 'string' || input.message.length > 32768)) fail('日志内容过长');
+    const status = input.status || (terminal.has(input.stage) ? input.stage : 'running');
+    if (!['running', ...terminal].includes(status)) fail('任务状态无效');
+    if (input.timestamp !== undefined && (typeof input.timestamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(input.timestamp) || !Number.isFinite(Date.parse(input.timestamp)))) fail('事件 timestamp 必须是有效的 ISO 8601 时间');
+    const result = input.result;
+    if (result !== undefined && (!result || typeof result !== 'object' || Array.isArray(result) || JSON.stringify(result).length > 65536)) fail('任务结果格式错误');
+    const ack = await this.store.change(async state => {
+      const data = state.deployments; const task = find(data.tasks, taskId); const target = this.ensureManaged(data, task.targetId);
+      if (task.serverId !== serverId) throw new HttpError(403, '无权更新此任务');
+      if (seq <= task.lastSeq) return task.lastSeq;
+      if (seq !== task.lastSeq + 1) throw new HttpError(409, `日志序号不连续，下一序号为 ${task.lastSeq + 1}`);
+      if (terminal.has(task.status)) throw new HttpError(409, '任务已完成');
+      const release = result?.release;
+      if (release) {
+        if (typeof release.id !== 'string' || !/^[a-f0-9-]{36}$/.test(release.id) || release.image !== `cmr/${target.id}:${release.id}`) fail('发布版本不属于平台目标');
+        if (task.action === 'deploy' && status === 'succeeded' && (release.id !== task.id || release.revision !== task.revision)) fail('发布版本与任务源码不一致');
+        if (task.action !== 'deploy' && !data.releases.some(existing => existing.targetId === target.id && existing.id === release.id)) fail('目标历史版本不存在');
+      }
+      if (status === 'succeeded' && !release) fail('成功任务必须包含实际运行版本');
+      const timing = agentEventTime(task, input.timestamp, now());
+      const record = { seq, stage: input.stage, message: input.message || '', status, ...timing };
+      const directory = path.join(this.root, 'tasks', taskId, 'logs'); await mkdir(directory, { recursive: true, mode: 0o700 });
+      // 日志先持久化再提交确认序号；崩溃后的重发覆盖同一序号，不产生重复记录。
+      await atomicWrite(path.join(directory, `${seq}.json`), JSON.stringify(record));
+      transition(task, input.stage, terminal.has(status), timing.at);
+      Object.assign(task, { lastSeq: seq, lastEventAt: timing.at, stage: input.stage, status, updatedAt: timing.receivedAt });
+      if (terminal.has(status)) {
+        task.finishedAt = timing.at; task.resultReceivedAt = timing.receivedAt; task.result = result || {}; if (status !== 'succeeded') task.error = input.message || '任务执行失败';
+        if (release && status === 'succeeded') {
+          const saved = { id: release.id, image: release.image, revision: release.revision, config: task.action === 'deploy' ? task.config : release.config, targetId: target.id, createdAt: timing.at, available: true };
+          if (!data.releases.some(existing => existing.id === saved.id && existing.targetId === target.id)) data.releases.push(saved);
+          target.currentRelease = structuredClone(data.releases.find(existing => existing.id === saved.id && existing.targetId === target.id));
+          target.lastDeployedAt = timing.at;
+        }
+        const rollbackRelease = result?.rollback?.release;
+        if (status === 'rolled_back' && rollbackRelease) {
+          const saved = data.releases.find(existing => existing.id === rollbackRelease.id && existing.targetId === target.id);
+          if (!saved || saved.image !== rollbackRelease.image) fail('回退版本不属于此目标'); target.currentRelease = structuredClone(saved);
+        }
+        const recent = data.releases.filter(existing => existing.targetId === target.id).slice(-5).map(existing => existing.id);
+        const baseline = task.previousRelease?.id;
+        for (const existing of data.releases.filter(existing => existing.targetId === target.id)) existing.available = recent.includes(existing.id) || existing.id === target.currentRelease?.id || existing.id === baseline;
+      }
+      return seq;
+    });
+    this.changed('task', taskId);
+    if (terminal.has(status)) await this.cleanupSources().catch(() => {});
+    return { ackSeq: ack };
+  }
+  async cleanupSources() {
+    const projects = new Set(this.data.tasks.filter(task => terminal.has(task.status)).map(task => task.sourceProjectId));
+    for (const projectId of projects) await this.archiveLock(projectId, async () => {
+      const keep = new Set(this.data.releases.filter(release => release.available).map(release => release.id));
+      for (const task of this.data.tasks) {
+        if (task.sourceProjectId !== projectId || !terminal.has(task.status) || keep.has(task.id)) continue;
+        const directory = path.join(this.root, 'tasks', task.id);
+        await rm(path.join(directory, 'source.zip'), { force: true }); await rm(path.join(directory, 'source.json'), { force: true });
+      }
+    });
+  }
+  async taskDetails(id, after = 0) {
+    const task = structuredClone(find(this.data.tasks, id, '任务')); after = integer(after, 0, 0, Number.MAX_SAFE_INTEGER, '日志起始序号');
+    const logs = [];
+    for (let seq = after + 1; seq <= Math.min(task.lastSeq, after + 500); seq++) logs.push(JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'logs', `${seq}.json`), 'utf8')));
+    return { task, logs, nextSeq: (logs.at(-1)?.seq ?? after) + 1 };
+  }
+  releases(targetId) { find(this.data.targets, targetId, '部署目标'); return this.data.releases.filter(release => release.targetId === targetId).slice().reverse().map(release => ({ ...release, current: release.id === find(this.data.targets, targetId).currentRelease?.id })); }
+  beginClose() { if (!this.closing) { this.closing = true; this.emit('shutdown'); } }
+  async close() {
+    this.beginClose();
+    await Promise.allSettled([...this.preparations.values(), ...this.repository.inFlight.values()]);
+    await Promise.allSettled([...this.archivePending.values()]); this.removeAllListeners();
+  }
+}

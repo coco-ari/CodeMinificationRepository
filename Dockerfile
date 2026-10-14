@@ -8,6 +8,9 @@ WORKDIR /app
 COPY --chown=node:node package.json ./
 COPY --chown=node:node src ./src
 COPY --chown=node:node public ./public
+COPY --chown=node:node agent ./agent
+COPY --chown=node:node scripts ./scripts
+RUN node scripts/bundle-agent.mjs
 
 ENV NODE_ENV=production \
     DATA_DIR=/data \

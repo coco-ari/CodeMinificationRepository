@@ -1,3 +1,5 @@
+import { createDeployPanel, deployPages } from './deploy.js';
+
 const $ = selector => document.querySelector(selector);
 const state = { session: null, overview: { projects: [], credentials: [], events: [] }, view: 'projects' };
 const labels = { idle: '等待下载', queued: '排队中', syncing: '同步中', ready: '已就绪', failed: '同步失败', disabled: '已停用' };
@@ -27,6 +29,8 @@ async function api(url, options = {}) {
   return value;
 }
 const send = (url, value = {}, method = 'POST') => api(url, { method, body: JSON.stringify(value) });
+const deployPanel = createDeployPanel({ api, send, toast, copy, element, button, emptyState,
+  getSources: () => state.overview.projects, getSession: () => state.session });
 const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚未同步';
 const formatSize = bytes => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const downloadUrl = id => `${location.origin}/api/projects/${id}/source/latest`;
@@ -171,12 +175,18 @@ async function refresh() {
 }
 function setView(view) {
   state.view = view;
-  const names = { projects: ['项目仓库', '从源码到交付，只需一个专属下载地址。'], credentials: ['Gitee 凭证', '在这里配置用于读取源码的 Gitee 账号。'], activity: ['操作记录', '查看最近 100 条管理操作和同步结果。'] };
+  const names = { ...deployPages, projects: ['项目仓库', '从源码到交付，只需一个专属下载地址。'], credentials: ['Gitee 凭证', '在这里配置用于读取源码的 Gitee 账号。'], activity: ['操作记录', '查看最近 100 条管理操作和同步结果。'] };
   $('#page-title').textContent = names[view][0]; $('#breadcrumb').textContent = names[view][0]; $('#page-description').textContent = names[view][1];
   $('#project-summary').hidden = view !== 'projects'; $('#project-toolbar').hidden = view !== 'projects'; $('#project-list').hidden = view !== 'projects';
   $('#credential-list').hidden = view !== 'credentials'; $('#activity-list').hidden = view !== 'activity';
+  $('#deploy-view').hidden = !deployPages[view];
   $('#create-button').hidden = view === 'activity'; $('#create-button').textContent = view === 'credentials' ? '＋ 新增凭证' : '＋ 新增项目';
   document.querySelectorAll('[data-view]').forEach(node => node.classList.toggle('active', node.dataset.view === view));
+  if (deployPages[view]) {
+    $('#create-button').hidden = view === 'tasks';
+    $('#create-button').textContent = { servers: '＋ 接入服务器', applications: '＋ 新增业务项目', deployments: '＋ 新增部署目标' }[view] || '';
+  }
+  deployPanel.setView(view);
 }
 async function initialize() {
   try {
@@ -190,7 +200,8 @@ async function initialize() {
     $('#auth-title').textContent = session.initialized ? '登录工作台' : '创建管理账号';
     $('#auth-description').textContent = session.initialized ? '管理项目、连接凭证与源码交付。' : '输入部署初始化口令，设置至少 12 位的管理员密码。';
     $('#auth-form button').textContent = session.initialized ? '登录工作台 →' : '创建账号并进入 →';
-    if (session.authenticated) { $('#admin-name').textContent = session.username; await refresh(); }
+    if (session.authenticated) { $('#admin-name').textContent = session.username; await refresh(); deployPanel.start(); }
+    else deployPanel.stop();
   } catch (error) { $('#auth-view').hidden = false; $('#auth-error').textContent = `无法连接服务：${error.message}`; }
 }
 
@@ -226,7 +237,7 @@ document.querySelectorAll('[data-view]').forEach(node => node.addEventListener('
 $('#secret-dialog').addEventListener('close', () => { $('#secret-value').value = ''; });
 $('#credential-dialog').addEventListener('close', () => { $('#credential-form').elements.password.value = ''; });
 $('#password-dialog').addEventListener('close', () => $('#password-form').reset());
-$('#create-button').addEventListener('click', () => state.view === 'credentials' ? openCredential() : openProject());
+$('#create-button').addEventListener('click', () => deployPages[state.view] ? deployPanel.create() : state.view === 'credentials' ? openCredential() : openProject());
 $('#search').addEventListener('input', renderProjects);
 $('#password-button').addEventListener('click', () => openDialog('password-dialog'));
 $('#logout-button').addEventListener('click', async () => {

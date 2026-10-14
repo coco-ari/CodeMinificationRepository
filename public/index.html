@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>源码分发 · CodeMinificationRepository</title>
+  <title>交付控制台 · CodeMinificationRepository</title>
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/app.js"></script>
 </head>
@@ -38,14 +38,19 @@
 
   <div id="app-view" class="app-layout" hidden>
     <aside class="sidebar">
-      <a class="brand" href="/"><span class="brand-icon">C</span><span>源码分发<span class="brand-sub">CODE REPOSITORY</span></span></a>
+      <a class="brand" href="/"><span class="brand-icon">C</span><span>交付控制台<span class="brand-sub">CODE REPOSITORY</span></span></a>
       <div class="nav-caption">工作空间</div>
       <nav aria-label="主导航">
+        <button data-view="servers" class="nav-item"><span>▤</span>服务器</button>
+        <button data-view="applications" class="nav-item"><span>▦</span>业务项目</button>
+        <button data-view="deployments" class="nav-item"><span>↗</span>部署目标</button>
+        <button data-view="tasks" class="nav-item"><span>◷</span>发布记录</button>
+        <div class="nav-divider"></div>
         <button data-view="projects" class="nav-item active"><span>▦</span>项目仓库<span id="nav-count" class="count">0</span></button>
         <button data-view="credentials" class="nav-item"><span>⌘</span>Gitee 凭证</button>
         <button data-view="activity" class="nav-item"><span>◷</span>操作记录</button>
       </nav>
-      <div class="sidebar-note"><span class="live-dot"></span>按需同步<br><small>下载时检查远端版本<br>无变更时复用源码包</small></div>
+      <div class="sidebar-note"><span class="live-dot"></span>统一交付，持续可见<br><small>Jenkins 管理的服务仅观察<br>平台部署在独立环境验证</small></div>
       <div class="account"><span class="avatar">管</span><div><strong id="admin-name">管理员</strong><button id="password-button" class="text-button">修改密码</button></div><button id="logout-button" class="icon-button" title="退出登录" aria-label="退出登录">↗</button></div>
     </aside>
     <main class="main">
@@ -62,6 +67,7 @@
         <div id="project-list" class="project-grid"></div>
         <div id="credential-list" hidden></div>
         <div id="activity-list" hidden></div>
+        <div id="deploy-view" hidden></div>
         <footer class="workspace-footer"><span>源码快照交付 · 不包含 Git 历史</span><span>每次下载，先确认最新版本</span></footer>
       </section>
     </main>

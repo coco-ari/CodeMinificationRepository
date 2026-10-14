@@ -5,3 +5,4 @@ coverage/
 *.log
 .test-artifacts/
 .deployment/
+dist/

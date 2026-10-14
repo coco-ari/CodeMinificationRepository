@@ -1,0 +1,9 @@
+*.tar.gz
+*.zip
+identity.json
+registration-token
+work
+cache
+tasks
+events
+targets

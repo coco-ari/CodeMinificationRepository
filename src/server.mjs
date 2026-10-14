@@ -5,6 +5,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { RepositoryService } from './service.mjs';
 import { HttpError, RateLimiter, randomSecret, equal } from './security.mjs';
+import { DeploymentService } from './deployment.mjs';
+import { handleAgentRequest, handleDeployRequest } from './deploy-http.mjs';
+import { handleInstallRequest } from './install-http.mjs';
 
 const publicDirectory = fileURLToPath(new URL('../public/', import.meta.url));
 const idPattern = '[a-f0-9-]{36}';
@@ -16,7 +19,7 @@ async function body(req) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 16384) throw new HttpError(413, '请求内容过大');
+    if (size > 262144) throw new HttpError(413, '请求内容过大');
     chunks.push(chunk);
   }
   try {
@@ -36,7 +39,15 @@ function sessionCookie(value, secure, age = SESSION_MS / 1000) {
 export async function createApplication({ directory, service, secureCookies = true, publicOrigin = '', ...options }) {
   service ||= new RepositoryService({ directory, ...options });
   await service.initialize();
+  const deployment = new DeploymentService(service, { publicOrigin });
+  await deployment.initialize();
   const sessions = new Map();
+  const revokeSession = key => {
+    const session = sessions.get(key); sessions.delete(key);
+    for (const stream of session?.streams || []) stream.end();
+  };
+  let stopping = false, closePromise, resourcesPromise;
+  const activeRequests = new Set();
   const loginLimiter = new RateLimiter(10, 10 * 60 * 1000);
   const downloadFailures = new RateLimiter(30, 60 * 1000);
   const downloadLimiter = new RateLimiter(60, 60 * 1000);
@@ -44,8 +55,13 @@ export async function createApplication({ directory, service, secureCookies = tr
   const assets = new Map(await Promise.all([
     ['/', 'index.html', 'text/html; charset=utf-8'], ['/app.js', 'app.js', 'text/javascript; charset=utf-8'],
     ['/style.css', 'style.css', 'text/css; charset=utf-8'],
+    ['/deploy.js', 'deploy.js', 'text/javascript; charset=utf-8'],
   ].map(async ([url, file, type]) => [url, { content: await readFile(path.join(publicDirectory, file)), type }])));
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer((req, res) => {
+    const pending = handleRequest(req, res); activeRequests.add(pending);
+    pending.finally(() => activeRequests.delete(pending)).catch(() => {});
+  });
+  async function handleRequest(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -53,16 +69,18 @@ export async function createApplication({ directory, service, secureCookies = tr
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     let file;
     try {
+      if (stopping) throw new HttpError(503, '中心正在停止，请稍后重试');
       const url = new URL(req.url, 'http://localhost');
       const route = url.pathname;
       const ip = req.socket.remoteAddress || 'unknown';
+      if (await handleInstallRequest(req, res, route, { publicOrigin })) return;
       if (req.method === 'GET' && (assets.has(route) || new RegExp(`^/download/${idPattern}$`).test(route))) {
         const asset = assets.get(route) || assets.get('/');
         res.writeHead(200, { 'Content-Type': asset.type }); res.end(asset.content); return;
       }
       if (req.method === 'GET' && route === '/healthz') { json(res, 200, { status: 'ok' }); return; }
       const now = Date.now();
-      for (const [key, session] of sessions) if (session.expires <= now) sessions.delete(key);
+      for (const [key, session] of sessions) if (session.expires <= now) revokeSession(key);
       const cookie = /(?:^|;\s*)cmr_session=([A-Za-z0-9_-]+)/.exec(req.headers.cookie || '')?.[1];
       const session = sessions.get(cookie);
       if (req.method === 'GET' && route === '/api/session') {
@@ -82,10 +100,11 @@ export async function createApplication({ directory, service, secureCookies = tr
         if (sessions.size >= 1000) throw new HttpError(503, '会话数量已满');
         const key = randomSecret();
         const csrf = randomSecret();
-        sessions.set(key, { username, csrf, expires: now + SESSION_MS });
+        sessions.set(key, { username, csrf, expires: now + SESSION_MS, streams: new Set() });
         res.setHeader('Set-Cookie', sessionCookie(key, secureCookies));
         json(res, 200, { username, csrf }); return;
       }
+      if (await handleAgentRequest(req, res, url, { deployment, body, json })) return;
       const download = new RegExp(`^/api/projects/(${idPattern})/source/latest$`).exec(route);
       if (req.method === 'GET' && download) {
         const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || '')?.[1];
@@ -109,11 +128,15 @@ export async function createApplication({ directory, service, secureCookies = tr
         if (!equal(req.headers['x-csrf-token'] || '', session.csrf)) throw new HttpError(403, '会话校验失败，请刷新页面');
         adminLimiter.take(cookie);
       }
+      if (await handleDeployRequest(req, res, url, { deployment, body, json, expiresAt: session.expires,
+        sessionValid: () => !stopping && sessions.get(cookie) === session && session.expires > Date.now(),
+        trackStream: stream => { session.streams.add(stream); stream.once('close', () => session.streams.delete(stream)); },
+      })) return;
       if (req.method === 'POST' && route === '/api/logout') {
-        sessions.delete(cookie); res.setHeader('Set-Cookie', sessionCookie('', secureCookies, 0)); json(res, 200, { ok: true }); return;
+        revokeSession(cookie); res.setHeader('Set-Cookie', sessionCookie('', secureCookies, 0)); json(res, 200, { ok: true }); return;
       }
       if (req.method === 'POST' && route === '/api/password') {
-        loginLimiter.take(ip); await service.changePassword(await body(req)); sessions.clear();
+        loginLimiter.take(ip); await service.changePassword(await body(req)); for (const key of sessions.keys()) revokeSession(key);
         res.setHeader('Set-Cookie', sessionCookie('', secureCookies, 0)); json(res, 200, { ok: true }); return;
       }
       if (req.method === 'GET' && route === '/api/overview') { json(res, 200, service.overview()); return; }
@@ -141,12 +164,33 @@ export async function createApplication({ directory, service, secureCookies = tr
       if (status === 429 || status === 503) res.setHeader('Retry-After', '60');
       json(res, status, { error: error instanceof HttpError ? error.message : '服务处理失败，请检查磁盘和服务配置' });
     } finally { if (file) await file.close().catch(() => {}); }
-  });
+  }
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxRequestsPerSocket = 100;
   server.on('clientError', (_, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'));
-  return { server, service };
+  const settleResources = () => resourcesPromise ||= (async () => {
+    // HTTP 连接结束后仍可能有源码准备和事务正在收尾，必须等待这些工作。
+    await Promise.allSettled([...activeRequests]); await deployment.close(); await service.store.close();
+  })();
+  const close = ({ timeoutMs = 25000 } = {}) => {
+    if (closePromise) return closePromise;
+    stopping = true; deployment.beginClose();
+    for (const key of sessions.keys()) revokeSession(key);
+    closePromise = (async () => {
+      const httpClosed = new Promise(resolve => { server.close(() => resolve()); });
+      let timer;
+      const drained = (async () => { await httpClosed; await settleResources(); return { graceful: true }; })();
+      const deadline = new Promise(resolve => { timer = setTimeout(() => {
+        // 强制断开连接但不改写准备中的任务，重启后根据持久状态继续恢复。
+        server.closeAllConnections(); resolve({ graceful: false });
+      }, timeoutMs); });
+      try { return await Promise.race([drained, deadline]); } finally { clearTimeout(timer); }
+    })();
+    return closePromise;
+  };
+  server.on('close', () => { settleResources().catch(() => {}); });
+  return { server, service, deployment, close };
 }
 
 function integerEnv(name, fallback, min, max) {
@@ -160,7 +204,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     const directory = path.resolve(process.env.DATA_DIR || './data');
     const publicOrigin = process.env.PUBLIC_ORIGIN || '';
     if (publicOrigin && new URL(publicOrigin).origin !== publicOrigin) throw new Error('PUBLIC_ORIGIN 必须是完整来源地址，不能包含路径或末尾斜杠');
-    const { server, service } = await createApplication({ directory, publicOrigin,
+    const { server, service, close } = await createApplication({ directory, publicOrigin,
       secureCookies: process.env.COOKIE_SECURE !== 'false',
       maxConcurrent: integerEnv('MAX_CONCURRENT_SYNCS', 2, 1, 8),
       maxPending: integerEnv('MAX_PENDING_SYNCS', 20, 0, 100),
@@ -172,10 +216,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       console.log(`CodeMinificationRepository 已启动，端口 ${port}`);
       if (!service.store.state.admin) console.log(`请读取 ${service.bootstrapPath}，在网页中输入初始化口令并创建管理员。`);
     });
-    const stop = () => {
-      server.close(() => process.exit(0));
-      setTimeout(() => process.exit(1), 25000).unref();
-    };
+    const stop = () => close({ timeoutMs: integerEnv('SHUTDOWN_TIMEOUT_SECONDS', 25, 1, 1800) * 1000 })
+      .then(result => process.exit(result.graceful ? 0 : 1)).catch(() => process.exit(1));
     process.on('SIGTERM', stop); process.on('SIGINT', stop);
   } catch (error) { console.error(`启动失败：${error.message}`); process.exit(1); }
 }
