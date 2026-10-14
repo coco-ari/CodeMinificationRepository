@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, stat, rename, rm, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, stat, rename, rm, writeFile, readdir, readFile } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -23,6 +23,14 @@ export function validateBranch(value) {
 
 export function sourceKey(project) {
   return `${project.id}:${createHash('sha256').update(JSON.stringify([project.repository, project.branch])).digest('hex')}`;
+}
+
+export function archiveKey(project) {
+  return `${sourceKey(project)}:${project.revision || 'latest'}`;
+}
+export function validateRevision(value) {
+  if (typeof value !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)) throw new HttpError(400, '请选择完整的 Git commit');
+  return value;
 }
 
 export class ArchiveBuilder {
@@ -60,12 +68,48 @@ export class ArchiveBuilder {
       child.on('close', code => resolve({ code, output }));
     });
   }
-  async build(project, credential) {
+  root(project) { return path.join(this.directory, project.id, sourceKey(project).split(':')[1]); }
+  async history(project, credential, refresh = false) {
+    if (!this.allowLocal) validateRepository(project.repository);
+    validateBranch(project.branch);
+    const root = this.root(project), repository = path.join(root, 'repository.git');
+    const file = path.join(root, 'history.json');
+    if (!refresh) {
+      try { return JSON.parse(await readFile(file, 'utf8')); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; return { commits: [], refreshedAt: null }; }
+    }
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const run = async args => {
+      const result = await this.git(args, credential, controller.signal);
+      if (result.code !== 0) throw new HttpError(502, '更新提交记录失败，请检查仓库、分支、凭证和网络');
+      return result.output;
+    };
+    try {
+      await mkdir(root, { recursive: true, mode: 0o700 });
+      try { await stat(repository); } catch (e) { if (e.code !== 'ENOENT') throw e; await run(['init', '--bare', repository]); }
+      const args = ['--git-dir', repository];
+      await run([...args, 'fetch', '--depth=100', '--no-tags', '--force', project.repository, `+refs/heads/${project.branch}:refs/heads/source`]);
+      const log = await run([...args, 'log', '-100', '--format=%H%x00%an%x00%aI%x00%s', 'refs/heads/source', '--']);
+      const commits = log.trim().split('\n').filter(Boolean).map(line => {
+        const [revision, author, at, subject] = line.split('\0');
+        return { revision: validateRevision(revision), author: (author || '').slice(0, 200), at, subject: (subject || '').slice(0, 500) };
+      });
+      const value = { commits, refreshedAt: new Date().toISOString() };
+      const temporary = `${file}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify(value), { mode: 0o600 }); await rename(temporary, file);
+      return value;
+    } catch (error) {
+      if (controller.signal.aborted) throw new HttpError(504, '更新代码超时，请重试');
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(502, '更新代码失败，请检查 Git 和存储');
+    } finally { clearTimeout(timer); }
+  }
+  async build(project, credential, onPhase = async () => {}) {
     if (!this.allowLocal) validateRepository(project.repository);
     validateBranch(project.branch);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    const root = path.join(this.directory, project.id, sourceKey(project).split(':')[1]);
+    const root = this.root(project);
     const repository = path.join(root, 'repository.git');
     const temporary = path.join(root, `${randomUUID()}.tmp.zip`);
     const run = async args => {
@@ -78,9 +122,13 @@ export class ArchiveBuilder {
       await mkdir(root, { recursive: true, mode: 0o700 });
       try { await stat(repository); }
       catch (error) { if (error.code !== 'ENOENT') throw error; await run(['init', '--bare', repository]); }
-      await run(inRepo(['fetch', '--depth=1', '--no-tags', '--force', project.repository,
+      await onPhase('source_fetch');
+      if (!project.revision) await run(inRepo(['fetch', '--depth=100', '--no-tags', '--force', project.repository,
         `+refs/heads/${project.branch}:refs/heads/source`]));
-      const revision = await run(inRepo(['rev-parse', '--verify', 'refs/heads/source^{commit}']));
+      else validateRevision(project.revision);
+      await onPhase('source_resolve');
+      const revision = await run(inRepo(['rev-parse', '--verify', `${project.revision || 'refs/heads/source'}^{commit}`]));
+      await onPhase('source_archive');
       const file = path.join(root, `${revision}.zip`);
       let cached = false;
       try { await stat(file); cached = true; }

@@ -14,7 +14,7 @@ const execute = promisify(execFile);
 const repositoryInput = { name: '订单源码', repository: 'https://gitee.com/example/orders.git', branch: 'main', enabled: true };
 async function fixture(t, http = false) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cmr-workspace-'));
-  const builder = { calls: [], async initialize() {}, async build(source) {
+  const builder = { calls: [], histories: [], async initialize() {}, async history(source) { this.histories.push(source.branch); return { commits: [], refreshedAt: null }; }, async build(source) {
     this.calls.push(structuredClone(source)); if (this.gate) await this.gate;
     const content = JSON.stringify([source.repository, source.branch]);
     const file = path.join(directory, sourceKey(source).replace(':', '-') + '.zip'); await writeFile(file, content);
@@ -188,4 +188,74 @@ test('迁移引用损坏时事务回滚；未知迁移版本和缺失集合拒�
   await assert.rejects(migrateWorkspaces(f.service.store, f.directory), /不支持/);
   await f.service.store.change(state => { state.deployments.workspaceVersion = 1; delete state.deployments.serverBindings; });
   await assert.rejects(migrateWorkspaces(f.service.store, f.directory), /数据损坏/);
+});
+
+test('真实 Git 提交刷新、指定历史提交、并发快照与旧下载分支互不污染', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cmr-commits-'));
+  const gitRoot = path.join(directory, 'git');
+  const { mkdir } = await import('node:fs/promises'); await mkdir(gitRoot);
+  const git = (...args) => execute('git', args, { cwd: gitRoot });
+  await git('init', '-b', 'main'); await git('config', 'user.email', 'test@example.invalid'); await git('config', 'user.name', '测试作者');
+  const commits = [];
+  for (const content of ['第一版', '第二版', '第三版']) {
+    await writeFile(path.join(gitRoot, 'version.txt'), content); await git('add', '.'); await git('commit', '-m', content);
+    commits.push((await git('rev-parse', 'HEAD')).stdout.trim());
+  }
+  await git('branch', 'develop');
+  const builder = new ArchiveBuilder(path.join(directory, 'cache'), { allowLocal: true });
+  const f = await createApplication({ directory: path.join(directory, 'data'), builder, secureCookies: false });
+  t.after(async () => { await f.close(); await rm(directory, { recursive: true, force: true }); });
+  const a = await project(f, '真实提交'); const b = await project(f, '其他项目', a.server);
+  await f.service.store.change(state => { state.projects.find(r => r.id === a.source.project.id).repository = gitRoot; });
+  const empty = await f.workspaces.targetSource(a.app.id, a.targets[0].id); assert.equal(empty.commits.length, 0);
+  const history = await f.workspaces.targetSource(a.app.id, a.targets[0].id, true);
+  assert.deepEqual(history.commits.map(c => c.revision), commits.toReversed());
+  assert.equal(history.commits[0].subject, '第三版');
+  await assert.rejects(f.workspaces.targetSource(b.app.id, a.targets[0].id, true), /当前项目/);
+  await assert.rejects(f.deployment.createTask({targetId:a.targets[0].id,action:'deploy',revision:'--upload-pack=bad'}), /完整的 Git commit/);
+  await assert.rejects(f.deployment.createTask({targetId:a.targets[0].id,action:'deploy',revision:'f'.repeat(40)}), /提交记录已变化/);
+  await assert.rejects(f.deployment.createTask({targetId:a.targets[0].id,action:'deploy',revision:commits[0],sourceKey:'wrong'}), /源码配置已变化/);
+  const first = await f.deployment.createTask({ targetId:a.targets[0].id, action:'deploy', revision:commits[0], sourceKey:history.sourceKey });
+  const second = await f.deployment.createTask({ targetId:a.targets[0].id, action:'deploy', revision:commits[1], sourceKey:history.sourceKey });
+  const latest = f.service.sync(a.source.project.id);
+  await Promise.all([latest, ...f.deployment.preparations.values()]);
+  const firstTask=f.deployment.data.tasks.find(t=>t.id===first.id), secondTask=f.deployment.data.tasks.find(t=>t.id===second.id);
+  assert.equal(firstTask.revision, commits[0]); assert.equal(secondTask.revision, commits[1]);
+  for (const [task, content] of [[firstTask,'第一版'],[secondTask,'第二版']]) {
+    assert.equal((await execute('unzip',['-p',path.join(f.deployment.root,'tasks',task.id,'source.zip'),'version.txt'])).stdout, content);
+    for (const phase of ['source_fetch','source_resolve','source_archive']) assert.ok(task.stageHistory.some(s=>s.stage===phase && Number.isFinite(s.durationMs)));
+  }
+  const download = await latest;
+  assert.equal(download.revision, commits[2]);
+  assert.equal(f.service.store.state.projects.find(r=>r.id===a.source.project.id).lastSuccess.revision,commits[2]);
+  assert.equal(f.service.store.state.projects.find(r=>r.id===a.source.project.id).branch,'main');
+  await f.workspaces.saveSource(a.app.id,{environmentId:a.environments[0].id,serviceId:a.service.id,sourceProjectId:a.source.project.id,branch:'main'});
+  await assert.rejects(f.deployment.createTask({targetId:a.targets[0].id,action:'deploy',sourceKey:history.sourceKey}), /源码配置已变化/);
+});
+
+test('首页卡片数据只包含本项目服务和绑定服务器，排除密钥与完整运行参数', async t => {
+  const f=await fixture(t), a=await project(f,'项目 A'), b=await project(f,'项目 B',a.server);
+  await f.deployment.heartbeat(a.server.id,{containers:[{targetId:a.targets[0].id,status:'running',health:'healthy'},{targetId:b.targets[0].id,status:'running'}],metrics:{cpuPercent:20}});
+  const dashboard=f.workspaces.list().find(p=>p.id===a.app.id).dashboard;
+  assert.equal(dashboard.services.length,1); assert.equal(dashboard.targets.length,2);
+  assert.equal(dashboard.servers.length,1); assert.equal(dashboard.servers[0].metrics.cpuPercent,20);
+  const json=JSON.stringify(dashboard);
+  assert.ok(!json.includes(b.service.id)); assert.ok(!json.includes(b.targets[0].id));
+  assert.ok(!json.includes('tokenHash')); assert.ok(!json.includes('registrationHash')); assert.ok(!json.includes('jvmArgs'));
+});
+
+test('提交刷新与发布同步共用并发队列，按队列再缓存锁的顺序执行', async t => {
+  const f=await fixture(t), a=await project(f,'并发刷新'); f.service.queue.limit=1;
+  let unlock; f.builder.gate=new Promise(resolve=>{unlock=resolve});
+  const source=f.service.store.state.projects.find(s=>s.id===a.source.project.id);
+  const first=f.service.sync(source.id);
+  while(!f.builder.calls.length) await new Promise(resolve=>setTimeout(resolve,2));
+  const history=f.workspaces.targetSource(a.app.id,a.targets[1].id,true);
+  const second=f.service.sync(source.id,{...source,revision:'a'.repeat(40)});
+  await new Promise(resolve=>setTimeout(resolve,5)); unlock();
+  const results=await Promise.race([
+    Promise.all([first,history,second]),
+    new Promise((_,reject)=>{const timer=setTimeout(()=>reject(new Error('提交刷新与发布同步死锁')),2000);timer.unref()})
+  ]);
+  assert.equal(results.length,3);assert.deepEqual(f.builder.histories,['main']);assert.equal(f.builder.calls.length,2);
 });

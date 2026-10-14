@@ -49,7 +49,10 @@ export class AgentRunner {
   saveIdentity() { return writeJson(path.join(this.root, 'identity.json'), this.identity); }
   async heartbeat() {
     const [metrics, containers] = await Promise.all([this.monitor.metrics(), this.monitor.containers(this.identity)]);
+    if (Number.isFinite(this.centerRttMs)) metrics.centerRttMs = this.centerRttMs;
+    const started = performance.now();
     const response = await this.client.post('heartbeat', { version: VERSION, capabilities: CAPABILITIES, metrics, containers, activeTaskId: this.activeTaskId });
+    this.centerRttMs = Math.max(0, Math.round(performance.now() - started));
     if (!['managed', 'observe'].includes(response.mode) || !Array.isArray(response.targets)) throw new Error('中心心跳响应无效');
     this.identity.mode = response.mode; this.identity.targets = response.targets; await this.saveIdentity();
   }

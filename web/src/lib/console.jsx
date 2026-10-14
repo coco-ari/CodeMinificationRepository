@@ -8,6 +8,8 @@ export const pageNames = {
   servers: ['服务器', '绑定已接入服务器，或安装 Agent 接入新服务器。'],
   applications: ['环境与服务', '为每个环境中的服务配置仓库和发布分支。'],
   deployments: ['部署发布', '独立发布每个服务，掌握版本与运行状态。'],
+  release: ['发布工作台', ''],
+  configuration: ['服务配置', ''],
   tasks: ['发布记录', '跟踪发布进度、查看日志和回退结果。'],
   'system-servers': ['服务器总览', '管理全部服务器与 Agent 接入。'],
   credentials: ['共享 Gitee 凭证', '复用仓库访问凭证，密码加密保存。'],
@@ -17,7 +19,7 @@ export function parseRoute() {
   const [path, query = ''] = (location.hash.slice(1) || '/projects').split('?')
   const params = new URLSearchParams(query)
   const match =
-    /^\/projects\/([a-f0-9-]{36})(?:\/(overview|projects|servers|applications|deployments|tasks))?$/.exec(
+    /^\/projects\/([a-f0-9-]{36})(?:\/(overview|projects|servers|applications|deployments|tasks|release|configuration))?$/.exec(
       path,
     )
   return {
@@ -27,14 +29,20 @@ export function parseRoute() {
       : /^\/system\/(system-servers|credentials|activity)$/.exec(path)?.[1] || 'home',
     environmentId: params.get('environment'),
     taskId: params.get('task'),
+    targetId: params.get('target'),
+    action: params.get('action'),
+    editor: params.get('editor'),
   }
 }
-export function routeUrl(view, workspaceId, environmentId, taskId) {
+export function routeUrl(view, workspaceId, environmentId, taskId, extra = {}) {
   if (view === 'home') return '#/projects'
   if (['system-servers', 'credentials', 'activity'].includes(view)) return `#/system/${view}`
   const query = new URLSearchParams()
   if (environmentId) query.set('environment', environmentId)
   if (taskId) query.set('task', taskId)
+  if (extra.targetId) query.set('target', extra.targetId)
+  if (extra.action) query.set('action', extra.action)
+  if (extra.editor) query.set('editor', extra.editor)
   return `#/projects/${workspaceId}/${view}${query.size ? `?${query}` : ''}`
 }
 export const date = (value) =>
@@ -62,6 +70,9 @@ export const statusNames = {
   interrupted: '已中断',
 }
 export const stageNames = {
+  source_fetch: '拉取代码',
+  source_resolve: '固定提交',
+  source_archive: '打包 ZIP',
   prepare: '准备源码',
   preparing: '准备源码',
   queued: '等待执行',

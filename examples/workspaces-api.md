@@ -45,3 +45,11 @@
 Agent 注册和心跳可附带 `capabilities` 字符串数组。前端任务要求 `static-site-v1`，旧 Agent 不满足时中心返回 409；领取前也会复查，避免降级后的旧 Agent 执行静态任务。Java 保持原有行为。静态目标只支持 deploy/rollback，拒绝 restart。静态版本通过 `{kind: "static", artifact: "static/<targetId>/<releaseId>"}` 引用本机版本目录，不能引用其他目标；历史版本仍关联固定 commit、任务与日志。
 
 持久数据仍使用 SQLite 中的状态文档，部署数据版本提升为 `deployments.version = 2`（旧中心会拒绝启动），新增 `deployments.workspaceVersion = 1`、`serverBindings`、`environmentSources` 和 `workspaceMigration`；仓库增加 `applicationId`。升级采用事务与版本标记，不改变 Agent 身份和既有容器归属标签。
+
+## 发布工作台源码选择
+
+- `GET /api/workspaces/:project/targets/:target/source`：返回当前环境仓库分支的缓存提交（最多 100 条）、刷新时间和 `sourceKey`。
+- `POST /api/workspaces/:project/targets/:target/source/refresh`：刷新远端记录，不创建部署任务、不修改默认下载分支。
+- 创建发布任务可以传 `revision`（完整 SHA）和 `sourceKey`。后端验证记录归属与当前配置，固定指定提交；不传 `revision` 时仍发布分支最新代码。
+- 项目列表新增 `dashboard`，只包含各项目自己的环境、服务、源码选择、绑定服务器指标及简化目标、活动任务。不含凭证或完整运行参数。
+- 任务阶段增加中心 `source_fetch`、`source_resolve`、`source_archive` 和新 Agent 的 `image`；旧 Agent、旧任务继续有效。

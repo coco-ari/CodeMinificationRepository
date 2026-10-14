@@ -17,7 +17,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { statusNames } from '@/lib/console'
+import { statusNames, useConsole } from '@/lib/console'
 
 export function Action({ children, onClick, variant = 'outline', className, ...props }) {
   const [busy, setBusy] = useState(false)
@@ -177,6 +177,70 @@ export function FormDialog({
     [error, setError] = useState('')
   const submitting = useRef(false)
   const returnFocus = useRef(document.activeElement)
+  const inline = useConsole()?.formLayout === 'page' && id !== 'credential-dialog'
+  const form = (
+    <form
+      id={formId}
+      className="min-w-0 space-y-5"
+      onSubmit={async (event) => {
+        event.preventDefault()
+        if (submitting.current || !onSubmit) return
+        submitting.current = true
+        setBusy(true)
+        setError('')
+        try {
+          const form = event.currentTarget
+          await onSubmit(Object.fromEntries(new FormData(form)), form)
+        } catch (e) {
+          if (e.name !== 'AbortError') setError(e.message)
+        } finally {
+          submitting.current = false
+          setBusy(false)
+        }
+      }}
+    >
+      {children}
+      {error && (
+        <p className="form-error text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      {footer || (
+        <div className="flex justify-end gap-2 border-t pt-4">
+          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+            取消
+          </Button>
+          <Button type="submit" disabled={busy}>
+            {busy && <LoaderCircle className="animate-spin" />}
+            {submitLabel}
+          </Button>
+        </div>
+      )}
+    </form>
+  )
+  if (inline)
+    return (
+      <section
+        id={id}
+        className="deploy-dialog inline-editor view-enter space-y-6"
+        data-state="open"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 id="page-title" className="text-xl font-semibold">
+              {title}
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+          </div>
+          <Button variant="outline" data-slot="dialog-close" onClick={onClose}>
+            返回
+          </Button>
+        </div>
+        <Card>
+          <CardContent>{form}</CardContent>
+        </Card>
+      </section>
+    )
   return (
     <Dialog
       open
@@ -201,44 +265,7 @@ export function FormDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description || '配置当前项目的交付资源。'}</DialogDescription>
         </DialogHeader>
-        <form
-          id={formId}
-          className="min-w-0 space-y-5"
-          onSubmit={async (event) => {
-            event.preventDefault()
-            if (submitting.current || !onSubmit) return
-            submitting.current = true
-            setBusy(true)
-            setError('')
-            try {
-              const form = event.currentTarget
-              await onSubmit(Object.fromEntries(new FormData(form)), form)
-            } catch (e) {
-              if (e.name !== 'AbortError') setError(e.message)
-            } finally {
-              submitting.current = false
-              setBusy(false)
-            }
-          }}
-        >
-          {children}
-          {error && (
-            <p className="form-error text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-          {footer || (
-            <DialogFooter className="border-t pt-4">
-              <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
-                取消
-              </Button>
-              <Button type="submit" disabled={busy}>
-                {busy && <LoaderCircle className="animate-spin" />}
-                {submitLabel}
-              </Button>
-            </DialogFooter>
-          )}
-        </form>
+        {form}
       </DialogContent>
     </Dialog>
   )

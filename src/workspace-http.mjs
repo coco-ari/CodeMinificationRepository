@@ -50,6 +50,10 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
   if (task && req.method === 'GET') {
     workspaces.owned('tasks', task[1], applicationId); return respond(await deployment.taskDetails(task[1], Number(url.searchParams.get('after') || 0)));
   }
+  const source = new RegExp(`^/targets/${id}/source(?:/(refresh))?$`).exec(sub);
+  if (source && ((!source[2] && req.method === 'GET') || (source[2] && req.method === 'POST'))) {
+    return respond(await workspaces.targetSource(applicationId, source[1], Boolean(source[2])));
+  }
   const releases = new RegExp(`^/targets/${id}/releases$`).exec(sub);
   if (releases && req.method === 'GET') {
     workspaces.owned('targets', releases[1], applicationId); return respond({ releases: deployment.releases(releases[1]) });

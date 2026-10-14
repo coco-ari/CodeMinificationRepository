@@ -228,6 +228,8 @@ test('完整发布与手动回退、重启使用目标专属资源，重复任�
   const { executor, docker, journal, root } = await fixture(t);
   const jenkins = { Id: 'original', State: { StartedAt: 'original' }, RestartCount: 0 }; docker.containers.set('jenkins-service', jenkins);
   await executor.execute(task()); assert.equal((await journal.get('task-1')).status, 'succeeded');
+  const phases = []; for await (const event of journal.pending(await journal.get('task-1'))) phases.push(event.stage);
+  assert.ok(phases.indexOf('image') > phases.indexOf('building')); assert.ok(phases.indexOf('deploying') > phases.indexOf('image'));
   const release1 = (await journal.get('task-1')).result.release;
   const calls = docker.calls.length; await executor.execute(task()); assert.equal(docker.calls.length, calls);
   await executor.execute(task('task-2')); assert.equal((await journal.get('task-2')).status, 'succeeded');
@@ -363,4 +365,13 @@ test('领取任务后刷新白名单，刚创建的目标可正常部署', async
   const runner = new AgentRunner({ root, centerUrl: 'https://center.example', docker, client });
   fakeOwnership(runner.executor); runner.identity = { ...currentIdentity, targets: [] };
   await runner.tick(); assert.equal((await runner.journal.get('new-target-task')).status, 'succeeded');
+});
+
+
+test('心跳上报上一成功请求的实测往返耗时，首次和失败时不伪造延迟', async t => {
+  const {root,docker}=await fixture(t); const reports=[];
+  const runner=new AgentRunner({root,centerUrl:'https://center.example',docker,client:{post:async(route,body)=>{reports.push(structuredClone(body));return {mode:'observe',targets:[]}}}});
+  runner.identity=identity('observe'); runner.monitor={metrics:async()=>({cpuPercent:1}),containers:async()=>[]};
+  await runner.heartbeat(); await runner.heartbeat();
+  assert.equal(reports[0].metrics.centerRttMs,undefined);assert.ok(Number.isFinite(reports[1].metrics.centerRttMs));assert.ok(reports[1].metrics.centerRttMs>=0);
 });

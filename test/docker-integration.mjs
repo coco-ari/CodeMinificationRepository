@@ -114,6 +114,7 @@ try {
   for (const action of ['deploy', 'restart', 'rollback']) await assert.rejects(api(`${workspacePath}/tasks`, { targetId: observed.id, action }), { status: 403 });
   const publish = async () => waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task.id);
   const good = await publish(); assert.equal(good.status, 'succeeded');
+  if (good.detailedAgentStages) assert.ok(good.stageHistory.some(entry => entry.stage === 'image' && Number.isFinite(entry.durationMs)), '新 Agent 应独立上报镜像构建耗时');
   const inspected = JSON.parse(await docker(['inspect', target.containerName]))[0]; assert.equal(inspected.State.Health.Status, 'healthy');
   await until(async () => (await api('/api/deploy/overview')).targets.find(item => item.id === observed.id)?.observation?.health === 'healthy', '只读节点上报业务健康状态', 45000);
   scenarios.push({ name: '两个 Agent 接入、观察隔离和真实健康状态', passed: true });

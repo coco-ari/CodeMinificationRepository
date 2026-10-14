@@ -28,12 +28,14 @@ pnpm run test:deploy-browser
 ## 代码组织
 
 - `web/src/App.jsx`：登录、下载入口、项目布局、哈希路由、会话和数据生命周期。
+- `web/src/components/workspace-home.jsx`：固定高度项目卡片、整机资源、环境服务及更新入口。
+- `web/src/components/release-workbench.jsx`：真实 commit 选择、已发布版本、完整配置和中心/Agent 任务流程。
 - `web/src/components/pages.jsx`：项目、仓库、服务器、环境服务、部署与记录页面。
-- `web/src/components/dialogs.jsx`：资源表单、确认操作、一次性密钥和任务日志。
+- `web/src/components/dialogs.jsx`：资源表单、确认操作、一次性密钥等表单。
 - `web/src/components/target-form.jsx`：Java/Maven/Docker 部署配置。
 - `web/src/components/shared.jsx`：表单布局、状态、空态等业务层组件。
 - `web/src/components/ui/`：shadcn/ui 组件，使用本地 `lib/utils.ts` 的 `cn`。
-- `web/src/index.css`：Tailwind 与主题变量，系统字体和绿色主色，无远程字体依赖。
+- `web/src/index.css`：Tailwind 与主题变量，系统字体和中性黑白主题，无远程字体依赖。
 
 新增组件使用 `pnpm dlx shadcn@latest add <component>`。核对组件 import 指向 `@/lib/utils`，不要引入重复的样式工具。提交源码与锁文件，随后运行 `pnpm format:ui` 和检查。保留组件的键盘操作、焦点管理与 ARIA 语义；共享表单在关闭时将焦点返回触发控件，秘密字段随弹窗卸载清除。
 
@@ -44,3 +46,5 @@ pnpm run test:deploy-browser
 项目切换会卸载旧空间、终止请求、关闭 SSE、清除页面与弹窗状态。即使旧请求在取消后仍返回，也会通过生命周期标记忽略。SSE 更新触发刷新；日志按序号补读、去重和文本渲染，断线时保留已显示内容，用户向上阅读时不强制滚到底部。
 
 中心只提供构建时枚举的静态资源，客户端路径不直接参与文件读取。每个 HTML 响应包含不同的 CSP 样式 nonce，`get-nonce` 将它提供给 Radix 滚动锁；`script-src 'self'` 保持不变。生产没有第三方脚本、字体或 CDN 请求。
+
+新发布入口为 `#/projects/{id}/release?environment={id}&target={id}`；配置入口为 `configuration`，原有 `tasks?task={id}` 使用完整任务页。视觉验收以 [原型落地记录](prototype-rollout-20261015.md) 为准。

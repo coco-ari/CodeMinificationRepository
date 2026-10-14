@@ -17,7 +17,8 @@ const dataDirectory = path.join(temporary, 'data');
 let version = 1;
 const builder = {
   async initialize() { await mkdir(dataDirectory, { recursive: true }); await writeFile(path.join(dataDirectory, 'test.zip'), 'isolated-source'); },
-  async build() { return { file: path.join(dataDirectory, 'test.zip'), revision: String(version).repeat(40),
+  async history(source, credential, refresh) { if(refresh)this.cachedHistory={commits:[{revision:String(version).repeat(40),author:'测试作者',subject:`第 ${version} 次提交`,at:new Date().toISOString()}],refreshedAt:new Date().toISOString()}; return this.cachedHistory || {commits:[],refreshedAt:null}; },
+  async build(source, credential, onPhase) { for(const phase of ['source_fetch','source_resolve','source_archive']) await onPhase?.(phase); return { file: path.join(dataDirectory, 'test.zip'), revision: String(version).repeat(40),
     sha256: createHash('sha256').update('isolated-source').digest('hex'), size: 15, cached: false }; },
 };
 const { server, service, deployment, workspaces } = await createApplication({ directory: dataDirectory, builder, secureCookies: false });
@@ -79,8 +80,15 @@ try {
     await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   };
   const visible = selector => until(() => evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)})?.getClientRects().length)`), selector);
-  const clickText = (text, parent = '.deploy-dialog[data-state=open]') => evaluate(`Array.from(document.querySelector(${JSON.stringify(parent)}).querySelectorAll('button')).find(item=>item.textContent===${JSON.stringify(text)}).click()`);
-  const closeModal = async () => { await click('.deploy-dialog[data-state=open] [data-slot=dialog-close]'); await until(() => evaluate('!document.querySelector(".deploy-dialog[data-state=open]")'), '关闭弹窗'); };
+  const clickText = async (text, parent = '.deploy-dialog[data-state=open]') => {
+    const role = await evaluate(`Array.from(document.querySelector(${JSON.stringify(parent)}).querySelectorAll('button')).find(item=>item.textContent===${JSON.stringify(text)}).getAttribute('role')`);
+    if(role !== 'tab') return evaluate(`Array.from(document.querySelector(${JSON.stringify(parent)}).querySelectorAll('button')).find(item=>item.textContent===${JSON.stringify(text)}).click()`);
+    await animationsSettled();
+    const point=await evaluate(`(()=>{const b=Array.from(document.querySelector(${JSON.stringify(parent)}).querySelectorAll('button')).find(item=>item.textContent===${JSON.stringify(text)});b.scrollIntoView({block:'center'});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+    await command('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});
+    await command('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point});
+  };
+  const closeModal = async () => { if(await evaluate('Boolean(document.querySelector("#task-workbench"))')) { await click('[data-close-task]'); await until(()=>evaluate('!document.querySelector("#task-workbench")'),'返回记录'); return; } await click('.deploy-dialog[data-state=open] [data-slot=dialog-close]'); await until(() => evaluate('!document.querySelector(".deploy-dialog[data-state=open]")'), '关闭弹窗'); };
   const saved = async () => {
     try { await until(() => evaluate('!document.querySelector(".deploy-dialog[data-state=open]")'), '保存配置'); }
     catch (error) { throw new Error(`${error.message}：${await evaluate('document.querySelector(".deploy-dialog[data-state=open] .form-error")?.textContent || Array.from(document.querySelectorAll(".deploy-dialog[data-state=open] :invalid")).map(item=>item.name).join(",")')}`); }
@@ -123,7 +131,7 @@ try {
   assert.equal(managed.config.health.path, '/api/swagger-resources'); assert.equal(managed.config.runtime.memoryMb, 512);
   await agentRequest('heartbeat', { metrics, containers: [] }, managedAgent.token);
   await until(() => evaluate(`!document.querySelector('[data-target-id="${managed.id}"] .card-actions button:first-child').disabled`), '平台目标可发布');
-  await click(`[data-target-id="${managed.id}"] .card-actions button:first-child`); await click('.deploy-dialog [type=submit]'); await visible('#deploy-task-logs');
+  await click(`[data-target-id="${managed.id}"] .card-actions button:first-child`); await visible('#confirm-release'); await click('#confirm-release'); await visible('#deploy-task-logs');
   await until(() => deployment.data.tasks.some(item => item.status === 'queued'), '准备源码');
   const { task } = await agentRequest('claim', {}, managedAgent.token);
   await agentRequest(`tasks/${task.id}/events`, { seq: 1, stage: 'downloading', message: '完整源码包下载完成，校验通过' }, managedAgent.token);
@@ -140,7 +148,7 @@ try {
   await click('[data-view=deployments]'); await visible('[data-target-id]');
   version = 2;
   await until(() => evaluate(`!document.querySelector('[data-target-id="${managed.id}"] .card-actions button:first-child').disabled`), '首次发布已解锁');
-  await click(`[data-target-id="${managed.id}"] .card-actions button:first-child`); await click('.deploy-dialog [type=submit]'); await visible('#deploy-task-logs');
+  await click(`[data-target-id="${managed.id}"] .card-actions button:first-child`); await visible('#confirm-release'); await click('#confirm-release'); await visible('#deploy-task-logs');
   await until(() => deployment.data.tasks.some(item => item.status === 'queued'), '第二版本源码准备');
   const second = (await agentRequest('claim', {}, managedAgent.token)).task;
   await agentRequest(`tasks/${second.id}/events`, { seq: 1, stage: 'verifying', status: 'succeeded', message: '第二版健康检查通过', result: { release: { id: second.id, revision: second.revision, image: `cmr/${managed.id}:${second.id}`, config: second.config } } }, managedAgent.token);
@@ -149,7 +157,7 @@ try {
   await until(() => evaluate(`!document.querySelector('[data-target-id="${managed.id}"] .card-actions button:first-child').disabled`), '第二次发布已解锁');
   await clickText('回退版本', `[data-target-id="${managed.id}"]`); await visible('#deploy-releaseId');
   assert.equal(await evaluate('document.querySelector("#deploy-releaseId").value'), task.id);
-  await click('.deploy-dialog [type=submit]'); await visible('#deploy-task-logs');
+  await visible('#confirm-release'); await click('#confirm-release'); await visible('#deploy-task-logs');
   const rollback = (await agentRequest('claim', {}, managedAgent.token)).task;
   assert.equal(rollback.action, 'rollback'); assert.equal(rollback.release.id, task.id);
   await agentRequest(`tasks/${rollback.id}/events`, { seq: 1, stage: 'verifying', status: 'succeeded', message: '回退后健康检查通过', result: { release: rollback.release } }, managedAgent.token);
@@ -158,6 +166,7 @@ try {
   await click('[data-view=servers]'); await screenshot('deploy-servers-desktop.png');
   await click('[data-view=deployments]'); await screenshot('deploy-targets-desktop.png');
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await until(() => evaluate('!document.querySelector("[data-slot=sidebar-gap]")'), '等待手机导航');
   for (const page of ['overview', 'servers', 'applications', 'deployments', 'tasks', 'projects']) {
     await click(`[data-view=${page}]`); await until(() => evaluate(`document.querySelector('#page-title').textContent === ${JSON.stringify({overview:'项目概览', servers:'服务器', applications:'环境与服务', deployments:'部署发布', tasks:'发布记录', projects:'代码仓库'}[page])}`), '切换页面'); assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, `${page} 手机页面横向溢出`);
   }
@@ -224,9 +233,9 @@ try {
   assert.ok(await evaluate(`document.querySelector('.deploy-dialog[data-state=open]').textContent.includes('/opt/cmr-agent-static/${staticTarget.id}/current')`));
   assert.equal(await evaluate('document.querySelector("#deploy-healthUrl").value'), 'https://app.example.test/');
   await screenshot('static-config-desktop.png'); await closeModal();
-  await clickText('发布最新源码', `[data-target-id="${staticTarget.id}"]`);
-  assert.ok(await evaluate('document.querySelector(".deploy-dialog[data-state=open]").textContent.includes("共用 Nginx 保持运行")'));
-  await click('.deploy-dialog [type=submit]'); await visible('#deploy-task-logs');
+  await clickText('更新', `[data-target-id="${staticTarget.id}"]`);
+  await visible('#release-workbench'); assert.ok(await evaluate('document.querySelector("#release-workbench").textContent.includes("站点")'));
+  await visible('#confirm-release'); await click('#confirm-release'); await visible('#deploy-task-logs');
   await until(() => deployment.data.tasks.some(item => item.targetId === staticTarget.id && item.status === 'queued'), '前端源码准备');
   const staticTask = (await agentRequest('claim', {}, managedAgent.token)).task;
   assert.equal(staticTask.config.kind, 'static');
@@ -259,6 +268,56 @@ try {
   await screenshot('workspace-home-mobile.png');
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await screenshot('workspace-home-desktop.png');
+  assert.equal(await evaluate('document.body.textContent.includes("项目空间")'), false);
+  assert.equal(await evaluate('document.body.textContent.includes("进行中的任务")'), false);
+  const homeCard = `[data-workspace-id="${initialProject.id}"]`;
+  const heightBefore = await evaluate(`document.querySelector('${homeCard}').getBoundingClientRect().height`);
+  // All environment services are visible in the card's scroll area, without expanding it.
+  for(let i=0;i<6;i++) await workspaces.saveEntity(initialProject.id,'services',{name:`额外服务 ${i}`,module:'.'});
+  await until(()=>evaluate(`document.querySelector('${homeCard}').textContent.includes('额外服务 5')`),'新增服务显示');
+  assert.equal(await evaluate(`document.querySelector('${homeCard}').getBoundingClientRect().height`),heightBefore);
+  await clickText('生产',homeCard);
+  await until(()=>evaluate(`document.querySelector('${homeCard}').textContent.includes('未关联仓库')`),'生产环境独立源码');
+  await clickText('测试',homeCard);
+  await screenshot('prototype-home-desktop.png');
+  await evaluate(`location.hash='/projects/${initialProject.id}/release?environment=${managed.environmentId}&target=${managed.id}'`);
+  await visible('#release-workbench');
+  assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
+  await click('#refresh-commits');
+  await until(()=>evaluate('Boolean(document.querySelector("[data-commit]"))'),'刷新提交记录');
+  assert.equal(await evaluate('document.querySelector("[data-commit]").getAttribute("aria-pressed")'),'true');
+  assert.equal(deployment.data.tasks.length,4,'更新代码不应创建发布任务');
+  await screenshot('prototype-release-desktop.png');
+  const releaseUrl=await evaluate('location.href');
+  await command('Page.navigate',{url:releaseUrl});await visible('#release-workbench');
+  assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
+  // A selected commit is submitted as a full SHA, not silently replaced with latest.
+  await click('[data-commit]');await click('#confirm-release');await visible('#deploy-task-logs');
+  await until(()=>deployment.data.tasks.some(t=>t.status==='queued'),'指定提交准备');
+  const pinned=(await agentRequest('claim',{},managedAgent.token)).task;
+  assert.equal(pinned.sourceSnapshot.revision,String(version).repeat(40));
+  await agentRequest(`tasks/${pinned.id}/events`,{seq:1,stage:'downloading',message:'下载'},managedAgent.token);
+  await agentRequest(`tasks/${pinned.id}/events`,{seq:2,stage:'building',message:'编译'},managedAgent.token);
+  await agentRequest(`tasks/${pinned.id}/events`,{seq:3,stage:'image',message:'镜像'},managedAgent.token);
+  await agentRequest(`tasks/${pinned.id}/events`,{seq:4,stage:'deploying',message:'更新'},managedAgent.token);
+  await agentRequest(`tasks/${pinned.id}/events`,{seq:5,stage:'verifying',message:'检查'},managedAgent.token);
+  await agentRequest(`tasks/${pinned.id}/events`,{seq:6,stage:'verifying',status:'succeeded',message:'验证完成',result:{release:{id:pinned.id,revision:pinned.revision,image:`cmr/${managed.id}:${pinned.id}`,config:pinned.config}}},managedAgent.token);
+  await until(()=>evaluate('document.querySelector("#deploy-task-progress").textContent.includes("构建镜像")'),'镜像独立阶段');
+  assert.ok(await evaluate('document.querySelector("#deploy-task-progress").textContent.includes("中心服务")'));
+  await screenshot('prototype-flow-desktop.png');
+  await command('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true);
+  await screenshot('prototype-flow-mobile.png');
+  await evaluate(`location.hash='/projects/${initialProject.id}/release?environment=${managed.environmentId}&target=${managed.id}'`);await visible('#release-workbench');
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true);
+  await screenshot('prototype-release-mobile.png');
+  await evaluate(`location.hash='/projects/${initialProject.id}/configuration?environment=${managed.environmentId}&target=${managed.id}'`);await visible('#deploy-view');
+  await until(()=>evaluate('document.body.textContent.includes("下次发布配置")'),'服务配置详情');
+  await clickText('版本链','#deploy-view');await until(()=>evaluate('document.querySelector("#deploy-view").textContent.includes("当前版本")'),'版本链');
+  await screenshot('prototype-configuration-mobile.png');
+  await click('[data-view=home]');await visible('#workspace-home');
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true);
+  await screenshot('prototype-home-mobile.png');
   assert.deepEqual(errors, []);
   assert.ok(!warnings.some(item => /Content Security Policy|Refused to/.test(item)), warnings.join('\n'));
   console.log('部署浏览器验证通过：服务器接入、系统管理模式切换保留身份和观察目标、项目/环境/服务配置、观察权限、平台模板发布、SSE 日志、阶段耗时、历史版本回退、失联状态、日志转义、前端静态服务与共用 Nginx 配置、桌面与手机布局。');

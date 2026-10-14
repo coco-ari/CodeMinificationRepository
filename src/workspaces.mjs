@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { HttpError, randomSecret, digest } from './security.mjs';
-import { validateBranch } from './archive.mjs';
+import { validateBranch, sourceKey } from './archive.mjs';
 
 const now = () => new Date().toISOString();
 const terminal = task => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(task.status);
@@ -102,7 +102,16 @@ export class WorkspaceService {
     return this.data.applications.map(project => {
       const targets = this.data.targets.filter(item => item.applicationId === project.id);
       const tasks = this.data.tasks.filter(item => item.applicationId === project.id);
-      return { ...project, repositories: this.store.state.projects.filter(item => item.applicationId === project.id).length,
+      const overview = this.overview(project.id);
+      const dashboard = {
+        environments: overview.environments, services: overview.services, environmentSources: overview.environmentSources,
+        repositories: overview.repositories.map(({ id, name, branch }) => ({ id, name, branch })),
+        servers: overview.servers.map(({ id, name, online, revoked, metrics, version, mode, lastSeenAt }) => ({ id, name, online, revoked, metrics, version, mode, lastSeenAt })),
+        targets: targets.map(({ id, serviceId, environmentId, serverId, mode, observation, currentRelease }) => ({ id, serviceId, environmentId, serverId, mode, observation,
+          currentRelease: currentRelease ? { id: currentRelease.id, revision: currentRelease.revision } : null })),
+        tasks: tasks.filter(task => !terminal(task)).map(({ id, targetId, status, stage, createdAt, startedAt }) => ({ id, targetId, status, stage, createdAt, startedAt })),
+      };
+      return { ...project, dashboard, repositories: this.store.state.projects.filter(item => item.applicationId === project.id).length,
         servers: this.data.serverBindings.filter(item => item.applicationId === project.id).length, targets: targets.length,
         runningTargets: targets.filter(item => ['running', 'published'].includes(item.observation?.state || item.observation?.status)).length,
         activeTasks: tasks.filter(task => !terminal(task)).length, latestTask: tasks.at(-1) || null };
@@ -120,6 +129,16 @@ export class WorkspaceService {
         containers: item.containers.filter(container => targetIds.has(container.targetId)) })),
       applications: [project], environments: scoped(this.data.environments), services: scoped(this.data.services), targets,
       environmentSources: scoped(this.data.environmentSources), tasks: scoped(this.data.tasks).slice(-200).reverse() };
+  }
+  async targetSource(applicationId, targetId, refresh = false) {
+    const target = this.owned('targets', targetId, applicationId);
+    const environment = this.owned('environments', target.environmentId, applicationId);
+    const selected = this.data.environmentSources.find(item => item.environmentId === target.environmentId && item.serviceId === target.serviceId);
+    const repository = this.owned('repositories', selected?.sourceProjectId || environment.sourceProjectId, applicationId);
+    if (!repository.enabled) throw new HttpError(409, '代码仓库已停用');
+    const snapshot = sourceSnapshot(repository, selected?.branch || repository.branch);
+    const history = await this.repository.history(snapshot, refresh);
+    return { ...history, sourceKey: sourceKey(snapshot), repositoryId: repository.id, repositoryName: repository.name, branch: snapshot.branch };
   }
   async create(input) { return this.deployment.saveEntity('applications', input, undefined, { defaultEnvironments: true }); }
   async bind(applicationId, serverId, remove = false) {

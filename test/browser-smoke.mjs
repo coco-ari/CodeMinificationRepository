@@ -100,7 +100,7 @@ try {
   await fill('#project-form [name=name]', '越南 SOL 标准版');
   await fill('#project-form [name=repository]', 'https://gitee.com/example/sol-standard.git');
   await fill('#project-form [name=branch]', 'release/vietnam');
-  await click('#repository-add-credential'); await visible('#credential-dialog');
+  await mouseClick('#repository-add-credential'); await visible('#credential-dialog');
   await fill('#credential-form [name=name]', '项目内新建凭证'); await fill('#credential-form [name=username]', 'project-reader');
   await fill('#credential-form [name=password]', 'inline-test-only-password'); await click('#credential-form [type=submit]');
   await until(() => evaluate('!document.querySelector("#credential-dialog")'), '项目内创建凭证');
@@ -116,14 +116,17 @@ try {
   assert.equal(service.store.state.projects.length, 1);
   assert.equal(service.store.state.projects[0].branch, 'release/vietnam');
   assert.ok(!await evaluate('document.body.textContent.includes("test-only-password")'));
-  // 使用真实鼠标和键盘核对 Radix 焦点圈定、Escape 关闭和焦点返回。
+  // 仓库配置使用完整页面；嵌入的共享凭证仍使用 Radix 对话框。
   await mouseClick('.project-card .card-actions button:nth-child(2)'); await visible('#project-dialog');
+  assert.equal(await evaluate('Boolean(document.querySelector("#project-dialog[role=dialog]"))'),false);
+  await mouseClick('#repository-add-credential'); await visible('#credential-dialog');
   for (let i = 0; i < 12; i++) {
     await key('Tab', 9);
-    assert.equal(await evaluate('document.querySelector("#project-dialog").contains(document.activeElement)'), true);
+    assert.equal(await evaluate('document.querySelector("#credential-dialog").contains(document.activeElement)'), true);
   }
-  await key('Escape', 27); await until(() => evaluate('!document.querySelector("#project-dialog")'), 'Escape 关闭对话框');
-  await until(() => evaluate('document.activeElement === document.querySelector(".project-card .card-actions button:nth-child(2)")'), '焦点返回编辑按钮');
+  await key('Escape', 27); await until(() => evaluate('!document.querySelector("#credential-dialog")'), 'Escape 关闭凭证对话框');
+  await until(() => evaluate('document.activeElement === document.querySelector("#repository-add-credential")'), '焦点返回新增凭证按钮');
+  await click('#project-dialog [data-slot=dialog-close]'); await until(()=>evaluate('!document.querySelector("#project-dialog")'),'返回仓库列表');
   await mouseClick('.project-card .card-actions button:nth-child(4)'); await visible('[role=alertdialog]');
   await evaluate('Array.from(document.querySelector("[role=alertdialog]").querySelectorAll("button")).find(b=>b.textContent === "取消").click()');
   await until(() => evaluate('!document.querySelector("[role=alertdialog]")'), '取消重置密码');

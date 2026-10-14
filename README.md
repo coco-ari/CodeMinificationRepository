@@ -8,6 +8,8 @@ Gitee 凭证只保存在中心，不写入镜像，也不下发给 Agent 或客�
 
 **直接试用已配置的 Java 服务：** 见 [Java 服务部署操作手册](examples/java-operator-manual.md)，包含 A / B 当前环境入口、一键发布、版本回退、内存不足时暂停与恢复 Jenkins 的具体步骤。本版实际验证范围见 [2026-10-15 验收清单](examples/release-checklist-20261015.md)，已上线的实机结果见 [并行部署验证记录](examples/parallel-verification-20261015.md)。
 
+**最新控制台更新：** 见 [完整原型落地与 B 中心更新](examples/prototype-rollout-20261015.md)，包含项目卡片、完整发布工作台、真实 Git 提交选择、验收结果和回退位置。
+
 ```text
 中心控制面板（原源码服务）
   ├── Gitee → 指定分支 → 完整 ZIP 源码包

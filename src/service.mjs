@@ -2,7 +2,7 @@ import { readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from './store.mjs';
-import { ArchiveBuilder, validateBranch, validateRepository, sourceKey } from './archive.mjs';
+import { ArchiveBuilder, validateBranch, validateRepository, sourceKey, archiveKey } from './archive.mjs';
 import { HttpError, randomSecret, digest, equal, encrypt, decrypt, requireText, hashPassword, checkPassword } from './security.mjs';
 
 const timestamp = () => new Date().toISOString();
@@ -41,6 +41,7 @@ export class RepositoryService {
     this.builder = builder || new ArchiveBuilder(path.join(directory, 'cache'), archiveOptions);
     this.queue = new WorkQueue(maxConcurrent, maxPending);
     this.inFlight = new Map();
+    this.phaseListeners = new Map();
   }
   async initialize() {
     await this.store.open();
@@ -193,24 +194,36 @@ export class RepositoryService {
     }
     return project;
   }
-  async sync(id, frozen) {
+  credential(project) {
+    const record = this.store.state.credentials.find(item => item.id === project.credentialId);
+    return record ? { username: record.username, password: decrypt(record.secret, this.store.key) } : null;
+  }
+  async history(project, refresh = false) {
+    if (!this.builder.history) return { commits: [], refreshedAt: null };
+    return this.queue.run(() => this.builder.history(project, this.credential(project), refresh));
+  }
+  async sync(id, frozen, onPhase) {
     const project = this.store.state.projects.find(item => item.id === id);
     if (!project) throw new HttpError(404, '项目不存在');
     if (!project.enabled) throw new HttpError(409, '项目已停用');
     const snapshot = structuredClone(frozen || project);
     if (snapshot.id !== id) throw new HttpError(400, '源码快照不匹配');
-    const key = sourceKey(snapshot);
+    const key = archiveKey(snapshot);
+    if (onPhase) {
+      if (!this.phaseListeners.has(key)) this.phaseListeners.set(key, new Set());
+      this.phaseListeners.get(key).add(onPhase);
+    }
     if (this.inFlight.has(key)) return this.inFlight.get(key);
     // 仅合并同仓库地址和分支的任务；每次新任务仍向远端检查最新提交。
     const task = this.performSync(snapshot);
     this.inFlight.set(key, task);
     try { return await task; }
-    finally { if (this.inFlight.get(key) === task) this.inFlight.delete(key); }
+    finally { if (this.inFlight.get(key) === task) { this.inFlight.delete(key); this.phaseListeners.delete(key); } }
   }
   async performSync(project) {
     const update = async fields => this.store.change(state => {
       const current = state.projects.find(item => item.id === project.id);
-      if (current && sourceKey(current) === sourceKey(project)) Object.assign(current, fields);
+      if (current && !project.revision && sourceKey(current) === sourceKey(project)) Object.assign(current, fields);
     });
     try {
       await update({ status: 'queued', error: null, lastAttemptAt: timestamp() });
@@ -218,10 +231,12 @@ export class RepositoryService {
         await update({ status: 'syncing' });
         const record = this.store.state.credentials.find(item => item.id === project.credentialId);
         const credential = record ? { username: record.username, password: decrypt(record.secret, this.store.key) } : null;
-        const result = await this.builder.build(project, credential);
+        const result = await this.builder.build(project, credential, async phase => {
+          await Promise.all([...(this.phaseListeners.get(archiveKey(project)) || [])].map(listener => listener(phase)));
+        });
         await this.store.change(state => {
           const current = state.projects.find(item => item.id === project.id);
-          if (current && sourceKey(current) === sourceKey(project)) {
+          if (current && !project.revision && sourceKey(current) === sourceKey(project)) {
             current.status = 'ready'; current.error = null;
             current.lastSuccess = { revision: result.revision, sha256: result.sha256, size: result.size, at: timestamp(), cached: result.cached };
           }
@@ -233,7 +248,7 @@ export class RepositoryService {
       const safe = error instanceof HttpError ? error : new HttpError(500, '同步失败，请检查凭证数据和服务存储');
       await this.store.change(state => {
         const current = state.projects.find(item => item.id === project.id);
-        if (current && sourceKey(current) === sourceKey(project)) { current.status = 'failed'; current.error = safe.message; }
+        if (current && !project.revision && sourceKey(current) === sourceKey(project)) { current.status = 'failed'; current.error = safe.message; }
         audit(state, project.id, 'failure', `${project.name}：${safe.message}`);
       });
       throw safe;

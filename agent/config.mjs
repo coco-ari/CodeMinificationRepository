@@ -1,7 +1,7 @@
 import path from 'node:path';
 
-export const VERSION = '1.1.0';
-export const CAPABILITIES = ['static-site-v1'];
+export const VERSION = '1.2.0';
+export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
   if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error(`${label}无效`);

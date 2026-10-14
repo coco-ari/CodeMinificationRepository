@@ -106,10 +106,11 @@ export class DeploymentExecutor {
     const cache = safeChild(this.root, 'cache', identifier(task.applicationId || task.targetId), 'maven'); await this.mountDirectory(cache);
     const args = ['mvn', '-B', '-ntp', '-Dmaven.repo.local=/cache', '-DskipTests', ...(config.module ? ['-pl', config.module, '-am'] : []), 'clean', 'package'];
     await this.builder(task, config, 'maven', [[source, '/workspace'], [cache, '/cache']], args);
+    await this.event(task, 'image', '编译完成，正在构建运行镜像');
     const imageRoot = safeChild(root, 'image'); await this.mountDirectory(imageRoot);
     await copyFile(await this.findArtifact(source, config.artifactPath), safeChild(imageRoot, 'app.jar'));
     await copyFile(path.join(directory, 'HealthProbe.java'), safeChild(imageRoot, 'HealthProbe.java'));
-    await this.builder(task, config, 'probe', [[imageRoot, '/workspace']], ['javac', '-encoding', 'UTF-8', '-source', '8', '-target', '8', '/workspace/HealthProbe.java']);
+    await this.builder(task, config, 'probe', [[imageRoot, '/workspace']], ['javac', '-encoding', 'UTF-8', '-source', '8', '-target', '8', '/workspace/HealthProbe.java'], 'image');
     const entrypoint = ['java', ...config.jvmArgs, '-jar', '/app/app.jar', ...(config.profile ? [`--spring.profiles.active=${config.profile}`] : []), ...config.args];
     const dockerfile = [`FROM ${config.runtimeImage}`, 'WORKDIR /app', `RUN ${JSON.stringify(['mkdir', '-p', '/app/logs', '/cmr', ...config.volumes.map(v => v.mountPath)])}`, 'RUN ["chown","-R","1000:1000","/app"]', 'COPY app.jar /app/app.jar', 'COPY HealthProbe.class /cmr/HealthProbe.class', 'USER 1000:1000', `ENTRYPOINT ${JSON.stringify(entrypoint)}`, ''].join('\n');
     await writeFile(safeChild(imageRoot, 'Dockerfile'), dockerfile, { mode: 0o600 });
@@ -117,7 +118,7 @@ export class DeploymentExecutor {
     const release = { id: task.id, image: releaseImage(task.targetId, task.id), revision: task.source.revision, config, createdAt: new Date().toISOString() };
     await this.requireOwned(task, release.image, 'image');
     const labelArgs = Object.entries(labels(this.getIdentity().serverId, task.targetId, task.id)).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
-    await this.mutation(task, ['build', ...labelArgs, '-t', release.image, imageRoot], { onOutput: text => this.output(task, 'building', text) });
+    await this.mutation(task, ['build', ...labelArgs, '-t', release.image, imageRoot], { onOutput: text => this.output(task, 'image', text) });
     return release;
   }
   async requireRelease(task, release) {

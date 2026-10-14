@@ -53,7 +53,6 @@ import {
 import { ConsoleContext, pageNames, parseRoute, routeUrl } from '@/lib/console'
 import { Field, Notice } from './components/shared'
 import {
-  Home,
   Overview,
   Repositories,
   Servers,
@@ -63,7 +62,9 @@ import {
   Credentials,
   Activity,
 } from './components/pages'
-import { Confirmation, Dialogs, TaskDialog } from './components/dialogs'
+import { WorkspaceHome } from './components/workspace-home'
+import { ReleaseWorkbench, TaskWorkbench, ConfigurationPage } from './components/release-workbench'
+import { Confirmation, Dialogs } from './components/dialogs'
 
 const blank = {
   projects: [],
@@ -78,7 +79,9 @@ const blank = {
   events: [],
 }
 const views = {
-  home: Home,
+  home: WorkspaceHome,
+  release: ReleaseWorkbench,
+  configuration: ConfigurationPage,
   overview: Overview,
   projects: Repositories,
   servers: Servers,
@@ -100,15 +103,8 @@ const createLabels = {
 function Brand() {
   return (
     <div className="flex items-center gap-3">
-      <div className="rounded-lg bg-primary p-2 text-primary-foreground">
-        <Box className="size-5" />
-      </div>
-      <div>
-        <p className="text-sm font-semibold tracking-wide">交付控制台</p>
-        <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          Delivery workspace
-        </p>
-      </div>
+      <Box className="size-5" />
+      <span className="text-base font-semibold tracking-tight">AutoOps</span>
     </div>
   )
 }
@@ -374,12 +370,22 @@ function Console({ route, session, reloadSession }) {
     : data.environments.find((e) => e.name === '测试')?.id || data.environments[0]?.id || null
   useEffect(() => {
     if (loaded && scope && route.environmentId !== environmentId)
-      history.replaceState(null, '', routeUrl(route.view, scope, environmentId, route.taskId))
+      history.replaceState(
+        null,
+        '',
+        routeUrl(route.view, scope, environmentId, route.taskId, route),
+      )
   }, [loaded, scope, environmentId, route])
   useEffect(() => {
     setDialog(null)
     setConfirmation(null)
-  }, [route.view, route.environmentId, route.taskId])
+  }, [route.view, route.environmentId, route.taskId, route.targetId])
+  useEffect(() => {
+    if (loaded && route.editor === 'service') {
+      setDialog({ kind: 'service' })
+      history.replaceState(null, '', routeUrl(route.view, scope, environmentId))
+    }
+  }, [loaded, route.editor])
   const targets = data.targets.filter((t) => !environmentId || t.environmentId === environmentId)
   const tasks = data.tasks.filter(
     (t) =>
@@ -392,7 +398,23 @@ function Console({ route, session, reloadSession }) {
       ? `${data.project?.name || '项目'} / ${find('environments', target.environmentId)?.name || '环境'} / ${find('services', target.serviceId)?.name || '服务'}`
       : '已归档目标'
   const navigate = (view, taskId, env = environmentId) => {
-    location.hash = routeUrl(view, scope, env, taskId)
+    const target = data.targets.find((t) => t.id === route.targetId)
+    const nextTarget =
+      ['release', 'configuration'].includes(view) && target
+        ? data.targets.find(
+            (t) =>
+              t.serviceId === target.serviceId &&
+              t.environmentId === env &&
+              t.serverId === target.serverId,
+          ) || data.targets.find((t) => t.serviceId === target.serviceId && t.environmentId === env)
+        : null
+    location.hash = routeUrl(
+      ['release', 'configuration'].includes(view) && !nextTarget ? 'deployments' : view,
+      scope,
+      env,
+      taskId,
+      nextTarget ? { targetId: nextTarget.id } : {},
+    )
   }
   const enter = (id) => {
     location.hash = `/projects/${id}/overview`
@@ -404,9 +426,26 @@ function Console({ route, session, reloadSession }) {
     toastTimer.current = setTimeout(() => setToast(''), 4500)
   }
   const open = (kind, item) => {
+    if (kind === 'release') {
+      location.hash = routeUrl('release', scope, item.target.environmentId, null, {
+        targetId: item.target.id,
+        action: item.action,
+      })
+      return
+    }
     if (life.current.active) setDialog({ kind, item })
   }
   const confirm = (title, description, action) => setConfirmation({ title, description, action })
+  const inlineEditor = [
+    'workspace',
+    'repository',
+    'service',
+    'source',
+    'target',
+    'environment',
+    'server',
+    'binding',
+  ].includes(dialog?.kind)
   const Page = views[route.view]
   return (
     <ConsoleContext.Provider
@@ -430,9 +469,10 @@ function Console({ route, session, reloadSession }) {
         notify,
         version,
         reloadSession,
+        formLayout: inlineEditor ? 'page' : 'dialog',
       }}
     >
-      <SidebarProvider>
+      <SidebarProvider className="console-shell">
         <Navigation
           route={route}
           data={data}
@@ -442,7 +482,7 @@ function Console({ route, session, reloadSession }) {
           request={request}
           reloadSession={reloadSession}
         />
-        <SidebarInset id="app-view" className="min-w-0">
+        <SidebarInset id="app-view" className="console-main min-w-0">
           <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-3 border-b bg-background/95 px-4 backdrop-blur sm:px-7">
             <SidebarTrigger aria-label="切换导航" />
             <Separator orientation="vertical" className="h-4!" />
@@ -456,7 +496,7 @@ function Console({ route, session, reloadSession }) {
                   <span className="hidden sm:inline">{pageNames[route.view][0]}</span>
                 </>
               ) : (
-                '交付控制台'
+                pageNames[route.view][0]
               )}
             </div>
             {scope && (
@@ -482,30 +522,28 @@ function Console({ route, session, reloadSession }) {
               管理员
             </Badge>
           </header>
-          <main className="mx-auto w-full max-w-[1600px] space-y-6 p-4 sm:p-7 lg:p-9">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="mb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                  {scope ? 'Project workspace' : 'Delivery console'}
-                </p>
-                <h1 id="page-title" className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                  {pageNames[route.view][0]}
-                </h1>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {pageNames[route.view][1]}
-                </p>
-              </div>
-              {createLabels[route.view] && (
-                <Button
-                  id="create-button"
-                  disabled={!loaded}
-                  onClick={() => open(createLabels[route.view][1])}
-                >
-                  <Plus />
-                  {createLabels[route.view][0]}
-                </Button>
+          <main className="mx-auto w-full max-w-[1600px] space-y-6 p-4 sm:p-6">
+            {!['home', 'release', 'configuration'].includes(route.view) &&
+              !route.taskId &&
+              !inlineEditor && (
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h1 id="page-title" className="text-xl font-semibold tracking-tight">
+                      {pageNames[route.view][0]}
+                    </h1>
+                  </div>
+                  {createLabels[route.view] && (
+                    <Button
+                      id="create-button"
+                      disabled={!loaded}
+                      onClick={() => open(createLabels[route.view][1])}
+                    >
+                      <Plus />
+                      {createLabels[route.view][0]}
+                    </Button>
+                  )}
+                </div>
               )}
-            </div>
             {error && (
               <Notice error>
                 <span id="connection-error">{error}</span>
@@ -522,14 +560,28 @@ function Console({ route, session, reloadSession }) {
                 <Skeleton className="h-36" />
               </div>
             ) : (
-              <div id="deploy-view" key={`${route.view}:${environmentId}`}>
-                <Page />
+              <div
+                id="deploy-view"
+                className="view-enter"
+                key={`${route.view}:${environmentId}:${route.targetId || ''}:${route.taskId || ''}`}
+              >
+                {inlineEditor ? (
+                  <Dialogs
+                    key={`${dialog.kind}:${dialog.item?.id || 'new'}`}
+                    value={dialog}
+                    onClose={() => setDialog(null)}
+                  />
+                ) : route.taskId ? (
+                  <TaskWorkbench key={route.taskId} id={route.taskId} />
+                ) : (
+                  <Page />
+                )}
               </div>
             )}
           </main>
         </SidebarInset>
       </SidebarProvider>
-      {dialog && (
+      {dialog && !inlineEditor && (
         <Dialogs
           key={`${dialog.kind}:${dialog.item?.id || ''}`}
           value={dialog}
@@ -537,9 +589,6 @@ function Console({ route, session, reloadSession }) {
         />
       )}
       {confirmation && <Confirmation value={confirmation} onClose={() => setConfirmation(null)} />}
-      {route.taskId && loaded && scope && (
-        <TaskDialog key={route.taskId} id={route.taskId} onClose={() => navigate(route.view)} />
-      )}
       {toast && (
         <div
           role="status"
@@ -558,7 +607,14 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
   const { setOpenMobile } = useSidebar()
   const nav = (view, label, Icon) => (
     <SidebarMenuItem key={view}>
-      <SidebarMenuButton asChild isActive={route.view === view} tooltip={label}>
+      <SidebarMenuButton
+        asChild
+        isActive={
+          route.view === view ||
+          (view === 'deployments' && ['release', 'configuration'].includes(route.view))
+        }
+        tooltip={label}
+      >
         <a
           href={routeUrl(view, route.workspaceId, route.environmentId)}
           data-view={view}
@@ -583,7 +639,7 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>
-            <SidebarMenu>{nav('home', '全部项目', FolderKanban)}</SidebarMenu>
+            <SidebarMenu>{nav('home', '项目', FolderKanban)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
         {route.workspaceId && (
@@ -605,7 +661,7 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
             </SidebarGroupContent>
           </SidebarGroup>
         )}
-        <SidebarGroup className="mt-auto">
+        <SidebarGroup className="mt-4">
           <SidebarGroupLabel>系统管理</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
