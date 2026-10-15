@@ -121,7 +121,7 @@ export function Detail({ label, children }) {
   return (
     <div className="min-w-0 space-y-1">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="break-words text-sm font-medium">{children ?? '—'}</dd>
+      <dd className="break-words text-sm leading-relaxed">{children ?? '—'}</dd>
     </div>
   )
 }

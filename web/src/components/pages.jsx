@@ -13,6 +13,9 @@ import {
   CircleCheck,
   Clock3,
   Settings2,
+  RefreshCw,
+  MoreHorizontal,
+  Copy,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -25,6 +28,14 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table,
@@ -110,8 +121,146 @@ export function Overview() {
     </div>
   )
 }
+function RepositoryToggle({ repo }) {
+  const { request, endpoint, refresh } = useConsole()
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('')
+  return (
+    <div className="space-y-2">
+      <Switch
+        aria-label={`${repo.name} 启用源码下载`}
+        checked={repo.enabled}
+        disabled={busy}
+        onCheckedChange={async (enabled) => {
+          setBusy(true)
+          setError('')
+          try {
+            await request(`${endpoint}/repositories/${repo.id}/enabled`, { enabled })
+            await refresh()
+          } catch (e) {
+            if (e.name !== 'AbortError') setError(e.message)
+          } finally {
+            setBusy(false)
+          }
+        }}
+      />
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+function RepositoryActions({ repo }) {
+  const { open, request, endpoint, refresh, confirm, notify } = useConsole()
+  const [error, setError] = useState('')
+  const menuAction = async (action) => {
+    setError('')
+    try {
+      await action()
+    } catch (e) {
+      if (e.name !== 'AbortError') setError(e.message)
+    }
+  }
+  return (
+    <>
+      <div className="card-actions repository-actions">
+        <Action
+          variant="ghost"
+          size="sm"
+          aria-label="立即同步"
+          disabled={!repo.enabled || ['syncing', 'queued'].includes(repo.status)}
+          onClick={async () => {
+            await request(`${endpoint}/repositories/${repo.id}/sync`, {})
+            await refresh()
+            notify('源码同步完成')
+          }}
+        >
+          <RefreshCw />
+          <span className="repo-sync-label">同步</span>
+        </Action>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="repo-edit"
+          aria-label="编辑仓库"
+          onClick={() => open('repository', repo)}
+        >
+          编辑
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`${repo.name} 更多操作`}
+              data-repository-menu
+            >
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => open('repository', repo)}>
+              <Settings2 />
+              编辑仓库
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                menuAction(async () => {
+                  await copy(downloadPage(repo.id))
+                  notify('下载地址已复制')
+                })
+              }
+            >
+              <Copy />
+              复制下载地址
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() =>
+                menuAction(async () => {
+                  await request(`${endpoint}/repositories/${repo.id}/enabled`, {
+                    enabled: !repo.enabled,
+                  })
+                  await refresh()
+                })
+              }
+            >
+              {repo.enabled ? '停用源码下载' : '启用源码下载'}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() =>
+                confirm(
+                  '重置下载密码',
+                  `「${repo.name}」的旧密码会立即失效，请同步更新 Jenkins 凭据。`,
+                  async () => {
+                    const result = await request(
+                      `${endpoint}/repositories/${repo.id}/rotate-token`,
+                      {},
+                    )
+                    open('secret', { project: repo, token: result.token })
+                  },
+                )
+              }
+            >
+              重置下载密码
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </>
+  )
+}
+
 export function Repositories() {
-  const { data, open, request, endpoint, refresh, confirm, notify } = useConsole()
+  const { data, open } = useConsole()
   const [search, setSearch] = useState('')
   const repos = data.repositories.filter((r) =>
     [r.name, r.repository, r.branch].some((v) => v.toLowerCase().includes(search.toLowerCase())),
@@ -127,20 +276,27 @@ export function Repositories() {
         onChange={(e) => setSearch(e.target.value)}
       />
       <Card id="project-list" className="overflow-hidden py-0">
-        <Table>
+        <Table className="repository-table">
           <TableHeader>
             <TableRow>
               <TableHead className="pl-5">仓库</TableHead>
-              <TableHead>下载分支</TableHead>
+              <TableHead className="repo-branch-cell">下载分支</TableHead>
               <TableHead className="hidden md:table-cell">最近同步</TableHead>
-              <TableHead>操作</TableHead>
+              <TableHead className="hidden sm:table-cell">启用</TableHead>
+              <TableHead className="text-right pr-5">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {repos.map((repo) => (
               <TableRow key={repo.id} className="project-card">
-                <TableCell className="max-w-64 whitespace-normal py-5 pl-5">
-                  <p className="font-medium">{repo.name}</p>
+                <TableCell className="repo-name-cell whitespace-normal py-4 pl-5">
+                  <Button
+                    variant="link"
+                    className="repo-name"
+                    onClick={() => open('repository', repo)}
+                  >
+                    {repo.name}
+                  </Button>
                   <a
                     className="mt-1 block truncate text-xs text-muted-foreground"
                     href={repo.repository}
@@ -157,79 +313,25 @@ export function Repositories() {
                     <p className="mt-2 text-xs text-muted-foreground">首次下载前请重置密码</p>
                   )}
                 </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="max-w-28 whitespace-normal break-all">
+                <TableCell className="repo-branch-cell">
+                  <Badge variant="outline" className="repo-branch" title={repo.branch}>
                     {repo.branch}
                   </Badge>
                 </TableCell>
                 <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
                   {repo.lastSuccess ? date(repo.lastSuccess.at) : '尚未同步'}
                 </TableCell>
-                <TableCell>
-                  <div className="card-actions flex max-w-64 flex-wrap gap-1">
-                    <Action
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        await copy(downloadPage(repo.id))
-                        notify('下载地址已复制')
-                      }}
-                    >
-                      复制地址
-                    </Action>
-                    <Button variant="ghost" size="sm" onClick={() => open('repository', repo)}>
-                      编辑
-                    </Button>
-                    <Action
-                      variant="ghost"
-                      size="sm"
-                      disabled={!repo.enabled || ['syncing', 'queued'].includes(repo.status)}
-                      onClick={async () => {
-                        await request(`${endpoint}/repositories/${repo.id}/sync`, {})
-                        await refresh()
-                        notify('源码同步完成')
-                      }}
-                    >
-                      立即同步
-                    </Action>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        confirm(
-                          '重置下载密码',
-                          `「${repo.name}」的旧密码会立即失效，请同步更新 Jenkins 凭据。`,
-                          async () => {
-                            const result = await request(
-                              `${endpoint}/repositories/${repo.id}/rotate-token`,
-                              {},
-                            )
-                            open('secret', { project: repo, token: result.token })
-                          },
-                        )
-                      }
-                    >
-                      重置密码
-                    </Button>
-                    <Action
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        await request(`${endpoint}/repositories/${repo.id}/enabled`, {
-                          enabled: !repo.enabled,
-                        })
-                        await refresh()
-                      }}
-                    >
-                      {repo.enabled ? '停用' : '启用'}
-                    </Action>
-                  </div>
+                <TableCell className="hidden sm:table-cell">
+                  <RepositoryToggle repo={repo} />
+                </TableCell>
+                <TableCell className="pr-4">
+                  <RepositoryActions repo={repo} />
                 </TableCell>
               </TableRow>
             ))}
             {!repos.length && (
               <TableRow>
-                <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
                   {search ? '没有匹配的仓库' : '尚未添加代码仓库'}
                 </TableCell>
               </TableRow>

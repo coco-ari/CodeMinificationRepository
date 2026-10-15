@@ -73,6 +73,9 @@ try {
   const animationsSettled = () => evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
   const fill = (selector, value) => evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)}); const prototype = input.tagName === 'SELECT' ? HTMLSelectElement.prototype : input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input',{bubbles:true})); input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   const click = async selector => {
+    if (selector === '#confirm-release' || selector === '#refresh-commits') {
+      await until(() => evaluate(`!document.querySelector(${JSON.stringify(selector)})?.disabled`), '源码与版本加载完成');
+    }
     if (selector.startsWith('[data-view=') && !await evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)})?.getClientRects().length)`)) {
       await evaluate(`document.querySelector('[data-sidebar="trigger"]').click()`);
       await visible(selector);
@@ -126,6 +129,8 @@ try {
   await click('#create-button'); await fill('#deploy-serverId', managedAgent.serverId); await fill('#deploy-mode', 'managed');
   assert.equal(await evaluate('document.querySelector("#deploy-artifactPath").value'), 'brezze-api/target/*.jar');
   await fill('#deploy-healthPath', '/api/swagger-resources'); await fill('#deploy-healthBody', 'swaggerVersion');
+  await fill('#deploy-jvmArgs', '-Duser.timezone=Asia/Shanghai\n-XX:+ExitOnOutOfMemoryError\n-Dsun.net.inetaddr.ttl=60');
+  await fill('#deploy-args', '--spring.cloud.nacos.discovery.server-addr=shared-nacos.test.internal:8848\n--spring.profiles.active=test');
   await click('.deploy-dialog [type=submit]'); await saved();
   const managed = deployment.data.targets.find(item => item.mode === 'managed');
   assert.equal(managed.config.health.path, '/api/swagger-resources'); assert.equal(managed.config.runtime.memoryMb, 512);
@@ -292,7 +297,7 @@ try {
   await command('Page.navigate',{url:releaseUrl});await visible('#release-workbench');
   assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
   // A selected commit is submitted as a full SHA, not silently replaced with latest.
-  await click('[data-commit]');await click('#confirm-release');await visible('#deploy-task-logs');
+  await visible('[data-commit]');await click('[data-commit]');await click('#confirm-release');await visible('#deploy-task-logs');
   await until(()=>deployment.data.tasks.some(t=>t.status==='queued'),'指定提交准备');
   const pinned=(await agentRequest('claim',{},managedAgent.token)).task;
   assert.equal(pinned.sourceSnapshot.revision,String(version).repeat(40));
@@ -304,6 +309,21 @@ try {
   await agentRequest(`tasks/${pinned.id}/events`,{seq:6,stage:'verifying',status:'succeeded',message:'验证完成',result:{release:{id:pinned.id,revision:pinned.revision,image:`cmr/${managed.id}:${pinned.id}`,config:pinned.config}}},managedAgent.token);
   await until(()=>evaluate('document.querySelector("#deploy-task-progress").textContent.includes("构建镜像")'),'镜像独立阶段');
   assert.ok(await evaluate('document.querySelector("#deploy-task-progress").textContent.includes("中心服务")'));
+  await until(()=>evaluate('document.querySelector("#deploy-task-info").textContent.includes("发布成功")'),'固定版本发布成功');
+  await click('[data-stage=building]');
+  await until(()=>evaluate('document.querySelector("#deploy-task-logs").textContent.includes("编译")'),'按阶段查看日志');
+  assert.equal(await evaluate('document.querySelector("#deploy-task-logs").textContent.includes("验证完成")'),false);
+  await clickText('跟随当前阶段','#task-workbench');
+  await until(()=>evaluate('document.querySelector("#deploy-task-logs").textContent.includes("验证完成")'),'恢复跟随阶段');
+  await clickText('任务快照','#task-workbench');await visible('#task-snapshot');
+  assert.match(await evaluate('document.querySelector("#task-snapshot").textContent'),/shared-nacos.test.internal:8848/);
+  assert.equal(await evaluate('document.querySelector("#task-snapshot .commit-sha").textContent'),pinned.revision);
+  await clickText('完整日志','#task-workbench');await visible('#deploy-task-logs');
+  const completeLogs = await evaluate('document.querySelector("#deploy-task-logs").textContent');
+  for(const message of ['下载','编译','镜像','更新','验证完成']) assert.ok(completeLogs.includes(message));
+  await clickText('发布进度','#task-workbench');await visible('#deploy-task-progress');
+  assert.equal(await evaluate('document.querySelectorAll("[data-lane-duration]").length'),2);
+  assert.equal(await evaluate('document.querySelector("[role=progressbar]").getAttribute("aria-valuetext")'),'已完成 8 / 8 个阶段');
   await screenshot('prototype-flow-desktop.png');
   await command('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true);
@@ -315,6 +335,41 @@ try {
   await until(()=>evaluate('document.body.textContent.includes("下次发布配置")'),'服务配置详情');
   await clickText('版本链','#deploy-view');await until(()=>evaluate('document.querySelector("#deploy-view").textContent.includes("当前版本")'),'版本链');
   await screenshot('prototype-configuration-mobile.png');
+  await clickText('配置','#deploy-view');
+  await clickText('下次发布配置','#deploy-view');
+  for (const width of [1024, 736, 390, 320]) {
+    await command('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:width<768});
+    await animationsSettled();
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true,`配置页 ${width}px 不应横向溢出`);
+    const columns = await evaluate(`(()=>{const cards=[...document.querySelectorAll('.configuration-stack > [data-slot=card]')];return cards.map(c=>({x:c.getBoundingClientRect().x,width:c.getBoundingClientRect().width}));})()`);
+    assert.ok(columns.length > 2);
+    assert.ok(columns.every(c=>c.x===columns[0].x && c.width===columns[0].width),'配置分组应纵向全宽排列');
+    assert.match(await evaluate('document.querySelector(".configuration-stack").textContent'),/shared-nacos.test.internal:8848/);
+    await screenshot(`refined-configuration-${width}.png`);
+  }
+  await command('Emulation.setDeviceMetricsOverride',{width:1024,height:1100,deviceScaleFactor:1,mobile:false});
+  await until(()=>evaluate('Boolean(document.querySelector("[data-slot=sidebar-gap]"))'),'桌面侧栏');
+  assert.equal(await evaluate('document.querySelector("[data-slot=sidebar-gap]").getBoundingClientRect().width'),180);
+  await evaluate(`location.hash='/projects/${initialProject.id}/tasks?task=${pinned.id}&environment=${managed.environmentId}'`);
+  await visible('#deploy-task-progress');
+  assert.equal(await evaluate('document.querySelector("[data-view=tasks]").getAttribute("data-active")'),'true');
+  await screenshot('refined-flow-1024.png');
+  const lanes = await evaluate(`(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect();return {center:rect('.flow-group.center').bottom,handoff:rect('.flow-handoff').top,agent:rect('.flow-group.agent').top};})()`);
+  assert.ok(lanes.center <= lanes.handoff && lanes.handoff < lanes.agent,'源码交付提示应位于中心和 Agent 之间');
+  await command('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  assert.equal(await evaluate('getComputedStyle(document.querySelector(".view-enter")).animationName'),'none');
+  await command('Emulation.setEmulatedMedia',{features:[]});
+  // 失败阶段保留错误和实际耗时，不能绘制为全部成功。
+  await evaluate(`location.hash='/projects/${initialProject.id}/release?environment=${managed.environmentId}&target=${managed.id}'`);
+  await visible('#confirm-release');await click('#confirm-release');await visible('#deploy-task-progress');
+  await until(()=>deployment.data.tasks.some(t=>t.status==='queued'),'失败场景源码准备');
+  const failedTask=(await agentRequest('claim',{},managedAgent.token)).task;
+  await agentRequest(`tasks/${failedTask.id}/events`,{seq:1,stage:'building',message:'开始编译'},managedAgent.token);
+  await agentRequest(`tasks/${failedTask.id}/events`,{seq:2,stage:'building',status:'failed',message:'Maven 编译失败：测试错误'},managedAgent.token);
+  await until(()=>evaluate('Boolean(document.querySelector(".stage-step.failed [data-stage=building]"))'),'失败阶段');
+  assert.match(await evaluate('document.querySelector("#deploy-task-result").textContent'),/Maven 编译失败/);
+  assert.ok(await evaluate('Number(document.querySelector("[role=progressbar]").getAttribute("aria-valuenow")) < 100'));
+  await screenshot('refined-flow-failed-1024.png');
   await click('[data-view=home]');await visible('#workspace-home');
   assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),true);
   await screenshot('prototype-home-mobile.png');

@@ -22,7 +22,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
+import {
+  Breadcrumb,
+  BreadcrumbList,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
 import { Skeleton } from '@/components/ui/skeleton'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -472,7 +479,10 @@ function Console({ route, session, reloadSession }) {
         formLayout: inlineEditor ? 'page' : 'dialog',
       }}
     >
-      <SidebarProvider className="console-shell">
+      <SidebarProvider
+        className="console-shell"
+        style={{ '--sidebar-width': 'var(--console-sidebar-width)' }}
+      >
         <Navigation
           route={route}
           data={data}
@@ -483,22 +493,52 @@ function Console({ route, session, reloadSession }) {
           reloadSession={reloadSession}
         />
         <SidebarInset id="app-view" className="console-main min-w-0">
-          <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-3 border-b bg-background/95 px-4 backdrop-blur sm:px-7">
+          <header className="console-header">
             <SidebarTrigger aria-label="切换导航" />
-            <Separator orientation="vertical" className="h-4!" />
-            <div className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-              {scope ? (
-                <>
-                  <span id="workspace-name" className="font-medium text-foreground">
-                    {data.project?.name || '正在加载项目…'}
-                  </span>
-                  <span className="mx-2">/</span>
-                  <span className="hidden sm:inline">{pageNames[route.view][0]}</span>
-                </>
-              ) : (
-                pageNames[route.view][0]
-              )}
-            </div>
+            <Breadcrumb className="min-w-0 flex-1">
+              <BreadcrumbList>
+                {scope ? (
+                  <>
+                    <BreadcrumbItem className="breadcrumb-home">
+                      <BreadcrumbLink href={routeUrl('home')}>项目</BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator className="breadcrumb-home" />
+                    <BreadcrumbItem>
+                      <BreadcrumbLink
+                        id="workspace-name"
+                        className="breadcrumb-project"
+                        href={routeUrl('overview', scope, environmentId)}
+                      >
+                        {data.project?.name || '正在加载…'}
+                      </BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    {route.taskId && (
+                      <>
+                        <BreadcrumbItem>
+                          <BreadcrumbLink
+                            data-close-task
+                            href={routeUrl('tasks', scope, environmentId)}
+                          >
+                            发布记录
+                          </BreadcrumbLink>
+                        </BreadcrumbItem>
+                        <BreadcrumbSeparator />
+                      </>
+                    )}
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>
+                        {route.taskId ? '发布详情' : pageNames[route.view][0]}
+                      </BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </>
+                ) : (
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>{pageNames[route.view][0]}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                )}
+              </BreadcrumbList>
+            </Breadcrumb>
             {scope && (
               <div className="flex max-w-48 items-center gap-2">
                 <LabelText />
@@ -522,7 +562,7 @@ function Console({ route, session, reloadSession }) {
               管理员
             </Badge>
           </header>
-          <main className="mx-auto w-full max-w-[1600px] space-y-6 p-4 sm:p-6">
+          <main className="console-body">
             {!['home', 'release', 'configuration'].includes(route.view) &&
               !route.taskId &&
               !inlineEditor && (
@@ -611,7 +651,8 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
         asChild
         isActive={
           route.view === view ||
-          (view === 'deployments' && ['release', 'configuration'].includes(route.view))
+          (view === 'deployments' && route.view === 'release') ||
+          (view === 'applications' && route.view === 'configuration')
         }
         tooltip={label}
       >
@@ -633,7 +674,7 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
   )
   return (
     <Sidebar collapsible="offcanvas">
-      <SidebarHeader className="p-5">
+      <SidebarHeader className="px-4 py-5">
         <Brand />
       </SidebarHeader>
       <SidebarContent>

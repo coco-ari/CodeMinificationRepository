@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  ArrowLeft,
+  ArrowDown,
+  Copy,
+  AlertCircle,
   ArrowRight,
   Check,
   GitBranch,
@@ -16,9 +18,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Progress } from '@/components/ui/progress'
 import { Action, Detail, Empty, Notice, Status } from './shared'
 import { Commit } from './workspace-home'
 import {
@@ -32,6 +35,7 @@ import {
   finished,
   stageLabel,
   actionNames,
+  copy,
 } from '@/lib/console'
 
 export function Configuration({ target }) {
@@ -50,7 +54,7 @@ export function Configuration({ target }) {
           ? [
               ['包管理器', config.packageManager],
               ['构建脚本', config.buildScript],
-              ['构建参数', config.buildArgs?.join(' ')],
+              ['构建参数', config.buildArgs?.join('\n')],
             ]
           : []),
       ],
@@ -71,8 +75,8 @@ export function Configuration({ target }) {
             [
               ['运行镜像', config.runtimeImage],
               ['Spring Profile', config.profile],
-              ['JVM 参数', config.jvmArgs?.join(' ')],
-              ['应用参数', config.args?.join(' ')],
+              ['JVM 参数', config.jvmArgs?.join('\n')],
+              ['应用参数', config.args?.join('\n')],
               [
                 '运行资源',
                 `${config.runtime?.cpus ?? '—'} CPU / ${config.runtime?.memoryMb ?? '—'} MB`,
@@ -104,19 +108,28 @@ export function Configuration({ target }) {
     ],
   ]
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
+    <div className="configuration-stack">
       {groups.map(([title, values]) => (
-        <Card key={title}>
+        <Card key={title} data-config-section={title}>
           <CardHeader>
             <CardTitle>{title}</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid gap-5 sm:grid-cols-2">
-              {values.map(([label, value]) => (
-                <Detail key={label} label={label}>
-                  <span className="whitespace-pre-wrap break-all">{value || '未设置'}</span>
-                </Detail>
-              ))}
+            <dl className="configuration-details">
+              {values.map(([label, value]) => {
+                const code = ['JVM 参数', '应用参数', '构建参数', '端口映射', '数据卷'].includes(
+                  label,
+                )
+                return (
+                  <div key={label} className={code ? 'config-wide' : ''}>
+                    <Detail label={label}>
+                      <span className={code && value ? 'config-code' : 'config-value'}>
+                        {value === 0 ? 0 : value || '未设置'}
+                      </span>
+                    </Detail>
+                  </div>
+                )
+              })}
             </dl>
           </CardContent>
         </Card>
@@ -157,10 +170,6 @@ export function ConfigurationPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Button variant="ghost" className="mb-3 -ml-3" onClick={() => navigate('applications')}>
-            <ArrowLeft />
-            返回环境与服务
-          </Button>
           <h1 id="page-title" className="text-xl font-semibold">
             {service?.name}
           </h1>
@@ -201,7 +210,7 @@ export function ConfigurationPage() {
         </NativeSelect>
       </div>
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        <TabsList variant="line" className="section-tabs">
           <TabsTrigger value="config">配置</TabsTrigger>
           <TabsTrigger value="runtime">运行状态</TabsTrigger>
           <TabsTrigger value="versions">版本链</TabsTrigger>
@@ -347,7 +356,8 @@ export function ReleaseWorkbench() {
     [choice, setChoice] = useState('latest'),
     [tab, setTab] = useState(route.action === 'rollback' ? 'releases' : 'commits'),
     [releaseId, setReleaseId] = useState(''),
-    [showConfig, setShowConfig] = useState(false)
+    [showConfig, setShowConfig] = useState(false),
+    [loading, setLoading] = useState(true)
   const live = useRef(true),
     locked = useRef(false),
     generation = useRef(0)
@@ -363,6 +373,7 @@ export function ReleaseWorkbench() {
     generation.current++
     locked.current = false
     setBusy(false)
+    setLoading(true)
     setHistory(null)
     setChoice('latest')
     setReleases([])
@@ -373,6 +384,7 @@ export function ReleaseWorkbench() {
       request(`${endpoint}/targets/${target.id}/releases`),
     ]).then(([h, r]) => {
       if (!active) return
+      setLoading(false)
       if (h.status === 'fulfilled') setHistory(h.value)
       else if (h.reason.name !== 'AbortError') setError(`源码记录：${h.reason.message}`)
       if (r.status === 'fulfilled') {
@@ -448,10 +460,6 @@ export function ReleaseWorkbench() {
     <div className="space-y-6" id="release-workbench">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Button variant="ghost" className="mb-3 -ml-3" onClick={() => navigate('deployments')}>
-            <ArrowLeft />
-            返回部署发布
-          </Button>
           <h1 id="page-title" className="text-xl font-semibold">
             {action === 'restart' ? '重启' : '更新'} {service?.name}
           </h1>
@@ -480,7 +488,7 @@ export function ReleaseWorkbench() {
       )}
       {showConfig && <Configuration target={{ ...target, config }} />}
       <div className="release-layout">
-        <Card className="release-selection">
+        <Card className="release-selection" aria-busy={loading || busy}>
           <CardContent className="space-y-6 pt-0">
             {action !== 'restart' ? (
               <>
@@ -495,7 +503,7 @@ export function ReleaseWorkbench() {
                     <Button
                       variant="outline"
                       onClick={updateCode}
-                      disabled={busy}
+                      disabled={loading || busy}
                       id="refresh-commits"
                     >
                       <RefreshCw className={busy ? 'animate-spin' : ''} />
@@ -513,73 +521,88 @@ export function ReleaseWorkbench() {
                         / {source?.branch}
                       </span>
                       <span>
-                        {history?.refreshedAt
-                          ? `更新于 ${date(history.refreshedAt)}`
-                          : '尚未获取提交记录'}
+                        {loading
+                          ? '正在读取提交记录…'
+                          : history?.refreshedAt
+                            ? `更新于 ${date(history.refreshedAt)}`
+                            : '尚未获取提交记录'}
                       </span>
                     </div>
                     <div
                       role="group"
                       aria-label="选择发布提交"
                       className="commit-list"
-                      aria-busy={busy}
+                      aria-busy={loading || busy}
                     >
-                      <Button
-                        variant="ghost"
-                        disabled={busy}
-                        aria-pressed={choice === 'latest'}
-                        className={`commit-option ${choice === 'latest' ? 'selected' : ''}`}
-                        onClick={() => setChoice('latest')}
-                      >
-                        <RefreshCw className="size-4 shrink-0" />
-                        <span className="text-left">
-                          <span className="block font-medium">最新代码</span>
-                          <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                            发布时重新拉取该分支最新提交
-                          </span>
-                        </span>
-                        {choice === 'latest' && <Check className="ml-auto size-4" />}
-                      </Button>
-                      {busy && !history?.commits.length && (
-                        <div className="space-y-3 py-3">
-                          <Skeleton className="h-20" />
-                          <Skeleton className="h-20" />
-                          <Skeleton className="h-20" />
+                      {loading && (
+                        <div className="space-y-4 py-3" role="status" aria-label="正在读取提交记录">
+                          <Skeleton className="h-16" />
+                          <Skeleton className="h-16" />
+                          <Skeleton className="h-16" />
                         </div>
                       )}
-                      {history?.commits.map((commit, index) => (
+                      <div hidden={loading}>
                         <Button
-                          key={commit.revision}
                           variant="ghost"
                           disabled={busy}
-                          aria-pressed={choice === commit.revision}
-                          data-commit={commit.revision}
-                          className={`commit-option ${choice === commit.revision ? 'selected' : ''}`}
-                          onClick={() => setChoice(commit.revision)}
+                          aria-pressed={choice === 'latest'}
+                          className={`commit-option ${choice === 'latest' ? 'selected' : ''}`}
+                          onClick={() => setChoice('latest')}
                         >
-                          <GitCommitHorizontal className="size-4 shrink-0" />
-                          <span className="min-w-0 flex-1 text-left">
-                            <span className="block whitespace-normal break-words font-medium">
-                              {commit.subject || '无提交说明'}
-                            </span>
-                            <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
-                              <code className="commit-sha">{commit.revision}</code>
-                              <span>{commit.author}</span>
-                              <span>{date(commit.at)}</span>
+                          <RefreshCw className="size-4 shrink-0" />
+                          <span className="text-left">
+                            <span className="block font-medium">最新代码</span>
+                            <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                              发布时重新拉取该分支最新提交
                             </span>
                           </span>
-                          {choice === commit.revision ? (
-                            <Check className="size-4 shrink-0" />
-                          ) : index === 0 ? (
-                            <Badge variant="secondary">最新记录</Badge>
-                          ) : null}
+                          {choice === 'latest' && <Check className="ml-auto size-4" />}
                         </Button>
-                      ))}
+                        {busy && !history?.commits.length && (
+                          <div className="space-y-3 py-3">
+                            <Skeleton className="h-20" />
+                            <Skeleton className="h-20" />
+                            <Skeleton className="h-20" />
+                          </div>
+                        )}
+                        {history?.commits.map((commit, index) => (
+                          <Button
+                            key={commit.revision}
+                            variant="ghost"
+                            disabled={busy}
+                            aria-pressed={choice === commit.revision}
+                            data-commit={commit.revision}
+                            className={`commit-option ${choice === commit.revision ? 'selected' : ''}`}
+                            onClick={() => setChoice(commit.revision)}
+                          >
+                            <GitCommitHorizontal className="size-4 shrink-0" />
+                            <span className="min-w-0 flex-1 text-left">
+                              <span className="block whitespace-normal break-words font-medium">
+                                {commit.subject || '无提交说明'}
+                              </span>
+                              <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
+                                <code className="commit-sha">{commit.revision}</code>
+                                <span>{commit.author}</span>
+                                <span>{date(commit.at)}</span>
+                              </span>
+                            </span>
+                            {choice === commit.revision ? (
+                              <Check className="size-4 shrink-0" />
+                            ) : index === 0 ? (
+                              <Badge variant="secondary">最新记录</Badge>
+                            ) : null}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
                       显示当前分支最近 100 条提交；“更新代码”只刷新记录，不会发布服务。
                     </p>
                   </>
+                ) : loading ? (
+                  <div role="status" aria-label="正在读取发布版本">
+                    <Skeleton className="h-64" />
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <label className="text-sm font-medium" htmlFor="deploy-releaseId">
@@ -698,6 +721,7 @@ export function ReleaseWorkbench() {
                 !managed ||
                 !!activeTask ||
                 busy ||
+                loading ||
                 (action === 'rollback' && !selectedRelease?.available) ||
                 (action === 'restart' && !target.currentRelease)
               }
@@ -740,24 +764,37 @@ const msLabel = (ms) =>
     : ms < 60000
       ? `${(ms / 1000).toFixed(1)} 秒`
       : `${Math.floor(ms / 60000)} 分 ${Math.floor((ms % 60000) / 1000)} 秒`
-export function StageFlow({ task, selected, onSelect }) {
-  const history = task.stageHistory || [],
-    detailed = history.some((s) => s.stage.startsWith('source_'))
+const stageDuration = (task, stage) =>
+  (task.stageHistory || [])
+    .filter((e) => e.stage === stage)
+    .reduce(
+      (sum, e) =>
+        sum +
+        (e.durationMs ??
+          Math.max(
+            0,
+            Date.parse(e.finishedAt || task.finishedAt || new Date().toISOString()) -
+              Date.parse(e.startedAt),
+          )),
+      0,
+    )
+function taskStages(task) {
+  const history = task.stageHistory || []
   const center =
-    task.action === 'deploy'
-      ? detailed
+    task.action !== 'deploy'
+      ? []
+      : history.some((s) => s.stage.startsWith('source_'))
         ? [
             ['source_fetch', '拉取代码'],
             ['source_resolve', '固定提交'],
             ['source_archive', '打包 ZIP'],
           ]
         : [['preparing', '准备源码']]
-      : []
   const image = task.detailedAgentStages || history.some((s) => s.stage === 'image')
   const agent =
     task.action === 'deploy'
       ? [
-          ['downloading', '拉取源码'],
+          ['downloading', '下载源码包'],
           [
             'building',
             task.config?.kind === 'static' ? '构建前端' : image ? '编译 JAR' : '编译 / 镜像',
@@ -770,111 +807,135 @@ export function StageFlow({ task, selected, onSelect }) {
           ['deploying', task.action === 'restart' ? '重启服务' : '恢复版本'],
           ['verifying', '健康检查'],
         ]
+  return { center, agent }
+}
+function failedStage(task) {
+  if (!finished(task) || task.status === 'succeeded') return null
+  const history = task.stageHistory || []
+  if (task.status === 'rolled_back' && task.action === 'deploy')
+    return history.findLast((e) => e.stage === 'verifying')?.stage || history.at(-1)?.stage
+  if ([...taskStages(task).center, ...taskStages(task).agent].some(([s]) => s === task.stage))
+    return task.stage
+  return history.at(-1)?.stage
+}
+export function StageFlow({ task, selected, onSelect }) {
+  const { center, agent } = taskStages(task),
+    history = task.stageHistory || [],
+    failure = failedStage(task)
+  const steps = [...center, ...agent],
+    done = steps.filter(
+      ([stage]) =>
+        stage !== failure &&
+        history.some((e) => e.stage === stage && (e.finishedAt || finished(task))) &&
+        (finished(task) || task.stage !== stage),
+    ).length
+  const current =
+    steps.find(([stage]) => stage === task.stage)?.[1] || stageLabel(task.stage, task.config?.kind)
+  const lane = (owner, title, Icon, stages) => (
+    <Card className={`flow-group ${owner}`}>
+      <CardHeader className="flow-heading">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Icon className="size-4" />
+          {title}
+        </CardTitle>
+        <span className="text-xs tabular-nums text-muted-foreground" data-lane-duration={owner}>
+          {msLabel(stages.reduce((sum, [stage]) => sum + stageDuration(task, stage), 0))}
+        </span>
+      </CardHeader>
+      <CardContent>
+        <div className="stage-list" aria-label={`${title}处理阶段`}>
+          {stages.map(([stage, label], i) => {
+            const entries = history.filter((e) => e.stage === stage),
+              running = !finished(task) && task.stage === stage,
+              failed = stage === failure
+            const state = failed
+              ? 'failed'
+              : running
+                ? 'active'
+                : entries.length
+                  ? 'complete'
+                  : 'waiting'
+            return (
+              <div key={stage} className={`stage-step ${state}`}>
+                <div className="stage-connector" />
+                <Button
+                  variant="ghost"
+                  aria-pressed={selected === stage}
+                  aria-label={`${label} · ${entries.length ? msLabel(stageDuration(task, stage)) : '等待'}`}
+                  className="stage-button"
+                  data-stage={stage}
+                  onClick={() => onSelect(stage)}
+                >
+                  <span className={`stage-token ${state}`}>
+                    {failed ? (
+                      <AlertCircle className="size-4" />
+                    ) : running ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : entries.length ? (
+                      <Check className="size-4" />
+                    ) : (
+                      (owner === 'agent' ? center.length : 0) + i + 1
+                    )}
+                  </span>
+                  <span className="stage-label">{label}</span>
+                  <span className="stage-time">
+                    {entries.length
+                      ? msLabel(stageDuration(task, stage))
+                      : finished(task)
+                        ? '未记录'
+                        : '等待'}
+                  </span>
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  )
   return (
     <div id="deploy-task-progress" className="space-y-4">
-      {[
-        [Cloud, '中心服务', center, 'center'],
-        [Server, 'Agent · 服务器', agent, 'agent'],
-      ]
-        .filter((v) => v[2].length)
-        .map(([Icon, title, steps, owner]) => (
-          <Card key={owner} className={`flow-group ${owner}`}>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Icon className="size-4" />
-                {title}
-              </CardTitle>
-              <span className="text-xs text-muted-foreground">
-                {owner === 'center' ? '固定源码' : '执行与验证'}
-              </span>
-            </CardHeader>
-            <CardContent>
-              <div className="stage-list">
-                {steps.map(([stage, label], i) => {
-                  const entries = history.filter((e) => e.stage === stage),
-                    running = !finished(task) && task.stage === stage
-                  const failed =
-                    finished(task) &&
-                    task.status !== 'succeeded' &&
-                    entries.some((e) => e === history.at(-1))
-                  const ms = entries.reduce(
-                    (sum, e) =>
-                      sum +
-                      (e.durationMs ??
-                        Math.max(
-                          0,
-                          Date.parse(e.finishedAt || task.finishedAt || new Date().toISOString()) -
-                            Date.parse(e.startedAt),
-                        )),
-                    0,
-                  )
-                  return (
-                    <div
-                      key={stage}
-                      className={`stage-step ${running ? 'active' : entries.length ? 'complete' : ''}`}
-                    >
-                      <div className="stage-connector" />
-                      <Button
-                        variant="ghost"
-                        aria-pressed={selected === stage}
-                        className={`stage-button ${failed ? 'text-destructive' : ''}`}
-                        onClick={() => onSelect(selected === stage ? '' : stage)}
-                      >
-                        <span
-                          className={`stage-token ${running ? 'active' : entries.length ? 'complete' : ''}`}
-                        >
-                          {running ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : entries.length && !failed ? (
-                            <Check className="size-4" />
-                          ) : (
-                            i + 1
-                          )}
-                        </span>
-                        <span className="text-xs font-medium">{label}</span>
-                        <span className="stage-time">
-                          {entries.length ? msLabel(ms) : finished(task) ? '无记录' : '等待'}
-                        </span>
-                      </Button>
-                    </div>
-                  )
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      {history.some((e) => e.stage === 'queued') && (
-        <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-          <Package className="size-3.5" />
-          源码交接 · 服务器队列{' '}
-          {msLabel(
-            history
-              .filter((e) => e.stage === 'queued')
-              .reduce(
-                (sum, e) =>
-                  sum +
-                  (e.durationMs ??
-                    Math.max(
-                      0,
-                      Date.parse(e.finishedAt || task.finishedAt || new Date().toISOString()) -
-                        Date.parse(e.startedAt),
-                    )),
-                0,
-              ),
-          )}
-          {task.status === 'queued' && ' · 等待 Agent 领取'}
-        </p>
+      <div className="flow-summary">
+        <span className="text-sm" aria-live="polite">
+          {finished(task)
+            ? resultName(task)
+            : task.status === 'queued'
+              ? '等待同一服务器上的前序任务'
+              : current}
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          总耗时 {duration({ ...task, startedAt: task.createdAt })} · 排队{' '}
+          {msLabel(stageDuration(task, 'queued'))}
+        </span>
+      </div>
+      <Progress
+        value={steps.length ? (done / steps.length) * 100 : 0}
+        className="h-1"
+        aria-label="发布阶段完成进度"
+        aria-valuetext={`已完成 ${done} / ${steps.length} 个阶段`}
+      />
+      {center.length > 0 && lane('center', '中心服务', Cloud, center)}
+      {center.length > 0 && (
+        <div className={`flow-handoff ${task.status === 'queued' ? 'active' : ''}`}>
+          <ArrowDown className="size-4" />
+          <span>
+            {task.status === 'queued'
+              ? '源码已准备，等待 Agent 领取'
+              : '固定 Commit · 完整源码 ZIP · 校验后交付'}
+          </span>
+        </div>
       )}
+      {lane('agent', '服务器 Agent', Server, agent)}
     </div>
   )
 }
 export function TaskWorkbench({ id }) {
-  const { request, endpoint, find, version, navigate, nameOfTarget } = useConsole()
+  const { request, endpoint, find, version, open, notify, nameOfTarget } = useConsole()
   const [task, setTask] = useState(null),
     [logs, setLogs] = useState([]),
     [error, setError] = useState(''),
-    [selected, setSelected] = useState(''),
-    [showConfig, setShowConfig] = useState(false),
+    [selected, setSelected] = useState(null),
+    [tab, setTab] = useState('flow'),
     [, tick] = useState(0)
   const cursor = useRef(0),
     output = useRef(null),
@@ -923,25 +984,86 @@ export function TaskWorkbench({ id }) {
   }, [version])
   useEffect(() => {
     if (nearBottom.current && output.current) output.current.scrollTop = output.current.scrollHeight
-  }, [logs, selected])
+  }, [logs, selected, tab, task?.stage])
   const target = find('targets', task?.targetId),
     outcome = task?.result
-  return (
-    <div className="space-y-6" id="task-workbench">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+  const currentStage =
+    task && (finished(task) ? logs.at(-1)?.stage || task.stageHistory?.at(-1)?.stage : task.stage)
+  const logStage = tab === 'logs' ? null : selected || currentStage
+  const stageTitle =
+    task &&
+    [...taskStages(task).center, ...taskStages(task).agent].find(([s]) => s === logStage)?.[1]
+  const allLogs = [
+    ...(task?.stageHistory || [])
+      .filter((e) => e.stage.startsWith('source_'))
+      .map((e) => ({
+        stage: e.stage,
+        text: `[${date(e.startedAt)}] [中心] ${stageLabel(e.stage)}\n`,
+      })),
+    ...logs.map((l) => ({
+      stage: l.stage,
+      text: `[${date(l.at)}] [${stageLabel(l.stage, task?.config?.kind)}] ${l.message}\n`,
+    })),
+  ]
+  const source = task?.action === 'rollback' ? task.release?.sourceSnapshot : task?.sourceSnapshot
+  const renderLogs = () => (
+    <Card className="overflow-hidden task-log-card">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+        <CardTitle className="text-sm">
+          {tab === 'logs'
+            ? '完整日志'
+            : `${stageTitle || stageLabel(logStage, task?.config?.kind)} · 日志`}
+        </CardTitle>
+        {tab === 'logs' ? (
+          <Action
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              await copy(allLogs.map((l) => l.text).join(''))
+              notify('日志已复制')
+            }}
+          >
+            <Copy />
+            复制日志
+          </Action>
+        ) : (
           <Button
             variant="ghost"
-            className="mb-3 -ml-3"
-            onClick={() => navigate('tasks')}
-            data-close-task
+            size="sm"
+            aria-pressed={!selected}
+            onClick={() => setSelected(null)}
           >
-            <ArrowLeft />
-            返回发布记录
+            跟随当前阶段
           </Button>
+        )}
+      </CardHeader>
+      <CardContent>
+        <pre
+          id="deploy-task-logs"
+          ref={output}
+          aria-label={tab === 'logs' ? '完整日志' : '当前阶段日志'}
+          tabIndex={0}
+          onScroll={(e) => {
+            const el = e.currentTarget
+            nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 50
+          }}
+          className="task-log-text"
+        >
+          {allLogs
+            .filter((l) => !logStage || l.stage === logStage)
+            .map((l) => l.text)
+            .join('') || '等待任务日志…'}
+        </pre>
+      </CardContent>
+    </Card>
+  )
+  return (
+    <div className="space-y-5" id="task-workbench">
+      <div className="page-title">
+        <div>
           <h1 id="page-title" className="text-xl font-semibold">
             {task
-              ? `${actionNames[task.action]} ${find('services', target?.serviceId)?.name || '服务'}`
+              ? `${find('services', target?.serviceId)?.name || '服务'} · ${actionNames[task.action]}`
               : '发布详情'}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -949,102 +1071,117 @@ export function TaskWorkbench({ id }) {
             {target && ` / ${find('servers', target.serverId)?.name || ''}`}
           </p>
         </div>
-        <Button variant="outline" onClick={() => setShowConfig((v) => !v)}>
-          查看本次配置
-        </Button>
+        <div className="page-actions">
+          <Action
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              await copy(location.href)
+              notify('任务地址已复制')
+            }}
+          >
+            <Copy />
+            复制任务地址
+          </Action>
+          {task && finished(task) && target?.mode === 'managed' && (
+            <Button size="sm" onClick={() => open('release', { target, action: 'deploy' })}>
+              再次更新 <ArrowRight />
+            </Button>
+          )}
+        </div>
       </div>
       {error && <Notice error>{error}</Notice>}
-      {task ? (
-        <>
-          <Card>
-            <CardContent
-              id="deploy-task-info"
-              className="flex flex-wrap items-center justify-between gap-4"
-            >
-              <Status value={task.status}>{resultName(task)}</Status>
-              <Commit value={revisionOf(task)} />
-              <span className="flex items-center gap-2 text-sm">
-                <Clock3 className="size-4 text-muted-foreground" />
-                总耗时 {duration({ ...task, startedAt: task.createdAt })}
-              </span>
-              <span className="text-xs text-muted-foreground">{date(task.createdAt)}</span>
-            </CardContent>
-          </Card>
-          {showConfig && (
-            <Configuration
-              target={{
-                ...target,
-                config:
-                  task.action === 'rollback' ? task.release?.config || task.config : task.config,
-              }}
-            />
+      <Tabs value={tab} onValueChange={setTab}>
+        <div className="task-toolbar" id="deploy-task-info">
+          <TabsList variant="line" className="section-tabs">
+            <TabsTrigger value="flow">发布进度</TabsTrigger>
+            <TabsTrigger value="snapshot">任务快照</TabsTrigger>
+            <TabsTrigger value="logs">完整日志</TabsTrigger>
+          </TabsList>
+          {task && <Status value={task.status}>{resultName(task)}</Status>}
+        </div>
+        <TabsContent value="flow" className="space-y-4 pt-4">
+          {task ? (
+            <>
+              <StageFlow task={task} selected={selected || currentStage} onSelect={setSelected} />
+              <div id="deploy-task-result" className="space-y-3">
+                {task.error && <Notice error>{task.error}</Notice>}
+                {typeof outcome === 'string' && <Notice>{outcome}</Notice>}
+                {outcome?.message && <Notice>{outcome.message}</Notice>}
+                {outcome?.error && outcome.error !== task.error && (
+                  <Notice error>{outcome.error}</Notice>
+                )}
+                {outcome?.rollback && (
+                  <Notice>
+                    自动回退：
+                    {outcome.rollback.status === 'succeeded'
+                      ? '成功'
+                      : outcome.rollback.status === 'unavailable'
+                        ? '没有可恢复的基线'
+                        : '失败'}
+                    {outcome.rollback.error && ` · ${outcome.rollback.error}`}
+                  </Notice>
+                )}
+                {outcome?.cleanupError && <Notice error>{outcome.cleanupError}</Notice>}
+                {outcome?.release?.kind === 'static' && (
+                  <p className="text-xs text-muted-foreground wrap-anywhere">
+                    静态版本：{outcome.release.artifact}
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <Skeleton className="h-56" />
           )}
-          <StageFlow task={task} selected={selected} onSelect={setSelected} />
-          <div id="deploy-task-result" className="space-y-2">
-            {task.error && <Notice error>{task.error}</Notice>}
-            {typeof outcome === 'string' && <Notice>{outcome}</Notice>}
-            {outcome?.message && <Notice>{outcome.message}</Notice>}
-            {outcome?.error && outcome.error !== task.error && (
-              <Notice error>{outcome.error}</Notice>
-            )}
-            {outcome?.rollback && (
-              <Notice>
-                自动回退：
-                {outcome.rollback.status === 'succeeded'
-                  ? '成功'
-                  : outcome.rollback.status === 'unavailable'
-                    ? '没有可恢复的基线'
-                    : '失败'}
-                {outcome.rollback.error && ` · ${outcome.rollback.error}`}
-              </Notice>
-            )}
-            {outcome?.cleanupError && <Notice error>{outcome.cleanupError}</Notice>}
-            {outcome?.release?.image && (
-              <p className="break-all font-mono text-xs">镜像：{outcome.release.image}</p>
-            )}
-            {outcome?.release?.kind === 'static' && (
-              <p className="break-all text-xs">静态版本：{outcome.release.artifact}</p>
-            )}
-          </div>
-        </>
-      ) : (
-        <Skeleton className="h-56" />
-      )}
-      <Card className="overflow-hidden">
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
-          <CardTitle className="text-sm">
-            执行日志{selected && ` · ${stageLabel(selected, task?.config?.kind)}`}
-          </CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => setSelected('')}>
-            全部日志
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <pre
-            id="deploy-task-logs"
-            ref={output}
-            aria-label="执行日志"
-            tabIndex={0}
-            onScroll={(e) => {
-              const el = e.currentTarget
-              nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 50
-            }}
-            className="h-80 max-w-full overflow-auto rounded-lg bg-muted/60 p-4 font-mono text-xs leading-6"
-          >
-            {[
-              ...(task?.stageHistory || [])
-                .filter((e) => e.stage.startsWith('source_') && (!selected || e.stage === selected))
-                .map((e) => `[${date(e.startedAt)}] [中心] ${stageLabel(e.stage)}\n`),
-              ...logs
-                .filter((l) => !selected || l.stage === selected)
-                .map(
-                  (l) =>
-                    `[${date(l.at)}] [${stageLabel(l.stage, task?.config?.kind)}] ${l.message}\n`,
-                ),
-            ].join('') || '等待任务日志…'}
-          </pre>
-        </CardContent>
-      </Card>
+          {renderLogs()}
+        </TabsContent>
+        <TabsContent value="snapshot" className="space-y-5 pt-4" id="task-snapshot">
+          {task && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>固定源码</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <dl className="configuration-details">
+                    <Detail label="代码仓库">{source?.name || '历史未记录'}</Detail>
+                    <Detail label="发布分支">{source?.branch || '历史未记录'}</Detail>
+                    <Detail label="Commit">
+                      <Commit value={revisionOf(task)} />
+                    </Detail>
+                    <Detail label="创建时间">{date(task.createdAt)}</Detail>
+                    <Detail label="Maven 模块 / 前端目录">{task.config?.module || '.'}</Detail>
+                    <Detail label="任务 ID">
+                      <span className="config-value font-mono text-xs">{task.id}</span>
+                    </Detail>
+                    <div className="config-wide">
+                      <Detail label="发布产物">
+                        <span className="config-code">
+                          {outcome?.release?.image ||
+                            outcome?.release?.artifact ||
+                            task.release?.image ||
+                            task.release?.artifact ||
+                            '尚未生成'}
+                        </span>
+                      </Detail>
+                    </div>
+                  </dl>
+                </CardContent>
+              </Card>
+              <Configuration
+                target={{
+                  ...target,
+                  config:
+                    task.action === 'rollback' ? task.release?.config || task.config : task.config,
+                }}
+              />
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="logs" className="pt-4">
+          {renderLogs()}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

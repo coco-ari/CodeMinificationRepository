@@ -111,13 +111,13 @@ try {
   const publicUrl = await evaluate('document.querySelector("#secret-page").value');
   await click('#secret-dialog [data-close]');
   await until(() => evaluate('!document.querySelector("#secret-value")'), '关闭弹窗后清除密码');
-  await evaluate('Array.from(document.querySelectorAll(".card-actions button")).find(x => x.textContent === "立即同步").click()');
+  await click('[aria-label="立即同步"]');
   await until(() => evaluate('document.querySelector(".project-card .badge").textContent === "已就绪"'), '手动同步');
   assert.equal(service.store.state.projects.length, 1);
   assert.equal(service.store.state.projects[0].branch, 'release/vietnam');
   assert.ok(!await evaluate('document.body.textContent.includes("test-only-password")'));
   // 仓库配置使用完整页面；嵌入的共享凭证仍使用 Radix 对话框。
-  await mouseClick('.project-card .card-actions button:nth-child(2)'); await visible('#project-dialog');
+  await mouseClick('[aria-label="编辑仓库"]'); await visible('#project-dialog');
   assert.equal(await evaluate('Boolean(document.querySelector("#project-dialog[role=dialog]"))'),false);
   await mouseClick('#repository-add-credential'); await visible('#credential-dialog');
   for (let i = 0; i < 12; i++) {
@@ -127,9 +127,17 @@ try {
   await key('Escape', 27); await until(() => evaluate('!document.querySelector("#credential-dialog")'), 'Escape 关闭凭证对话框');
   await until(() => evaluate('document.activeElement === document.querySelector("#repository-add-credential")'), '焦点返回新增凭证按钮');
   await click('#project-dialog [data-slot=dialog-close]'); await until(()=>evaluate('!document.querySelector("#project-dialog")'),'返回仓库列表');
-  await mouseClick('.project-card .card-actions button:nth-child(4)'); await visible('[role=alertdialog]');
+  await mouseClick('[data-repository-menu]'); await visible('[role=menu]');
+  await evaluate('Array.from(document.querySelectorAll("[role=menuitem]")).find(b=>b.textContent === "重置下载密码").click()');
+  await visible('[role=alertdialog]');
   await evaluate('Array.from(document.querySelector("[role=alertdialog]").querySelectorAll("button")).find(b=>b.textContent === "取消").click()');
   await until(() => evaluate('!document.querySelector("[role=alertdialog]")'), '取消重置密码');
+  service.authorizeDownload(service.store.state.projects[0].id, secret);
+  await mouseClick('.repository-table [role=switch]');
+  await until(() => !service.store.state.projects[0].enabled, '停用源码下载');
+  await until(() => evaluate('!document.querySelector(".repository-table [role=switch]").disabled'), '停用完成');
+  await mouseClick('.repository-table [role=switch]');
+  await until(() => service.store.state.projects[0].enabled, '恢复源码下载');
   service.authorizeDownload(service.store.state.projects[0].id, secret);
   await mouseClick('[data-slot=dropdown-menu-trigger]'); await visible('[role=menu]');
   await evaluate('Array.from(document.querySelectorAll("[role=menuitem]")).find(b=>b.textContent.includes("修改密码")).click()');
@@ -145,6 +153,10 @@ try {
   await animationsSettled();
   screenshot = await command('Page.captureScreenshot', { format: 'png' });
   await writeFile(path.join(artifactDirectory, 'dashboard-mobile.png'), Buffer.from(screenshot.data, 'base64'));
+  await mouseClick('[data-repository-menu]'); await visible('[role=menu]');
+  await evaluate('Array.from(document.querySelectorAll("[role=menuitem]")).find(b=>b.textContent === "编辑仓库").click()');
+  await visible('#project-dialog');
+  assert.equal(await evaluate('document.querySelector("#project-form [name=branch]").value'), 'release/vietnam');
   await command('Page.navigate', { url: publicUrl }); await visible('#download-view');
   assert.equal(await evaluate('!document.querySelector("#app-view")'), true);
   await fill('#download-form [name=token]', 'invalid'); await click('#download-form [type=submit]');
