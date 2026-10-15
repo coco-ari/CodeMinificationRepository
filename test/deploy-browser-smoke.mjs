@@ -927,6 +927,25 @@ try {
     )
   const beforeSize = await homeSize()
   assert.equal(beforeSize.height, 440)
+  const footerStyle = await evaluate(
+    `(() => {const c=document.querySelector('${homeCard}'),link=getComputedStyle(c.querySelector('.tile-all-services')),name=getComputedStyle(c.querySelector('.tile-service-name'));return {weight:link.fontWeight,size:parseFloat(link.fontSize),nameSize:parseFloat(name.fontSize),color:link.color,pageColor:getComputedStyle(c.querySelector('.tile-pagination > span')).color};})()`,
+  )
+  assert.equal(footerStyle.weight, '400', '提示组件包裹的页脚按钮仍使用常规字重')
+  assert.ok(footerStyle.size < footerStyle.nameSize, '服务计数的视觉层级低于服务名称')
+  assert.equal(footerStyle.color, footerStyle.pageColor, '服务计数与分页使用同一辅助色')
+  assert.equal(
+    await evaluate(
+      `getComputedStyle(document.querySelector('${homeCard} [role=tab][data-state=active]')).boxShadow`,
+    ),
+    'none',
+    '环境切换不叠加浮起阴影',
+  )
+  assert.ok(
+    !(
+      await evaluate(`document.querySelector('${homeCard} .tile-host-heading').innerText`)
+    ).includes('整机'),
+    '主机范围说明移入资源提示',
+  )
   const expectedIds = workspaces.overview(initialProject.id).services.map((item) => item.id),
     displayed = []
   await firstHomePage()
@@ -998,7 +1017,7 @@ try {
   await visible('[role=tooltip]')
   assert.match(
     await evaluate(`document.querySelector('[role=tooltip]').textContent`),
-    /空间紧张.*剩余 7.0 GB.*最近采集/,
+    /整台服务器资源.*空间紧张.*剩余 7.0 GB.*最近采集/,
   )
   await choose('[aria-label="SOL 标准版的资源服务器"]', '测试服务器 B')
   assert.equal(
@@ -1110,6 +1129,10 @@ try {
       '所有项目卡片等高',
     )
     assert.ok(await assertWholeRows(), `服务行在 ${width}px 完整显示`)
+    const cardContentFits = await evaluate(
+      `(() => {const c=document.querySelector('${homeCard}');return [...c.querySelectorAll('[data-home-service]')].every(row=>{const version=row.querySelector('[data-service-version]'),actions=row.querySelector('.tile-service-end'),label=row.querySelector('.tile-runtime-label').getBoundingClientRect(),button=row.querySelector('.tile-service-action').getBoundingClientRect();return version.scrollWidth<=version.clientWidth+1&&version.getBoundingClientRect().right<=actions.getBoundingClientRect().left+1&&Math.abs(label.x+label.width/2-button.x-button.width/2)<1;});})()`,
+    )
+    assert.ok(cardContentFits, `版本信息不与操作区重叠，状态文字在 ${width}px 与更新按钮居中对齐`)
     await screenshot(`console-home-${width}.png`)
     for (const view of ['overview', 'services', 'projects', 'environments', 'servers', 'tasks']) {
       await go(view)

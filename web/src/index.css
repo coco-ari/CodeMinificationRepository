@@ -146,7 +146,7 @@
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  gap: 12px;
+  gap: 14px;
   padding: 0 20px;
 }
 .tile-project-name {
@@ -156,7 +156,7 @@
   padding: 0 !important;
   font-size: 16px;
   font-weight: 600;
-  gap: 7px;
+  gap: 8px;
 }
 .tile-project-name svg {
   width: 13px;
@@ -169,15 +169,24 @@
   max-width: 52%;
 }
 .tile-environments [data-slot='tabs-list'] {
-  height: 30px;
-  padding: 3px;
+  height: 28px;
+  padding: 2px;
+  border-radius: 7px;
   max-width: 100%;
 }
 .tile-environments [data-slot='tabs-trigger'] {
+  height: 24px;
   font-size: 11px;
-  padding: 2px 9px;
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: 5px;
+  transition-property: background-color, color;
   min-width: 0;
   max-width: 90px;
+}
+.tile-environments [data-slot='tabs-trigger'][data-state='active'] {
+  box-shadow: none;
+  border-color: var(--border);
 }
 .tile-environment-single {
   max-width: 48%;
@@ -190,21 +199,27 @@
   font-size: 12px;
 }
 .tile-resources {
+  position: relative;
+  min-width: 0;
   padding: 0 20px;
-  border-bottom: 1px solid var(--border);
+}
+.tile-resource-separator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
 }
 .tile-host-heading {
   height: 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 13px;
 }
 .tile-host-identity {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
   font-size: 12px;
   color: var(--muted-foreground);
@@ -227,10 +242,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tile-host-scope {
-  flex-shrink: 0;
-  font-size: 11px;
-}
 .tile-connection {
   padding: 0;
   border: 0;
@@ -252,20 +263,22 @@
 .tile-service {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 64px;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
-  height: 76px;
-  border-bottom: 1px solid var(--border);
+  height: 75px;
   min-width: 0;
 }
 .tile-service:last-child {
-  border-bottom: 0;
+  height: 76px;
+}
+.tile-row-separator {
+  background: color-mix(in oklch, var(--border) 75%, var(--background));
 }
 .tile-service-name {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  height: auto;
+  height: 21px;
   justify-content: flex-start;
   padding: 0 !important;
   font-size: 13px;
@@ -277,6 +290,7 @@
   flex-direction: column;
   align-items: center;
   gap: 5px;
+  width: 64px;
   min-width: 0;
 }
 .tile-service-action {
@@ -293,32 +307,49 @@
   height: 12px;
 }
 .tile-runtime {
+  width: 100%;
+  height: 16px;
   padding: 0;
   border: 0;
   border-radius: 0;
-  gap: 4px;
-  font-size: 11px;
+  gap: 0;
+  font-size: 10.5px;
   font-weight: 400;
   line-height: 16px;
   max-width: 100%;
+  overflow: visible;
+}
+.tile-runtime-label {
+  position: relative;
+  max-width: calc(100% - 16px);
+}
+.tile-runtime-dot {
+  position: absolute;
+  top: calc(50% - 2px);
+  left: -8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .tile-version {
   height: 23px;
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 5px;
+  gap: 12px;
   color: var(--muted-foreground);
   font-size: 11px;
   white-space: nowrap;
 }
 .tile-branch {
-  height: auto;
+  height: 20px;
   min-width: 0;
-  max-width: 50%;
+  max-width: 58%;
+  flex-shrink: 1;
   justify-content: flex-start;
   padding: 0 !important;
-  gap: 4px;
+  gap: 5px;
   font-size: 11px;
   font-weight: 400;
   color: var(--muted-foreground);
@@ -338,13 +369,20 @@
 .tile-version-unknown {
   font-size: 11px;
 }
+.tile-commit.commit-button {
+  height: 22px;
+  padding: 0;
+  border-radius: 3px;
+  font-weight: 400;
+}
 .tile-commit .commit-sha {
   font-size: 11px;
-  width: 10ch;
-  mask-image: linear-gradient(to right, #000 62%, transparent 100%);
+  width: 11ch;
+  line-height: 20px;
+  mask-image: linear-gradient(to right, #000 8ch, transparent 11ch);
 }
 .tile-commit > span {
-  gap: 4px;
+  gap: 5px;
 }
 .tile-commit svg {
   width: 12px;
@@ -361,13 +399,18 @@
   color: var(--muted-foreground);
 }
 .tile-footer {
-  border-top: 1px solid var(--border);
+  position: relative;
   padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
+}
+.tile-footer-separator {
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 .tile-footer-links,
 .tile-pagination {
@@ -375,35 +418,56 @@
   align-items: center;
   gap: 2px;
 }
-.tile-footer-links [data-slot='button'] {
-  font-size: 12px;
-  font-weight: 400;
-  padding-inline: 4px;
-  gap: 6px;
-  color: var(--muted-foreground);
-}
-.tile-footer [data-slot='button'] {
+.tile-footer-action {
   height: 30px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  box-shadow: none;
 }
-.tile-footer [data-slot='button'] svg {
+.tile-footer-action:hover {
+  color: var(--foreground);
+}
+.tile-footer-action svg {
   width: 14px;
   height: 14px;
 }
+.tile-add-service {
+  width: 30px;
+}
+.tile-all-services {
+  padding-inline: 7px;
+  gap: 5px;
+}
+.tile-all-services svg {
+  width: 12px;
+  height: 12px;
+  color: color-mix(in oklch, var(--muted-foreground) 75%, var(--background));
+}
+.tile-pagination {
+  gap: 3px;
+}
 .tile-pagination > span {
-  width: 35px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  min-width: 34px;
   font-size: 11px;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
-.tile-pagination [data-slot='button'] {
-  width: 28px;
-  color: var(--muted-foreground);
+.tile-page-slash {
+  color: color-mix(in oklch, var(--muted-foreground) 65%, var(--background));
+}
+.tile-pagination .tile-footer-action {
+  width: 30px;
 }
 @keyframes tile-page-enter {
   from {
     opacity: 0.3;
-    transform: translateY(4px);
+    transform: translateY(3px);
   }
   to {
     opacity: 1;
@@ -946,11 +1010,15 @@
   .tile-service-action {
     min-height: 34px;
   }
-  .tile-footer [data-slot='button'] {
+  .tile-footer-action {
     min-height: 40px;
+    min-width: 36px;
   }
   .tile-environments [data-slot='tabs-list'] {
-    height: 36px;
+    height: 34px;
+  }
+  .tile-environments [data-slot='tabs-trigger'] {
+    height: 30px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1031,30 +1099,42 @@
   .tile-services {
     padding-inline: 16px;
   }
-  .tile-host-scope {
-    display: none;
-  }
   .tile-footer {
     padding-inline: 8px;
   }
   .tile-service {
     gap: 8px;
   }
-}
-@media (max-width: 390px) {
   .tile-environments [data-slot='tabs-trigger'] {
-    padding-inline: 6px;
-  }
-  .tile-service-name {
-    font-size: 12px;
-  }
-  .tile-branch svg {
-    display: none;
+    padding-inline: 7px;
+    font-size: 10.5px;
   }
   .tile-version {
+    gap: 8px;
+  }
+  .tile-branch {
     gap: 4px;
   }
-  .tile-commit .commit-sha {
-    width: 9ch;
+}
+@media (max-width: 375px) {
+  .tile-environments [data-slot='tabs-trigger'] {
+    padding-inline: 5px;
+    font-size: 10px;
+  }
+  .tile-project-name {
+    font-size: 13px;
+  }
+  .tile-host-identity {
+    font-size: 11px;
+    gap: 5px;
+  }
+  .project-tile .tile-heading,
+  .tile-resources,
+  .tile-services {
+    padding-inline: 14px;
+  }
+  .tile-branch svg,
+  .tile-commit svg {
+    display: none;
   }
 }

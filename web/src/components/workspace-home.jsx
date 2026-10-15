@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
   Plus,
   GitBranch,
@@ -24,6 +24,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Selection, SelectionOption } from '@/components/selection'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Progress } from '@/components/ui/progress'
+import { Separator } from '@/components/ui/separator'
 import { Empty, Action, Status } from './shared'
 import {
   useConsole,
@@ -95,13 +96,13 @@ export function HostResources({
   const online = server?.online && !server?.revoked
   return (
     <div className="space-y-3" aria-label="整台服务器资源">
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid grid-cols-3 ${compact ? 'gap-3.5' : 'gap-3'}`}>
         {hostMetrics(server).map(({ label, value, known, level, message, remaining }) => (
           <Tooltip key={label}>
             <TooltipTrigger asChild>
               <div
                 tabIndex={compact ? 0 : undefined}
-                className="min-w-0 space-y-1.5"
+                className={`min-w-0 ${compact ? 'space-y-[7px]' : 'space-y-1.5'}`}
                 data-resource={label}
                 data-level={level}
                 aria-label={`${label}：${known ? `${Math.round(value)}%${message ? `，${message}` : ''}${remaining != null ? `，剩余 ${size(remaining)}` : ''}` : '暂无有效数据'}`}
@@ -130,6 +131,7 @@ export function HostResources({
             </TooltipTrigger>
             {compact && (
               <TooltipContent>
+                <p>整台服务器资源；服务列表显示当前环境全部服务。</p>
                 <p>
                   {known
                     ? `${label} ${Math.round(value)}%${message ? ` · ${message}` : ''}`
@@ -175,8 +177,10 @@ export function ServiceState({ targets, servers, failedTask }) {
           className={`tile-runtime ${health.value === 'healthy' ? 'text-emerald-700 dark:text-emerald-400' : health.value === 'unhealthy' ? 'text-destructive' : 'text-muted-foreground'}`}
           aria-label={description}
         >
-          <span className="size-1 shrink-0 rounded-full bg-current" />
-          {label}
+          <span className="tile-runtime-label">
+            <span className="tile-runtime-dot" aria-hidden="true" />
+            <span className="block truncate">{label}</span>
+          </span>
         </Badge>
       </TooltipTrigger>
       <TooltipContent className="max-w-80">{description}</TooltipContent>
@@ -219,7 +223,6 @@ function ServiceVersion({ row, onDetails }) {
           <p>点击查看服务详情</p>
         </TooltipContent>
       </Tooltip>
-      <span aria-hidden="true">·</span>
       {version.revision ? (
         <Commit value={version.revision} subject={version.subject} compact />
       ) : version.kind === 'mixed' ? (
@@ -364,6 +367,7 @@ export function ProjectTile({ project }) {
       ? pageSelection.index
       : 0
   const page = Math.min(Math.max(0, requestedPage), pageCount - 1)
+  const pageRows = rows.slice(page * 3, page * 3 + 3)
   const attention = rows.filter((row) => row.needsAttention).length
   const go = (view, extra = {}) => {
     location.hash = routeUrl(view, project.id, environment?.id, null, extra)
@@ -459,19 +463,11 @@ export function ProjectTile({ project }) {
                     {server?.name || '未绑定服务器'}
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>{server?.name || '未绑定服务器'}</TooltipContent>
+                <TooltipContent>
+                  {server?.name || '未绑定服务器'}；下方指标为整台服务器的资源使用率。
+                </TooltipContent>
               </Tooltip>
             )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="tile-host-scope" tabIndex={0}>
-                  整机
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                整台服务器的资源；选择服务器仅切换指标，服务列表仍显示当前环境全部服务。
-              </TooltipContent>
-            </Tooltip>
           </div>
           <Badge variant="ghost" className="tile-connection">
             <span
@@ -481,6 +477,7 @@ export function ProjectTile({ project }) {
           </Badge>
         </div>
         <HostResources server={server} showConnection={false} compact />
+        <Separator className="tile-resource-separator" />
       </CardContent>
       <div
         className="tile-services"
@@ -496,49 +493,57 @@ export function ProjectTile({ project }) {
               </Button>
             </div>
           )}
-          {rows.slice(page * 3, page * 3 + 3).map((row) => (
-            <div className="tile-service" data-home-service={row.id} key={row.id}>
-              <div className="min-w-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="link"
-                      className="tile-service-name"
-                      onClick={() => go('service', { serviceId: row.id })}
-                    >
-                      <span className="truncate">{row.name}</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{row.name}</TooltipContent>
-                </Tooltip>
-                <ServiceVersion row={row} onDetails={() => go('service', { serviceId: row.id })} />
+          {pageRows.map((row, index) => (
+            <Fragment key={row.id}>
+              <div className="tile-service" data-home-service={row.id}>
+                <div className="min-w-0">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="link"
+                        className="tile-service-name"
+                        onClick={() => go('service', { serviceId: row.id })}
+                      >
+                        <span className="truncate">{row.name}</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{row.name}</TooltipContent>
+                  </Tooltip>
+                  <ServiceVersion
+                    row={row}
+                    onDetails={() => go('service', { serviceId: row.id })}
+                  />
+                </div>
+                <div className="tile-service-end">
+                  <ServiceAction
+                    row={row}
+                    servers={db.servers}
+                    go={go}
+                    onTask={(id) => {
+                      location.hash = routeUrl('tasks', project.id, environment?.id, id)
+                    }}
+                  />
+                  <ServiceState
+                    targets={row.targets}
+                    servers={db.servers}
+                    failedTask={row.failedTask}
+                  />
+                </div>
               </div>
-              <div className="tile-service-end">
-                <ServiceAction
-                  row={row}
-                  servers={db.servers}
-                  go={go}
-                  onTask={(id) => {
-                    location.hash = routeUrl('tasks', project.id, environment?.id, id)
-                  }}
-                />
-                <ServiceState
-                  targets={row.targets}
-                  servers={db.servers}
-                  failedTask={row.failedTask}
-                />
-              </div>
-            </div>
+              {index < pageRows.length - 1 && <Separator className="tile-row-separator" />}
+            </Fragment>
           ))}
         </div>
       </div>
       <CardFooter className="tile-footer">
+        <Separator className="tile-footer-separator" />
         <div className="tile-footer-links">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon-sm"
+                className="tile-footer-action tile-add-service"
                 aria-label={`为${project.name}新增服务`}
                 onClick={() => go('setup')}
               >
@@ -552,11 +557,12 @@ export function ProjectTile({ project }) {
               <Button
                 variant="ghost"
                 size="sm"
+                className="tile-footer-action tile-all-services"
                 onClick={() => go('services')}
                 aria-label={`查看全部 ${rows.length} 个服务${attention ? `，${attention} 个待处理` : ''}`}
               >
                 {rows.length} 个服务
-                <ArrowUpRight />
+                <ChevronRight />
               </Button>
             </TooltipTrigger>
             <TooltipContent>
@@ -568,6 +574,7 @@ export function ProjectTile({ project }) {
           <Button
             variant="ghost"
             size="icon-sm"
+            className="tile-footer-action"
             aria-label="上一页服务"
             disabled={page === 0}
             onClick={() => changePage(page - 1)}
@@ -575,11 +582,14 @@ export function ProjectTile({ project }) {
             <ChevronLeft />
           </Button>
           <span aria-live="polite">
-            {page + 1} / {pageCount}
+            {page + 1}
+            <span className="tile-page-slash">/</span>
+            {pageCount}
           </span>
           <Button
             variant="ghost"
             size="icon-sm"
+            className="tile-footer-action"
             aria-label="下一页服务"
             disabled={page === pageCount - 1}
             onClick={() => changePage(page + 1)}
