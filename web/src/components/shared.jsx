@@ -1,4 +1,20 @@
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { registerGuard, navigateSafely } from '@/lib/navigation-guard'
+import { Choice } from './selection'
+import {
+  Field as FieldRoot,
+  FieldLabel,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+} from '@/components/ui/field'
+import {
+  Empty as EmptyRoot,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+} from '@/components/ui/empty'
 import { LoaderCircle, Inbox, Info, ArrowUpRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -6,7 +22,6 @@ import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Label } from '@/components/ui/label'
 import {
   Dialog,
@@ -17,11 +32,10 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { statusNames, useConsole } from '@/lib/console'
+import { statusNames, useConsole, date } from '@/lib/console'
 
 export function Action({ children, onClick, variant = 'outline', className, ...props }) {
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   return (
     <>
       <Button
@@ -33,11 +47,10 @@ export function Action({ children, onClick, variant = 'outline', className, ...p
         onClick={async () => {
           if (busy) return
           setBusy(true)
-          setError('')
           try {
             await onClick?.()
           } catch (e) {
-            if (e.name !== 'AbortError') setError(e.message)
+            if (e.name !== 'AbortError') toast.error(e.message)
           } finally {
             setBusy(false)
           }
@@ -46,11 +59,6 @@ export function Action({ children, onClick, variant = 'outline', className, ...p
         {busy && <LoaderCircle className="animate-spin" />}
         {children}
       </Button>
-      {error && (
-        <p role="alert" className="text-sm text-destructive basis-full">
-          {error}
-        </p>
-      )}
     </>
   )
 }
@@ -73,6 +81,44 @@ export function Status({ value, children }) {
     </Badge>
   )
 }
+export function TargetStatus({ target, server }) {
+  const state = target.observation?.state || target.observation?.status
+  const health = target.observation?.health || target.observation?.healthStatus
+  const running = ['running', 'published'].includes(state)
+  if (!server?.online || server?.revoked)
+    return (
+      <div className="space-y-1">
+        <Status value="disabled">状态待确认</Status>
+        <p className="text-xs text-muted-foreground">
+          服务器{server?.revoked ? '已撤销' : '未在线'}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          最近采集：{date(target.lastObservedAt || server?.lastSeenAt)}
+        </p>
+      </div>
+    )
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      <Status value={running ? 'healthy' : state ? 'unhealthy' : 'disabled'}>
+        {running
+          ? state === 'published'
+            ? '已发布'
+            : '运行中'
+          : ['exited', 'stopped'].includes(state)
+            ? '已停止'
+            : ['missing', 'unpublished'].includes(state)
+              ? '未运行'
+              : '待上报'}
+      </Status>
+      <Status
+        value={health === 'healthy' ? 'healthy' : health === 'unhealthy' ? 'unhealthy' : 'disabled'}
+      >
+        {health === 'healthy' ? '健康' : health === 'unhealthy' ? '健康异常' : '健康待确认'}
+      </Status>
+    </div>
+  )
+}
+
 export function Notice({ children, error = false, className }) {
   return (
     <Alert variant={error ? 'destructive' : 'default'} className={cn('bg-muted/35', className)}>
@@ -83,21 +129,21 @@ export function Notice({ children, error = false, className }) {
 }
 export function Empty({ title, description, action, label }) {
   return (
-    <Card className="col-span-full border-dashed shadow-none">
-      <CardContent className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">
+    <EmptyRoot className="col-span-full">
+      <EmptyHeader>
         <div className="mb-1 rounded-xl border bg-muted/50 p-3">
           <Inbox className="size-6 text-muted-foreground" />
         </div>
-        <h2 className="font-semibold">{title}</h2>
-        <p className="max-w-md text-sm text-muted-foreground">{description}</p>
-        {action && (
-          <Button className="mt-2" onClick={action}>
-            {label}
-            <ArrowUpRight />
-          </Button>
-        )}
-      </CardContent>
-    </Card>
+        <EmptyTitle>{title}</EmptyTitle>
+        {description && <EmptyDescription>{description}</EmptyDescription>}
+      </EmptyHeader>
+      {action && (
+        <Button className="mt-2" onClick={action}>
+          {label}
+          <ArrowUpRight />
+        </Button>
+      )}
+    </EmptyRoot>
   )
 }
 export function Stats({ items }) {
@@ -135,29 +181,57 @@ export function Field({
   className,
   value,
   onChange,
+  searchable,
   ...props
 }) {
   const unique = useId()
+  const [invalid, setInvalid] = useState('')
   id ||= `deploy-${name || unique}`
-  const inputProps = { id, name, ...props, ...(value !== undefined ? { value } : {}), onChange }
+  const inputProps = {
+    id,
+    name,
+    ...props,
+    ...(value !== undefined ? { value } : {}),
+    'aria-invalid': !!invalid || undefined,
+    'aria-describedby': invalid ? `${id}-error` : hint ? `${id}-hint` : undefined,
+    onInvalid: (event) => setInvalid(event.currentTarget.validationMessage || `请检查${label}`),
+    onChange: (event) => {
+      setInvalid('')
+      onChange?.(event)
+    },
+  }
   return (
-    <div className={cn('min-w-0 space-y-2', className)}>
-      <Label htmlFor={id}>{label}</Label>
+    <FieldRoot className={className}>
+      <FieldLabel htmlFor={id}>
+        {label}
+        {props.required && (
+          <span className="text-muted-foreground" aria-hidden="true">
+            {' '}
+            *
+          </span>
+        )}
+      </FieldLabel>
       {choices ? (
-        <NativeSelect {...inputProps} className="w-full">
-          {choices.map(([key, text]) => (
-            <NativeSelectOption key={key} value={key}>
-              {text}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+        <Choice
+          {...inputProps}
+          aria-label={label}
+          searchable={
+            searchable ?? /serverId|serviceId|sourceProjectId|credentialId/.test(name || '')
+          }
+          options={choices.map(([key, text]) => ({ value: key, label: text }))}
+          onValueChange={(next) => {
+            setInvalid('')
+            onChange?.({ target: { value: next } })
+          }}
+        />
       ) : multiline ? (
         <Textarea {...inputProps} />
       ) : (
         <Input {...inputProps} />
       )}
-      {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
-    </div>
+      {hint && <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription>}
+      {invalid && <FieldError id={`${id}-error`}>{invalid}</FieldError>}
+    </FieldRoot>
   )
 }
 export function FormDialog({
@@ -176,21 +250,48 @@ export function FormDialog({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
   const submitting = useRef(false)
+  const dirty = useRef(false)
+  const guardId = useId()
+  useEffect(() => registerGuard(guardId, () => dirty.current && !submitting.current), [guardId])
+  const close = () => navigateSafely(onClose)
   const returnFocus = useRef(document.activeElement)
-  const inline = useConsole()?.formLayout === 'page' && id !== 'credential-dialog'
+  const layout = useConsole()?.formLayout
+  const inline = ['page', 'embedded'].includes(layout) && id !== 'credential-dialog'
+  const Heading = layout === 'embedded' ? 'h2' : 'h1'
   const form = (
     <form
       id={formId}
       className="min-w-0 space-y-5"
+      onInput={() => {
+        dirty.current = true
+      }}
+      onChange={() => {
+        dirty.current = true
+      }}
+      onInvalidCapture={(event) => {
+        const content = event.target.closest('[data-slot="advanced-content"]')
+        if (content?.dataset.state === 'closed')
+          content.parentElement.querySelector('button[data-state="closed"]')?.click()
+        setError('请检查标记的字段。')
+      }}
       onSubmit={async (event) => {
         event.preventDefault()
         if (submitting.current || !onSubmit) return
+        const missing = event.currentTarget.querySelector(
+          '[data-required-choice=""]:not(:disabled)',
+        )
+        if (missing) {
+          missing.focus()
+          setError(`请选择${missing.getAttribute('aria-label') || '必填项'}`)
+          return
+        }
         submitting.current = true
         setBusy(true)
         setError('')
         try {
           const form = event.currentTarget
           await onSubmit(Object.fromEntries(new FormData(form)), form)
+          dirty.current = false
         } catch (e) {
           if (e.name !== 'AbortError') setError(e.message)
         } finally {
@@ -199,15 +300,11 @@ export function FormDialog({
         }
       }}
     >
-      {children}
-      {error && (
-        <p className="form-error text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      )}
+      <FieldGroup>{children}</FieldGroup>
+      {error && <FieldError className="form-error">{error}</FieldError>}
       {footer || (
         <div className="flex justify-end gap-2 border-t pt-4">
-          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+          <Button type="button" variant="outline" disabled={busy} onClick={close}>
             取消
           </Button>
           <Button type="submit" disabled={busy}>
@@ -227,12 +324,15 @@ export function FormDialog({
       >
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 id="page-title" className="text-xl font-semibold">
+            <Heading
+              id={layout === 'embedded' ? undefined : 'page-title'}
+              className="text-xl font-semibold"
+            >
               {title}
-            </h1>
+            </Heading>
             <p className="mt-2 text-sm text-muted-foreground">{description}</p>
           </div>
-          <Button variant="outline" data-slot="dialog-close" onClick={onClose}>
+          <Button variant="outline" data-slot="dialog-close" onClick={close}>
             返回
           </Button>
         </div>
@@ -245,7 +345,7 @@ export function FormDialog({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose()
+        if (!open && !busy) close()
       }}
     >
       <DialogContent

@@ -5,36 +5,47 @@ export const pageNames = {
   home: ['项目', '从一个项目开始，组织每一次交付。'],
   overview: ['项目概览', '源码、环境和服务发布，尽在当前项目。'],
   projects: ['代码仓库', '独立管理仓库配置与下载入口。'],
-  servers: ['服务器', '绑定已接入服务器，或安装 Agent 接入新服务器。'],
+  servers: ['项目服务器', '绑定已接入服务器，或安装 Agent 接入新服务器。'],
   applications: ['环境与服务', '为每个环境中的服务配置仓库和发布分支。'],
+  services: ['服务与部署', '配置服务、选择部署位置并发布。'],
+  environments: ['环境管理', '独立管理项目环境。'],
+  service: ['服务详情', ''],
+  setup: ['配置服务', ''],
   deployments: ['部署发布', '独立发布每个服务，掌握版本与运行状态。'],
   release: ['发布工作台', ''],
   configuration: ['服务配置', ''],
   tasks: ['发布记录', '跟踪发布进度、查看日志和回退结果。'],
-  'system-servers': ['服务器总览', '管理全部服务器与 Agent 接入。'],
+  'system-servers': ['服务器管理', '管理全部服务器与 Agent 接入。'],
   credentials: ['共享 Gitee 凭证', '复用仓库访问凭证，密码加密保存。'],
-  activity: ['全局操作记录', '查看管理操作和源码同步记录。'],
+  activity: ['操作记录', '查看管理操作和源码同步记录。'],
 }
 export function parseRoute() {
   const [path, query = ''] = (location.hash.slice(1) || '/projects').split('?')
   const params = new URLSearchParams(query)
   const match =
-    /^\/projects\/([a-f0-9-]{36})(?:\/(overview|projects|servers|applications|deployments|tasks|release|configuration))?$/.exec(
+    /^\/projects\/([a-f0-9-]{36})(?:\/(overview|projects|servers|applications|deployments|services|environments|service|setup|tasks|release|configuration))?$/.exec(
       path,
     )
   return {
     workspaceId: match?.[1],
     view: match
-      ? match[2] || 'overview'
+      ? { applications: 'services', deployments: 'services', configuration: 'service' }[match[2]] ||
+        match[2] ||
+        'overview'
       : /^\/system\/(system-servers|credentials|activity)$/.exec(path)?.[1] || 'home',
     environmentId: params.get('environment'),
     taskId: params.get('task'),
     targetId: params.get('target'),
     action: params.get('action'),
     editor: params.get('editor'),
+    serviceId: params.get('service'),
+    step: params.get('step'),
+    tab: params.get('tab') || (match?.[2] === 'configuration' ? 'config' : null),
   }
 }
 export function routeUrl(view, workspaceId, environmentId, taskId, extra = {}) {
+  view =
+    { applications: 'services', deployments: 'services', configuration: 'service' }[view] || view
   if (view === 'home') return '#/projects'
   if (['system-servers', 'credentials', 'activity'].includes(view)) return `#/system/${view}`
   const query = new URLSearchParams()
@@ -43,6 +54,9 @@ export function routeUrl(view, workspaceId, environmentId, taskId, extra = {}) {
   if (extra.targetId) query.set('target', extra.targetId)
   if (extra.action) query.set('action', extra.action)
   if (extra.editor) query.set('editor', extra.editor)
+  if (extra.serviceId) query.set('service', extra.serviceId)
+  if (extra.step) query.set('step', extra.step)
+  if (extra.tab) query.set('tab', extra.tab)
   return `#/projects/${workspaceId}/${view}${query.size ? `?${query}` : ''}`
 }
 export const date = (value) =>

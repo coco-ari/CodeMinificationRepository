@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Selection, SelectionOption } from '@/components/selection'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Progress } from '@/components/ui/progress'
-import { Empty, Action } from './shared'
+import { Empty, Action, Status } from './shared'
 import { useConsole, copy, duration, stageLabel, routeUrl } from '@/lib/console'
 
 export function Commit({ value }) {
@@ -25,7 +25,7 @@ export function Commit({ value }) {
           }}
         >
           <GitCommitHorizontal className="size-3.5 shrink-0" />
-          <code className="commit-sha">{value}</code>
+          <code className="commit-sha">{value.slice(0, 10)}</code>
         </Action>
       </TooltipTrigger>
       <TooltipContent className="max-w-72 break-all">{value} · 点击复制</TooltipContent>
@@ -99,21 +99,30 @@ export function ServiceState({ targets, servers }) {
           ? health === 'healthy'
             ? '运行中 · 健康'
             : '运行中 · 健康未确认'
-          : ['exited', 'unpublished', 'missing'].includes(state)
+          : ['exited', 'stopped', 'unpublished', 'missing'].includes(state)
             ? '未运行'
             : '状态待上报'
   })
   const label = states.length ? [...new Set(states)].join(' / ') : '尚未配置部署目标'
   const good = states.length > 0 && states.every((s) => s === '运行中 · 健康')
   const bad = states.some((s) => s === '健康异常')
+  const labelShort = good
+    ? '健康'
+    : bad
+      ? '异常'
+      : states.includes('失联待确认')
+        ? '失联待确认'
+        : states.includes('未运行')
+          ? '未运行'
+          : targets.length
+            ? '待确认'
+            : '待配置'
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          tabIndex={0}
-          aria-label={label}
-          className={`status-dot ${good ? 'good' : bad ? 'bad' : ''}`}
-        />
+        <span tabIndex={0} aria-label={label}>
+          <Status value={good ? 'healthy' : bad ? 'unhealthy' : 'disabled'}>{labelShort}</Status>
+        </span>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -183,25 +192,24 @@ export function ProjectTile({ project }) {
           </TabsList>
         </Tabs>
         <div className="tile-hosts space-y-3">
-          <NativeSelect
+          <Selection
             aria-label={`${project.name}的服务器`}
             value={server?.id || ''}
             onChange={(e) => setServerId(e.target.value)}
             disabled={!servers.length}
           >
-            {!servers.length && <NativeSelectOption value="">未绑定服务器</NativeSelectOption>}
+            {!servers.length && <SelectionOption value="">未绑定服务器</SelectionOption>}
             {servers.map((s) => (
-              <NativeSelectOption key={s.id} value={s.id}>
+              <SelectionOption key={s.id} value={s.id}>
                 {s.name} · {s.online ? '在线' : '离线'}
-              </NativeSelectOption>
+              </SelectionOption>
             ))}
-          </NativeSelect>
+          </Selection>
           <HostResources server={server} />
         </div>
         <div
           className="tile-services"
           aria-label={`${project.name} ${environment?.name || ''}服务列表`}
-          tabIndex={0}
           key={environment?.id}
         >
           {!db.services.length && (
@@ -209,7 +217,7 @@ export function ProjectTile({ project }) {
               暂无服务
             </div>
           )}
-          {db.services.map((service) => {
+          {db.services.slice(0, 3).map((service) => {
             const source = db.environmentSources.find(
               (s) => s.environmentId === environment?.id && s.serviceId === service.id,
             )
@@ -237,11 +245,13 @@ export function ProjectTile({ project }) {
                               active.id,
                             ))
                           : target
-                            ? go('release', { targetId: target.id })
+                            ? targets.length === 1
+                              ? go('release', { targetId: target.id })
+                              : go('service', { serviceId: service.id })
                             : go('applications')
                       }
                     >
-                      {active ? '查看进度' : target ? '更新' : '配置'}
+                      {active ? '查看进度' : target ? '发布' : '配置'}
                     </Button>
                   </span>
                 </div>
@@ -282,8 +292,8 @@ export function ProjectTile({ project }) {
           <Plus />
           新增服务
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => enter(project.id)}>
-          进入项目 <ArrowUpRight />
+        <Button variant="ghost" size="sm" onClick={() => go('services')}>
+          查看全部 {db.services.length} 个服务 <ArrowUpRight />
         </Button>
       </CardFooter>
     </Card>

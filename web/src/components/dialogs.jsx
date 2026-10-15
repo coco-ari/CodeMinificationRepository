@@ -74,7 +74,8 @@ export function Confirmation({ value, onClose }) {
               }
             }}
           >
-            {busy && <LoaderCircle className="animate-spin" />}确认
+            {busy && <LoaderCircle className="animate-spin" />}
+            {value.confirmLabel || '确认'}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -132,7 +133,7 @@ function RepositoryForm({ item, onClose }) {
         id="project-dialog"
         formId="project-form"
         title={item ? '编辑仓库' : '添加仓库'}
-        description="发布分支在环境与服务中选择，不会改变这里的默认下载分支。"
+        description="发布分支在服务配置中选择，不会改变这里的默认下载分支。"
         onClose={onClose}
         submitLabel="保存仓库"
         onSubmit={async (input) => {
@@ -205,16 +206,16 @@ function RepositoryForm({ item, onClose }) {
     </>
   )
 }
-function ServiceForm({ item, onClose, onSave }) {
+export function ServiceForm({ item, onClose, onSave, step = false }) {
   const { data } = useConsole()
   const [serviceKind, setServiceKind] = useState(item?.kind || 'java')
   const hasTargets = data.targets.some((target) => target.serviceId === item?.id)
   return (
     <FormDialog
       title={item ? '编辑服务' : '新增服务'}
-      description={`项目：${data.project.name}`}
+      description={`项目：${data.project.name}。服务名称和模块对所有环境生效。`}
       onClose={onClose}
-      submitLabel="保存服务"
+      submitLabel={step ? '保存并配置源码' : '保存服务'}
       onSubmit={(input) => onSave({ ...input, kind: serviceKind })}
     >
       <Field name="name" label="服务名称" required maxLength={80} defaultValue={item?.name || ''} />
@@ -298,7 +299,7 @@ function BindingForm({ onClose }) {
     </FormDialog>
   )
 }
-function SourceForm({ item, onClose }) {
+export function SourceForm({ item, onClose, onSaved }) {
   const { data, environmentId, find, endpoint, request, refresh } = useConsole()
   const selected = data.environmentSources.find(
     (s) => s.environmentId === environmentId && s.serviceId === item.id,
@@ -310,17 +311,18 @@ function SourceForm({ item, onClose }) {
   return (
     <FormDialog
       title="配置环境源码"
-      description={`${find('environments', environmentId)?.name} / ${item.name}`}
+      description={`${find('environments', environmentId)?.name} / ${item.name}。仓库和分支对该环境的所有部署位置生效。`}
       onClose={onClose}
-      submitLabel="保存源码配置"
+      submitLabel={onSaved ? '保存并配置部署' : '保存源码配置'}
       onSubmit={async () => {
         await request(
           `${endpoint}/environment-sources`,
           { environmentId, serviceId: item.id, sourceProjectId: repository, branch },
           'PUT',
         )
-        onClose()
         await refresh()
+        if (onSaved) onSaved()
+        else onClose()
       }}
     >
       <Field

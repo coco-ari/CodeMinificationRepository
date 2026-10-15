@@ -131,7 +131,8 @@
   gap: 20px;
 }
 .project-tile {
-  height: 570px;
+  height: auto;
+  align-self: start;
   padding-bottom: 0;
   overflow: hidden;
   gap: 16px;
@@ -148,16 +149,10 @@
   min-height: 112px;
 }
 .tile-services {
-  min-height: 0;
+  min-width: 0;
   flex: 1;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  overscroll-behavior: contain;
-  margin-right: -8px;
-  padding-right: 8px;
-  animation: page-arrive 180ms ease both;
-  scrollbar-width: thin;
 }
+
 .tile-service {
   border-bottom: 1px solid var(--border);
   min-height: 82px;
@@ -199,7 +194,7 @@
   overflow: hidden;
   white-space: nowrap;
   font-size: 12px;
-  mask-image: linear-gradient(to right, #000 62%, transparent 100%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   vertical-align: middle;
 }
 .status-dot {
@@ -457,13 +452,13 @@
   min-width: 0;
   max-width: 100%;
 }
-.review-details dd:has(select) {
+.review-details dd:has([role='combobox']) {
   width: 100%;
 }
-.review-details > div:has(select) {
+.review-details > div:has([role='combobox']) {
   display: block;
 }
-.review-details > div:has(select) dt {
+.review-details > div:has([role='combobox']) dt {
   margin-bottom: 6px;
 }
 .commit-option > span {
@@ -683,7 +678,7 @@
   .review-details dd {
     text-align: left;
   }
-  .review-details > div:has(select) {
+  .review-details > div:has([role='combobox']) {
     grid-column: 1 / -1;
   }
   .stage-label {
@@ -705,7 +700,7 @@
 }
 @media (pointer: coarse) {
   .project-tile {
-    height: 610px;
+    height: auto;
   }
   .tile-service [data-slot='button'] {
     min-height: 40px;
@@ -734,5 +729,42 @@
   .section-tabs [data-slot='tabs-trigger'] {
     padding-inline: 7px;
     font-size: 12px;
+  }
+}
+
+[data-slot='data-table'] table {
+  table-layout: fixed;
+}
+[data-slot='data-table'] th {
+  height: 44px;
+  padding: 8px 16px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+[data-slot='data-table'] td {
+  padding: 14px 16px;
+  white-space: normal;
+  font-size: 14px;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+[data-slot='data-table'] [data-slot='table-header'] {
+  background: var(--muted);
+}
+[data-slot='select-trigger'],
+[role='combobox'] {
+  max-width: 100%;
+}
+.inline-editor {
+  max-width: 1000px;
+  margin-inline: auto;
+}
+[data-slot='advanced-content'][data-state='closed'] {
+  display: none;
+}
+@media (min-width: 768px) and (max-width: 1100px) {
+  [data-slot='data-table'] td,
+  [data-slot='data-table'] th {
+    padding-inline: 10px;
   }
 }

@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Field, FormDialog, Notice } from './shared'
+import { Advanced, MappingRows } from './config-fields'
+import { FieldSet, FieldLegend } from '@/components/ui/field'
+import { Field, FormDialog, Notice, Empty } from './shared'
 import { Separator } from '@/components/ui/separator'
 import { useConsole } from '@/lib/console'
 const lines = (value) =>
@@ -9,21 +11,33 @@ const lines = (value) =>
     .filter(Boolean)
 const Grid = ({ children }) => <div className="grid gap-4 sm:grid-cols-2">{children}</div>
 const Section = ({ title, children }) => (
-  <section className="space-y-4">
-    <Separator />
-    <h3 className="font-semibold">{title}</h3>
+  <FieldSet className="border-t pt-5">
+    <FieldLegend>{title}</FieldLegend>
     {children}
-  </section>
+  </FieldSet>
 )
-export function TargetForm({ item, onClose }) {
+export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
   const { data, environmentId, endpoint, request, refresh, notify } = useConsole()
-  const available = data.servers.filter((s) => !s.revoked)
+  const available = data.servers.filter(
+    (s) =>
+      !s.revoked &&
+      (item ||
+        !fixedService ||
+        !data.targets.some(
+          (t) =>
+            t.serverId === s.id &&
+            t.serviceId === fixedService.id &&
+            t.environmentId === environmentId,
+        )),
+  )
   const [env, setEnv] = useState(
     item?.environmentId || environmentId || data.environments[0]?.id || '',
   )
   const choices = data.services.filter(
     (s) =>
-      item || data.environmentSources.some((v) => v.environmentId === env && v.serviceId === s.id),
+      (item ||
+        data.environmentSources.some((v) => v.environmentId === env && v.serviceId === s.id)) &&
+      (!fixedService || s.id === fixedService.id),
   )
   const [serviceId, setService] = useState(item?.serviceId || choices[0]?.id || '')
   const [serverId, setServer] = useState(item?.serverId || available[0]?.id || '')
@@ -41,27 +55,32 @@ export function TargetForm({ item, onClose }) {
       `${module === '.' ? '' : `${module}/`}${data.services.find((s) => s.id === id)?.kind === 'static' ? 'dist' : 'target/*.jar'}`,
     )
   }
+  if (!item && !available.length)
+    return (
+      <Empty
+        title="没有可用的部署位置"
+        description="当前服务已配置到所有可用服务器，可返回服务详情编辑已有配置，或先绑定其他服务器。"
+        label="返回服务列表"
+        action={onClose}
+      />
+    )
   return (
     <FormDialog
       wide
       title={item ? '编辑部署目标' : '新增部署目标'}
-      description="为单个服务配置部署位置、运行参数和健康检查。"
+      description="构建和运行配置仅影响当前部署位置，下次发布时生效。"
       onClose={onClose}
       submitLabel="保存部署目标"
       onSubmit={async (input) => {
         if (!serviceId) throw new Error('请先配置该环境的服务源码')
         if (!serverId) throw new Error('请先绑定服务器')
         const body = { environmentId: env, serviceId, serverId }
-        const ports = lines(input.ports).map((line) => {
-          const match = /^(\d{1,3}(?:\.\d{1,3}){3}):(\d+):(\d+)$/.exec(line)
-          if (!match) throw new Error('端口映射请使用 IP:服务器端口:容器端口 格式')
-          return { host: match[1], hostPort: Number(match[2]), containerPort: Number(match[3]) }
-        })
-        const volumes = lines(input.volumes).map((line) => {
-          const i = line.indexOf(':')
-          if (i < 1 || line[i + 1] !== '/') throw new Error('持久化卷请使用 卷名:/容器路径 格式')
-          return { name: line.slice(0, i), mountPath: line.slice(i + 1) }
-        })
+        const ports = JSON.parse(input.ports || '[]').map((port) => ({
+          ...port,
+          hostPort: Number(port.hostPort),
+          containerPort: Number(port.containerPort),
+        }))
+        const volumes = JSON.parse(input.volumes || '[]')
         body.config = {
           module,
           artifactPath: artifact,
@@ -93,14 +112,15 @@ export function TargetForm({ item, onClose }) {
             intervalSeconds: Number(input.healthInterval),
           },
         }
-        await request(
+        const saved = await request(
           `${endpoint}/targets${item ? `/${item.id}` : ''}`,
           body,
           item ? 'PUT' : 'POST',
         )
-        onClose()
         await refresh()
-        notify('部署目标已保存')
+        if (onSaved) onSaved(saved)
+        else onClose()
+        notify('部署配置已保存；发布后生效')
       }}
     >
       <Section title="部署位置">
@@ -109,7 +129,7 @@ export function TargetForm({ item, onClose }) {
             name="environmentId"
             label="环境"
             value={env}
-            disabled={!!item}
+            disabled={!!item || !!fixedService}
             required
             choices={data.environments.map((e) => [e.id, e.name])}
             onChange={(e) => {
@@ -128,7 +148,7 @@ export function TargetForm({ item, onClose }) {
             name="serviceId"
             label="服务"
             value={serviceId}
-            disabled={!!item}
+            disabled={!!item || !!fixedService}
             required
             choices={
               choices.length ? choices.map((s) => [s.id, s.name]) : [['', '请先配置环境源码']]
@@ -223,25 +243,27 @@ export function TargetForm({ item, onClose }) {
               </Notice>
             </>
           )}
-          <Grid>
-            <Field
-              name="buildCpus"
-              label="构建 CPU 上限（核）"
-              type="number"
-              min="0.1"
-              max="32"
-              step="0.1"
-              defaultValue={c.build?.cpus ?? 1}
-            />
-            <Field
-              name="buildMemory"
-              label="构建内存上限（MB）"
-              type="number"
-              min="256"
-              max="65536"
-              defaultValue={c.build?.memoryMb ?? 1024}
-            />
-          </Grid>
+          <Advanced title="构建资源限制">
+            <Grid>
+              <Field
+                name="buildCpus"
+                label="构建 CPU 上限（核）"
+                type="number"
+                min="0.1"
+                max="32"
+                step="0.1"
+                defaultValue={c.build?.cpus ?? 1}
+              />
+              <Field
+                name="buildMemory"
+                label="构建内存上限（MB）"
+                type="number"
+                min="256"
+                max="65536"
+                defaultValue={c.build?.memoryMb ?? 1024}
+              />
+            </Grid>
+          </Advanced>
         </Section>
         {!isStatic && (
           <>
@@ -255,64 +277,67 @@ export function TargetForm({ item, onClose }) {
                 />
                 <Field name="profile" label="Spring Profile" defaultValue={c.profile ?? 'test'} />
               </Grid>
-              <Grid>
-                <Field
-                  name="cpus"
-                  label="运行 CPU 上限（核）"
-                  type="number"
-                  min="0.1"
-                  max="32"
-                  step="0.1"
-                  defaultValue={c.runtime?.cpus ?? 0.5}
-                />
-                <Field
-                  name="memory"
-                  label="运行内存上限（MB）"
-                  type="number"
-                  min="128"
-                  max="65536"
-                  defaultValue={c.runtime?.memoryMb ?? 512}
-                />
-              </Grid>
-              <Grid>
-                <Field
-                  name="jvmArgs"
-                  label="JVM 参数（每行一个）"
-                  multiline
-                  rows={5}
-                  defaultValue={(
-                    c.jvmArgs || [
-                      '-Duser.timezone=Asia/Shanghai',
-                      '-Xms64m',
-                      '-Xmx192m',
-                      '-XX:MaxMetaspaceSize=128m',
-                      '-XX:+ExitOnOutOfMemoryError',
-                    ]
-                  ).join('\n')}
-                />
-                <Field
-                  name="args"
-                  label="应用参数（每行一个）"
-                  multiline
-                  rows={5}
-                  defaultValue={(c.args || []).join('\n')}
-                  placeholder="--ybt.enable=false"
-                />
-              </Grid>
+              <Advanced title="运行资源与附加参数">
+                <Grid>
+                  <Field
+                    name="cpus"
+                    label="运行 CPU 上限（核）"
+                    type="number"
+                    min="0.1"
+                    max="32"
+                    step="0.1"
+                    defaultValue={c.runtime?.cpus ?? 0.5}
+                  />
+                  <Field
+                    name="memory"
+                    label="运行内存上限（MB）"
+                    type="number"
+                    min="128"
+                    max="65536"
+                    defaultValue={c.runtime?.memoryMb ?? 512}
+                  />
+                </Grid>
+                <Grid>
+                  <Field
+                    name="jvmArgs"
+                    label="JVM 参数（每行一个）"
+                    multiline
+                    rows={5}
+                    defaultValue={(
+                      c.jvmArgs || [
+                        '-Duser.timezone=Asia/Shanghai',
+                        '-Xms64m',
+                        '-Xmx192m',
+                        '-XX:MaxMetaspaceSize=128m',
+                        '-XX:+ExitOnOutOfMemoryError',
+                      ]
+                    ).join('\n')}
+                  />
+                  <Field
+                    name="args"
+                    label="应用参数（每行一个）"
+                    multiline
+                    rows={5}
+                    defaultValue={(c.args || []).join('\n')}
+                    placeholder="--ybt.enable=false"
+                  />
+                </Grid>
+              </Advanced>
             </Section>
-            <Section title="端口、网络与存储">
-              <Grid>
-                <Field
-                  name="ports"
-                  label="端口映射（每行一条）"
-                  multiline
-                  defaultValue={(
-                    c.ports || [{ host: '127.0.0.1', hostPort: 18080, containerPort: 8080 }]
-                  )
-                    .map((v) => `${v.host}:${v.hostPort}:${v.containerPort}`)
-                    .join('\n')}
-                  hint="IP:服务器端口:容器端口；服务器端口大于 1023。"
-                />
+            <Section title="网络与存储">
+              <MappingRows
+                name="ports"
+                title="端口映射"
+                initial={c.ports || []}
+                emptyRow={{ host: '127.0.0.1', hostPort: '', containerPort: '8080' }}
+                columns={[
+                  { key: 'host', label: '绑定 IP' },
+                  { key: 'hostPort', label: '服务器端口', type: 'number', min: 1, max: 65535 },
+                  { key: 'containerPort', label: '容器端口', type: 'number', min: 1, max: 65535 },
+                ]}
+                hint="留空时不向宿主机发布端口；平台网络内仍可访问容器。"
+              />
+              <Advanced title="Docker 网络与持久化卷">
                 <Field
                   name="networks"
                   label="Docker 网络（每行一个）"
@@ -320,17 +345,18 @@ export function TargetForm({ item, onClose }) {
                   defaultValue={(c.networks || []).join('\n')}
                   hint="留空使用平台独立网络。"
                 />
-              </Grid>
-              <Field
-                name="volumes"
-                label="持久化卷（每行一条）"
-                multiline
-                rows={2}
-                defaultValue={(c.volumes || [{ name: 'logs', mountPath: '/app/logs' }])
-                  .map((v) => `${v.name}:${v.mountPath}`)
-                  .join('\n')}
-                hint="例如 logs:/app/logs，仅支持 /app 子目录中的平台命名卷。"
-              />
+                <MappingRows
+                  name="volumes"
+                  title="持久化卷"
+                  initial={c.volumes || [{ name: 'logs', mountPath: '/app/logs' }]}
+                  emptyRow={{ name: '', mountPath: '/app/' }}
+                  columns={[
+                    { key: 'name', label: '卷名' },
+                    { key: 'mountPath', label: '容器目录' },
+                  ]}
+                  hint="仅支持 /app 子目录中的平台命名卷。"
+                />
+              </Advanced>
             </Section>
           </>
         )}

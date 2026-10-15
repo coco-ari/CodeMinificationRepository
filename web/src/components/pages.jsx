@@ -1,3 +1,12 @@
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet'
+import { ServiceList, OnboardingChecklist } from './service-pages'
+import { DataTable } from './data-table'
 import { Commit, HostResources } from './workspace-home'
 import { useState } from 'react'
 import {
@@ -74,7 +83,8 @@ export function Overview() {
           项目设置
         </Button>
       </div>
-      <Targets compact />
+      <OnboardingChecklist />
+      <ServiceList compact />
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader className="flex-row items-center justify-between">
@@ -260,98 +270,129 @@ function RepositoryActions({ repo }) {
 
 export function Repositories() {
   const { data, open } = useConsole()
-  const [search, setSearch] = useState('')
-  const repos = data.repositories.filter((r) =>
-    [r.name, r.repository, r.branch].some((v) => v.toLowerCase().includes(search.toLowerCase())),
+  const repoName = (repo) => (
+    <div className="min-w-0">
+      <Button
+        variant="link"
+        className="repo-name font-medium"
+        onClick={() => open('repository', repo)}
+      >
+        {repo.name}
+      </Button>
+      <a
+        className="mt-1 block truncate text-xs text-muted-foreground"
+        href={repo.repository}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {repo.repository}
+      </a>
+      <div className="mt-2">
+        <Status value={repo.enabled ? repo.status : 'disabled'} />
+      </div>
+      {repo.error && <p className="mt-2 break-words text-xs text-destructive">{repo.error}</p>}
+      {repo.needsDownloadTokenReset && (
+        <p className="mt-1 text-xs text-muted-foreground">首次下载前请重置密码</p>
+      )}
+    </div>
   )
   return (
-    <div className="space-y-5">
-      <Input
-        id="search"
-        aria-label="搜索代码仓库"
-        placeholder="搜索仓库…"
-        className="max-w-sm"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
+    <div id="project-list" className="space-y-4">
+      <DataTable
+        data={data.repositories}
+        searchPlaceholder="搜索代码仓库…"
+        searchText={(r) => [r.name, r.repository, r.branch].join(' ')}
+        filters={[
+          { value: 'enabled', label: '已启用' },
+          { value: 'disabled', label: '已停用' },
+        ]}
+        filterValue={(r) => (r.enabled ? 'enabled' : 'disabled')}
+        rowProps={(r) => ({ 'data-repository-id': r.id, className: 'project-card' })}
+        columns={[
+          {
+            accessorKey: 'name',
+            header: '仓库',
+            sortingFn: 'text',
+            meta: { className: 'w-[35%] max-w-64' },
+            cell: ({ row }) => repoName(row.original),
+          },
+          {
+            accessorKey: 'branch',
+            header: '下载分支',
+            sortingFn: 'text',
+            meta: { className: 'max-w-36' },
+            cell: ({ row }) => (
+              <span className="block truncate font-mono text-xs" title={row.original.branch}>
+                {row.original.branch}
+              </span>
+            ),
+          },
+          {
+            id: 'sync',
+            header: '最近同步',
+            cell: ({ row }) => (
+              <span className="text-xs text-muted-foreground">
+                {row.original.lastSuccess ? date(row.original.lastSuccess.at) : '尚未同步'}
+              </span>
+            ),
+          },
+          {
+            id: 'enabled',
+            header: '启用',
+            meta: { className: 'w-16' },
+            cell: ({ row }) => <RepositoryToggle repo={row.original} />,
+          },
+          {
+            id: 'actions',
+            header: '操作',
+            meta: { className: 'w-40 text-right' },
+            cell: ({ row }) => <RepositoryActions repo={row.original} />,
+          },
+        ]}
+        renderMobile={(repo) => (
+          <>
+            {repoName(repo)}
+            <div className="flex items-center justify-between gap-2">
+              <Badge variant="outline" className="max-w-40 truncate">
+                {repo.branch}
+              </Badge>
+              <RepositoryToggle repo={repo} />
+            </div>
+            <RepositoryActions repo={repo} />
+          </>
+        )}
+        emptyTitle="尚未添加代码仓库"
       />
-      <Card id="project-list" className="overflow-hidden py-0">
-        <Table className="repository-table">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="pl-5">仓库</TableHead>
-              <TableHead className="repo-branch-cell">下载分支</TableHead>
-              <TableHead className="hidden md:table-cell">最近同步</TableHead>
-              <TableHead className="hidden sm:table-cell">启用</TableHead>
-              <TableHead className="text-right pr-5">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {repos.map((repo) => (
-              <TableRow key={repo.id} className="project-card">
-                <TableCell className="repo-name-cell whitespace-normal py-4 pl-5">
-                  <Button
-                    variant="link"
-                    className="repo-name"
-                    onClick={() => open('repository', repo)}
-                  >
-                    {repo.name}
-                  </Button>
-                  <a
-                    className="mt-1 block truncate text-xs text-muted-foreground"
-                    href={repo.repository}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {repo.repository}
-                  </a>
-                  <div className="mt-2">
-                    <Status value={repo.enabled ? repo.status : 'disabled'} />
-                  </div>
-                  {repo.error && <p className="mt-2 text-xs text-destructive">{repo.error}</p>}
-                  {repo.needsDownloadTokenReset && (
-                    <p className="mt-2 text-xs text-muted-foreground">首次下载前请重置密码</p>
-                  )}
-                </TableCell>
-                <TableCell className="repo-branch-cell">
-                  <Badge variant="outline" className="repo-branch" title={repo.branch}>
-                    {repo.branch}
-                  </Badge>
-                </TableCell>
-                <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
-                  {repo.lastSuccess ? date(repo.lastSuccess.at) : '尚未同步'}
-                </TableCell>
-                <TableCell className="hidden sm:table-cell">
-                  <RepositoryToggle repo={repo} />
-                </TableCell>
-                <TableCell className="pr-4">
-                  <RepositoryActions repo={repo} />
-                </TableCell>
-              </TableRow>
-            ))}
-            {!repos.length && (
-              <TableRow>
-                <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                  {search ? '没有匹配的仓库' : '尚未添加代码仓库'}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        默认下载分支供浏览器与 Jenkins 使用；服务的发布分支在「环境与服务」中单独配置。
+      <p className="text-xs text-muted-foreground">
+        默认下载分支供浏览器与 Jenkins 使用；服务的发布分支在「服务与部署」中单独配置。
       </p>
     </div>
   )
 }
+
 export function Servers() {
   const { data, scope, open, request, endpoint, refresh, confirm, notify } = useConsole()
-  const [selectedServer, setSelectedServer] = useState('')
+  const [selectedServer, setSelectedServer] = useState(null)
+  const selected = data.servers.find((s) => s.id === selectedServer)
+  const remove = (server) =>
+    confirm(
+      '删除服务器记录',
+      '删除「' +
+        server.name +
+        '」及其项目绑定。有关联部署目标或发布历史时不能删除。此操作仅清理中心记录，不卸载 Agent，也不删除服务器上的容器和文件。',
+      async () => {
+        await request('/api/deploy/servers/' + server.id, {}, 'DELETE')
+        await refresh()
+        notify('服务器记录已删除')
+      },
+    )
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {scope && (
-        <div className="space-y-4">
-          <Notice>CPU、内存和磁盘是整台服务器的指标；这里只显示当前项目的服务。</Notice>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            复用已接入的服务器，无需重复安装 Agent。资源指标为整台服务器的数据。
+          </p>
           <Button className="bind-server" variant="outline" onClick={() => open('binding')}>
             <Plus />
             绑定已接入服务器
@@ -362,468 +403,262 @@ export function Servers() {
         {!data.servers.length && (
           <Empty
             title="接入第一台服务器"
-            description="Agent 主动连接中心，上报主机资源和受管服务状态。"
-            label="接入新服务器"
+            description="安装 Agent 后即可配置项目服务。"
+            label="接入服务器"
             action={() => open('server')}
           />
         )}
-        {data.servers.map((server) => {
-          const metrics = server.metrics || {},
-            memory = metrics.memory || {},
-            disk = metrics.disk || {},
-            cpu = metrics.cpuPercent ?? metrics.cpu?.percent
-          return (
-            <Card key={server.id} data-server-id={server.id} className="server-card shadow-none">
-              <CardHeader>
-                <div className="mb-2 flex items-center justify-between">
-                  <Server className="size-5 text-muted-foreground" />
-                  <Status value={server.online && !server.revoked ? 'online' : 'disabled'}>
-                    {server.revoked
-                      ? '已撤销'
-                      : server.online
-                        ? '在线'
-                        : server.registeredAt
-                          ? '失联'
-                          : '等待接入'}
-                  </Status>
-                </div>
-                <CardTitle>{server.name}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <HostResources server={server} />
-                <p className="text-xs text-muted-foreground">
-                  Agent {server.version || '等待接入'}
-                </p>
-                <p className="border-t pt-3 text-xs text-muted-foreground">
-                  最近采集：{date(server.lastSeenAt)}
-                </p>
-                {!server.online && server.registeredAt && !server.revoked && (
-                  <Notice error>连接已中断，业务当前状态待确认。保留最后上报的状态。</Notice>
-                )}
-              </CardContent>
-              <CardFooter className="flex flex-wrap gap-2">
-                {scope && (
+        {data.servers.map((server) => (
+          <Card key={server.id} data-server-id={server.id} className="server-card py-5">
+            <CardHeader className="gap-3">
+              <div className="flex items-center justify-between">
+                <Server className="size-5 text-muted-foreground" />
+                <Status
+                  value={
+                    server.online && !server.revoked
+                      ? 'online'
+                      : server.registeredAt && !server.revoked
+                        ? 'unhealthy'
+                        : 'disabled'
+                  }
+                >
+                  {server.revoked
+                    ? '已撤销'
+                    : server.online
+                      ? '在线'
+                      : server.registeredAt
+                        ? '失联'
+                        : '等待接入'}
+                </Status>
+              </div>
+              <CardTitle className="break-words">{server.name}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <HostResources server={server} />
+              <div className="flex flex-wrap justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
+                <span>Agent {server.version || '等待接入'}</span>
+                <span>最近采集：{date(server.lastSeenAt)}</span>
+              </div>
+              {!server.online && server.registeredAt && !server.revoked && (
+                <Notice error>连接已中断，业务当前状态待确认。</Notice>
+              )}
+            </CardContent>
+            <CardFooter className="justify-between gap-2">
+              <Button variant="outline" size="sm" onClick={() => setSelectedServer(server.id)}>
+                查看详情
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSelectedServer(selectedServer === server.id ? '' : server.id)}
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label={server.name + ' · 更多操作'}
                   >
-                    查看服务器
+                    <MoreHorizontal />
                   </Button>
-                )}
-                {!scope && server.revoked && (
-                  <Button
-                    variant="destructive"
-                    onClick={() =>
-                      confirm(
-                        '删除服务器记录',
-                        `删除「${server.name}」及其项目绑定。有关联部署目标或发布历史时不能删除。此操作仅清理中心记录，不卸载 Agent，也不删除服务器上的容器和文件。`,
-                        async () => {
-                          await request(`/api/deploy/servers/${server.id}`, {}, 'DELETE')
-                          await refresh()
-                          notify('服务器记录已删除')
-                        },
-                      )
-                    }
-                  >
-                    删除记录
-                  </Button>
-                )}
-                {scope ? (
-                  <Action
-                    onClick={async () => {
-                      await request(`${endpoint}/servers/${server.id}`, {}, 'DELETE')
-                      await refresh()
-                      notify('已解除项目绑定')
-                    }}
-                  >
-                    解除项目绑定
-                  </Action>
-                ) : (
-                  !server.revoked && (
-                    <Button
-                      variant="outline"
-                      onClick={() =>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {scope ? (
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        confirm(
+                          '解除项目绑定',
+                          '仅解除此项目与服务器的关联，不撤销 Agent。存在部署目标时不能解除绑定。',
+                          async () => {
+                            await request(endpoint + '/servers/' + server.id, {}, 'DELETE')
+                            await refresh()
+                            notify('已解除项目绑定')
+                          },
+                        )
+                      }
+                    >
+                      解除项目绑定
+                    </DropdownMenuItem>
+                  ) : server.revoked ? (
+                    <DropdownMenuItem variant="destructive" onSelect={() => remove(server)}>
+                      删除记录
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() =>
                         confirm(
                           '撤销服务器接入',
-                          `撤销「${server.name}」后，它将无法再连接中心，影响所有绑定项目。已有业务容器会继续运行。`,
+                          '撤销「' +
+                            server.name +
+                            '」后将无法连接中心，影响所有绑定项目。已有业务容器继续运行。',
                           async () => {
-                            await request(`/api/deploy/servers/${server.id}/revoke`, {})
+                            await request('/api/deploy/servers/' + server.id + '/revoke', {})
                             await refresh()
                           },
                         )
                       }
                     >
                       撤销接入
-                    </Button>
-                  )
-                )}
-              </CardFooter>
-            </Card>
-          )
-        })}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </CardFooter>
+          </Card>
+        ))}
       </div>
-      {scope && selectedServer && (
-        <div className="space-y-4">
-          <h2 className="font-semibold">
-            {data.servers.find((s) => s.id === selectedServer)?.name} · 当前项目的服务
-          </h2>
-          <Targets serverId={selectedServer} />
-        </div>
-      )}
+      <Sheet
+        open={!!selected}
+        onOpenChange={(value) => {
+          if (!value) setSelectedServer(null)
+        }}
+      >
+        <SheetContent className="overflow-y-auto sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>{selected?.name}</SheetTitle>
+            <SheetDescription>
+              {scope ? '当前项目在该服务器上的部署位置' : '该服务器的 Agent 与部署状态'}
+            </SheetDescription>
+          </SheetHeader>
+          {selected && (
+            <div className="space-y-5 px-4">
+              <HostResources server={selected} />
+              <p className="text-xs text-muted-foreground">最近采集：{date(selected.lastSeenAt)}</p>
+              {data.targets
+                .filter((t) => t.serverId === selected.id)
+                .map((target) => (
+                  <div key={target.id} className="rounded-lg border p-3">
+                    <p className="font-medium">
+                      {data.services.find((s) => s.id === target.serviceId)?.name || '服务'}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {data.environments.find((e) => e.id === target.environmentId)?.name}
+                    </p>
+                    <Button
+                      variant="link"
+                      className="mt-2 h-auto p-0"
+                      onClick={() => {
+                        location.hash = routeUrl(
+                          'service',
+                          target.applicationId,
+                          target.environmentId,
+                          null,
+                          { serviceId: target.serviceId, targetId: target.id },
+                        )
+                      }}
+                    >
+                      查看服务 <ArrowRight />
+                    </Button>
+                  </div>
+                ))}
+              {!data.targets.some((t) => t.serverId === selected.id) && (
+                <p className="text-sm text-muted-foreground">尚未配置部署位置。</p>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
 export function Services() {
-  const { data, environmentId, open, navigate, route, scope } = useConsole()
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs
-          value={environmentId || ''}
-          onValueChange={(id) => navigate(route.view, null, id)}
-          className="max-w-full overflow-x-auto overflow-y-hidden"
-        >
-          <TabsList>
-            {data.environments.map((env) => (
-              <TabsTrigger key={env.id} value={env.id}>
-                {env.name}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => open('environment')}>
-            <Plus />
-            新增环境
-          </Button>
-          <Button onClick={() => open('service')}>
-            <Plus />
-            新增服务
-          </Button>
-        </div>
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() =>
-          open(
-            'environment',
-            data.environments.find((e) => e.id === environmentId),
-          )
-        }
-      >
-        <Settings2 />
-        编辑当前环境
-      </Button>
-      <Card className="overflow-hidden py-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="pl-5">服务</TableHead>
-              <TableHead>源码</TableHead>
-              <TableHead className="hidden lg:table-cell">部署位置</TableHead>
-              <TableHead>操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.services.map((service) => {
-              const source = data.environmentSources.find(
-                  (s) => s.environmentId === environmentId && s.serviceId === service.id,
-                ),
-                targets = data.targets.filter(
-                  (t) => t.serviceId === service.id && t.environmentId === environmentId,
-                )
-              return (
-                <TableRow key={service.id} data-service-id={service.id}>
-                  <TableCell className="max-w-44 whitespace-normal py-5 pl-5">
-                    <p className="font-medium">{service.name}</p>
-                    <p className="mt-1 break-all text-xs text-muted-foreground">
-                      {service.kind === 'static' ? '静态站点' : 'Java'} · {service.module}
-                    </p>
-                  </TableCell>
-                  <TableCell className="max-w-40 whitespace-normal">
-                    <p className="text-sm">
-                      {data.repositories.find((r) => r.id === source?.sourceProjectId)?.name ||
-                        '未关联仓库'}
-                    </p>
-                    <p className="mt-1 break-all text-xs text-muted-foreground">
-                      {source?.branch || '请配置发布分支'}
-                    </p>
-                  </TableCell>
-                  <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
-                    {targets.map((t) => (
-                      <p className="py-1" key={t.id}>
-                        {data.servers.find((s) => s.id === t.serverId)?.name}
-                      </p>
-                    ))}
-                    {!targets.length && '待配置'}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex max-w-72 flex-wrap gap-1">
-                      {targets.map((t) => (
-                        <Button
-                          key={t.id}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            location.hash = routeUrl('configuration', scope, environmentId, null, {
-                              targetId: t.id,
-                            })
-                          }}
-                        >
-                          查看配置
-                          {targets.length > 1
-                            ? ` · ${data.servers.find((s) => s.id === t.serverId)?.name}`
-                            : ''}
-                        </Button>
-                      ))}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={!environmentId || !data.repositories.length}
-                        onClick={() => open('source', service)}
-                      >
-                        配置当前环境源码
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => open('service', service)}>
-                        编辑服务
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-            {!data.services.length && (
-              <TableRow>
-                <TableCell colSpan={4} className="h-28 text-center text-muted-foreground">
-                  暂无服务。新增服务后关联仓库与分支。
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-    </div>
-  )
+  return <ServiceList />
 }
 export function Targets({ compact = false, serverId }) {
-  const { data, targets, find, open, scope, environmentId, navigate } = useConsole()
-  const items = serverId ? data.targets.filter((t) => t.serverId === serverId) : targets
-  return (
-    <div className="space-y-5">
-      {!items.length ? (
-        <Empty
-          title="当前环境暂无部署目标"
-          description="关联服务源码并绑定服务器后，配置部署位置。"
-          label="新增部署目标"
-          action={() => open('target')}
-        />
-      ) : (
-        <Card className="overflow-hidden py-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5">服务 / 环境</TableHead>
-                <TableHead className="hidden md:table-cell">服务器</TableHead>
-                <TableHead>版本 / 状态</TableHead>
-                <TableHead>操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((target) => {
-                const server = find('servers', target.serverId),
-                  observation = target.observation || {},
-                  current = target.currentRelease || {},
-                  running = observation.state || observation.status,
-                  health = observation.health || observation.healthStatus,
-                  isStatic = target.config?.kind === 'static'
-                const canManage =
-                  target.mode === 'managed' &&
-                  server?.mode === 'managed' &&
-                  !server.revoked &&
-                  server.online
-                const active = data.tasks.find(
-                  (task) => task.targetId === target.id && !finished(task),
-                )
-                return (
-                  <TableRow className="target-card" key={target.id} data-target-id={target.id}>
-                    <TableCell className="max-w-48 whitespace-normal py-5 pl-5">
-                      <Button
-                        variant="link"
-                        className="h-auto max-w-full whitespace-normal p-0 text-left"
-                        onClick={() => {
-                          location.hash = routeUrl(
-                            'configuration',
-                            scope,
-                            target.environmentId,
-                            null,
-                            { targetId: target.id },
-                          )
-                        }}
-                      >
-                        {find('services', target.serviceId)?.name}
-                      </Button>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {find('environments', target.environmentId)?.name}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground md:hidden">{server?.name}</p>
-                    </TableCell>
-                    <TableCell className="hidden max-w-44 whitespace-normal text-xs md:table-cell">
-                      <p>{server?.name}</p>
-                      <p className="mt-2 text-muted-foreground">
-                        {server?.online ? '在线' : '离线'}
-                      </p>
-                    </TableCell>
-                    <TableCell className="max-w-48 whitespace-normal">
-                      <Commit value={current.revision || observation.revision} />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {!server?.online
-                          ? '失联 · 当前待确认'
-                          : {
-                              running: '运行中',
-                              published: '已发布',
-                              unpublished: '尚未发布',
-                              exited: '已停止',
-                              restarting: '重启中',
-                              created: '已创建',
-                              missing: '未找到容器',
-                              unknown: '待确认',
-                            }[running] ||
-                            running ||
-                            '尚未上报'}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {{
-                          healthy: '健康',
-                          unhealthy: '健康异常',
-                          starting: '检查中',
-                          none: '未配置检查',
-                          unknown: '待确认',
-                        }[health] ||
-                          health ||
-                          '健康待上报'}
-                      </p>
-                      {active && (
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="h-auto p-0 text-xs"
-                          onClick={() => navigate('tasks', active.id, target.environmentId)}
-                        >
-                          {stageLabel(active.stage, target.config?.kind)} · {duration(active)}
-                        </Button>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="card-actions flex max-w-64 flex-wrap gap-1">
-                        {[
-                          ['deploy', '更新'],
-                          ['restart', '重启'],
-                          ['rollback', '回退版本'],
-                        ]
-                          .filter(([action]) => !isStatic || action !== 'restart')
-                          .map(([action, label]) => (
-                            <Button
-                              key={action}
-                              size="sm"
-                              variant={action === 'deploy' ? 'outline' : 'ghost'}
-                              disabled={
-                                !canManage ||
-                                !!active ||
-                                (action !== 'deploy' && !target.currentRelease)
-                              }
-                              onClick={() => open('release', { target, action })}
-                            >
-                              {label}
-                            </Button>
-                          ))}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            location.hash = routeUrl(
-                              'configuration',
-                              scope,
-                              target.environmentId,
-                              null,
-                              { targetId: target.id },
-                            )
-                          }}
-                        >
-                          查看配置
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => open('target', target)}>
-                          编辑配置
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </Card>
-      )}
-    </div>
-  )
+  return <ServiceList compact={compact} serverId={serverId} />
 }
 export function Tasks({ compact = false }) {
   const { tasks, find, nameOfTarget, navigate } = useConsole()
-  return (
-    <div className="space-y-5">
-      {!tasks.length ? (
-        <Empty
-          title="还没有发布记录"
-          description="在部署发布中发起首次发布，即可在这里跟踪进度。"
-        />
-      ) : (
-        <Card className="overflow-hidden py-0 shadow-none">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5">服务 / 版本</TableHead>
-                <TableHead>结果</TableHead>
-                <TableHead className="hidden md:table-cell">开始时间</TableHead>
-                <TableHead className="hidden lg:table-cell">阶段 / 耗时</TableHead>
-                <TableHead className="text-right pr-5">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(compact ? tasks.slice(0, 5) : tasks).map((task) => (
-                <TableRow className="task-row" key={task.id} data-task-id={task.id}>
-                  <TableCell className="max-w-48 whitespace-normal py-4 pl-5">
-                    <p className="break-words font-medium">
-                      {nameOfTarget(find('targets', task.targetId))}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {actionNames[task.action]} · <code>{short(revisionOf(task))}</code>
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <Status value={task.status}>{resultName(task)}</Status>
-                  </TableCell>
-                  <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
-                    {date(task.createdAt)}
-                  </TableCell>
-                  <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
-                    {stageLabel(task.stage, task.config?.kind)} · {duration(task)}
-                  </TableCell>
-                  <TableCell className="pr-5 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => navigate('tasks', task.id)}>
-                      查看详情
-                      <ArrowUpRight />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
-      )}
+  const title = (task) => (
+    <div>
+      <p className="break-words font-medium">
+        {find('services', find('targets', task.targetId)?.serviceId)?.name ||
+          nameOfTarget(find('targets', task.targetId))}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {actionNames[task.action]} · <code>{short(revisionOf(task))}</code>
+      </p>
     </div>
   )
+  const detail = (task) => (
+    <Button variant="outline" size="sm" onClick={() => navigate('tasks', task.id)}>
+      查看详情 <ArrowUpRight />
+    </Button>
+  )
+  return (
+    <DataTable
+      data={compact ? tasks.slice(0, 5) : tasks}
+      searchPlaceholder="搜索服务、版本或任务…"
+      searchText={(t) =>
+        nameOfTarget(find('targets', t.targetId)) + ' ' + revisionOf(t) + ' ' + t.id
+      }
+      scopeNote="当前环境 · 项目最近 200 条任务范围"
+      filters={[
+        { value: 'active', label: '进行中' },
+        { value: 'succeeded', label: '成功' },
+        { value: 'failed', label: '失败或已回退' },
+      ]}
+      filterValue={(t) =>
+        !finished(t)
+          ? 'active'
+          : ['succeeded', 'success'].includes(t.status)
+            ? 'succeeded'
+            : 'failed'
+      }
+      rowProps={(t) => ({ 'data-task-id': t.id, className: 'task-row' })}
+      columns={[
+        {
+          id: 'service',
+          header: '服务 / 版本',
+          meta: { className: 'w-[30%]' },
+          cell: ({ row }) => title(row.original),
+        },
+        {
+          accessorKey: 'status',
+          header: '结果',
+          sortingFn: 'text',
+          cell: ({ row }) => (
+            <Status value={row.original.status}>{resultName(row.original)}</Status>
+          ),
+        },
+        {
+          accessorKey: 'createdAt',
+          header: '开始时间',
+          sortingFn: 'text',
+          cell: ({ row }) => (
+            <span className="text-xs text-muted-foreground">{date(row.original.createdAt)}</span>
+          ),
+        },
+        {
+          id: 'stage',
+          header: '阶段 / 耗时',
+          cell: ({ row }) => (
+            <span className="text-xs text-muted-foreground">
+              {stageLabel(row.original.stage, row.original.config?.kind)} · {duration(row.original)}
+            </span>
+          ),
+        },
+        {
+          id: 'actions',
+          header: '操作',
+          meta: { className: 'w-32 text-right' },
+          cell: ({ row }) => detail(row.original),
+        },
+      ]}
+      renderMobile={(t) => (
+        <>
+          <div className="flex items-start justify-between gap-2">
+            {title(t)}
+            <Status value={t.status}>{resultName(t)}</Status>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {date(t.createdAt)} · {duration(t)}
+          </p>
+          {detail(t)}
+        </>
+      )}
+      emptyTitle="还没有发布记录"
+    />
+  )
 }
+
 export function Credentials() {
   const { data, open, confirm, request, refresh } = useConsole()
   return (
@@ -879,41 +714,56 @@ export function Activity() {
     failure: '同步失败',
     token: '下载密码',
     enabled: '状态',
-    'server-mode': '平台权限',
     'server-delete': '删除服务器记录',
   }
+  const events = (data.events || []).map((event, i) => ({ ...event, id: event.id || String(i) }))
   return (
     <div id="activity-list">
-      {!data.events?.length ? (
-        <Empty title="还没有操作记录" description="管理操作与同步结果会显示在这里。" />
-      ) : (
-        <Card className="py-0 shadow-none">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5">时间</TableHead>
-                <TableHead>类型</TableHead>
-                <TableHead>操作内容</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.events.map((event, i) => (
-                <TableRow key={event.id || i}>
-                  <TableCell className="pl-5 text-xs text-muted-foreground">
-                    {date(event.at)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{labels[event.action] || event.action}</Badge>
-                  </TableCell>
-                  <TableCell className="min-w-40 whitespace-normal break-words">
-                    {event.message}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
-      )}
+      <DataTable
+        data={events}
+        scopeNote="接口返回的最近操作记录"
+        searchPlaceholder="搜索操作记录…"
+        searchText={(e) => (labels[e.action] || e.action) + ' ' + e.message}
+        columns={[
+          {
+            accessorKey: 'at',
+            header: '时间',
+            sortingFn: 'text',
+            meta: { className: 'w-44' },
+            cell: ({ row }) => (
+              <span className="text-xs text-muted-foreground">{date(row.original.at)}</span>
+            ),
+          },
+          {
+            accessorKey: 'action',
+            header: '类型',
+            sortingFn: 'text',
+            meta: { className: 'w-36' },
+            cell: ({ row }) => (
+              <Badge variant="secondary">
+                {labels[row.original.action] || row.original.action}
+              </Badge>
+            ),
+          },
+          {
+            accessorKey: 'message',
+            header: '操作内容',
+            cell: ({ row }) => (
+              <p className="break-words whitespace-normal">{row.original.message}</p>
+            ),
+          },
+        ]}
+        renderMobile={(e) => (
+          <>
+            <div className="flex justify-between gap-2">
+              <Badge variant="secondary">{labels[e.action] || e.action}</Badge>
+              <span className="text-xs text-muted-foreground">{date(e.at)}</span>
+            </div>
+            <p className="break-words text-sm">{e.message}</p>
+          </>
+        )}
+        emptyTitle="还没有操作记录"
+      />
     </div>
   )
 }

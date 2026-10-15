@@ -1,3 +1,4 @@
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
@@ -19,10 +20,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Selection, SelectionOption } from '@/components/selection'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
-import { Action, Detail, Empty, Notice, Status } from './shared'
+import { Action, Detail, Empty, Notice, Status, TargetStatus } from './shared'
 import { Commit } from './workspace-home'
 import {
   useConsole,
@@ -137,10 +138,12 @@ export function Configuration({ target }) {
     </div>
   )
 }
-export function ConfigurationPage() {
+export function ConfigurationPage({ selectedTarget }) {
   const { data, route, find, navigate, open, endpoint, request, scope } = useConsole(),
-    target = find('targets', route.targetId)
-  const [tab, setTab] = useState('config'),
+    target = selectedTarget || find('targets', route.targetId)
+  const [tab, setTab] = useState(
+      ['config', 'runtime', 'history'].includes(route.tab) ? route.tab : 'runtime',
+    ),
     [configTab, setConfigTab] = useState('next'),
     [releases, setReleases] = useState([]),
     [error, setError] = useState('')
@@ -166,6 +169,9 @@ export function ConfigurationPage() {
     repo = find('repositories', source?.sourceProjectId)
   const tasks = data.tasks.filter((t) => t.targetId === target.id)
   const configuration = configTab === 'current' ? target.currentRelease?.config : target.config
+  const server = find('servers', target.serverId)
+  const activeTask = tasks.find((task) => !finished(task))
+  const sourceConfig = configTab === 'current' ? target.currentRelease?.sourceSnapshot : null
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -182,15 +188,28 @@ export function ConfigurationPage() {
             编辑服务
           </Button>
           <Button
-            disabled={target.mode !== 'managed'}
+            disabled={
+              target.mode !== 'managed' || !server?.online || server?.revoked || !!activeTask
+            }
             onClick={() => open('release', { target, action: 'deploy' })}
           >
-            更新服务 <ArrowRight />
+            发布服务 <ArrowRight />
           </Button>
         </div>
       </div>
       <div className="flex flex-wrap gap-3">
-        <NativeSelect
+        <Button
+          variant="outline"
+          onClick={() => {
+            location.hash = routeUrl('setup', scope, target.environmentId, null, {
+              serviceId: service.id,
+              step: '3',
+            })
+          }}
+        >
+          新增部署位置
+        </Button>
+        <Selection
           aria-label="部署位置"
           value={target.id}
           onChange={(e) => {
@@ -201,20 +220,19 @@ export function ConfigurationPage() {
           }}
         >
           {data.targets
-            .filter((t) => t.serviceId === service.id)
+            .filter((t) => t.serviceId === service.id && t.environmentId === target.environmentId)
             .map((t) => (
-              <NativeSelectOption key={t.id} value={t.id}>
-                {find('environments', t.environmentId)?.name} / {find('servers', t.serverId)?.name}
-              </NativeSelectOption>
+              <SelectionOption key={t.id} value={t.id}>
+                {find('servers', t.serverId)?.name}
+              </SelectionOption>
             ))}
-        </NativeSelect>
+        </Selection>
       </div>
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList variant="line" className="section-tabs">
-          <TabsTrigger value="config">配置</TabsTrigger>
           <TabsTrigger value="runtime">运行状态</TabsTrigger>
-          <TabsTrigger value="versions">版本链</TabsTrigger>
-          <TabsTrigger value="logs">发布日志</TabsTrigger>
+          <TabsTrigger value="config">配置</TabsTrigger>
+          <TabsTrigger value="history">发布记录</TabsTrigger>
         </TabsList>
       </Tabs>
       {error && <Notice error>{error}</Notice>}
@@ -231,21 +249,38 @@ export function ConfigurationPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>源码与模块</CardTitle>
-              <Button variant="outline" size="sm" onClick={() => open('source', service)}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={configTab === 'current'}
+                onClick={() => open('source', service)}
+              >
                 编辑关联
               </Button>
             </CardHeader>
             <CardContent>
               <dl className="grid gap-5 sm:grid-cols-2">
-                <Detail label="代码仓库">{repo?.name || '未关联'}</Detail>
-                <Detail label="Gitee 地址">{repo?.repository || '—'}</Detail>
-                <Detail label="发布分支">{source?.branch || '—'}</Detail>
+                <Detail label="代码仓库">
+                  {configTab === 'current'
+                    ? sourceConfig?.name || '见对应发布记录'
+                    : repo?.name || '未关联'}
+                </Detail>
+                <Detail label="Gitee 地址">
+                  {configTab === 'current'
+                    ? sourceConfig?.repository || '—'
+                    : repo?.repository || '—'}
+                </Detail>
+                <Detail label="发布分支">
+                  {configTab === 'current'
+                    ? sourceConfig?.branch || '见对应发布记录'
+                    : source?.branch || '—'}
+                </Detail>
                 <Detail label={service.kind === 'static' ? '前端目录' : 'Maven 模块'}>
-                  {service.module}
+                  {configTab === 'current' ? configuration?.module || '—' : service.module}
                 </Detail>
               </dl>
               <p className="mt-4 text-xs text-muted-foreground">
-                当前环境源码选择；已执行任务的提交与配置保存在发布日志中。
+                源码修改影响当前环境的所有部署位置；已执行任务保留原始快照。
               </p>
             </CardContent>
           </Card>
@@ -253,7 +288,11 @@ export function ConfigurationPage() {
             <span className="text-sm text-muted-foreground">
               {find('servers', target.serverId)?.name}
             </span>
-            <Button variant="outline" onClick={() => open('target', target)}>
+            <Button
+              variant="outline"
+              disabled={configTab === 'current'}
+              onClick={() => open('target', target)}
+            >
               编辑运行配置
             </Button>
           </div>
@@ -265,12 +304,13 @@ export function ConfigurationPage() {
           <CardContent>
             <dl className="grid gap-5 sm:grid-cols-2">
               <Detail label="服务器连接">
-                {find('servers', target.serverId)?.online ? '在线' : '离线 · 当前状态待确认'}
+                <Status value={server?.online && !server.revoked ? 'online' : 'disabled'}>
+                  {server?.revoked ? '已撤销' : server?.online ? '在线' : '失联 · 状态待确认'}
+                </Status>
               </Detail>
-              <Detail label="最近运行状态">
-                {target.observation?.state || target.observation?.status || '尚未上报'}
+              <Detail label="运行与健康">
+                <TargetStatus target={target} server={server} />
               </Detail>
-              <Detail label="最近健康状态">{target.observation?.health || '尚未上报'}</Detail>
               <Detail label="当前版本">
                 <Commit value={target.currentRelease?.revision} />
               </Detail>
@@ -282,7 +322,7 @@ export function ConfigurationPage() {
           </CardContent>
         </Card>
       )}
-      {tab === 'versions' && (
+      {tab === 'history' && (
         <Card>
           <CardContent>
             {releases.map((r) => (
@@ -305,7 +345,12 @@ export function ConfigurationPage() {
             <Button
               className="mt-4"
               variant="outline"
-              disabled={!releases.some((r) => r.available && r.id !== target.currentRelease?.id)}
+              disabled={
+                !server?.online ||
+                server?.revoked ||
+                !!activeTask ||
+                !releases.some((r) => r.available && r.id !== target.currentRelease?.id)
+              }
               onClick={() => open('release', { target, action: 'rollback' })}
             >
               回退版本
@@ -313,7 +358,7 @@ export function ConfigurationPage() {
           </CardContent>
         </Card>
       )}
-      {tab === 'logs' && (
+      {tab === 'history' && (
         <Card>
           <CardContent>
             {tasks.map((t) => (
@@ -607,20 +652,20 @@ export function ReleaseWorkbench() {
                     <label className="text-sm font-medium" htmlFor="deploy-releaseId">
                       恢复到版本
                     </label>
-                    <NativeSelect
+                    <Selection
                       id="deploy-releaseId"
                       value={releaseId}
                       onChange={(e) => setReleaseId(e.target.value)}
                     >
-                      <NativeSelectOption value="">请选择成功版本</NativeSelectOption>
+                      <SelectionOption value="">请选择成功版本</SelectionOption>
                       {releases
                         .filter((r) => r.available && r.id !== target.currentRelease?.id)
                         .map((r) => (
-                          <NativeSelectOption key={r.id} value={r.id}>
+                          <SelectionOption key={r.id} value={r.id}>
                             {short(r.revision)} · {date(r.createdAt)}
-                          </NativeSelectOption>
+                          </SelectionOption>
                         ))}
-                    </NativeSelect>
+                    </Selection>
                     <div className="version-chain">
                       {releases.map((r) => (
                         <div key={r.id} className="version-item">
@@ -674,7 +719,7 @@ export function ReleaseWorkbench() {
                   : source?.branch || '—'}
               </Detail>
               <Detail label="服务器">
-                <NativeSelect
+                <Selection
                   aria-label="发布服务器"
                   value={target.id}
                   onChange={(e) => {
@@ -684,11 +729,11 @@ export function ReleaseWorkbench() {
                   }}
                 >
                   {candidates.map((t) => (
-                    <NativeSelectOption key={t.id} value={t.id}>
+                    <SelectionOption key={t.id} value={t.id}>
                       {find('servers', t.serverId)?.name}
-                    </NativeSelectOption>
+                    </SelectionOption>
                   ))}
-                </NativeSelect>
+                </Selection>
               </Detail>
             </dl>
             <div className="space-y-3 border-t pt-4">
@@ -1035,22 +1080,26 @@ export function TaskWorkbench({ id }) {
         )}
       </CardHeader>
       <CardContent>
-        <pre
-          id="deploy-task-logs"
-          ref={output}
-          aria-label={tab === 'logs' ? '完整日志' : '当前阶段日志'}
-          tabIndex={0}
-          onScroll={(e) => {
+        <ScrollArea
+          className="h-80 rounded-md border bg-muted/30"
+          viewportRef={output}
+          onViewportScroll={(e) => {
             const el = e.currentTarget
             nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 50
           }}
-          className="task-log-text"
         >
-          {allLogs
-            .filter((l) => !logStage || l.stage === logStage)
-            .map((l) => l.text)
-            .join('') || '等待任务日志…'}
-        </pre>
+          <pre
+            id="deploy-task-logs"
+            aria-label={tab === 'logs' ? '完整日志' : '当前阶段日志'}
+            tabIndex={0}
+            className="task-log-text !max-h-none !overflow-visible !border-0"
+          >
+            {allLogs
+              .filter((l) => !logStage || l.stage === logStage)
+              .map((l) => l.text)
+              .join('') || '等待任务日志…'}
+          </pre>
+        </ScrollArea>
       </CardContent>
     </Card>
   )

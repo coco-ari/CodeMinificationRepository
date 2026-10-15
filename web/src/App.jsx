@@ -1,3 +1,8 @@
+import { toast } from 'sonner'
+import { Toaster } from '@/components/ui/sonner'
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
+import { navigateSafely, hasUnsavedChanges, setGuardHandler } from '@/lib/navigation-guard'
+import { ServiceList, Environments, ServiceSetup, ServiceDetail } from './components/service-pages'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
@@ -31,7 +36,7 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Skeleton } from '@/components/ui/skeleton'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Selection, SelectionOption } from '@/components/selection'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -88,7 +93,11 @@ const blank = {
 const views = {
   home: WorkspaceHome,
   release: ReleaseWorkbench,
-  configuration: ConfigurationPage,
+  configuration: ServiceDetail,
+  service: ServiceDetail,
+  setup: ServiceSetup,
+  services: ServiceList,
+  environments: Environments,
   overview: Overview,
   projects: Repositories,
   servers: Servers,
@@ -103,7 +112,8 @@ const createLabels = {
   home: ['创建项目', 'workspace'],
   projects: ['添加仓库', 'repository'],
   servers: ['接入新服务器', 'server'],
-  deployments: ['新增部署目标', 'target'],
+  services: ['新增服务', 'service'],
+  environments: ['新增环境', 'environment'],
   credentials: ['新增凭证', 'credential'],
   'system-servers': ['接入服务器', 'server'],
 }
@@ -140,9 +150,31 @@ export default function App() {
   }, [])
   useEffect(() => {
     if (!download) reloadSession()
-    const change = () => setRoute(parseRoute())
+    let accepted = location.hash
+    const change = () => {
+      const next = location.hash
+      if (hasUnsavedChanges()) {
+        history.replaceState(null, '', location.pathname + location.search + accepted)
+        navigateSafely(() => {
+          location.hash = next
+        })
+      } else {
+        accepted = next
+        setRoute(parseRoute())
+      }
+    }
+    const unload = (event) => {
+      if (hasUnsavedChanges()) {
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', unload)
     window.addEventListener('hashchange', change)
-    return () => window.removeEventListener('hashchange', change)
+    return () => {
+      window.removeEventListener('hashchange', change)
+      window.removeEventListener('beforeunload', unload)
+    }
   }, [])
   if (download) return <DownloadPage id={download[1]} />
   if (!session)
@@ -273,11 +305,21 @@ function Console({ route, session, reloadSession }) {
     [error, setError] = useState(''),
     [version, setVersion] = useState(0)
   const [dialog, setDialog] = useState(null),
-    [confirmation, setConfirmation] = useState(null),
-    [toast, setToast] = useState('')
+    [confirmation, setConfirmation] = useState(null)
   const life = useRef({ active: true, controller: new AbortController() }),
-    refreshState = useRef({ busy: false, again: false }),
-    toastTimer = useRef()
+    refreshState = useRef({ busy: false, again: false })
+  useEffect(
+    () =>
+      setGuardHandler((action) =>
+        setConfirmation({
+          title: '离开未保存的配置？',
+          description: '当前步骤的修改尚未保存。离开将放弃这些修改，已保存的步骤会保留。',
+          action,
+          confirmLabel: '放弃修改并离开',
+        }),
+      ),
+    [],
+  )
   const request = useCallback(
     async (url, body, method) => {
       const current = life.current
@@ -368,13 +410,19 @@ function Console({ route, session, reloadSession }) {
     () => () => {
       life.current.active = false
       life.current.controller.abort()
-      clearTimeout(toastTimer.current)
     },
     [],
   )
+  const linkedTarget = data.targets.find(
+    (t) =>
+      t.id === (route.targetId || data.tasks.find((task) => task.id === route.taskId)?.targetId),
+  )
   const environmentId = data.environments.some((e) => e.id === route.environmentId)
     ? route.environmentId
-    : data.environments.find((e) => e.name === '测试')?.id || data.environments[0]?.id || null
+    : linkedTarget?.environmentId ||
+      data.environments.find((e) => e.name === '测试')?.id ||
+      data.environments[0]?.id ||
+      null
   useEffect(() => {
     if (loaded && scope && route.environmentId !== environmentId)
       history.replaceState(
@@ -386,11 +434,10 @@ function Console({ route, session, reloadSession }) {
   useEffect(() => {
     setDialog(null)
     setConfirmation(null)
-  }, [route.view, route.environmentId, route.taskId, route.targetId])
+  }, [route.view, route.environmentId, route.taskId, route.targetId, route.serviceId])
   useEffect(() => {
     if (loaded && route.editor === 'service') {
-      setDialog({ kind: 'service' })
-      history.replaceState(null, '', routeUrl(route.view, scope, environmentId))
+      location.hash = routeUrl('setup', scope, environmentId)
     }
   }, [loaded, route.editor])
   const targets = data.targets.filter((t) => !environmentId || t.environmentId === environmentId)
@@ -404,35 +451,42 @@ function Console({ route, session, reloadSession }) {
     target
       ? `${data.project?.name || '项目'} / ${find('environments', target.environmentId)?.name || '环境'} / ${find('services', target.serviceId)?.name || '服务'}`
       : '已归档目标'
-  const navigate = (view, taskId, env = environmentId) => {
-    const target = data.targets.find((t) => t.id === route.targetId)
-    const nextTarget =
-      ['release', 'configuration'].includes(view) && target
-        ? data.targets.find(
-            (t) =>
-              t.serviceId === target.serviceId &&
-              t.environmentId === env &&
-              t.serverId === target.serverId,
-          ) || data.targets.find((t) => t.serviceId === target.serviceId && t.environmentId === env)
-        : null
-    location.hash = routeUrl(
-      ['release', 'configuration'].includes(view) && !nextTarget ? 'deployments' : view,
-      scope,
-      env,
-      taskId,
-      nextTarget ? { targetId: nextTarget.id } : {},
-    )
-  }
-  const enter = (id) => {
-    location.hash = `/projects/${id}/overview`
-  }
+  const navigate = (view, taskId, env = environmentId) =>
+    navigateSafely(() => {
+      view =
+        { applications: 'services', deployments: 'services', configuration: 'service' }[view] ||
+        view
+      const target = data.targets.find((t) => t.id === route.targetId)
+      const serviceId = route.serviceId || target?.serviceId
+      const nextTarget =
+        data.targets.find(
+          (t) =>
+            t.serviceId === serviceId && t.environmentId === env && t.serverId === target?.serverId,
+        ) || data.targets.find((t) => t.serviceId === serviceId && t.environmentId === env)
+      location.hash = routeUrl(
+        view === 'release' && !nextTarget ? 'services' : view,
+        scope,
+        env,
+        taskId,
+        ['release', 'service', 'setup'].includes(view)
+          ? { serviceId, targetId: nextTarget?.id, step: route.step, tab: route.tab }
+          : {},
+      )
+    })
+  const enter = (id) =>
+    navigateSafely(() => {
+      location.hash = routeUrl('overview', id)
+    })
   const notify = (text) => {
-    if (!life.current.active) return
-    setToast(text)
-    clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(''), 4500)
+    if (life.current.active) toast.success(text)
   }
   const open = (kind, item) => {
+    if (kind === 'setup' || (kind === 'service' && !item)) {
+      navigateSafely(() => {
+        location.hash = routeUrl('setup', scope, environmentId, null, { serviceId: item?.id })
+      })
+      return
+    }
     if (kind === 'release') {
       location.hash = routeUrl('release', scope, item.target.environmentId, null, {
         targetId: item.target.id,
@@ -440,7 +494,7 @@ function Console({ route, session, reloadSession }) {
       })
       return
     }
-    if (life.current.active) setDialog({ kind, item })
+    if (life.current.active) navigateSafely(() => setDialog({ kind, item }))
   }
   const confirm = (title, description, action) => setConfirmation({ title, description, action })
   const inlineEditor = [
@@ -539,10 +593,10 @@ function Console({ route, session, reloadSession }) {
                 )}
               </BreadcrumbList>
             </Breadcrumb>
-            {scope && (
+            {scope && !['projects', 'servers', 'environments'].includes(route.view) && (
               <div className="flex max-w-48 items-center gap-2">
                 <LabelText />
-                <NativeSelect
+                <Selection
                   id="environment-select"
                   aria-label="当前环境"
                   value={environmentId || ''}
@@ -550,11 +604,11 @@ function Console({ route, session, reloadSession }) {
                   onChange={(e) => navigate(route.view, null, e.target.value)}
                 >
                   {data.environments.map((env) => (
-                    <NativeSelectOption key={env.id} value={env.id}>
+                    <SelectionOption key={env.id} value={env.id}>
                       {env.name}
-                    </NativeSelectOption>
+                    </SelectionOption>
                   ))}
-                </NativeSelect>
+                </Selection>
               </div>
             )}
             <Badge variant="outline" className="hidden gap-1.5 text-xs sm:flex">
@@ -563,7 +617,7 @@ function Console({ route, session, reloadSession }) {
             </Badge>
           </header>
           <main className="console-body">
-            {!['home', 'release', 'configuration'].includes(route.view) &&
+            {!['home', 'release', 'configuration', 'service', 'setup'].includes(route.view) &&
               !route.taskId &&
               !inlineEditor && (
                 <div className="flex flex-wrap items-start justify-between gap-4">
@@ -602,8 +656,9 @@ function Console({ route, session, reloadSession }) {
             ) : (
               <div
                 id="deploy-view"
+                data-page={route.view}
                 className="view-enter"
-                key={`${route.view}:${environmentId}:${route.targetId || ''}:${route.taskId || ''}`}
+                key={`${route.view}:${environmentId}:${route.targetId || ''}:${route.serviceId || ''}:${route.taskId || ''}`}
               >
                 {inlineEditor ? (
                   <Dialogs
@@ -629,14 +684,7 @@ function Console({ route, session, reloadSession }) {
         />
       )}
       {confirmation && <Confirmation value={confirmation} onClose={() => setConfirmation(null)} />}
-      {toast && (
-        <div
-          role="status"
-          className="fixed bottom-5 left-1/2 z-[100] w-max max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-lg border bg-popover px-5 py-3 text-sm shadow-lg"
-        >
-          {toast}
-        </div>
-      )}
+      <Toaster />
     </ConsoleContext.Provider>
   )
 }
@@ -645,14 +693,27 @@ function LabelText() {
 }
 function Navigation({ route, data, session, navigate, open, request, reloadSession }) {
   const { setOpenMobile } = useSidebar()
+  const storageKey = 'cmr:setup-navigation:' + route.workspaceId
+  const [setupOpen, setSetupOpen] = useState(() => {
+    try {
+      return localStorage.getItem(storageKey) !== 'closed'
+    } catch {
+      return true
+    }
+  })
+  const changeSetup = (value) => {
+    setSetupOpen(value)
+    try {
+      localStorage.setItem(storageKey, value ? 'open' : 'closed')
+    } catch {}
+  }
   const nav = (view, label, Icon) => (
     <SidebarMenuItem key={view}>
       <SidebarMenuButton
         asChild
         isActive={
           route.view === view ||
-          (view === 'deployments' && route.view === 'release') ||
-          (view === 'applications' && route.view === 'configuration')
+          (view === 'services' && ['release', 'service', 'setup'].includes(route.view))
         }
         tooltip={label}
       >
@@ -690,14 +751,27 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {[
-                  ['overview', '概览', LayoutDashboard],
-                  ['projects', '代码仓库', GitFork],
-                  ['servers', '服务器', Server],
-                  ['applications', '环境与服务', Layers],
-                  ['deployments', '部署发布', Rocket],
-                  ['tasks', '发布记录', History],
-                ].map((args) => nav(...args))}
+                {nav('overview', '项目概览', LayoutDashboard)}
+                <SidebarMenuItem>
+                  <Collapsible open={setupOpen} onOpenChange={changeSetup}>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton>
+                        <ListChecks />
+                        <span>接入配置</span>
+                        <ChevronDown className={setupOpen ? 'ml-auto rotate-180' : 'ml-auto'} />
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenu className="mt-1 ml-3 w-auto border-l pl-2">
+                        {nav('projects', '代码仓库', GitFork)}
+                        {nav('environments', '环境管理', Layers)}
+                        {nav('servers', '项目服务器', Server)}
+                      </SidebarMenu>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </SidebarMenuItem>
+                {nav('services', '服务与部署', Rocket)}
+                {nav('tasks', '发布记录', History)}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -707,9 +781,9 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
           <SidebarGroupContent>
             <SidebarMenu>
               {[
-                ['system-servers', '服务器总览', Server],
+                ['system-servers', '服务器管理', Server],
                 ['credentials', '共享凭证', KeyRound],
-                ['activity', '全局操作记录', ListChecks],
+                ['activity', '操作记录', ListChecks],
               ].map((args) => nav(...args))}
             </SidebarMenu>
           </SidebarGroupContent>
