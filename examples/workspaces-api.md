@@ -23,6 +23,7 @@
 | `DELETE /api/workspaces/{workspaceId}/servers/{serverId}` | 解除绑定；仍被本项目目标引用时返回 409 |
 | `POST /api/workspaces/{workspaceId}/environments` | `{name}`；新增空环境 |
 | `PUT /api/workspaces/{workspaceId}/environments/{id}` | 修改环境名称 |
+| `DELETE /api/workspaces/{workspaceId}/environments/{id}` | 删除无部署位置、无发布历史的环境及源码关联；保留项目服务和仓库，有引用返回 409 |
 | `POST /api/workspaces/{workspaceId}/services` | `{name, module, kind?}`；`kind` 为 `java`（默认）或 `static`，模块为 Maven 模块或前端项目目录 |
 | `PUT /api/workspaces/{workspaceId}/services/{id}` | 修改服务名称及模块；已有目标时不能更改类型 |
 | `PUT /api/workspaces/{workspaceId}/environment-sources` | `{environmentId, serviceId, sourceProjectId}`；只关联仓库，旧 `branch` 保留为首次发布兼容预选 |
@@ -32,6 +33,7 @@
 | `POST /api/workspaces/{workspaceId}/targets/{id}/source/refresh` | `{branch}`；加载最近 100 条具体提交及 `sourceKey`、`configKey` |
 | `GET /api/workspaces/{workspaceId}/tasks/{id}?after=0` | 本项目任务详情和增量日志 |
 | `GET /api/workspaces/{workspaceId}/targets/{id}/releases?offset=0&limit=20` | 服务端分页，返回 `releases`、`total`、`nextOffset`；最大每页 100 条 |
+| `GET /api/workspaces/{workspaceId}/targets/{targetId}/releases/{releaseId}` | 读取指定历史版本供回退预选；校验项目与部署位置归属，不受分页限制 |
 | `GET /api/workspaces/{workspaceId}/releases/{id}/source` | 登录后下载该版本原始 ZIP；校验失败或源码清理后拒绝下载 |
 | `DELETE /api/workspaces/{workspaceId}/releases/{id}/source` | 释放该版本源码引用并留审计；当前版本、基线和执行中引用返回 409 |
 | `GET /api/workspaces/{workspaceId}/events` | 本项目 SSE 更新通知；共享服务器心跳会通知绑定的项目，不包含其他项目目标或任务详情 |

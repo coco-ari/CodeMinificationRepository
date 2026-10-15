@@ -189,6 +189,20 @@ export class WorkspaceService {
     const result = await this.deployment.saveEntity(kind, { ...input, applicationId, ...(kind === 'environments' ? { sourceProjectId: undefined } : {}) }, id);
     return result;
   }
+  async deleteEnvironment(applicationId, id) {
+    await this.store.change(state => {
+      const data = state.deployments;
+      const environment = required(data.environments, id, '环境');
+      if (environment.applicationId !== applicationId) throw new HttpError(404, '当前项目中不存在此环境');
+      if (data.targets.some(item => item.environmentId === id)) throw new HttpError(409, '环境仍有部署位置，不能删除');
+      if (data.tasks.some(item => item.environmentId === id) || data.releases.some(item => item.environmentId === id)) throw new HttpError(409, '环境仍有发布历史，不能删除');
+      data.environments = data.environments.filter(item => item.id !== id);
+      data.environmentSources = data.environmentSources.filter(item => item.environmentId !== id);
+      state.events.unshift({ id: randomUUID(), applicationId, action: 'environment_delete', message: `已删除环境：${environment.name}`, at: now() });
+      state.events = state.events.slice(0, 100);
+    });
+    this.deployment.changed('environments', id, applicationId);
+  }
   eventBelongs(value, applicationId) {
     if (value.applicationId) return value.applicationId === applicationId;
     if (['server', 'heartbeat'].includes(value.type)) return this.data.serverBindings.some(item => item.serverId === value.id && item.applicationId === applicationId);

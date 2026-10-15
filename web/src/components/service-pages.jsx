@@ -22,13 +22,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet'
 import { Empty, Notice, Status, TargetStatus } from './shared'
 import { DataTable } from './data-table'
 import { Commit } from './workspace-home'
@@ -37,6 +30,7 @@ import { TargetForm } from './target-form'
 import { ConfigurationPage } from './release-workbench'
 import { ConsoleContext, useConsole, routeUrl, finished, date, stageLabel } from '@/lib/console'
 import { navigateSafely } from '@/lib/navigation-guard'
+import { targetVersion } from '@/lib/home-summary'
 
 export function TargetActions({ target, service }) {
   const { data, open, scope, environmentId, navigate } = useConsole()
@@ -152,6 +146,9 @@ export function ServiceList({ compact = false, serverId }) {
         source,
         repository,
         targets,
+        branches: [...new Set(targets.map((t) => targetVersion(t).branch || '分支待识别'))].join(
+          '、',
+        ),
         active,
         ready,
         filter: !ready ? 'pending' : active ? 'active' : unhealthy ? 'attention' : 'configured',
@@ -180,18 +177,8 @@ export function ServiceList({ compact = false, serverId }) {
       <p className="truncate" title={service.repository?.name}>
         {service.repository?.name || '未关联仓库'}
       </p>
-      <p
-        className="mt-1 truncate font-mono text-xs text-muted-foreground"
-        title={service.targets
-          .map((t) => t.currentRelease?.sourceSnapshot?.branch)
-          .filter(Boolean)
-          .join('、')}
-      >
-        {[
-          ...new Set(
-            service.targets.map((t) => t.currentRelease?.sourceSnapshot?.branch).filter(Boolean),
-          ),
-        ].join('、') || '尚未发布'}
+      <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={service.branches}>
+        {service.branches || '待配置'}
       </p>
     </div>
   )
@@ -279,12 +266,10 @@ export function ServiceList({ compact = false, serverId }) {
               target={target}
               server={data.servers.find((s) => s.id === target.serverId)}
             />
-            <Badge variant="outline">
-              {target.currentRelease?.sourceSnapshot?.branch || '尚未发布'}
-            </Badge>
+            <Badge variant="outline">{targetVersion(target).branch || '分支待识别'}</Badge>
             <Commit
-              value={target.currentRelease?.revision}
-              subject={target.currentRelease?.commitSubject}
+              value={targetVersion(target).revision}
+              subject={targetVersion(target).subject}
               summary
             />
             <TargetActions target={target} service={service} />
@@ -339,8 +324,8 @@ export function ServiceList({ compact = false, serverId }) {
           <span className="text-xs text-muted-foreground">按部署位置查看</span>
         ) : (
           <Commit
-            value={row.original.targets[0]?.currentRelease?.revision}
-            subject={row.original.targets[0]?.currentRelease?.commitSubject}
+            value={targetVersion(row.original.targets[0] || {}).revision}
+            subject={targetVersion(row.original.targets[0] || {}).subject}
             summary
           />
         ),
@@ -374,9 +359,7 @@ export function ServiceList({ compact = false, serverId }) {
       <DataTable
         data={rows}
         columns={columns}
-        searchText={(r) =>
-          `${r.name} ${r.module} ${r.repository?.name || ''} ${r.targets.map((t) => t.currentRelease?.sourceSnapshot?.branch || '').join(' ')}`
-        }
+        searchText={(r) => `${r.name} ${r.module} ${r.repository?.name || ''} ${r.branches}`}
         searchPlaceholder="搜索服务、仓库或分支…"
         filters={[
           { value: 'pending', label: '待配置' },
@@ -401,8 +384,8 @@ export function ServiceList({ compact = false, serverId }) {
             {status(r)}
             {r.targets.length === 1 && (
               <Commit
-                value={r.targets[0].currentRelease?.revision}
-                subject={r.targets[0].currentRelease?.commitSubject}
+                value={targetVersion(r.targets[0]).revision}
+                subject={targetVersion(r.targets[0]).subject}
                 summary
               />
             )}
@@ -424,7 +407,11 @@ export function OnboardingChecklist() {
   const deployed = targets.some((t) => !!t.currentRelease)
   const steps = [
     ['创建项目', !!data.project, () => open('workspace', data.project)],
-    ['连接代码仓库', data.repositories.some((r) => r.enabled), () => navigate('projects')],
+    [
+      '连接代码仓库',
+      data.repositories.some((r) => r.enabled && ['ready', 'empty'].includes(r.connectionStatus)),
+      () => navigate('projects'),
+    ],
     ['确认环境', !!data.environments.length, () => navigate('environments')],
     [
       '接入或绑定服务器',
@@ -436,9 +423,10 @@ export function OnboardingChecklist() {
   ]
   const count = steps.filter((s) => s[1]).length
   const next = steps.find((s) => !s[1])
+  if (!next) return null
   return (
     <Card className="py-4" data-onboarding>
-      <CardHeader className="flex-row items-center justify-between gap-3 pb-0">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pb-0">
         <div>
           <CardTitle>项目接入</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -478,123 +466,75 @@ export function OnboardingChecklist() {
 }
 
 export function Environments() {
-  const { data, open, navigate } = useConsole()
-  const [selected, setSelected] = useState(null)
-  return (
-    <>
-      <DataTable
-        data={data.environments}
-        columns={[
-          {
-            accessorKey: 'name',
-            header: '环境名称',
-            sortingFn: 'text',
-            cell: ({ row }) => (
-              <Button variant="link" className="p-0" onClick={() => setSelected(row.original)}>
-                {row.original.name}
-              </Button>
-            ),
-          },
-          {
-            id: 'sources',
-            header: '已关联服务',
-            cell: ({ row }) =>
-              data.environmentSources.filter((s) => s.environmentId === row.id).length,
-          },
-          {
-            id: 'targets',
-            header: '部署位置',
-            cell: ({ row }) => data.targets.filter((t) => t.environmentId === row.id).length,
-          },
-          {
-            id: 'actions',
-            header: '操作',
-            cell: ({ row }) => (
-              <div className="flex justify-end gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigate('services', null, row.id)}
-                >
-                  查看服务
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`编辑 ${row.original.name}`}
-                  onClick={() => open('environment', row.original)}
-                >
-                  <Settings2 />
-                </Button>
-              </div>
-            ),
-          },
-        ]}
-        searchText={(r) => r.name}
-        searchPlaceholder="搜索环境…"
-        emptyTitle="尚未创建环境"
-        renderMobile={(env) => (
-          <div className="space-y-3">
-            <Button
-              variant="link"
-              className="h-auto whitespace-normal break-all p-0 text-left"
-              onClick={() => setSelected(env)}
-            >
-              {env.name}
-            </Button>
-            <p className="text-sm text-muted-foreground">
-              已关联 {data.environmentSources.filter((s) => s.environmentId === env.id).length}{' '}
-              个服务 · {data.targets.filter((t) => t.environmentId === env.id).length} 个部署位置
-            </p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => navigate('services', null, env.id)}
-              >
-                查看服务
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => open('environment', env)}>
-                编辑环境
-              </Button>
-            </div>
-          </div>
-        )}
-      />
-      <Sheet
-        open={!!selected}
-        onOpenChange={(value) => {
-          if (!value) setSelected(null)
-        }}
+  const { data, open, confirm, request, endpoint, refresh, notify } = useConsole()
+  const actions = (env) => (
+    <div className="flex items-center gap-2">
+      <Button variant="outline" size="sm" onClick={() => open('environment', env)}>
+        编辑
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-destructive hover:text-destructive"
+        onClick={() =>
+          confirm(
+            '删除环境',
+            `删除「${env.name}」及其源码关联配置；项目服务和代码仓库会保留。有部署位置或发布历史的环境不能删除。`,
+            async () => {
+              await request(`${endpoint}/environments/${env.id}`, {}, 'DELETE')
+              await refresh()
+              notify('环境已删除')
+            },
+          )
+        }
       >
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>{selected?.name}</SheetTitle>
-            <SheetDescription>
-              环境中的仓库关联和部署位置独立配置，分支在发布时选择。
-            </SheetDescription>
-          </SheetHeader>
-          <div className="space-y-3 px-4">
-            {data.services.map((service) => {
-              const source = data.environmentSources.find(
-                (s) => s.serviceId === service.id && s.environmentId === selected?.id,
-              )
-              return (
-                <div className="rounded-md border p-3" key={service.id}>
-                  <p className="font-medium">{service.name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {source ? '已关联仓库，发布时选择分支' : '尚未配置源码'}
-                  </p>
-                </div>
-              )
-            })}
-            <Button onClick={() => navigate('services', null, selected.id)}>
-              进入环境 <ArrowRight />
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-    </>
+        删除
+      </Button>
+    </div>
+  )
+  return (
+    <DataTable
+      data={data.environments}
+      rowProps={(env) => ({ 'data-environment-id': env.id })}
+      columns={[
+        {
+          accessorKey: 'name',
+          header: '环境名称',
+          sortingFn: 'text',
+          cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+        },
+        {
+          id: 'sources',
+          header: '已关联服务',
+          cell: ({ row }) =>
+            data.environmentSources.filter((s) => s.environmentId === row.id).length,
+        },
+        {
+          id: 'targets',
+          header: '部署位置',
+          cell: ({ row }) => data.targets.filter((t) => t.environmentId === row.id).length,
+        },
+        {
+          id: 'actions',
+          header: '操作',
+          meta: { className: 'w-40 text-left' },
+          cell: ({ row }) => actions(row.original),
+        },
+      ]}
+      searchText={(r) => r.name}
+      searchPlaceholder="搜索环境…"
+      emptyTitle="尚未创建环境"
+      renderMobile={(env) => (
+        <div className="space-y-3">
+          <p className="break-words font-medium">{env.name}</p>
+          <p className="text-sm text-muted-foreground">
+            已关联 {data.environmentSources.filter((s) => s.environmentId === env.id).length} 个服务
+            · {data.targets.filter((t) => t.environmentId === env.id).length} 个部署位置
+          </p>
+          {actions(env)}
+        </div>
+      )}
+    />
   )
 }
 

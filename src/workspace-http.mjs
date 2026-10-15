@@ -46,6 +46,9 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
     }
   }
   const entity = new RegExp(`^/(environments|services|targets)(?:/${id})?$`).exec(sub);
+  if (entity?.[1] === 'environments' && entity[2] && req.method === 'DELETE') {
+    await workspaces.deleteEnvironment(applicationId, entity[2]); return respond({ ok: true });
+  }
   if (entity && ((req.method === 'POST' && !entity[2]) || (req.method === 'PUT' && entity[2]))) {
     return respond(await workspaces.saveEntity(applicationId, entity[1], await body(req), entity[2]), entity[2] ? 200 : 201);
   }
@@ -65,6 +68,13 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
   const releases = new RegExp(`^/targets/${id}/releases$`).exec(sub);
   if (releases && req.method === 'GET') {
     workspaces.owned('targets', releases[1], applicationId); return respond(deployment.releasePage(releases[1], Number(url.searchParams.get('offset') || 0), Number(url.searchParams.get('limit') || 20)));
+  }
+  const release = new RegExp(`^/targets/${id}/releases/${id}$`).exec(sub);
+  if (release && req.method === 'GET') {
+    workspaces.owned('targets', release[1], applicationId);
+    const selected = workspaces.owned('releases', release[2], applicationId);
+    if (selected.targetId !== release[1]) throw new HttpError(404, '当前部署位置中不存在此版本');
+    return respond({ release: deployment.releases(release[1]).find(item => item.id === release[2]) });
   }
   const archive = new RegExp(`^/releases/${id}/source$`).exec(sub);
   if (archive && ['GET', 'DELETE'].includes(req.method)) {

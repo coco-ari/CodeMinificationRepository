@@ -1,42 +1,12 @@
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet'
 import { ServiceList, OnboardingChecklist } from './service-pages'
 import { DataTable } from './data-table'
-import { Commit, HostResources } from './workspace-home'
+import { HostResources } from './workspace-home'
 import { useState } from 'react'
-import {
-  ArrowRight,
-  ArrowUpRight,
-  Box,
-  GitBranch,
-  GitFork,
-  Server,
-  Search,
-  Plus,
-  FolderOpen,
-  CircleCheck,
-  Clock3,
-  Settings2,
-  RefreshCw,
-  MoreHorizontal,
-  Copy,
-} from 'lucide-react'
+import { ArrowUpRight, Server, Settings2, RefreshCw, MoreHorizontal, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Switch } from '@/components/ui/switch'
 import {
   DropdownMenu,
@@ -45,20 +15,10 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  Table,
-  TableHeader,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-} from '@/components/ui/table'
-import { Action, Detail, Empty, Notice, Stats, Status } from './shared'
+import { Action, Empty, Notice, Status, RepositoryStatus, ServerStatus } from './shared'
 import {
   useConsole,
   date,
-  size,
   short,
   finished,
   resultName,
@@ -68,26 +28,19 @@ import {
   stageLabel,
   downloadPage,
   copy,
-  routeUrl,
 } from '@/lib/console'
 
 const grid = 'grid gap-5 lg:grid-cols-2 2xl:grid-cols-3'
 const actions = 'card-actions flex flex-wrap items-center gap-2'
 export function Overview() {
-  const { data, open, navigate } = useConsole()
+  const { data, navigate } = useConsole()
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button variant="outline" onClick={() => open('workspace', data.project)}>
-          <Settings2 />
-          项目设置
-        </Button>
-      </div>
       <OnboardingChecklist />
       <ServiceList compact />
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
+        <Card data-overview="repositories">
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>代码仓库</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => navigate('projects')}>
               管理 <ArrowUpRight />
@@ -95,9 +48,13 @@ export function Overview() {
           </CardHeader>
           <CardContent className="divide-y">
             {data.repositories.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-3 py-3 text-sm">
+              <div
+                key={r.id}
+                data-repository-id={r.id}
+                className="flex items-center justify-between gap-3 py-3 text-sm"
+              >
                 <span className="truncate">{r.name}</span>
-                <Badge variant="outline">{r.branch}</Badge>
+                <RepositoryStatus repo={r} />
               </div>
             ))}
             {!data.repositories.length && (
@@ -105,8 +62,8 @@ export function Overview() {
             )}
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
+        <Card data-overview="servers">
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>服务器</CardTitle>
             <Button variant="ghost" size="sm" onClick={() => navigate('servers')}>
               管理 <ArrowUpRight />
@@ -116,9 +73,7 @@ export function Overview() {
             {data.servers.map((s) => (
               <div key={s.id} className="flex items-center justify-between gap-3 py-3 text-sm">
                 <span className="truncate">{s.name}</span>
-                <Status value={s.online ? 'online' : 'disabled'}>
-                  {s.online ? '在线' : '离线'}
-                </Status>
+                <ServerStatus server={s} />
               </div>
             ))}
             {!data.servers.length && (
@@ -137,7 +92,7 @@ function RepositoryToggle({ repo }) {
   return (
     <div className="space-y-2">
       <Switch
-        aria-label={`${repo.name} 启用源码下载`}
+        aria-label={`${repo.name} 启用仓库`}
         checked={repo.enabled}
         disabled={busy}
         onCheckedChange={async (enabled) => {
@@ -237,7 +192,7 @@ function RepositoryActions({ repo }) {
                 })
               }
             >
-              {repo.enabled ? '停用源码下载' : '启用源码下载'}
+              {repo.enabled ? '停用仓库' : '启用仓库'}
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
@@ -289,19 +244,9 @@ export function Repositories() {
         {repo.repository}
       </a>
       <div className="mt-2">
-        <Status value={!repo.enabled ? 'disabled' : repo.connectionStatus || 'idle'}>
-          {!repo.enabled
-            ? '已停用'
-            : repo.connectionStatus === 'ready'
-              ? '已连接'
-              : repo.connectionStatus === 'empty'
-                ? '暂无提交'
-                : repo.connectionStatus === 'failed'
-                  ? '连接失败'
-                  : '待刷新'}
-        </Status>
+        <RepositoryStatus repo={repo} />
       </div>
-      {repo.connectionError && (
+      {repo.enabled && repo.connectionError && (
         <p className="mt-2 break-words text-xs text-destructive">{repo.connectionError}</p>
       )}
       {repo.needsDownloadTokenReset && (
@@ -364,17 +309,12 @@ export function Repositories() {
         )}
         emptyTitle="尚未添加代码仓库"
       />
-      <p className="text-xs text-muted-foreground">
-        仓库接入后可查询凭证有权访问的分支，每次发布时选择分支和具体提交。
-      </p>
     </div>
   )
 }
 
 export function Servers() {
   const { data, scope, open, request, endpoint, refresh, confirm, notify } = useConsole()
-  const [selectedServer, setSelectedServer] = useState(null)
-  const selected = data.servers.find((s) => s.id === selectedServer)
   const remove = (server) =>
     confirm(
       '删除服务器记录',
@@ -389,17 +329,6 @@ export function Servers() {
     )
   return (
     <div className="space-y-4">
-      {scope && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            复用已接入的服务器，无需重复安装 Agent。资源指标为整台服务器的数据。
-          </p>
-          <Button className="bind-server" variant="outline" onClick={() => open('binding')}>
-            <Plus />
-            绑定已接入服务器
-          </Button>
-        </div>
-      )}
       <div className={grid}>
         {!data.servers.length && (
           <Empty
@@ -411,28 +340,64 @@ export function Servers() {
         )}
         {data.servers.map((server) => (
           <Card key={server.id} data-server-id={server.id} className="server-card py-5">
-            <CardHeader className="gap-3">
-              <div className="flex items-center justify-between">
-                <Server className="size-5 text-muted-foreground" />
-                <Status
-                  value={
-                    server.online && !server.revoked
-                      ? 'online'
-                      : server.registeredAt && !server.revoked
-                        ? 'unhealthy'
-                        : 'disabled'
-                  }
-                >
-                  {server.revoked
-                    ? '已撤销'
-                    : server.online
-                      ? '在线'
-                      : server.registeredAt
-                        ? '失联'
-                        : '等待接入'}
-                </Status>
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <CardTitle className="flex min-w-0 items-start gap-2 text-sm leading-6">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className="mt-0.5 shrink-0 text-muted-foreground"
+                      aria-label="整台服务器资源"
+                    >
+                      <Server className="size-5" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>资源指标属于整台服务器，可能由多个项目共用。</TooltipContent>
+                </Tooltip>
+                <span className="break-words [overflow-wrap:anywhere]">{server.name}</span>
+              </CardTitle>
+              <div className="flex shrink-0 items-center gap-1">
+                <ServerStatus server={server} />
+                {!scope && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label={server.name + ' · 更多操作'}
+                      >
+                        <MoreHorizontal />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {server.revoked ? (
+                        <DropdownMenuItem variant="destructive" onSelect={() => remove(server)}>
+                          删除记录
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() =>
+                            confirm(
+                              '撤销服务器接入',
+                              '撤销「' +
+                                server.name +
+                                '」后将无法连接中心，影响所有绑定项目。已有业务容器继续运行。',
+                              async () => {
+                                await request('/api/deploy/servers/' + server.id + '/revoke', {})
+                                await refresh()
+                              },
+                            )
+                          }
+                        >
+                          撤销接入
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
-              <CardTitle className="break-words">{server.name}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <HostResources server={server} showConnection={false} />
@@ -444,118 +409,30 @@ export function Servers() {
                 <Notice error>连接已中断，业务当前状态待确认。</Notice>
               )}
             </CardContent>
-            <CardFooter className="justify-between gap-2">
-              <Button variant="outline" size="sm" onClick={() => setSelectedServer(server.id)}>
-                查看详情
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8"
-                    aria-label={server.name + ' · 更多操作'}
-                  >
-                    <MoreHorizontal />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {scope ? (
-                    <DropdownMenuItem
-                      onSelect={() =>
-                        confirm(
-                          '解除项目绑定',
-                          '仅解除此项目与服务器的关联，不撤销 Agent。存在部署目标时不能解除绑定。',
-                          async () => {
-                            await request(endpoint + '/servers/' + server.id, {}, 'DELETE')
-                            await refresh()
-                            notify('已解除项目绑定')
-                          },
-                        )
-                      }
-                    >
-                      解除项目绑定
-                    </DropdownMenuItem>
-                  ) : server.revoked ? (
-                    <DropdownMenuItem variant="destructive" onSelect={() => remove(server)}>
-                      删除记录
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={() =>
-                        confirm(
-                          '撤销服务器接入',
-                          '撤销「' +
-                            server.name +
-                            '」后将无法连接中心，影响所有绑定项目。已有业务容器继续运行。',
-                          async () => {
-                            await request('/api/deploy/servers/' + server.id + '/revoke', {})
-                            await refresh()
-                          },
-                        )
-                      }
-                    >
-                      撤销接入
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </CardFooter>
+            {scope && (
+              <CardFooter className="justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    confirm(
+                      '解除项目绑定',
+                      '仅解除此项目与服务器的关联，不撤销 Agent。存在部署目标时不能解除绑定。',
+                      async () => {
+                        await request(endpoint + '/servers/' + server.id, {}, 'DELETE')
+                        await refresh()
+                        notify('已解除项目绑定')
+                      },
+                    )
+                  }
+                >
+                  解除绑定
+                </Button>
+              </CardFooter>
+            )}
           </Card>
         ))}
       </div>
-      <Sheet
-        open={!!selected}
-        onOpenChange={(value) => {
-          if (!value) setSelectedServer(null)
-        }}
-      >
-        <SheetContent className="overflow-y-auto sm:max-w-lg">
-          <SheetHeader>
-            <SheetTitle>{selected?.name}</SheetTitle>
-            <SheetDescription>
-              {scope ? '当前项目部署在这台服务器上的服务' : '该服务器的 Agent 与部署状态'}
-            </SheetDescription>
-          </SheetHeader>
-          {selected && (
-            <div className="space-y-5 px-4">
-              <HostResources server={selected} />
-              <p className="text-xs text-muted-foreground">最近采集：{date(selected.lastSeenAt)}</p>
-              {data.targets
-                .filter((t) => t.serverId === selected.id)
-                .map((target) => (
-                  <div key={target.id} className="rounded-lg border p-3">
-                    <p className="font-medium">
-                      {data.services.find((s) => s.id === target.serviceId)?.name || '服务'}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {data.environments.find((e) => e.id === target.environmentId)?.name}
-                    </p>
-                    <Button
-                      variant="link"
-                      className="mt-2 h-auto p-0"
-                      onClick={() => {
-                        location.hash = routeUrl(
-                          'service',
-                          target.applicationId,
-                          target.environmentId,
-                          null,
-                          { serviceId: target.serviceId, targetId: target.id },
-                        )
-                      }}
-                    >
-                      查看服务 <ArrowRight />
-                    </Button>
-                  </div>
-                ))}
-              {!data.targets.some((t) => t.serverId === selected.id) && (
-                <p className="text-sm text-muted-foreground">这台服务器上尚未配置服务。</p>
-              )}
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   )
 }
@@ -716,6 +593,7 @@ export function Activity() {
     token: '下载密码',
     enabled: '状态',
     'server-delete': '删除服务器记录',
+    environment_delete: '删除环境',
   }
   const events = (data.events || []).map((event, i) => ({ ...event, id: event.id || String(i) }))
   return (

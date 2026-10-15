@@ -125,6 +125,11 @@ export class RepositoryService {
         credential = { id: randomUUID(), createdAt: timestamp() };
         state.credentials.push(credential);
       }
+      if (id && (secret || credential.username !== username)) {
+        for (const project of state.projects.filter(item => item.credentialId === id)) {
+          Object.assign(project, { branchInfo: null, defaultBranch: null, connectionStatus: 'idle', connectionError: null });
+        }
+      }
       Object.assign(credential, { name, username, updatedAt: timestamp() });
       if (secret) credential.secret = secret;
       audit(state, null, 'credential', `已保存凭证：${name}`);
@@ -158,7 +163,7 @@ export class RepositoryService {
         project.status = 'idle'; project.lastSuccess = null; project.error = null;
       }
       if (project.repository !== repository || project.credentialId !== (input.credentialId || null)) {
-        project.branchInfo = null; project.defaultBranch = null;
+        Object.assign(project, { branchInfo: null, defaultBranch: null, connectionStatus: 'idle', connectionError: null });
       }
       if (input.applicationId !== undefined) {
         if (!state.deployments?.applications.some(item => item.id === input.applicationId)) throw new HttpError(400, '项目不存在');
@@ -217,7 +222,13 @@ export class RepositoryService {
     if (!refresh && project.branchInfo) return project.branchInfo;
     if (!this.builder.branches) return { branches: project.branch ? [{ name: project.branch }] : [], defaultBranch: project.defaultBranch || project.branch || null, refreshedAt: null };
     const snapshot = structuredClone(project);
-    const unchanged = current => current && current.repository === snapshot.repository && current.credentialId === snapshot.credentialId;
+    const credential = this.store.state.credentials.find(item => item.id === snapshot.credentialId);
+    const credentialIdentity = credential ? { username: credential.username, secret: credential.secret } : null;
+    const unchanged = current => {
+      const latest = this.store.state.credentials.find(item => item.id === snapshot.credentialId);
+      return current && current.repository === snapshot.repository && current.credentialId === snapshot.credentialId &&
+        (latest?.username ?? null) === (credentialIdentity?.username ?? null) && (latest?.secret ?? null) === (credentialIdentity?.secret ?? null);
+    };
     try {
       const info = await this.queue.run(() => this.builder.branches(snapshot, this.credential(snapshot)));
       await this.store.change(state => {

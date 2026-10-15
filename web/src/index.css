@@ -582,6 +582,7 @@
 }
 .version-item {
   display: flex;
+  align-items: flex-start;
   gap: 14px;
   padding: 18px 0;
   border-bottom: 1px solid var(--border);
@@ -809,13 +810,6 @@
   justify-content: flex-start;
   color: var(--foreground);
 }
-.repo-branch {
-  max-width: 100%;
-  white-space: nowrap;
-}
-.repo-branch-cell {
-  overflow: hidden;
-}
 .repository-actions {
   display: flex;
   align-items: center;
@@ -995,7 +989,6 @@
   .configuration-details {
     grid-template-columns: minmax(0, 1fr);
   }
-  .repo-branch-cell,
   .repo-edit {
     display: none;
   }

@@ -15,10 +15,18 @@ import {
   LoaderCircle,
   FileCode2,
   Clock3,
+  MoreHorizontal,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Choice, Selection, SelectionOption } from '@/components/selection'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -352,9 +360,8 @@ export function ConfigurationPage({ selectedTarget }) {
         <Card>
           <CardContent>
             {releases.map((r) => (
-              <div className="version-item flex-wrap" key={r.id}>
-                <span className="status-dot good mt-2" />
-                <div className="min-w-0 flex-1">
+              <div className="version-item flex-col sm:flex-row" key={r.id} data-release-id={r.id}>
+                <div className="w-full min-w-0 flex-1">
                   <Commit value={r.revision} subject={r.commitSubject} summary />
                   <p className="mt-1 text-xs text-muted-foreground">{date(r.createdAt)}</p>
                   <p className="mt-1 break-all text-xs text-muted-foreground">
@@ -381,53 +388,106 @@ export function ConfigurationPage({ selectedTarget }) {
                     </p>
                   )}
                 </div>
-                <Badge variant="outline">
-                  {target.currentRelease?.id === r.id
-                    ? '当前版本'
-                    : r.available
-                      ? '可回退'
-                      : '不可回退'}
-                </Badge>
-                <Badge variant="outline">
-                  {r.archiveStatus === 'available'
-                    ? '源码已归档'
-                    : r.archiveStatus === 'cleared'
-                      ? '源码已清理'
-                      : r.archiveStatus === 'invalid'
-                        ? '源码校验失败'
-                        : '中心源码缺失'}
-                </Badge>
-                {r.archiveStatus === 'available' && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="ghost" size="sm" asChild>
-                      <a href={`${endpoint}/releases/${r.id}/source`}>下载源码</a>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={r.archiveProtected}
-                      title={
-                        r.archiveProtected
-                          ? '当前版本、恢复基线或执行中任务引用的版本不能清理'
-                          : undefined
-                      }
-                      onClick={() =>
-                        confirm(
-                          '清理源码档案',
-                          `清理 ${r.sourceSnapshot?.branch || '历史分支'} / ${short(r.revision)} 的源码后，此版本将不能通过中心重建。版本说明和操作记录仍保留；其他版本共享的源码包继续保留。`,
-                          async () => {
-                            await request(`${endpoint}/releases/${r.id}/source`, {}, 'DELETE')
-                            const page = await request(`${endpoint}/targets/${target.id}/releases`)
-                            setReleases(page.releases)
-                            setReleaseNext(page.nextOffset)
-                          },
-                        )
-                      }
+                <div className="flex shrink-0 flex-wrap items-center gap-2 self-start">
+                  {target.currentRelease?.id === r.id ? (
+                    <Badge variant="secondary" className="h-6 self-center font-normal">
+                      当前版本
+                    </Badge>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          tabIndex={
+                            !r.available || !server?.online || server?.revoked || activeTask
+                              ? 0
+                              : undefined
+                          }
+                        >
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={
+                              !r.available ||
+                              !server?.online ||
+                              server?.revoked ||
+                              !!activeTask ||
+                              target.mode !== 'managed'
+                            }
+                            onClick={() =>
+                              open('release', { target, action: 'rollback', releaseId: r.id })
+                            }
+                          >
+                            回退
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {!r.available
+                          ? '此版本不可回退'
+                          : !server?.online || server?.revoked
+                            ? '服务器未在线'
+                            : activeTask
+                              ? '请等待当前任务完成'
+                              : '选择此版本，核对配置后确认回退'}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                  {r.archiveStatus === 'available' ? (
+                    <>
+                      <Button variant="ghost" size="sm" asChild>
+                        <a href={`${endpoint}/releases/${r.id}/source`}>下载源码</a>
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`版本 ${short(r.revision)} · 更多操作`}
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            variant="destructive"
+                            disabled={r.archiveProtected}
+                            onSelect={() =>
+                              confirm(
+                                '清理源码档案',
+                                `清理 ${r.sourceSnapshot?.branch || '历史分支'} / ${short(r.revision)} 的源码后，此版本将不能通过中心重建。版本说明和操作记录仍保留；其他版本共享的源码包继续保留。`,
+                                async () => {
+                                  await request(`${endpoint}/releases/${r.id}/source`, {}, 'DELETE')
+                                  const page = await request(
+                                    `${endpoint}/targets/${target.id}/releases`,
+                                  )
+                                  setReleases(page.releases)
+                                  setReleaseNext(page.nextOffset)
+                                },
+                              )
+                            }
+                          >
+                            清理源码
+                          </DropdownMenuItem>
+                          {r.archiveProtected && (
+                            <p className="max-w-52 px-2 py-1.5 text-xs text-muted-foreground">
+                              当前版本、恢复基线或执行中任务引用的版本不能清理。
+                            </p>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </>
+                  ) : (
+                    <span
+                      className={`text-xs ${r.archiveStatus === 'invalid' ? 'text-destructive' : 'text-muted-foreground'}`}
                     >
-                      清理源码
-                    </Button>
-                  </div>
-                )}
+                      {r.archiveStatus === 'cleared'
+                        ? '源码已清理'
+                        : r.archiveStatus === 'invalid'
+                          ? '源码校验失败'
+                          : '暂无源码档案'}
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
             {!releases.length && <p className="text-sm text-muted-foreground">尚无成功版本</p>}
@@ -449,19 +509,6 @@ export function ConfigurationPage({ selectedTarget }) {
                 加载更早版本
               </Action>
             )}
-            <Button
-              className="mt-4"
-              variant="outline"
-              disabled={
-                !server?.online ||
-                server?.revoked ||
-                !!activeTask ||
-                !releases.some((r) => r.available && r.id !== target.currentRelease?.id)
-              }
-              onClick={() => open('release', { target, action: 'rollback' })}
-            >
-              回退版本
-            </Button>
           </CardContent>
         </Card>
       )}
@@ -550,6 +597,8 @@ export function ReleaseWorkbench() {
     setBranch('')
     setBranchInfo(null)
     setReleaseNext(null)
+    setReleaseId('')
+    setTab(route.action === 'rollback' ? 'releases' : 'commits')
     setReleases([])
     setError('')
     if (!target) return
@@ -558,7 +607,10 @@ export function ReleaseWorkbench() {
         ? request(`${endpoint}/repositories/${source.sourceProjectId}/branches`)
         : Promise.resolve({ branches: [], defaultBranch: null }),
       request(`${endpoint}/targets/${target.id}/releases`),
-    ]).then(([h, r]) => {
+      route.releaseId && route.action === 'rollback'
+        ? request(`${endpoint}/targets/${target.id}/releases/${route.releaseId}`)
+        : Promise.resolve(null),
+    ]).then(([h, r, selected]) => {
       if (!active) return
       setLoading(false)
       if (h.status === 'fulfilled') {
@@ -585,17 +637,26 @@ export function ReleaseWorkbench() {
       )
         setError(`仓库分支：${h.reason.message}`)
       if (r.status === 'fulfilled') {
-        setReleases(r.value.releases)
-        setReleaseNext(r.value.nextOffset)
-        setReleaseId(
-          r.value.releases.find((v) => v.available && v.id !== target.currentRelease?.id)?.id || '',
+        const chosen = selected.status === 'fulfilled' ? selected.value?.release : null
+        const items = r.value.releases
+        setReleases(
+          chosen && !items.some((item) => item.id === chosen.id) ? [...items, chosen] : items,
         )
+        setReleaseNext(r.value.nextOffset)
+        if (route.releaseId && route.action === 'rollback') {
+          setReleaseId(chosen?.id || '')
+          if (!chosen) setError('所选历史版本不存在或不属于当前部署位置，请返回发布记录重新选择。')
+        } else {
+          setReleaseId(
+            items.find((v) => v.available && v.id !== target.currentRelease?.id)?.id || '',
+          )
+        }
       } else if (r.reason.name !== 'AbortError') setError(`版本记录：${r.reason.message}`)
     })
     return () => {
       active = false
     }
-  }, [target?.id, signature, route.action])
+  }, [target?.id, signature, route.action, route.releaseId])
   if (!target)
     return (
       <Empty
@@ -903,13 +964,13 @@ export function ReleaseWorkbench() {
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <Commit value={r.revision} subject={r.commitSubject} summary />
-                              <Badge variant="secondary">
-                                {r.id === target.currentRelease?.id
-                                  ? '当前版本'
-                                  : r.available
-                                    ? '可回退'
-                                    : '已清理'}
-                              </Badge>
+                              {r.id === target.currentRelease?.id ? (
+                                <Badge variant="secondary" className="h-5 self-start font-normal">
+                                  当前版本
+                                </Badge>
+                              ) : !r.available ? (
+                                <span className="text-xs text-muted-foreground">不可回退</span>
+                              ) : null}
                             </div>
                             <p className="mt-2 text-xs text-muted-foreground">
                               {r.sourceSnapshot?.branch || '历史分支未记录'} · {date(r.createdAt)} ·{' '}
@@ -933,7 +994,12 @@ export function ReleaseWorkbench() {
                               `${endpoint}/targets/${target.id}/releases?offset=${releaseNext}`,
                             )
                             if (live.current) {
-                              setReleases((items) => [...items, ...page.releases])
+                              setReleases((items) => [
+                                ...items,
+                                ...page.releases.filter(
+                                  (next) => !items.some((item) => item.id === next.id),
+                                ),
+                              ])
                               setReleaseNext(page.nextOffset)
                             }
                           }}
@@ -1033,7 +1099,9 @@ export function ReleaseWorkbench() {
                 loading ||
                 (action === 'deploy' &&
                   (!choice || !history?.sourceKey || !branch || !history?.configKey)) ||
-                (action === 'rollback' && !selectedRelease?.available) ||
+                (action === 'rollback' &&
+                  (!selectedRelease?.available ||
+                    selectedRelease.id === target.currentRelease?.id)) ||
                 (action === 'restart' && !target.currentRelease)
               }
               onClick={async () => {

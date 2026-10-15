@@ -23,6 +23,7 @@ import {
   ArrowRight,
   Download,
   LoaderCircle,
+  Settings2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -491,6 +492,7 @@ function Console({ route, session, reloadSession }) {
       location.hash = routeUrl('release', scope, item.target.environmentId, null, {
         targetId: item.target.id,
         action: item.action,
+        releaseId: item.releaseId,
       })
       return
     }
@@ -626,16 +628,40 @@ function Console({ route, session, reloadSession }) {
                       {pageNames[route.view][0]}
                     </h1>
                   </div>
-                  {createLabels[route.view] && (
-                    <Button
-                      id="create-button"
-                      disabled={!loaded}
-                      onClick={() => open(createLabels[route.view][1])}
-                    >
-                      <Plus />
-                      {createLabels[route.view][0]}
-                    </Button>
-                  )}
+                  <div className="ml-auto flex flex-wrap justify-end gap-2">
+                    {route.view === 'overview' && (
+                      <Button
+                        variant="outline"
+                        disabled={!loaded}
+                        onClick={() => open('workspace', data.project)}
+                      >
+                        <Settings2 />
+                        项目设置
+                      </Button>
+                    )}
+                    {route.view === 'servers' && scope && (
+                      <Button
+                        className="bind-server"
+                        variant="outline"
+                        disabled={!loaded}
+                        onClick={() => open('binding')}
+                      >
+                        <Plus />
+                        绑定已接入服务器
+                      </Button>
+                    )}
+                    {createLabels[route.view] && (
+                      <Button
+                        id="create-button"
+                        variant={route.view === 'servers' ? 'outline' : 'default'}
+                        disabled={!loaded}
+                        onClick={() => open(createLabels[route.view][1])}
+                      >
+                        <Plus />
+                        {createLabels[route.view][0]}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             {error && (

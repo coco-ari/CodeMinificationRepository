@@ -37,6 +37,7 @@ export function parseRoute() {
     taskId: params.get('task'),
     targetId: params.get('target'),
     action: params.get('action'),
+    releaseId: params.get('release'),
     editor: params.get('editor'),
     serviceId: params.get('service'),
     step: params.get('step'),
@@ -53,6 +54,7 @@ export function routeUrl(view, workspaceId, environmentId, taskId, extra = {}) {
   if (taskId) query.set('task', taskId)
   if (extra.targetId) query.set('target', extra.targetId)
   if (extra.action) query.set('action', extra.action)
+  if (extra.releaseId) query.set('release', extra.releaseId)
   if (extra.editor) query.set('editor', extra.editor)
   if (extra.serviceId) query.set('service', extra.serviceId)
   if (extra.step) query.set('step', extra.step)

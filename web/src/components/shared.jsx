@@ -19,6 +19,7 @@ import { LoaderCircle, Inbox, Info, ArrowUpRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -80,6 +81,53 @@ export function Status({ value, children }) {
       {children || statusNames[value] || value}
     </Badge>
   )
+}
+export function RepositoryStatus({ repo }) {
+  const connected = ['ready', 'empty'].includes(repo.connectionStatus)
+  const value = !repo.enabled ? 'disabled' : connected ? 'ready' : repo.connectionStatus || 'idle'
+  const label = !repo.enabled
+    ? '已停用'
+    : connected
+      ? '已连接'
+      : repo.connectionStatus === 'failed'
+        ? '连接失败'
+        : '待验证'
+  const description = !repo.enabled
+    ? '仓库已停用，启用后可刷新连接状态。'
+    : repo.connectionStatus === 'empty'
+      ? '已成功连接远端，仓库暂无提交。'
+      : connected
+        ? `最近验证：${date(repo.branchInfo?.refreshedAt)}；可在代码仓库中刷新。`
+        : repo.connectionStatus === 'failed'
+          ? repo.connectionError || '请检查仓库地址、访问凭证和网络后重试。'
+          : '尚未验证当前仓库配置，请在代码仓库中刷新。'
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex shrink-0" data-repository-status={value}>
+          <Status value={value}>{label}</Status>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72 break-words">{description}</TooltipContent>
+    </Tooltip>
+  )
+}
+export function ServerStatus({ server }) {
+  const value = server.revoked
+    ? 'disabled'
+    : server.online
+      ? 'online'
+      : server.registeredAt
+        ? 'unhealthy'
+        : 'disabled'
+  const label = server.revoked
+    ? '已撤销'
+    : server.online
+      ? '在线'
+      : server.registeredAt
+        ? '失联'
+        : '等待接入'
+  return <Status value={value}>{label}</Status>
 }
 export function TargetStatus({ target, server }) {
   const state = target.observation?.state || target.observation?.status

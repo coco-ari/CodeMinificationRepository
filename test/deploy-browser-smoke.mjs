@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, writeFile, mkdir, rm, access } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
@@ -192,6 +192,14 @@ try {
     `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e=>e.getClientRects().length)`
   const visible = (selector) => until(() => evaluate(`Boolean(${query(selector)})`), selector)
   const click = async (selector) => {
+    if (selector.startsWith('[data-view='))
+      await until(
+        () =>
+          evaluate(
+            `Boolean(document.querySelector('[data-slot=sidebar-gap]')) === (innerWidth >= 768)`,
+          ),
+        '响应式导航切换完成',
+      )
     if (selector.startsWith('[data-view=') && !(await evaluate(`Boolean(${query(selector)})`))) {
       await evaluate(`document.querySelector('[data-sidebar="trigger"]').click()`)
       await visible(selector)
@@ -346,6 +354,40 @@ try {
     ),
     false,
   )
+  // 概览与管理页复用真实连接状态，不再把默认下载分支当作仓库状态。
+  const repositoryId = service.store.state.projects[0].id
+  for (const [connectionStatus, enabled, label] of [
+    ['idle', true, '待验证'],
+    ['ready', true, '已连接'],
+    ['empty', true, '已连接'],
+    ['failed', true, '连接失败'],
+    ['ready', false, '已停用'],
+  ]) {
+    await service.store.change((state) => {
+      Object.assign(state.projects[0], { connectionStatus, enabled, status: 'failed' })
+    })
+    for (const view of ['projects', 'overview']) {
+      await go(view)
+      await until(
+        () =>
+          evaluate(
+            `document.querySelector('[data-repository-id="${repositoryId}"] [data-repository-status]')?.textContent === ${JSON.stringify(label)}`,
+          ),
+        `${view} 仓库${label}`,
+      )
+    }
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[data-overview="repositories"]').textContent.includes('main')`,
+      ),
+      false,
+    )
+  }
+  await service.setEnabled(repositoryId, true)
+  await service.branches(repositoryId, true)
+  await service.store.change((state) => {
+    state.projects[0].status = 'idle'
+  })
   await click('[data-view=servers]')
   await click('#create-button')
   await fill('#deploy-name', '测试服务器 A')
@@ -380,6 +422,42 @@ try {
   }
   await agentRequest('heartbeat', { metrics, containers: [] }, firstAgent.token)
   await agentRequest('heartbeat', { metrics, containers: [] }, secondAgent.token)
+  await visible(`[data-server-id="${firstAgent.serverId}"]`)
+  assert.equal(
+    await evaluate(`document.querySelector('#deploy-view').textContent.includes('查看详情')`),
+    false,
+  )
+  assert.equal(await evaluate(`!!document.querySelector('[data-slot="sheet-content"]')`), false)
+  await clickText('解除绑定', `[data-server-id="${firstAgent.serverId}"]`)
+  await visible('[role=alertdialog]')
+  await clickText('取消', '[role=alertdialog]')
+
+  // 空环境可删除，取消操作保留环境；删除当前环境后地址自动切回有效环境。
+  await go('environments')
+  await click('#create-button')
+  await fill('#deploy-name', '待删除环境')
+  await submit()
+  const disposableEnv = deployment.data.environments.find((e) => e.name === '待删除环境')
+  await visible(`[data-environment-id="${disposableEnv.id}"]`)
+  await clickText('编辑', `[data-environment-id="${disposableEnv.id}"]`)
+  await fill('#deploy-name', '空环境待清理')
+  await submit()
+  await go('environments', `?environment=${disposableEnv.id}`)
+  await clickText('删除', `[data-environment-id="${disposableEnv.id}"]`)
+  await visible('[role=alertdialog]')
+  await clickText('取消', '[role=alertdialog]')
+  assert.ok(deployment.data.environments.some((e) => e.id === disposableEnv.id))
+  await clickText('删除', `[data-environment-id="${disposableEnv.id}"]`)
+  await clickText('确认', '[role=alertdialog]')
+  await until(
+    () => !deployment.data.environments.some((e) => e.id === disposableEnv.id),
+    '删除空环境',
+  )
+  await until(() => evaluate(`!location.hash.includes('${disposableEnv.id}')`), '自动选择有效环境')
+  assert.equal(
+    await evaluate(`document.querySelector('#deploy-view').textContent.includes('查看服务')`),
+    false,
+  )
 
   // 分步保存、离开确认与继续配置均通过网页执行。
   await click('[data-view=services]')
@@ -510,10 +588,10 @@ try {
   )
   await screenshot('console-commit-summary.png')
   await evaluate('document.activeElement.blur()')
-  const publish = async (action) => {
+  const publish = async (action, chosenRelease) => {
     await go(
       'release',
-      `?environment=${firstTarget.environmentId}&target=${firstTarget.id}&action=${action || 'deploy'}`,
+      `?environment=${firstTarget.environmentId}&target=${firstTarget.id}&action=${action || 'deploy'}${chosenRelease ? '&release=' + chosenRelease : ''}`,
     )
     await visible('#confirm-release')
     await until(
@@ -541,7 +619,51 @@ try {
     () => evaluate(`document.querySelector('#deploy-task-info').textContent.includes('发布成功')`),
     '第二版成功',
   )
-  const rollback = await publish('rollback')
+  // 从第二页选中的版本必须精确进入回退确认，刷新后仍不能换成默认首项。
+  const fillerIds = Array.from({ length: 22 }, () => randomUUID())
+  await service.store.change((state) => {
+    const original = state.deployments.releases.find((r) => r.id === task.id)
+    const at = state.deployments.releases.findIndex((r) => r.id === next.id)
+    state.deployments.releases.splice(
+      at,
+      0,
+      ...fillerIds.map((id, i) => ({ ...original, id, commitSubject: `历史填充 ${i}` })),
+    )
+  })
+  await go(
+    'service',
+    `?environment=${firstTarget.environmentId}&target=${firstTarget.id}&tab=history`,
+  )
+  await visible('[data-release-id]')
+  assert.equal(
+    await evaluate(`document.querySelector('#deploy-view').textContent.includes('回退版本')`),
+    false,
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('#deploy-view').textContent.includes('源码已归档')`),
+    false,
+  )
+  assert.equal(
+    await evaluate(`Boolean(document.querySelector('[data-release-id="${task.id}"]'))`),
+    false,
+  )
+  await clickText('加载更早版本')
+  await visible(`[data-release-id="${task.id}"]`)
+  await clickText('回退', `[data-release-id="${task.id}"]`)
+  await visible('#deploy-releaseId')
+  assert.ok((await evaluate('location.hash')).includes('release=' + task.id))
+  await command('Page.reload')
+  await visible('#deploy-releaseId')
+  await until(
+    () => evaluate(`!document.querySelector('#confirm-release').disabled`),
+    '精确版本回退可确认',
+  )
+  assert.ok(
+    !(await evaluate(`document.querySelector('#deploy-releaseId').textContent`)).includes(
+      '历史填充',
+    ),
+  )
+  const rollback = await publish('rollback', task.id)
   assert.equal(rollback.release.id, task.id)
   await send(rollback, 1, 'verifying', '回退健康检查通过', 'succeeded', {
     release: rollback.release,
@@ -550,6 +672,9 @@ try {
     () => evaluate(`document.querySelector('#deploy-task-info').textContent.includes('回退成功')`),
     '回退成功',
   )
+  await service.store.change((state) => {
+    state.deployments.releases = state.deployments.releases.filter((r) => !fillerIds.includes(r.id))
+  })
   const restart = await publish('restart')
   assert.equal(restart.action, 'restart')
   await send(restart, 1, 'verifying', '重启健康检查通过', 'succeeded', {
@@ -898,7 +1023,7 @@ try {
   const homeVersion = `${homeApi} [data-service-version]`
   const homeSize = () =>
     evaluate(
-      `(() => { const c=document.querySelector('${homeCard}'),b=c.getBoundingClientRect();return {height:b.height,width:b.width}; })()`,
+      `(() => { const c=document.querySelector('${homeCard}'),b=c.getBoundingClientRect();return {height:Math.round(b.height*100)/100,width:Math.round(b.width*100)/100}; })()`,
     )
   const firstHomePage = async () => {
     while (
@@ -1092,7 +1217,7 @@ try {
   await visible(`[data-workspace-id="${layoutProject.id}"]`)
   assert.equal(
     await evaluate(
-      `document.querySelector('[data-workspace-id="${layoutProject.id}"]').getBoundingClientRect().height`,
+      `Math.round(document.querySelector('[data-workspace-id="${layoutProject.id}"]').getBoundingClientRect().height*100)/100`,
     ),
     beforeSize.height,
     '空项目与多服务项目等高',
@@ -1123,7 +1248,7 @@ try {
     )
     assert.equal(
       await evaluate(
-        `[...document.querySelectorAll('.project-tile')].every(c=>c.getBoundingClientRect().height===440)`,
+        `[...document.querySelectorAll('.project-tile')].every(c=>Math.abs(c.getBoundingClientRect().height-440)<.01)`,
       ),
       true,
       '所有项目卡片等高',
@@ -1143,7 +1268,49 @@ try {
         true,
         `${view} 在 ${width}px 溢出`,
       )
-      if (['services', 'overview', 'environments'].includes(view))
+      if (view === 'overview') {
+        assert.equal(
+          await evaluate(
+            `[...document.querySelectorAll('[data-overview] [data-slot="card-header"]')].every(header => {const title=header.querySelector('[data-slot="card-title"]').getBoundingClientRect(),button=header.querySelector('button').getBoundingClientRect();return Math.abs(title.y+title.height/2-button.y-button.height/2)<1;})`,
+          ),
+          true,
+          '概览管理按钮与标题在同一行',
+        )
+      }
+      if (view === 'environments') {
+        assert.equal(
+          await evaluate(`document.querySelector('#deploy-view').textContent.includes('查看服务')`),
+          false,
+        )
+        if (width >= 768)
+          assert.equal(
+            await evaluate(
+              `(() => {const table=document.querySelector('#deploy-view table'),head=table.querySelector('th:last-child').getBoundingClientRect(),cell=table.querySelector('td:last-child').getBoundingClientRect();return Math.abs(head.x-cell.x)<1 && getComputedStyle(table.querySelector('td:last-child > div')).justifyContent!=='flex-end';})()`,
+            ),
+            true,
+            '环境操作与表头对齐',
+          )
+      }
+      if (view === 'servers') {
+        assert.equal(
+          await evaluate(
+            `getComputedStyle(document.querySelector('.bind-server')).backgroundColor === getComputedStyle(document.querySelector('#create-button')).backgroundColor`,
+          ),
+          true,
+          '两个接入按钮样式一致',
+        )
+        assert.equal(
+          await evaluate(`document.querySelector('#deploy-view').textContent.includes('查看详情')`),
+          false,
+        )
+        assert.equal(
+          await evaluate(
+            `[...document.querySelectorAll('.server-card')].every(card => card.scrollWidth <= card.clientWidth + 1)`,
+          ),
+          true,
+        )
+      }
+      if (['services', 'overview', 'environments', 'servers', 'projects'].includes(view))
         await screenshot(`console-${view}-${width}.png`)
     }
     await go(
@@ -1157,6 +1324,23 @@ try {
       `配置在 ${width}px 溢出`,
     )
     await screenshot(`console-config-${width}.png`)
+    await clickText('发布记录')
+    await visible('[data-release-id]')
+    assert.equal(
+      await evaluate(
+        `document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('[data-release-id] [data-slot=badge]')].every(b => b.getBoundingClientRect().height <= 28)`,
+      ),
+      true,
+      '版本状态不拉伸且页面不溢出',
+    )
+    assert.equal(
+      await evaluate(
+        `[...document.querySelectorAll('[data-release-id]')].every(row=>{const box=row.getBoundingClientRect(),commit=row.querySelector('.commit-summary').getBoundingClientRect();return commit.right<=box.right+.5;})`,
+      ),
+      true,
+      '长提交说明不超出历史记录内容区',
+    )
+    await screenshot(`console-history-${width}.png`)
   }
   await go('services')
   await visible(`[data-service-id="${apiService.id}"]`)
@@ -1175,9 +1359,11 @@ try {
     '失联状态',
   )
   await go('overview')
-  assert.match(
-    await evaluate(`document.querySelector('[data-onboarding]').textContent`),
-    /已完成 6 \/ 6/,
+  await visible('[data-overview=\"repositories\"]')
+  assert.equal(
+    await evaluate(`!!document.querySelector('[data-onboarding]')`),
+    false,
+    '接入完成后自动收起引导',
   )
 
   // 全局撤销记录可以删除，项目解绑不影响共享服务器身份。
@@ -1223,7 +1409,7 @@ try {
   await submit()
   await visible(`[data-server-id="${secondAgent.serverId}"]`)
   assert.equal(workspaces.overview(another.id).targets.length, 0)
-  await menu(`[data-server-id="${secondAgent.serverId}"]`, '解除项目绑定')
+  await clickText('解除绑定', `[data-server-id="${secondAgent.serverId}"]`)
   await clickText('确认', '[role=alertdialog]')
   await until(() => !workspaces.overview(another.id).servers.length, '解除绑定')
   assert.equal(deployment.authenticate(secondAgent.token), secondAgent.serverId)

@@ -319,3 +319,39 @@ test('提交刷新与发布同步共用并发队列，按队列再缓存锁的�
   ]);
   assert.equal(results.length,3);assert.deepEqual(f.builder.histories,['main']);assert.equal(f.builder.calls.length,2);
 });
+
+
+test('环境删除按项目检查引用，事务清理源码关联并保留项目服务与仓库', async t => {
+  const f = await fixture(t, true), a = await project(f, '环境删除'), b = await project(f, '其他项目');
+  const env = await f.workspaces.saveEntity(a.app.id, 'environments', { name: '可删除环境' });
+  await f.workspaces.saveSource(a.app.id, { environmentId: env.id, serviceId: a.service.id, sourceProjectId: a.source.project.id });
+  assert.equal((await f.request(`/api/workspaces/${b.app.id}/environments/${env.id}`, 'DELETE')).status, 404);
+  assert.equal((await f.request(`/api/workspaces/${a.app.id}/environments/${a.environments[0].id}`, 'DELETE')).status, 409);
+  assert.equal((await f.request(`/api/workspaces/${a.app.id}/environments/${env.id}`, 'DELETE')).status, 200);
+  assert.equal(f.workspaces.overview(a.app.id).environments.some(item => item.id === env.id), false);
+  assert.equal(f.workspaces.data.environmentSources.some(item => item.environmentId === env.id), false);
+  assert.ok(f.workspaces.overview(a.app.id).services.some(item => item.id === a.service.id));
+  assert.ok(f.workspaces.overview(a.app.id).repositories.some(item => item.id === a.source.project.id));
+  assert.equal(f.workspaces.overview(a.app.id).targets.length, 2);
+  assert.equal(f.workspaces.overview(b.app.id).environments.length, 2);
+  assert.equal((await f.request(`/api/workspaces/${a.app.id}/environments/${env.id}`, 'DELETE')).status, 404);
+  assert.ok(f.service.store.state.events.some(item => item.action === 'environment_delete' && item.applicationId === a.app.id));
+  const historical = await f.workspaces.saveEntity(a.app.id, 'environments', { name: '历史环境' });
+  await f.service.store.change(state => state.deployments.tasks.push({ id: randomUUID(), applicationId: a.app.id, environmentId: historical.id, status: 'failed' }));
+  assert.equal((await f.request(`/api/workspaces/${a.app.id}/environments/${historical.id}`, 'DELETE')).status, 409);
+});
+
+test('按版本读取回退详情覆盖较早分页，拒绝跨项目和跨部署位置引用', async t => {
+  const f = await fixture(t, true), a = await project(f, '历史版本'), b = await project(f, '其他项目');
+  const versions = Array.from({ length: 25 }, (_, i) => ({ id: randomUUID(), targetId: a.targets[0].id, applicationId: a.app.id, revision: String(i).padStart(40, '0'), available: true }));
+  await f.service.store.change(state => state.deployments.releases.push(...versions));
+  const base = `/api/workspaces/${a.app.id}/targets/${a.targets[0].id}/releases`;
+  assert.equal((await f.request(base)).value.releases.some(item => item.id === versions[0].id), false);
+  const selected = await f.request(`${base}/${versions[0].id}`);
+  assert.equal(selected.status, 200);
+  assert.equal(selected.value.release.id, versions[0].id);
+  assert.equal(selected.value.release.revision, versions[0].revision);
+  assert.equal((await f.request(`/api/workspaces/${a.app.id}/targets/${a.targets[1].id}/releases/${versions[0].id}`)).status, 404);
+  assert.equal((await f.request(`/api/workspaces/${b.app.id}/targets/${b.targets[0].id}/releases/${versions[0].id}`)).status, 404);
+  assert.equal((await f.request(`${base}/${randomUUID()}`)).status, 404);
+});
