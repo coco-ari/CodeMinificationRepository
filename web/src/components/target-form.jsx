@@ -3,6 +3,7 @@ import { Advanced, MappingRows } from './config-fields'
 import { FieldSet, FieldLegend } from '@/components/ui/field'
 import { Field, FormDialog, Notice, Empty } from './shared'
 import { Separator } from '@/components/ui/separator'
+import { Button } from '@/components/ui/button'
 import { useConsole } from '@/lib/console'
 const lines = (value) =>
   (value || '')
@@ -17,7 +18,7 @@ const Section = ({ title, children }) => (
   </FieldSet>
 )
 export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
-  const { data, environmentId, endpoint, request, refresh, notify } = useConsole()
+  const { data, environmentId, endpoint, request, refresh, notify, confirm } = useConsole()
   const available = data.servers.filter(
     (s) =>
       !s.revoked &&
@@ -41,7 +42,13 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
   )
   const [serviceId, setService] = useState(item?.serviceId || choices[0]?.id || '')
   const [serverId, setServer] = useState(item?.serverId || available[0]?.id || '')
-  const c = item?.config || {}
+  const [templateId, setTemplateId] = useState('')
+  const [imported, setImported] = useState(null)
+  const [configKey, setConfigKey] = useState(0)
+  const c = imported || item?.config || {}
+  const templates = data.targets.filter(
+    (t) => t.serviceId === serviceId && t.mode === 'managed' && t.id !== item?.id,
+  )
   const module = data.services.find((s) => s.id === serviceId)?.module || '.'
   const isStatic = data.services.find((s) => s.id === serviceId)?.kind === 'static'
   const [packageManager, setPackageManager] = useState(c.packageManager || 'npm')
@@ -50,6 +57,9 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
   )
   function selectService(id) {
     setService(id)
+    setImported(null)
+    setTemplateId('')
+    setPackageManager('npm')
     const module = data.services.find((s) => s.id === id)?.module || '.'
     setArtifact(
       `${module === '.' ? '' : `${module}/`}${data.services.find((s) => s.id === id)?.kind === 'static' ? 'dist' : 'target/*.jar'}`,
@@ -175,7 +185,61 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
           />
         </Grid>
       </Section>
-      <div key={serviceId} className="space-y-5 managed-config">
+      {!item && templates.length > 0 && (
+        <Section title="复用已有配置（可选）">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-0 flex-1 basis-60">
+              <Field
+                name="configTemplate"
+                label="此服务的已有部署位置"
+                value={templateId}
+                choices={[
+                  ['', '选择已有配置'],
+                  ...templates.map((t) => [
+                    t.id,
+                    `${data.environments.find((e) => e.id === t.environmentId)?.name || '环境'} / ${data.servers.find((s) => s.id === t.serverId)?.name || '服务器'}`,
+                  ]),
+                ]}
+                onChange={(e) => setTemplateId(e.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!templateId}
+              onClick={(event) => {
+                const template = templates.find((t) => t.id === templateId)
+                if (!template) return
+                const form = event.currentTarget.closest('form')
+                confirm(
+                  '应用已有配置',
+                  '将替换下方尚未保存的配置，保留当前环境和服务器。Profile、运行参数及网络会沿用，请核对环境差异；服务器端口和静态站点地址需重新填写。仅填入表单，不会创建发布任务。',
+                  async () => {
+                    const config = structuredClone(template.config)
+                    config.ports = (config.ports || []).map((port) => ({ ...port, hostPort: '' }))
+                    if (isStatic) config.health = { ...config.health, url: '' }
+                    setImported(config)
+                    setConfigKey((key) => key + 1)
+                    setArtifact(config.artifactPath)
+                    setPackageManager(config.packageManager || 'npm')
+                    form?.dispatchEvent(new Event('input', { bubbles: true }))
+                    notify('已填入配置，请核对环境差异后保存')
+                  },
+                )
+              }}
+            >
+              应用配置
+            </Button>
+          </div>
+          {imported && (
+            <p className="text-sm text-muted-foreground" role="status">
+              已复用构建、运行和检查设置。请检查
+              Profile、外部依赖与网络，并填写当前服务器的端口或站点地址。
+            </p>
+          )}
+        </Section>
+      )}
+      <div key={`${serviceId}-${configKey}`} className="space-y-5 managed-config">
         <Section title="构建配置">
           <Grid>
             <Field
@@ -389,26 +453,66 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
             />
           </Section>
         )}
-        <Section title={isStatic ? '发布验证' : '健康检查'}>
-          {!isStatic && (
-            <>
-              <Grid>
-                <Field
-                  name="healthPath"
-                  label="检查路径"
-                  defaultValue={c.health?.path || '/health'}
-                />
-                <Field
-                  name="healthPort"
-                  label="容器端口"
-                  type="number"
-                  min="1"
-                  max="65535"
-                  defaultValue={c.health?.port ?? 8080}
-                />
-              </Grid>
-            </>
-          )}
+        <HealthFields health={c.health || {}} isStatic={isStatic} />
+      </div>
+    </FormDialog>
+  )
+}
+
+function HealthFields({ health, isStatic }) {
+  const [path, setPath] = useState(health.path || '/health')
+  const [port, setPort] = useState(health.port ?? 8080)
+  const [status, setStatus] = useState(health.status ?? 200)
+  const [body, setBody] = useState(health.bodyIncludes || '')
+  const [timeout, setTimeout] = useState(health.timeoutSeconds ?? 180)
+  const [interval, setInterval] = useState(health.intervalSeconds ?? 5)
+  return (
+    <Section title={isStatic ? '发布验证' : '健康检查'}>
+      {!isStatic && (
+        <Grid>
+          <Field
+            name="healthPath"
+            label="检查路径"
+            value={path}
+            required
+            onChange={(e) => setPath(e.target.value)}
+            hint="填写服务实际提供的 HTTP 接口，例如 /actuator/health。"
+          />
+          <Field
+            name="healthPort"
+            label="容器端口"
+            type="number"
+            min="1"
+            max="65535"
+            value={port}
+            required
+            onChange={(e) => setPort(e.target.value)}
+            hint="服务在容器内监听的端口，不是服务器映射端口。"
+          />
+        </Grid>
+      )}
+      <p className="text-sm text-muted-foreground break-words" id="health-check-preview">
+        {isStatic ? (
+          'Agent 通过上方站点地址检查 HTTP 200 和发布版本标记'
+        ) : (
+          <>
+            在服务容器内访问{' '}
+            <code className="break-all">
+              http://127.0.0.1:{port}
+              {path}
+            </code>
+            ，返回 HTTP {status}
+          </>
+        )}
+        {body && (
+          <>
+            ，且响应包含 <code className="break-all">{body}</code>
+          </>
+        )}{' '}
+        时通过。 每 {interval} 秒检查一次，最多等待 {timeout} 秒。失败时尝试恢复上一版本。
+      </p>
+      <Advanced title="成功条件与等待时间">
+        <div className="space-y-4 pt-2">
           <Grid>
             {!isStatic && (
               <Field
@@ -417,13 +521,16 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
                 type="number"
                 min="200"
                 max="399"
-                defaultValue={c.health?.status ?? 200}
+                value={status}
+                required
+                onChange={(e) => setStatus(e.target.value)}
               />
             )}
             <Field
               name="healthBody"
               label="响应内容需包含（可选）"
-              defaultValue={c.health?.bodyIncludes || ''}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
             />
           </Grid>
           <Grid>
@@ -433,7 +540,9 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
               type="number"
               min="10"
               max="900"
-              defaultValue={c.health?.timeoutSeconds ?? 180}
+              value={timeout}
+              required
+              onChange={(e) => setTimeout(e.target.value)}
             />
             <Field
               name="healthInterval"
@@ -441,11 +550,13 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
               type="number"
               min="2"
               max="60"
-              defaultValue={c.health?.intervalSeconds ?? 5}
+              value={interval}
+              required
+              onChange={(e) => setInterval(e.target.value)}
             />
           </Grid>
-        </Section>
-      </div>
-    </FormDialog>
+        </div>
+      </Advanced>
+    </Section>
   )
 }

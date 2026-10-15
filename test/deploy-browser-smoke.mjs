@@ -52,6 +52,12 @@ const builder = {
             subject: `第 ${version} 次提交`,
             at: new Date().toISOString(),
           },
+          ...Array.from({ length: 99 }, (_, index) => ({
+            revision: createHash('sha1').update(`历史提交-${index}`).digest('hex'),
+            author: index === 60 ? 'Alice Example' : '历史作者',
+            subject: `历史修复 ${index} [api]`,
+            at: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
+          })),
         ],
         refreshedAt: new Date().toISOString(),
       }
@@ -483,7 +489,27 @@ try {
   await visible('#deploy-buildImage')
   assert.equal(deployment.data.services.filter((s) => s.name === 'API 服务').length, 1)
   assert.equal(deployment.data.tasks.length, 0)
+  assert.equal(
+    await evaluate(`document.querySelector('#deploy-healthStatus').getClientRects().length`),
+    0,
+  )
   await fill('#deploy-healthPath', '/api/health')
+  assert.match(
+    await evaluate(`document.querySelector('#health-check-preview').textContent`),
+    /127.0.0.1:8080\/api\/health/,
+  )
+  await evaluate(`document.querySelector('#health-check-preview').scrollIntoView({block:'center'})`)
+  await screenshot('ux-health-after-desktop.png')
+  await clickText('成功条件与等待时间')
+  await fill('#deploy-healthStatus', '204')
+  await fill('#deploy-healthBody', 'UP')
+  await fill('#deploy-healthTimeout', '240')
+  await fill('#deploy-healthInterval', '7')
+  assert.match(
+    await evaluate(`document.querySelector('#health-check-preview').textContent`),
+    /HTTP 204.*UP.*7.*240/s,
+  )
+  await clickText('成功条件与等待时间')
   await clickText('运行资源与附加参数')
   await fill('#deploy-args', '--endpoint=shared-nacos.test.internal:8848')
   await clickText('添加端口映射')
@@ -501,12 +527,79 @@ try {
     await evaluate(`document.querySelector('#deploy-serverId').textContent`),
     /测试服务器 B/,
   )
+  const templateLabel = `${deployment.data.environments.find((e) => e.id === firstTarget.environmentId).name} / ${deployment.data.servers.find((s) => s.id === firstTarget.serverId).name}`
+  await choose('#deploy-configTemplate', templateLabel)
+  await fill('#deploy-buildImage', 'maven:custom-before-copy')
+  await clickText('应用配置')
+  await visible('[role=alertdialog]')
+  await clickText('取消', '[role=alertdialog]')
+  assert.equal(
+    await evaluate(`document.querySelector('#deploy-buildImage').value`),
+    'maven:custom-before-copy',
+  )
+  await clickText('应用配置')
+  await visible('[role=alertdialog]')
+  await clickText('确认', '[role=alertdialog]')
+  await until(
+    () =>
+      evaluate(
+        `document.querySelector('#deploy-buildImage').value === ${JSON.stringify(firstTarget.config.buildImage)}`,
+      ),
+    '复用构建配置',
+  )
+  assert.equal(await evaluate(`document.querySelector('#deploy-healthStatus').value`), '204')
+  assert.equal(await evaluate(`document.querySelector('#deploy-healthTimeout').value`), '240')
+  assert.equal(
+    await evaluate(`document.querySelector('[aria-label="端口映射 1 服务器端口"]').value`),
+    '',
+  )
+  assert.equal(await evaluate(`document.querySelector('#deploy-healthPath').value`), '/api/health')
+  assert.match(
+    await evaluate(`document.querySelector('#deploy-serverId').textContent`),
+    /测试服务器 B/,
+  )
+  assert.equal(deployment.data.tasks.length, 0)
+  await screenshot('ux-reuse-after-desktop.png')
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 950,
+    deviceScaleFactor: 1,
+    mobile: true,
+  })
+  await animationsSettled()
+  await evaluate(
+    `document.querySelector('#deploy-configTemplate').scrollIntoView({block:'center'})`,
+  )
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true)
+  await screenshot('ux-reuse-after-mobile.png')
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 1100,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[aria-label="端口映射 1 服务器端口"]').checkValidity()`,
+    ),
+    false,
+  )
+  assert.equal(
+    deployment.data.targets.filter((t) => t.serviceId === apiService.id).length,
+    1,
+    '未填写服务器端口不能保存',
+  )
+  await fill('[aria-label="端口映射 1 服务器端口"]', '18102')
   await submit()
   await visible('.configuration-stack')
   const secondTarget = deployment.data.targets.find(
     (t) => t.serviceId === apiService.id && t.id !== firstTarget.id,
   )
   assert.ok(secondTarget)
+  assert.deepEqual(secondTarget.config, {
+    ...firstTarget.config,
+    ports: [{ ...firstTarget.config.ports[0], hostPort: 18102 }],
+  })
   const containers = [
     {
       targetId: firstTarget.id,
@@ -530,6 +623,27 @@ try {
     () => evaluate(`!document.querySelector('#confirm-release').disabled`),
     '发布准备完成',
   )
+  assert.equal(await evaluate(`document.querySelectorAll('[data-commit]').length`), 100)
+  await fill('[aria-label="搜索提交"]', 'ALICE')
+  assert.equal(await evaluate(`document.querySelectorAll('[data-commit]').length`), 1)
+  assert.equal(
+    await evaluate(`document.querySelector('[data-commit]').textContent.includes('最新提交')`),
+    false,
+  )
+  const oldSHA = createHash('sha1').update('历史提交-60').digest('hex')
+  await fill('[aria-label="搜索提交"]', oldSHA.slice(0, 12).toUpperCase())
+  assert.equal(await evaluate(`document.querySelector('[data-commit]').dataset.commit`), oldSHA)
+  await screenshot('ux-commit-search-after-desktop.png')
+  await fill('[aria-label="搜索提交"]', '不存在的提交')
+  assert.equal(await evaluate(`document.querySelectorAll('[data-commit]').length`), 0)
+  assert.equal(
+    await evaluate(`document.querySelector('#confirm-release').disabled`),
+    false,
+    '过滤不清除已选版本',
+  )
+  await click('[aria-label="清空搜索提交"]')
+  await fill('[aria-label="搜索提交"]', String(version).repeat(40))
+  assert.equal(await evaluate(`document.querySelectorAll('[data-commit]').length`), 1)
   await click('#confirm-release')
   await visible('[role=alertdialog]')
   await clickText('确认', '[role=alertdialog]')
@@ -537,6 +651,7 @@ try {
   await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '源码准备')
   const task = (await agentRequest('claim', {}, firstAgent.token)).task
   assert.equal(task.targetId, firstTarget.id)
+  assert.equal(task.revision, String(version).repeat(40), '搜索后仍按选中的完整 SHA 创建任务')
   const send = (task, seq, stage, message, status, result) =>
     agentRequest(
       `tasks/${task.id}/events`,
@@ -781,6 +896,28 @@ try {
     '静态发布成功',
   )
 
+  // 同服务静态配置复用保留包管理器，但必须重新填写站点地址。
+  await go('setup', `?environment=${staticTarget.environmentId}&service=${staticService.id}&step=3`)
+  await visible('#deploy-configTemplate')
+  await choose('#deploy-configTemplate', templateLabel)
+  await clickText('应用配置')
+  await visible('[role=alertdialog]')
+  await clickText('确认', '[role=alertdialog]')
+  await until(
+    () => evaluate(`document.querySelector('#deploy-packageManager').textContent.includes('pnpm')`),
+    '复用 pnpm',
+  )
+  assert.equal(await evaluate(`document.querySelector('#deploy-buildArgs').value`), '--mode\ntest')
+  assert.equal(await evaluate(`document.querySelector('#deploy-healthUrl').value`), '')
+  assert.match(
+    await evaluate(`document.querySelector('#health-check-preview').textContent`),
+    /HTTP 200.*发布版本标记/,
+  )
+  await clickText('返回')
+  await visible('[role=alertdialog]')
+  await clickText('放弃修改并离开', '[role=alertdialog]')
+  assert.equal(deployment.data.targets.filter((t) => t.serviceId === staticService.id).length, 1)
+
   // 提交选择、日志补读和任务快照继续兼容。
   await go('release', `?environment=${firstTarget.environmentId}&target=${firstTarget.id}`)
   await visible('#refresh-commits')
@@ -818,7 +955,9 @@ try {
     }
     return originalHistory.call(this, source, credential, refresh)
   }
+  await fill('[aria-label="搜索提交"]', '待切换分支的筛选')
   await choose('#release-branch', 'frontend-test')
+  assert.equal(await evaluate(`document.querySelector('[aria-label="搜索提交"]').value`), '')
   await until(() => oldStarted, '旧分支请求开始')
   assert.equal(await evaluate(`document.querySelector('#confirm-release').disabled`), true)
   await choose('#release-branch', 'test-branch')
@@ -887,6 +1026,39 @@ try {
     '完整日志',
   )
   const logs = await evaluate(`document.querySelector('#deploy-task-logs').textContent`)
+  await fill('[aria-label="搜索日志"]', '编译')
+  assert.ok(
+    (await evaluate(`document.querySelector('#deploy-task-logs').textContent`)).includes('编译'),
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('#deploy-task-logs').textContent.includes('验证完成')`),
+    false,
+  )
+  await screenshot('ux-log-search-after-desktop.png')
+  await evaluate(`(() => {
+    window.originalCreateObjectURL = URL.createObjectURL;
+    window.originalAnchorClick = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = (blob) => { window.downloadText = blob.text(); return window.originalCreateObjectURL(blob) };
+    HTMLAnchorElement.prototype.click = function() { if (this.download) window.downloadName = this.download; else window.originalAnchorClick.call(this) };
+  })()`)
+  await clickText('下载日志')
+  assert.equal(await evaluate('window.downloadName'), `autoops-${pinned.id}.log`)
+  assert.equal(
+    (await evaluate('window.downloadText')).trimEnd(),
+    logs.trimEnd(),
+    '下载保留搜索之外的所有已加载日志',
+  )
+  await evaluate(
+    `URL.createObjectURL = window.originalCreateObjectURL; HTMLAnchorElement.prototype.click = window.originalAnchorClick`,
+  )
+  await fill('[aria-label="搜索日志"]', '[不存在.*]')
+  assert.match(
+    await evaluate(`document.querySelector('#deploy-task-logs').textContent`),
+    /没有匹配/,
+  )
+  await click('[aria-label="清空搜索日志"]')
+  assert.equal(await evaluate(`document.querySelector('#deploy-task-logs').textContent`), logs)
+
   for (const word of ['下载', '编译', '镜像', '更新', '验证完成']) assert.ok(logs.includes(word))
   const taskUrl = await evaluate('location.href')
   await command('Page.navigate', { url: taskUrl })
@@ -1341,6 +1513,51 @@ try {
       '长提交说明不超出历史记录内容区',
     )
     await screenshot(`console-history-${width}.png`)
+    await go('release', `?environment=${firstTarget.environmentId}&target=${firstTarget.id}`)
+    await visible('[aria-label="搜索提交"]')
+    await until(
+      () => evaluate(`!document.querySelector('[aria-label="搜索提交"]').disabled`),
+      '提交检索可用',
+    )
+    await fill('[aria-label="搜索提交"]', 'ALICE')
+    assert.equal(await evaluate(`document.querySelectorAll('[data-commit]').length`), 1)
+    assert.equal(
+      await evaluate('document.documentElement.scrollWidth <= innerWidth'),
+      true,
+      `提交检索 ${width}px`,
+    )
+    await screenshot(`ux-commit-search-${width}.png`)
+    await go('tasks', `?environment=${firstTarget.environmentId}&task=${pinned.id}`)
+    await visible('#deploy-task-logs')
+    await clickText('完整日志', '#task-workbench')
+    await fill('[aria-label="搜索日志"]', '编译')
+    assert.equal(
+      await evaluate('document.documentElement.scrollWidth <= innerWidth'),
+      true,
+      `日志检索 ${width}px`,
+    )
+    await evaluate(`document.querySelector('.task-log-card').scrollIntoView({block:'center'})`)
+    await screenshot(`ux-log-search-${width}.png`)
+    await go(
+      'service',
+      `?environment=${firstTarget.environmentId}&target=${firstTarget.id}&tab=config`,
+    )
+    await visible('.configuration-stack')
+    await clickText('编辑部署配置')
+    await visible('#health-check-preview')
+    assert.equal(
+      await evaluate('document.documentElement.scrollWidth <= innerWidth'),
+      true,
+      `健康检查配置 ${width}px`,
+    )
+    assert.equal(
+      await evaluate(`document.querySelector('#deploy-healthStatus').getClientRects().length`),
+      0,
+    )
+    await evaluate(
+      `document.querySelector('#health-check-preview').scrollIntoView({block:'center'})`,
+    )
+    await screenshot(`ux-health-${width}.png`)
   }
   await go('services')
   await visible(`[data-service-id="${apiService.id}"]`)

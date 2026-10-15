@@ -16,8 +16,12 @@ import {
   FileCode2,
   Clock3,
   MoreHorizontal,
+  Download,
+  Search,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -46,6 +50,35 @@ import {
   actionNames,
   copy,
 } from '@/lib/console'
+
+function SearchField({ label, placeholder, value, onChange, disabled = false }) {
+  return (
+    <div className="relative min-w-0 flex-1">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        type="search"
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="pl-9 pr-10 [&::-webkit-search-cancel-button]:appearance-none"
+      />
+      {value && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`清空${label}`}
+          className="absolute right-1 top-1/2 -translate-y-1/2"
+          onClick={() => onChange('')}
+        >
+          <X />
+        </Button>
+      )}
+    </div>
+  )
+}
 
 export function Configuration({ target }) {
   if (!target) return <Empty title="部署目标不存在" />
@@ -565,6 +598,7 @@ export function ReleaseWorkbench() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [choice, setChoice] = useState(''),
+    [commitQuery, setCommitQuery] = useState(''),
     [tab, setTab] = useState(route.action === 'rollback' ? 'releases' : 'commits'),
     [releaseId, setReleaseId] = useState(''),
     [showConfig, setShowConfig] = useState(false),
@@ -573,6 +607,13 @@ export function ReleaseWorkbench() {
     locked = useRef(false),
     generation = useRef(0),
     submission = useRef(null)
+  useEffect(() => setCommitQuery(''), [branch, target?.id])
+  const visibleCommits = (history?.commits || []).filter((commit) =>
+    [commit.revision, commit.subject, commit.author]
+      .join(' ')
+      .toLocaleLowerCase()
+      .includes(commitQuery.trim().toLocaleLowerCase()),
+  )
   useEffect(() => {
     live.current = true
     return () => {
@@ -877,6 +918,21 @@ export function ReleaseWorkbench() {
                             : '尚未获取提交记录'}
                       </span>
                     </div>
+                    <SearchField
+                      label="搜索提交"
+                      placeholder="提交 SHA、说明或作者"
+                      value={commitQuery}
+                      onChange={setCommitQuery}
+                      disabled={loading || busy}
+                    />
+                    {commitQuery.trim() && (
+                      <p className="text-xs text-muted-foreground" role="status">
+                        匹配 {visibleCommits.length} / {history?.commits.length || 0} 条提交
+                        {choice && !visibleCommits.some((c) => c.revision === choice)
+                          ? ' · 已选提交保留在发布确认中'
+                          : ''}
+                      </p>
+                    )}
                     <div
                       role="group"
                       aria-label="选择发布提交"
@@ -898,7 +954,7 @@ export function ReleaseWorkbench() {
                             <Skeleton className="h-20" />
                           </div>
                         )}
-                        {history?.commits.map((commit, index) => (
+                        {visibleCommits.map((commit) => (
                           <Button
                             key={commit.revision}
                             variant="ghost"
@@ -921,11 +977,16 @@ export function ReleaseWorkbench() {
                             </span>
                             {choice === commit.revision ? (
                               <Check className="size-4 shrink-0" />
-                            ) : index === 0 ? (
+                            ) : commit.revision === history?.commits[0]?.revision ? (
                               <Badge variant="secondary">最新提交</Badge>
                             ) : null}
                           </Button>
                         ))}
+                        {commitQuery.trim() && !visibleCommits.length && !busy && (
+                          <p className="py-6 text-sm text-muted-foreground">
+                            最近 100 条提交中没有匹配结果。可清空搜索、切换分支或刷新提交。
+                          </p>
+                        )}
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
@@ -1326,6 +1387,7 @@ export function TaskWorkbench({ id }) {
     [error, setError] = useState(''),
     [selected, setSelected] = useState(null),
     [tab, setTab] = useState('flow'),
+    [logQuery, setLogQuery] = useState(''),
     [, tick] = useState(0)
   const cursor = useRef(0),
     output = useRef(null),
@@ -1373,8 +1435,9 @@ export function TaskWorkbench({ id }) {
     pollRef.current()
   }, [version])
   useEffect(() => {
-    if (nearBottom.current && output.current) output.current.scrollTop = output.current.scrollHeight
-  }, [logs, selected, tab, task?.stage])
+    if (!logQuery.trim() && nearBottom.current && output.current)
+      output.current.scrollTop = output.current.scrollHeight
+  }, [logs, selected, tab, task?.stage, logQuery])
   const target = find('targets', task?.targetId),
     outcome = task?.result
   const currentStage =
@@ -1395,6 +1458,27 @@ export function TaskWorkbench({ id }) {
       text: `[${date(l.at)}] [${stageLabel(l.stage, task?.config?.kind)}] ${l.message}\n`,
     })),
   ]
+  const stageLogs = allLogs.filter((l) => !logStage || l.stage === logStage)
+  const logLines = stageLogs
+    .map((l) => l.text)
+    .join('')
+    .split('\n')
+  if (logLines.at(-1) === '') logLines.pop()
+  const query = logQuery.trim().toLocaleLowerCase()
+  const matchingLines = query
+    ? logLines.filter((line) => line.toLocaleLowerCase().includes(query))
+    : logLines
+  const backfilling = task && cursor.current < task.lastSeq
+  function downloadLogs() {
+    const text = allLogs.map((l) => l.text).join('')
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `autoops-${id}.log`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    notify(finished(task) ? '完整日志已下载' : '截至当前的日志已下载')
+  }
   const source = task?.action === 'rollback' ? task.release?.sourceSnapshot : task?.sourceSnapshot
   const renderLogs = () => (
     <Card className="overflow-hidden task-log-card">
@@ -1404,30 +1488,59 @@ export function TaskWorkbench({ id }) {
             ? '完整日志'
             : `${stageTitle || stageLabel(logStage, task?.config?.kind)} · 日志`}
         </CardTitle>
-        {tab === 'logs' ? (
-          <Action
+        <div className="flex flex-wrap items-center gap-2">
+          {tab === 'logs' ? (
+            <Action
+              variant="outline"
+              size="sm"
+              disabled={!task || backfilling}
+              onClick={async () => {
+                await copy(allLogs.map((l) => l.text).join(''))
+                notify('日志已复制')
+              }}
+            >
+              <Copy />
+              复制日志
+            </Action>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={!selected}
+              onClick={() => setSelected(null)}
+            >
+              跟随当前阶段
+            </Button>
+          )}
+          <Button
             variant="outline"
             size="sm"
-            onClick={async () => {
-              await copy(allLogs.map((l) => l.text).join(''))
-              notify('日志已复制')
-            }}
+            disabled={!task || backfilling || !allLogs.length}
+            onClick={downloadLogs}
           >
-            <Copy />
-            复制日志
-          </Action>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-pressed={!selected}
-            onClick={() => setSelected(null)}
-          >
-            跟随当前阶段
+            <Download />
+            下载日志
           </Button>
-        )}
+        </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        <SearchField
+          label="搜索日志"
+          placeholder={tab === 'logs' ? '搜索完整日志中的关键字' : '搜索当前阶段中的关键字'}
+          value={logQuery}
+          onChange={(value) => {
+            setLogQuery(value)
+            nearBottom.current = !value.trim()
+            if (output.current) output.current.scrollTop = 0
+          }}
+        />
+        {(query || backfilling) && (
+          <p className="text-xs text-muted-foreground" role="status">
+            {backfilling ? '正在补齐历史日志… ' : ''}
+            {query &&
+              `匹配 ${matchingLines.length} / ${logLines.length} 行 · 下载保留全部已加载日志`}
+          </p>
+        )}
         <ScrollArea
           className="h-80 rounded-md border bg-muted/30"
           viewportRef={output}
@@ -1442,10 +1555,8 @@ export function TaskWorkbench({ id }) {
             tabIndex={0}
             className="task-log-text !max-h-none !overflow-visible !border-0"
           >
-            {allLogs
-              .filter((l) => !logStage || l.stage === logStage)
-              .map((l) => l.text)
-              .join('') || '等待任务日志…'}
+            {matchingLines.join('\n') ||
+              (query ? '没有匹配的日志，请修改关键字或清空搜索。' : '等待任务日志…')}
           </pre>
         </ScrollArea>
       </CardContent>
