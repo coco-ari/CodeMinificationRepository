@@ -174,7 +174,7 @@ export function ProjectTile({ project }) {
           }}
           className="min-w-0"
         >
-          <TabsList className="max-w-full overflow-x-auto">
+          <TabsList className="max-w-full overflow-x-auto overflow-y-hidden">
             {db.environments.map((env) => (
               <TabsTrigger key={env.id} value={env.id}>
                 {env.name}

@@ -495,7 +495,7 @@ export function Services() {
         <Tabs
           value={environmentId || ''}
           onValueChange={(id) => navigate(route.view, null, id)}
-          className="max-w-full overflow-x-auto"
+          className="max-w-full overflow-x-auto overflow-y-hidden"
         >
           <TabsList>
             {data.environments.map((env) => (
