@@ -820,6 +820,30 @@ try {
     () => evaluate(`document.querySelector('#deploy-view').textContent.includes('当前版本')`),
     '版本记录',
   )
+  assert.ok((await evaluate('location.hash')).includes('tab=history'), '点击页签写入地址')
+  await go(
+    'service',
+    `?environment=${firstTarget.environmentId}&target=${firstTarget.id}&tab=config`,
+  )
+  await visible('.configuration-stack')
+  await evaluate('history.back()')
+  await until(
+    () =>
+      evaluate(
+        `location.hash.includes('tab=history') && !!document.querySelector('[data-release-id]')`,
+      ),
+    '后退恢复发布记录',
+  )
+  await evaluate('history.forward()')
+  await visible('.configuration-stack')
+  await clickText('发布记录')
+  await command('Page.reload')
+  await visible('[data-release-id]')
+  assert.equal(
+    await evaluate(`document.querySelector('[role=tab][data-state=active]').textContent`),
+    '发布记录',
+    '刷新保留页签',
+  )
   await choose('#environment-select', '生产')
   await visible('[data-slot=empty]')
   assert.match(

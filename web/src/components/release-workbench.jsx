@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { navigateSafely } from '@/lib/navigation-guard'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -182,10 +183,16 @@ export function Configuration({ target }) {
 export function ConfigurationPage({ selectedTarget }) {
   const { data, route, find, navigate, open, endpoint, request, scope, confirm } = useConsole(),
     target = selectedTarget || find('targets', route.targetId)
-  const [tab, setTab] = useState(
-      ['config', 'runtime', 'history'].includes(route.tab) ? route.tab : 'runtime',
-    ),
-    [configTab, setConfigTab] = useState('next'),
+  const tab = ['config', 'runtime', 'history'].includes(route.tab) ? route.tab : 'runtime'
+  const setTab = (value) =>
+    navigateSafely(() => {
+      location.hash = routeUrl('service', scope, target.environmentId, null, {
+        targetId: target.id,
+        serviceId: target.serviceId,
+        tab: value,
+      })
+    })
+  const [configTab, setConfigTab] = useState('next'),
     [releases, setReleases] = useState([]),
     [releaseNext, setReleaseNext] = useState(null),
     [error, setError] = useState('')
@@ -266,6 +273,7 @@ export function ConfigurationPage({ selectedTarget }) {
             const t = find('targets', e.target.value)
             location.hash = routeUrl('configuration', scope, t.environmentId, null, {
               targetId: t.id,
+              tab,
             })
           }}
         >
