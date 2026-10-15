@@ -68,7 +68,11 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
     <FormDialog
       wide
       title={item ? '编辑部署目标' : '新增部署目标'}
-      description="构建和运行配置仅影响当前部署位置，下次发布时生效。"
+      description={
+        item
+          ? '构建和运行配置仅影响当前部署位置，下次发布时生效。'
+          : '为服务添加部署服务器。保存后需手动发布；不会迁移或停止其他服务器上的服务。'
+      }
       onClose={onClose}
       submitLabel="保存部署目标"
       onSubmit={async (input) => {

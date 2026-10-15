@@ -68,20 +68,10 @@ export function HostResources({ server }) {
       </div>
       <div className="flex justify-between gap-2 text-xs text-muted-foreground">
         <span>整机资源</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={0} className="inline-flex items-center gap-1.5">
-              <span className={`status-dot ${online ? 'good' : ''}`} />
-              {server ? (online ? '在线' : server.revoked ? '已撤销' : '离线') : '未绑定服务器'}
-              <span>
-                {online && Number.isFinite(metrics.centerRttMs)
-                  ? `${Math.round(metrics.centerRttMs)} ms`
-                  : '延迟 —'}
-              </span>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>Agent 与中心的最近一次心跳往返耗时。未上报时显示 —。</TooltipContent>
-        </Tooltip>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={`status-dot ${online ? 'good' : ''}`} />
+          {server ? (online ? '在线' : server.revoked ? '已撤销' : '离线') : '未绑定服务器'}
+        </span>
       </div>
     </div>
   )

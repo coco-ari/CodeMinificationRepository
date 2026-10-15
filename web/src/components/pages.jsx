@@ -514,7 +514,7 @@ export function Servers() {
           <SheetHeader>
             <SheetTitle>{selected?.name}</SheetTitle>
             <SheetDescription>
-              {scope ? '当前项目在该服务器上的部署位置' : '该服务器的 Agent 与部署状态'}
+              {scope ? '当前项目部署在这台服务器上的服务' : '该服务器的 Agent 与部署状态'}
             </SheetDescription>
           </SheetHeader>
           {selected && (
@@ -549,7 +549,7 @@ export function Servers() {
                   </div>
                 ))}
               {!data.targets.some((t) => t.serverId === selected.id) && (
-                <p className="text-sm text-muted-foreground">尚未配置部署位置。</p>
+                <p className="text-sm text-muted-foreground">这台服务器上尚未配置服务。</p>
               )}
             </div>
           )}
