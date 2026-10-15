@@ -884,7 +884,7 @@ try {
   )
   assert.match(
     await evaluate(
-      `document.querySelector('${homeCard} [aria-label="当前环境服务汇总"]').textContent`,
+      `document.querySelector('${homeCard} [aria-label^="查看全部"]').getAttribute('aria-label')`,
     ),
     /待处理/,
   )
@@ -892,14 +892,22 @@ try {
   assert.ok(versionBefore.includes(currentApi.currentRelease.sourceSnapshot.branch))
   assert.ok(!versionBefore.includes('尚未发布'))
   assert.match(
-    await evaluate(`document.querySelector('${homeCard} [data-resource="磁盘"]').textContent`),
+    await evaluate(
+      `document.querySelector('${homeCard} [data-resource="磁盘"]').getAttribute('aria-label')`,
+    ),
     /93%.*空间紧张.*7.0 GB/,
   )
   assert.equal(
     await evaluate(`document.querySelector('${homeCard} [data-resource="磁盘"]').dataset.level`),
     'critical',
   )
-  await choose('[aria-label="SOL 标准版的资源服务器"]', '测试服务器 B')
+  await evaluate(`document.querySelector('${homeCard} [data-resource="磁盘"]').focus()`)
+  await visible('[role=tooltip]')
+  assert.match(
+    await evaluate(`document.querySelector('[role=tooltip]').textContent`),
+    /空间紧张.*剩余 7.0 GB.*最近采集/,
+  )
+  await choose('[aria-label="SOL 标准版的资源服务器"]', '测试服务器 B · 在线')
   assert.equal(
     await evaluate(`document.querySelector('${homeVersion}').textContent`),
     versionBefore,
@@ -908,10 +916,15 @@ try {
     await evaluate(`document.querySelector('${homeCard} [data-resource="磁盘"]').dataset.level`),
     'normal',
   )
-  await choose('[aria-label="SOL 标准版的资源服务器"]', '测试服务器 A')
-  await clickText('选择目标…', homeApi)
-  await visible('[aria-label="部署位置"]')
-  assert.ok((await evaluate('location.hash')).includes(`service=${apiService.id}`))
+  await choose('[aria-label="SOL 标准版的资源服务器"]', '测试服务器 A · 在线')
+  await menu(homeApi, '测试服务器 B')
+  await visible('#release-workbench')
+  assert.ok((await evaluate('location.hash')).includes(`target=${secondTarget.id}`))
+  await click('[data-view=home]')
+  await visible(homeApi)
+  await menu(homeApi, '测试服务器 A')
+  await visible('#release-workbench')
+  assert.ok((await evaluate('location.hash')).includes(`target=${firstTarget.id}`))
   await click('[data-view=home]')
   await visible(homeApi)
   await clickText(apiService.name, homeApi)
@@ -927,10 +940,7 @@ try {
     state.deployments.targets.find((item) => item.id === secondTarget.id).currentRelease = null
   })
   await until(
-    () =>
-      evaluate(
-        `document.querySelector('${homeVersion}')?.textContent.includes('各部署位置版本不同')`,
-      ),
+    () => evaluate(`document.querySelector('${homeVersion}')?.textContent.includes('版本不同')`),
     '多位置版本差异',
   )
   const productionEnv = deployment.data.environments.find(
@@ -947,7 +957,7 @@ try {
   assert.ok(
     !(
       await evaluate(
-        `[...document.querySelectorAll('${homeCard} [aria-label="当前环境服务汇总"] [data-slot="badge"]')].map(item => item.textContent).join(' ')`,
+        `document.querySelector('${homeCard} [aria-label^="查看全部"]').getAttribute('aria-label')`,
       )
     ).includes('待处理'),
   )

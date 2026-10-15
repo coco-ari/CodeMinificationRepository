@@ -1,10 +1,24 @@
 import { Fragment, useId, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowRight, Plus, GitCommitHorizontal, LoaderCircle } from 'lucide-react'
+import {
+  ArrowRight,
+  Plus,
+  GitBranch,
+  GitCommitHorizontal,
+  LoaderCircle,
+  ChevronDown,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Selection, SelectionOption } from '@/components/selection'
@@ -72,36 +86,66 @@ export function Commit({ value, subject, summary = false }) {
     <span className="text-xs text-muted-foreground">尚未发布</span>
   )
 }
-export function HostResources({ server, showConnection = true, showTimestamp = false }) {
+export function HostResources({
+  server,
+  showConnection = true,
+  showTimestamp = false,
+  compact = false,
+}) {
   const online = server?.online && !server?.revoked
   return (
     <div className="space-y-3" aria-label="整台服务器资源">
       <div className="grid grid-cols-3 gap-3">
         {hostMetrics(server).map(({ label, value, known, level, message, remaining }) => (
-          <div key={label} className="min-w-0 space-y-1.5" data-resource={label} data-level={level}>
-            <div className="flex justify-between gap-1 text-xs">
-              <span className="text-muted-foreground">{label}</span>
-              <span className="tabular-nums">{known ? `${Math.round(value)}%` : '—'}</span>
-            </div>
-            <Progress
-              value={known ? Math.min(100, Math.max(0, value)) : null}
-              aria-label={`${label}（整机）`}
-              aria-valuetext={
-                known ? `${Math.round(value)}%${message ? `，${message}` : ''}` : '暂无有效数据'
-              }
-              className={`h-1.5 ${!known ? '[&_[data-slot=progress-indicator]]:invisible' : level === 'critical' ? '[&_[data-slot=progress-indicator]]:bg-destructive' : level === 'warning' ? '[&_[data-slot=progress-indicator]]:bg-amber-500' : ''}`}
-            />
-            {message && (
-              <p
-                className={`text-xs ${level === 'critical' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}`}
+          <Tooltip key={label}>
+            <TooltipTrigger asChild>
+              <div
+                tabIndex={compact ? 0 : undefined}
+                className="min-w-0 space-y-1.5"
+                data-resource={label}
+                data-level={level}
+                aria-label={`${label}：${known ? `${Math.round(value)}%${message ? `，${message}` : ''}${remaining != null ? `，剩余 ${size(remaining)}` : ''}` : '暂无有效数据'}`}
               >
-                {message}
-              </p>
+                <div className="flex justify-between gap-1 text-xs">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span
+                    className={`tabular-nums ${level === 'critical' ? 'text-destructive' : level === 'warning' ? 'text-amber-700 dark:text-amber-400' : ''}`}
+                  >
+                    {known ? `${Math.round(value)}%` : '—'}
+                  </span>
+                </div>
+                <Progress
+                  value={known ? Math.min(100, Math.max(0, value)) : null}
+                  aria-label={`${label}（整机）`}
+                  aria-valuetext={
+                    known ? `${Math.round(value)}%${message ? `，${message}` : ''}` : '暂无有效数据'
+                  }
+                  className={`h-1.5 ${!known ? '[&_[data-slot=progress-indicator]]:invisible' : level === 'critical' ? '[&_[data-slot=progress-indicator]]:bg-destructive' : level === 'warning' ? '[&_[data-slot=progress-indicator]]:bg-amber-500' : ''}`}
+                />
+                {!compact && message && (
+                  <p
+                    className={`text-xs ${level === 'critical' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}`}
+                  >
+                    {message}
+                  </p>
+                )}
+                {!compact && label === '磁盘' && known && remaining != null && (
+                  <p className="text-xs text-muted-foreground">剩余 {size(remaining)}</p>
+                )}
+              </div>
+            </TooltipTrigger>
+            {compact && (
+              <TooltipContent>
+                <p>
+                  {known
+                    ? `${label} ${Math.round(value)}%${message ? ` · ${message}` : ''}`
+                    : '暂无有效数据'}
+                </p>
+                {known && remaining != null && <p>剩余 {size(remaining)}</p>}
+                <p className="mt-1">最近采集：{date(server?.lastSeenAt)}</p>
+              </TooltipContent>
             )}
-            {label === '磁盘' && known && remaining != null && (
-              <p className="text-xs text-muted-foreground">剩余 {size(remaining)}</p>
-            )}
-          </div>
+          </Tooltip>
         ))}
       </div>
       {(showConnection || showTimestamp) && (
@@ -117,43 +161,154 @@ export function HostResources({ server, showConnection = true, showTimestamp = f
     </div>
   )
 }
-export function ServiceState({ targets, servers }) {
+export function ServiceState({ targets, servers, failedTask }) {
   const health = serviceHealth(targets, servers)
+  const showFailure = failedTask && !health.attention
+  const label = showFailure
+    ? failedTask.status === 'rolled_back'
+      ? '已回退'
+      : '发布失败'
+    : health.label
+  const description = `${health.description}${failedTask ? `；最近任务：${statusNames[failedTask.status]}` : ''}`
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0} aria-label={health.description}>
-          <Status value={health.value}>{health.label}</Status>
+        <span tabIndex={0} aria-label={description}>
+          <Status value={showFailure ? failedTask.status : health.value}>{label}</Status>
         </span>
       </TooltipTrigger>
-      <TooltipContent className="max-w-80">{health.description}</TooltipContent>
+      <TooltipContent className="max-w-80">{description}</TooltipContent>
     </Tooltip>
   )
 }
 
 function ServiceVersion({ row, onDetails }) {
   const { version } = row
+  const label =
+    version.kind === 'mixed'
+      ? `${row.targets.length} 个位置 · 版本不同`
+      : version.kind === 'observed'
+        ? '运行版本'
+        : version.kind === 'drift'
+          ? '运行版本不一致'
+          : version.label
   return (
     <div
-      className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+      className="flex min-w-0 items-center justify-between gap-3 text-xs text-muted-foreground"
       data-service-version
     >
-      {version.kind === 'mixed' ? (
-        <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={onDetails}>
-          {version.label}
-          <ArrowRight />
-        </Button>
-      ) : (
-        <>
-          <span
-            className={`min-w-0 break-all ${version.kind === 'drift' ? 'text-destructive' : ''}`}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="link"
+            className={`h-auto min-w-0 flex-1 shrink justify-start gap-1.5 p-0 text-xs font-normal has-[>svg]:px-0 ${version.kind === 'drift' ? 'text-destructive' : 'text-muted-foreground'}`}
+            onClick={onDetails}
           >
-            {version.kind === 'released' ? `已发布 · ${version.label}` : version.label}
-          </span>
-          {version.revision && <Commit value={version.revision} subject={version.subject} />}
-        </>
-      )}
+            {version.kind === 'released' && <GitBranch className="size-3.5" />}
+            <span className="truncate">{label}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 space-y-1">
+          <p>{version.repositoryName || row.repository?.name || '未关联仓库'}</p>
+          <p>{version.label}</p>
+          <p>{row.targets.length} 个部署位置</p>
+          {row.lastDeployedAt && <p>最近发布：{date(row.lastDeployedAt)}</p>}
+          <p>点击查看服务详情</p>
+        </TooltipContent>
+      </Tooltip>
+      {version.revision && <Commit value={version.revision} subject={version.subject} />}
     </div>
+  )
+}
+
+function ServiceAction({ row, servers, go, onTask }) {
+  const reason = (target) => {
+    const server = servers.find((item) => item.id === target.serverId)
+    return !server?.online || server.revoked
+      ? '服务器未在线'
+      : !row.repository?.enabled
+        ? '请先配置并启用源码仓库'
+        : ''
+  }
+  if (row.activeTasks.length) {
+    const task = row.activeTasks.length === 1 ? row.activeTasks[0] : null
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={`${row.name} · 查看进度`}
+            onClick={() =>
+              task ? onTask(task.id) : go('service', { serviceId: row.id, tab: 'history' })
+            }
+          >
+            <LoaderCircle className="size-3 animate-spin" />
+            进度
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {task
+            ? `${stageLabel(task.stage)} · ${duration(task)}`
+            : `${row.activeTasks.length} 个任务进行中`}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+  if (row.targets.length > 1)
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" aria-label={`${row.name} · 选择目标发布`}>
+            发布
+            <ChevronDown className="size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="max-w-80">
+          <DropdownMenuLabel>选择部署位置</DropdownMenuLabel>
+          {row.targets.map((target) => {
+            const disabledReason = reason(target)
+            return (
+              <DropdownMenuItem
+                key={target.id}
+                disabled={!!disabledReason}
+                onSelect={() => go('release', { targetId: target.id })}
+              >
+                <div className="min-w-0">
+                  <p className="break-words">
+                    {servers.find((item) => item.id === target.serverId)?.name || '服务器不存在'}
+                  </p>
+                  {disabledReason && (
+                    <p className="mt-1 text-xs text-muted-foreground">{disabledReason}</p>
+                  )}
+                </div>
+              </DropdownMenuItem>
+            )
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  const target = row.targets[0],
+    disabledReason = target ? reason(target) : ''
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={disabledReason ? 0 : undefined}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!!disabledReason}
+            aria-label={`${row.name} · ${target ? '发布' : '配置'}`}
+            onClick={() =>
+              target ? go('release', { targetId: target.id }) : go('setup', { serviceId: row.id })
+            }
+          >
+            {target ? '发布' : '配置'}
+          </Button>
+        </span>
+      </TooltipTrigger>
+      {disabledReason && <TooltipContent>{disabledReason}</TooltipContent>}
+    </Tooltip>
   )
 }
 
@@ -177,9 +332,6 @@ export function ProjectTile({ project }) {
   const server = servers.find((s) => s.id === serverId) || servers[0]
   const rows = homeServices(db, environment?.id)
   const attention = rows.filter((row) => row.needsAttention).length
-  const active = rows.filter((row) => row.activeTasks.length).length
-  const healthy = rows.filter((row) => row.health.value === 'healthy').length
-  const pending = rows.filter((row) => row.health.value === 'disabled').length
   const go = (view, extra = {}) => {
     location.hash = routeUrl(view, project.id, environment?.id, null, extra)
   }
@@ -233,177 +385,76 @@ export function ProjectTile({ project }) {
         )}
       </CardHeader>
       <CardContent className="tile-body">
-        <div className="space-y-2" aria-label="当前环境服务汇总">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>当前环境 · 全部部署位置</span>
-            {rows.length > 3 && <span>优先显示待处理与发布中服务</span>}
+        <div className="space-y-3" data-host-resources>
+          <div className="flex min-w-0 items-center gap-3">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Label
+                  htmlFor={hostId}
+                  tabIndex={0}
+                  className="shrink-0 text-xs font-normal text-muted-foreground"
+                >
+                  整机资源
+                </Label>
+              </TooltipTrigger>
+              <TooltipContent>项目共享的服务器资源，切换仅影响此区域的指标。</TooltipContent>
+            </Tooltip>
+            <Selection
+              id={hostId}
+              className="min-w-0 flex-1 shrink"
+              aria-label={`${project.name}的资源服务器`}
+              value={server?.id || ''}
+              disabled={!servers.length}
+              onChange={(e) => setServerId(e.target.value)}
+            >
+              {!servers.length && <SelectionOption value="">未绑定服务器</SelectionOption>}
+              {servers.map((item) => (
+                <SelectionOption key={item.id} value={item.id}>
+                  {item.name} · {item.online ? '在线' : '离线'}
+                </SelectionOption>
+              ))}
+            </Selection>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{rows.length} 个服务</Badge>
-            {attention > 0 && <Status value="unhealthy">{attention} 个待处理</Status>}
-            {active > 0 && <Status value="running">{active} 个发布中</Status>}
-            {healthy > 0 && <Status value="healthy">{healthy} 个健康</Status>}
-            {pending > 0 && <Badge variant="outline">{pending} 个待配置 / 确认</Badge>}
-          </div>
+          <HostResources server={server} showConnection={false} compact />
         </div>
         <div
           className="tile-services"
           aria-label={`${project.name} ${environment?.name || ''}服务列表`}
           key={environment?.id}
         >
-          {!rows.length && (
-            <Empty title="暂无服务" description="添加服务后即可配置当前环境的部署位置。" />
-          )}
-          {rows.slice(0, 3).map((row, index) => {
-            const target = row.targets.length === 1 ? row.targets[0] : null
-            const task = row.activeTasks.length === 1 ? row.activeTasks[0] : null
-            const details = () => go('service', { serviceId: row.id })
-            const targetServer = target && db.servers.find((s) => s.id === target.serverId)
-            const publishReason = !target
-              ? ''
-              : !targetServer?.online || targetServer.revoked
-                ? '服务器未在线'
-                : !row.repository?.enabled
-                  ? '请先配置并启用源码仓库'
-                  : ''
-            const lastFailed = !!row.failedTask
-            return (
-              <Fragment key={row.id}>
-                {index > 0 && <Separator />}
-                <div className="tile-service space-y-2" data-home-service={row.id}>
-                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                    <Button
-                      variant="link"
-                      className="h-auto min-w-0 max-w-full justify-start p-0 text-sm font-medium"
-                      onClick={details}
-                      title={row.name}
-                    >
-                      <span className="truncate">{row.name}</span>
-                    </Button>
-                    <ServiceState targets={row.targets} servers={db.servers} />
-                  </div>
-                  <ServiceVersion row={row} onDetails={details} />
-                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                    <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-                      <p>
-                        {row.targets.length
-                          ? `${row.targets.length} 个部署位置`
-                          : '尚未配置部署位置'}
-                      </p>
-                      {row.lastDeployedAt && (
-                        <p className="mt-1">最近发布：{date(row.lastDeployedAt)}</p>
-                      )}
-                    </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span tabIndex={!row.activeTasks.length && publishReason ? 0 : undefined}>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={!row.activeTasks.length && !!publishReason}
-                            aria-label={`${row.name} · ${row.activeTasks.length ? '查看进度' : target ? '发布' : row.targets.length ? '选择目标发布' : '配置'}`}
-                            onClick={() => {
-                              if (task)
-                                location.hash = routeUrl(
-                                  'tasks',
-                                  project.id,
-                                  environment?.id,
-                                  task.id,
-                                )
-                              else if (row.activeTasks.length)
-                                go('service', { serviceId: row.id, tab: 'history' })
-                              else if (target) go('release', { targetId: target.id })
-                              else if (row.targets.length) details()
-                              else go('setup', { serviceId: row.id })
-                            }}
-                          >
-                            {row.activeTasks.length
-                              ? '查看进度'
-                              : target
-                                ? '发布'
-                                : row.targets.length
-                                  ? '选择目标…'
-                                  : '配置'}
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {publishReason && !row.activeTasks.length && (
-                        <TooltipContent>{publishReason}</TooltipContent>
-                      )}
-                    </Tooltip>
-                  </div>
-                  {row.activeTasks.length > 0 ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto w-full justify-between gap-2 p-0 text-xs"
-                      onClick={() =>
-                        task
-                          ? (location.hash = routeUrl(
-                              'tasks',
-                              project.id,
-                              environment?.id,
-                              task.id,
-                            ))
-                          : go('service', { serviceId: row.id, tab: 'history' })
-                      }
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        <LoaderCircle className="size-3 animate-spin" />
-                        {task ? stageLabel(task.stage) : `${row.activeTasks.length} 个任务进行中`}
-                      </span>
-                      {task && <span>{duration(task)}</span>}
-                    </Button>
-                  ) : (
-                    lastFailed && (
-                      <Button
-                        variant="link"
-                        className="h-auto max-w-full whitespace-normal p-0 text-left text-xs text-destructive"
-                        onClick={() => {
-                          location.hash = routeUrl(
-                            'tasks',
-                            project.id,
-                            environment?.id,
-                            row.failedTask.id,
-                          )
-                        }}
-                      >
-                        {row.targets.length > 1 ? '部分位置最近任务' : '最近任务'}：
-                        {statusNames[row.failedTask.status]}
-                        <ArrowRight />
-                      </Button>
-                    )
-                  )}
+          {!rows.length && <Empty title="暂无服务" />}
+          {rows.slice(0, 3).map((row, index) => (
+            <Fragment key={row.id}>
+              {index > 0 && <Separator />}
+              <div className="tile-service space-y-2" data-home-service={row.id}>
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+                  <Button
+                    variant="link"
+                    className="h-auto min-w-0 max-w-full justify-start p-0 text-sm font-medium"
+                    onClick={() => go('service', { serviceId: row.id })}
+                    title={row.name}
+                  >
+                    <span className="truncate">{row.name}</span>
+                  </Button>
+                  <ServiceState
+                    targets={row.targets}
+                    servers={db.servers}
+                    failedTask={row.failedTask}
+                  />
+                  <ServiceAction
+                    row={row}
+                    servers={db.servers}
+                    go={go}
+                    onTask={(id) => {
+                      location.hash = routeUrl('tasks', project.id, environment?.id, id)
+                    }}
+                  />
                 </div>
-              </Fragment>
-            )
-          })}
+                <ServiceVersion row={row} onDetails={() => go('service', { serviceId: row.id })} />
+              </div>
+            </Fragment>
+          ))}
         </div>
-        <Card className="gap-0 rounded-lg bg-muted/30 py-3 shadow-none">
-          <CardContent className="space-y-3 px-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label htmlFor={servers.length > 1 ? hostId : undefined}>服务器资源</Label>
-              <span className="text-xs text-muted-foreground">项目共享 · 整机指标</span>
-            </div>
-            {servers.length > 1 ? (
-              <Selection
-                id={hostId}
-                aria-label={`${project.name}的资源服务器`}
-                value={server?.id || ''}
-                onChange={(e) => setServerId(e.target.value)}
-              >
-                {servers.map((s) => (
-                  <SelectionOption key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectionOption>
-                ))}
-              </Selection>
-            ) : (
-              <p className="break-words text-sm">{server?.name || '未绑定服务器'}</p>
-            )}
-            <HostResources server={server} showTimestamp />
-          </CardContent>
-        </Card>
       </CardContent>
       <CardFooter className="tile-footer">
         <Button
@@ -415,10 +466,22 @@ export function ProjectTile({ project }) {
           <Plus />
           新增服务
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => go('services')}>
-          查看全部 {rows.length} 个服务
-          <ArrowRight />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => go('services')}
+              aria-label={`查看全部 ${rows.length} 个服务${attention ? `，${attention} 个待处理` : ''}`}
+            >
+              查看全部 {rows.length} 个服务
+              <ArrowRight />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {attention ? `${attention} 个服务需要处理，已优先展示` : '查看当前环境的全部服务'}
+          </TooltipContent>
+        </Tooltip>
       </CardFooter>
     </Card>
   )
