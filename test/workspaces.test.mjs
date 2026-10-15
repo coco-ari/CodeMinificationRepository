@@ -89,6 +89,17 @@ test('发布分支与具体提交独立固定，幂等请求冲突、配置变�
   await f.deployment.events(a.server.id, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: { id: first.id, image: `cmr/${target.id}:${first.id}`, revision: saved.revision } } });
   assert.equal((await f.workspaces.targetSource(a.app.id, target.id)).branch, 'feature');
   assert.equal((await f.workspaces.targetSource(a.app.id, a.targets[1].id)).branch, 'main');
+  const dashboard = f.workspaces.list().find(item => item.id === a.app.id).dashboard;
+  const cardTarget = dashboard.targets.find(item => item.id === target.id);
+  assert.deepEqual(cardTarget.currentRelease.sourceSnapshot, { id: a.source.project.id, name: a.source.project.name, branch: 'feature' });
+  assert.equal(cardTarget.currentRelease.revision, revisions.feature);
+  assert.ok(cardTarget.currentRelease.createdAt);
+  assert.ok(cardTarget.lastDeployedAt);
+  assert.equal(cardTarget.latestTask.id, first.id);
+  assert.equal(cardTarget.latestTask.status, 'succeeded');
+  assert.equal(dashboard.repositories[0].enabled, true);
+  assert.equal(cardTarget.currentRelease.sourceSnapshot.credentialId, undefined);
+  assert.equal(cardTarget.currentRelease.sourceSnapshot.repository, undefined);
   assert.equal((await f.deployment.createTask(input)).id, first.id);
 });
 

@@ -435,7 +435,7 @@ export function Servers() {
               <CardTitle className="break-words">{server.name}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <HostResources server={server} />
+              <HostResources server={server} showConnection={false} />
               <div className="flex flex-wrap justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
                 <span>Agent {server.version || '等待接入'}</span>
                 <span>最近采集：{date(server.lastSeenAt)}</span>

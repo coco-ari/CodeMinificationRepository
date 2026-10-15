@@ -102,13 +102,20 @@ export class WorkspaceService {
     return this.data.applications.map(project => {
       const targets = this.deployment.overview().targets.filter(item => item.applicationId === project.id);
       const tasks = this.data.tasks.filter(item => item.applicationId === project.id);
+      const latestTasks = new Map();
+      for (const task of tasks) latestTasks.set(task.targetId, task);
       const overview = this.overview(project.id);
       const dashboard = {
         environments: overview.environments, services: overview.services, environmentSources: overview.environmentSources,
-        repositories: overview.repositories.map(({ id, name, branch }) => ({ id, name, branch })),
+        repositories: overview.repositories.map(({ id, name, branch, enabled }) => ({ id, name, branch, enabled })),
         servers: overview.servers.map(({ id, name, online, revoked, metrics, version, mode, lastSeenAt }) => ({ id, name, online, revoked, metrics, version, mode, lastSeenAt })),
-        targets: targets.map(({ id, serviceId, environmentId, serverId, mode, observation, currentRelease }) => ({ id, serviceId, environmentId, serverId, mode, observation,
-          currentRelease: currentRelease ? { id: currentRelease.id, revision: currentRelease.revision, commitSubject: currentRelease.commitSubject } : null })),
+        targets: targets.map(({ id, serviceId, environmentId, serverId, mode, observation, currentRelease, lastDeployedAt, lastObservedAt }) => {
+          const latestTask = latestTasks.get(id);
+          return { id, serviceId, environmentId, serverId, mode, observation, lastDeployedAt, lastObservedAt,
+            latestTask: latestTask ? { id: latestTask.id, status: latestTask.status, createdAt: latestTask.createdAt, finishedAt: latestTask.finishedAt } : null,
+            currentRelease: currentRelease ? { id: currentRelease.id, revision: currentRelease.revision, commitSubject: currentRelease.commitSubject, createdAt: currentRelease.createdAt,
+              sourceSnapshot: currentRelease.sourceSnapshot ? { id: currentRelease.sourceSnapshot.id, name: currentRelease.sourceSnapshot.name, branch: currentRelease.sourceSnapshot.branch } : null } : null };
+        }),
         tasks: tasks.filter(task => !terminal(task)).map(({ id, targetId, status, stage, createdAt, startedAt }) => ({ id, targetId, status, stage, createdAt, startedAt })),
       };
       return { ...project, dashboard, repositories: this.store.state.projects.filter(item => item.applicationId === project.id).length,

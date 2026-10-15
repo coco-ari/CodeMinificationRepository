@@ -338,7 +338,7 @@ try {
   await fill('#auth-form [name=password]', 'isolated-browser-password')
   await click('#auth-form [type=submit]')
   await visible('#workspace-home')
-  await click(`[data-workspace-id="${initialProject.id}"] button`)
+  await click(`[data-workspace-id="${initialProject.id}"] [aria-label="进入 SOL 标准版"]`)
   await visible('[data-onboarding]')
   assert.equal(
     await evaluate(
@@ -817,8 +817,143 @@ try {
   await choose('[aria-label="筛选状态"]', '全部状态')
   await clickText('服务')
   await screenshot('console-services-sorted.png')
+
+  // 首页使用真实接口验证：异常服务不能被前三条截断，资源切换不改变环境服务版本。
+  const attentionService = deployment.data.services.find((item) =>
+    item.name.startsWith('额外服务 11'),
+  )
+  const sourceId = workspaces
+    .overview(initialProject.id)
+    .environmentSources.find((item) => item.serviceId === apiService.id).sourceProjectId
+  await workspaces.saveSource(initialProject.id, {
+    environmentId: firstTarget.environmentId,
+    serviceId: attentionService.id,
+    sourceProjectId: sourceId,
+  })
+  const attentionTarget = await workspaces.saveEntity(initialProject.id, 'targets', {
+    environmentId: firstTarget.environmentId,
+    serviceId: attentionService.id,
+    serverId: firstAgent.serverId,
+    mode: 'managed',
+  })
+  const currentApi = deployment.data.targets.find((item) => item.id === firstTarget.id)
+  await service.store.change((state) => {
+    state.deployments.targets.find((item) => item.id === secondTarget.id).currentRelease =
+      structuredClone(currentApi.currentRelease)
+  })
+  await agentRequest(
+    'heartbeat',
+    {
+      metrics: { ...metrics, disk: { used: 93 * 1024 ** 3, total: 100 * 1024 ** 3 } },
+      containers: [
+        {
+          targetId: firstTarget.id,
+          state: 'running',
+          health: 'healthy',
+          revision: currentApi.currentRelease.revision,
+        },
+        { targetId: attentionTarget.id, state: 'stopped', health: 'unhealthy' },
+      ],
+    },
+    firstAgent.token,
+  )
+  await agentRequest(
+    'heartbeat',
+    {
+      metrics,
+      containers: [
+        {
+          targetId: secondTarget.id,
+          state: 'running',
+          health: 'healthy',
+          revision: currentApi.currentRelease.revision,
+        },
+      ],
+    },
+    secondAgent.token,
+  )
   await click('[data-view=home]')
   await visible('#workspace-home')
+  const homeCard = `[data-workspace-id="${initialProject.id}"]`
+  const homeApi = `${homeCard} [data-home-service="${apiService.id}"]`
+  const homeVersion = `${homeApi} [data-service-version]`
+  await visible(`${homeCard} [data-home-service="${attentionService.id}"]`)
+  assert.equal(
+    await evaluate(`document.querySelector('${homeCard} [data-home-service]').dataset.homeService`),
+    attentionService.id,
+  )
+  assert.match(
+    await evaluate(
+      `document.querySelector('${homeCard} [aria-label="当前环境服务汇总"]').textContent`,
+    ),
+    /待处理/,
+  )
+  const versionBefore = await evaluate(`document.querySelector('${homeVersion}').textContent`)
+  assert.ok(versionBefore.includes(currentApi.currentRelease.sourceSnapshot.branch))
+  assert.ok(!versionBefore.includes('尚未发布'))
+  assert.match(
+    await evaluate(`document.querySelector('${homeCard} [data-resource="磁盘"]').textContent`),
+    /93%.*空间紧张.*7.0 GB/,
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('${homeCard} [data-resource="磁盘"]').dataset.level`),
+    'critical',
+  )
+  await choose('[aria-label="SOL 标准版的资源服务器"]', '测试服务器 B')
+  assert.equal(
+    await evaluate(`document.querySelector('${homeVersion}').textContent`),
+    versionBefore,
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('${homeCard} [data-resource="磁盘"]').dataset.level`),
+    'normal',
+  )
+  await choose('[aria-label="SOL 标准版的资源服务器"]', '测试服务器 A')
+  await clickText('选择目标…', homeApi)
+  await visible('[aria-label="部署位置"]')
+  assert.ok((await evaluate('location.hash')).includes(`service=${apiService.id}`))
+  await click('[data-view=home]')
+  await visible(homeApi)
+  await clickText(apiService.name, homeApi)
+  await visible('[aria-label="部署位置"]')
+  await click('[data-view=home]')
+  await visible(homeApi)
+  await click(`[aria-label="${attentionService.name} · 发布"]`)
+  await visible('#release-workbench')
+  assert.ok((await evaluate('location.hash')).includes(`target=${attentionTarget.id}`))
+  await click('[data-view=home]')
+  await visible(homeApi)
+  await service.store.change((state) => {
+    state.deployments.targets.find((item) => item.id === secondTarget.id).currentRelease = null
+  })
+  await until(
+    () =>
+      evaluate(
+        `document.querySelector('${homeVersion}')?.textContent.includes('各部署位置版本不同')`,
+      ),
+    '多位置版本差异',
+  )
+  const productionEnv = deployment.data.environments.find(
+    (item) => item.applicationId === initialProject.id && item.id !== firstTarget.environmentId,
+  )
+  await clickText(productionEnv.name, `${homeCard} [role=tablist]`)
+  await until(
+    () =>
+      evaluate(
+        `document.querySelector('${homeCard} .tile-services')?.getAttribute('aria-label').includes('${productionEnv.name}')`,
+      ),
+    '首页环境切换',
+  )
+  assert.ok(
+    !(
+      await evaluate(
+        `[...document.querySelectorAll('${homeCard} [aria-label="当前环境服务汇总"] [data-slot="badge"]')].map(item => item.textContent).join(' ')`,
+      )
+    ).includes('待处理'),
+  )
+  const testEnv = deployment.data.environments.find((item) => item.id === firstTarget.environmentId)
+  await clickText(testEnv.name, `${homeCard} [role=tablist]`)
+  await visible(`${homeCard} [data-home-service="${attentionService.id}"]`)
   assert.equal(
     await evaluate(
       `document.querySelectorAll('[data-workspace-id="${initialProject.id}"] [data-home-service]').length`,
@@ -838,6 +973,22 @@ try {
       deviceScaleFactor: 1,
       mobile: width < 768,
     })
+    await click('[data-view=home]')
+    await visible('#workspace-home')
+    await animationsSettled()
+    assert.equal(
+      await evaluate('document.documentElement.scrollWidth <= window.innerWidth'),
+      true,
+      `首页在 ${width}px 溢出`,
+    )
+    assert.equal(
+      await evaluate(
+        `[...document.querySelectorAll('.project-tile')].every(card => card.scrollWidth <= card.clientWidth + 1)`,
+      ),
+      true,
+      `卡片内容在 ${width}px 溢出`,
+    )
+    await screenshot(`console-home-${width}.png`)
     for (const view of ['overview', 'services', 'projects', 'environments', 'servers', 'tasks']) {
       await go(view)
       await until(() => evaluate(`!document.querySelector('[aria-label="正在加载"]')`), '页面加载')
