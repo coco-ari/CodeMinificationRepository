@@ -49,6 +49,53 @@ Agent 保留最近 5 个成功产物及当前版本、基线；中心保留规�
 
 2026-10-15 的本地 Linux Docker 隔离验收全部通过：两个 Agent、9 个场景、17 个任务。其中 12 次成功、2 次预期构建失败、2 次预期健康失败后恢复、1 次预期中断，结果均与断言一致。Java 历史镜像和前端历史目录分别删除后，停用远端仓库并改变当前配置，仍按中心原 ZIP 和历史配置恢复成功；共用 Nginx、其他项目目标和业务转发保持运行。中心离线、日志补报、中心重启、Agent 编译与切换阶段重启均通过。
 
-报告为 `.test-artifacts/docker-verification.json`，验收标识 `a5f7e3fc`；完整日志为 `.test-artifacts/docker-final.log` 和 `.test-artifacts/unit-final.log`。线上迁移结果在升级后补记。
+报告为 `.test-artifacts/docker-verification.json`，验收标识 `a5f7e3fc`；完整日志为 `.test-artifacts/docker-final.log` 和 `.test-artifacts/unit-final.log`。
 
 测试命令为 `pnpm run check`、`pnpm run build`、`node --test --test-concurrency=1 test/*.test.mjs`、`node test/browser-smoke.mjs`、`node test/deploy-browser-smoke.mjs`、`node test/docker-integration.mjs`。Linux 测试需 Git HTTP 后端与 flock。验收脚本使用独立目录、两个 Agent 和演示项目，不操作业务服务器。
+
+## 线上升级与迁移结果
+
+2026-10-15 18:30（北京时间）完成中心及现有 Agent 升级。运行代码提交为 `396b08ad83f5b9410cdfe45dd7a51244fc95336f`，中心地址继续使用 `https://bst-tmp.996788.xyz`。升级前检测到一个新发布任务，首次升级自动退出；等待任务结束、停止接收任务并重新核验空闲后才备份和更换程序。
+
+| 核验项 | 实际结果 |
+| --- | --- |
+| 成功版本迁移 | 19 个历史成功版本保留；18 个关联可用中心源码，1 个标记中心源码缺失 |
+| 独立源码档案 | 9 个去重 ZIP，大小与 SHA-256 全部重新校验通过 |
+| 当前版本 | 6 个部署位置均有可用中心源码；当前版本 ID 保持不变 |
+| 迁移计数 | 首次迁移 imported=18、missing=4、invalid=0；missing 包含任务缺包，不代表 4 个成功版本丢失 |
+| 身份与历史 | 管理员、Gitee 凭证、master.key、下载密钥、仓库兼容分支、Agent 凭据及实体 ID 全部保持不变 |
+| Agent | 1.4.0 在线，上报 `source-archive-recovery-v1`；容器无重启循环 |
+| 业务隔离 | 14 个其他容器的 ID、启动时间及状态相同；两个前端 current 指针相同 |
+| 远端仓库查询 | 后台 51 个分支、前端 3 个分支；均识别远端默认分支 master，后台旧下载仍使用 p-vi-sol |
+| 下载兼容 | 旧地址无凭据返回 401，原密码下载返回 200；ZIP 大小、签名与 SHA-256 校验通过 |
+| 版本档案接口 | 历史版本按服务端分页；登录下载历史源码并校验 SHA-256 通过 |
+| 线上页面 | 6 个服务的提交说明和版本显示正确；390、768、1280、1920 像素无横向溢出，浏览器无接口或脚本错误 |
+
+缺失的旧 H5 版本 `b718a684-e4cc-4cdf-8349-32315a767c4e` 在升级前已没有任务源码包，本机对应静态目录也不存在。该记录继续保留，但不可恢复；没有用远端最新代码补档。所有当前运行版本的源码档案完整。
+
+本次公网核验只读取页面和版本、下载源码，没有创建发布任务、重启业务或修改 Nginx。两次核验前后的任务集合、当前版本相同。Java 和前端缺缓存重建及故障场景在隔离 Docker 完成，不在业务服务器重演。
+
+本地详细证据：`.test-artifacts/source-archives-live.json`、`.test-artifacts/archives-live-report.json` 和 `archives-live-services-*.png`。可提交的汇总报告见 [迁移与验收汇总](source-archive-migration-20261015.json)，不包含凭据。
+
+## 本次备份位置与程序恢复
+
+中心服务器 172.29.254.212：
+
+- `/opt/cmr-upgrades/source-archives-20261015/backup/data/`：停机后完整数据卷备份。
+- 同级 `backup/code/`、`backup/container.json`、`backup/center-image.tar`：旧代码、运行配置及镜像。
+- `migration-check/migration-report.json`：备份副本迁移明细；`production-migration-report.json`：正式数据与原备份对比及全部档案校验结果。
+- 旧镜像为 `code-minification-repository:before-archives-20261015`，运行镜像为 `code-minification-repository:archives-20261015`，并保留原 Compose 使用的 local 标签。
+
+Agent 服务器 129.226.133.152：
+
+- `/opt/cmr-upgrades/source-archives-20261015/agent-backup/agent-state.tar.gz`：身份、任务、日志游标、目标版本与工作目录；可重新生成的 cache 不入此备份。
+- 同级 `static-state.tar.gz`：静态站点所有版本与指针；`container.json`、`business-before.json`、`static-before.json`：原启动参数与业务基线。
+- 旧容器 `cmr-agent-before-archives-20261015` 已停止保留，旧镜像为 `cmr-agent:1.3.0-dcfa554`；新容器名仍为 `cmr-agent`，镜像 `cmr-agent:1.4.0-archives`。
+
+备份目录权限为 0700。SQLite、master.key 和身份文件必须作为同一份备份恢复，不能重新生成密钥替代。程序恢复按以下顺序执行：
+
+1. 停止接收任务，核对中心和 Agent 都没有执行中任务，记录当前业务容器与静态站点版本。
+2. 停止新版中心及 Agent，将故障时的数据另存，保留排错依据。
+3. 若升级后没有新的业务发布，将中心整卷备份复制到新的恢复卷，使用旧镜像、旧 Compose 参数及原地址启动；先验证历史版本和身份再接入 Agent。不要在运行中的 SQLite 上覆盖文件。
+4. 恢复同一服务器的 Agent 身份和任务状态，在原挂载位置启动保留的旧容器。核对业务基线一致后恢复接入，不重新构建现有业务容器。
+5. 如果升级后已经发布过业务，不能直接回灌升级前数据库或静态指针。先对齐这些新增任务和实际运行版本，再选择程序修复或业务版本回退；升级前备份不能代表后来发布的业务状态。

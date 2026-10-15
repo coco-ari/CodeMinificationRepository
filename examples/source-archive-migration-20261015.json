@@ -1,0 +1,34 @@
+{
+  "reportedAt": "2026-10-15T18:30:00+08:00",
+  "runtimeCommit": "396b08ad83f5b9410cdfe45dd7a51244fc95336f",
+  "center": {
+    "upgraded": true,
+    "healthy": true,
+    "identitiesPreserved": true,
+    "successfulReleases": 19,
+    "releasesWithArchive": 18,
+    "releasesWithMissingArchive": 1,
+    "distinctArchivesVerified": 9,
+    "currentTargets": 6,
+    "allCurrentSourcesPresent": true,
+    "legacyDownloadVerified": true,
+    "firstMigrationCounters": { "imported": 18, "missing": 4, "invalid": 0 }
+  },
+  "agent": {
+    "version": "1.4.0",
+    "online": true,
+    "capability": "source-archive-recovery-v1",
+    "identityPreserved": true,
+    "otherContainersUnchanged": 14,
+    "staticPointersUnchanged": 2
+  },
+  "verification": {
+    "linuxTests": { "total": 85, "passed": 85, "skipped": 0 },
+    "docker": { "runId": "a5f7e3fc", "scenarios": 9, "tasks": 17, "passed": true },
+    "browserWidths": [390, 768, 1280, 1920],
+    "publicArchiveChecksumVerified": true,
+    "publicBranchQueryVerified": true,
+    "publicReleasePaginationVerified": true,
+    "businessTasksCreatedByVerification": 0
+  }
+}
