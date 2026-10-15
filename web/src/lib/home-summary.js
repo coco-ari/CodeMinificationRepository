@@ -74,7 +74,7 @@ export function targetVersion(target) {
     }
   return observed
     ? { kind: 'observed', revision: observed, label: '运行版本已发现 · 无发布记录' }
-    : { kind: 'unpublished', label: '尚未发布' }
+    : { kind: 'unknown', label: '版本待识别' }
 }
 
 export function serviceVersion(targets) {
@@ -86,58 +86,52 @@ export function serviceVersion(targets) {
   )
   return keys.size > 1
     ? { kind: 'mixed', label: '各部署位置版本不同' }
-    : versions[0] || { kind: 'unpublished', label: '尚未发布' }
+    : versions[0] || { kind: 'unconfigured', label: '待配置' }
 }
 
 export function homeServices(db, environmentId) {
-  return db.services
-    .map((service, index) => {
-      const targets = db.targets.filter(
-        (target) => target.environmentId === environmentId && target.serviceId === service.id,
+  return db.services.map((service, index) => {
+    const targets = db.targets.filter(
+      (target) => target.environmentId === environmentId && target.serviceId === service.id,
+    )
+    const activeTasks = db.tasks.filter(
+      (task) =>
+        !completed.has(task.status) && targets.some((target) => target.id === task.targetId),
+    )
+    const failedTask = targets
+      .map((target) => target.latestTask)
+      .filter((task) => task && failed.has(task.status))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0]
+    const health = serviceHealth(targets, db.servers)
+    const source = db.environmentSources.find(
+      (item) => item.environmentId === environmentId && item.serviceId === service.id,
+    )
+    const repository = db.repositories.find((item) => item.id === source?.sourceProjectId)
+    const version = serviceVersion(targets)
+    const needsAttention =
+      health.attention > 0 ||
+      targets.some(
+        (target) => failed.has(target.latestTask?.status) || targetVersion(target).kind === 'drift',
       )
-      const activeTasks = db.tasks.filter(
-        (task) =>
-          !completed.has(task.status) && targets.some((target) => target.id === task.targetId),
-      )
-      const failedTask = targets
-        .map((target) => target.latestTask)
-        .filter((task) => task && failed.has(task.status))
-        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0]
-      const health = serviceHealth(targets, db.servers)
-      const source = db.environmentSources.find(
-        (item) => item.environmentId === environmentId && item.serviceId === service.id,
-      )
-      const repository = db.repositories.find((item) => item.id === source?.sourceProjectId)
-      const version = serviceVersion(targets)
-      const needsAttention =
-        health.attention > 0 ||
-        targets.some(
-          (target) =>
-            failed.has(target.latestTask?.status) || targetVersion(target).kind === 'drift',
-        )
-      const lastDeployedAt = targets
-        .map((target) => target.lastDeployedAt || target.currentRelease?.createdAt)
-        .filter(Boolean)
-        .sort()
-        .at(-1)
-      return {
-        ...service,
-        index,
-        targets,
-        activeTasks,
-        failedTask,
-        health,
-        repository,
-        version,
-        needsAttention,
-        lastDeployedAt,
-      }
-    })
-    .sort((a, b) => {
-      const priority = (row) =>
-        row.needsAttention ? 0 : row.activeTasks.length ? 1 : row.targets.length ? 2 : 3
-      return priority(a) - priority(b) || a.index - b.index
-    })
+    const lastDeployedAt = targets
+      .map((target) => target.lastDeployedAt || target.currentRelease?.createdAt)
+      .filter(Boolean)
+      .sort()
+      .at(-1)
+    return {
+      ...service,
+      index,
+      targets,
+      activeTasks,
+      failedTask,
+      health,
+      repository,
+      source,
+      version,
+      needsAttention,
+      lastDeployedAt,
+    }
+  })
 }
 
 export function hostMetrics(server) {

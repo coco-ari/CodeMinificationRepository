@@ -1,17 +1,17 @@
-import { Fragment, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import {
-  ArrowRight,
   Plus,
   GitBranch,
   GitCommitHorizontal,
-  LoaderCircle,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpRight,
+  Server,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
-import { Label } from '@/components/ui/label'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -37,7 +37,7 @@ import {
 } from '@/lib/console'
 import { homeServices, hostMetrics, serviceHealth } from '@/lib/home-summary'
 
-export function Commit({ value, subject, summary = false }) {
+export function Commit({ value, subject, summary = false, compact = false }) {
   const { notify } = useConsole()
   const text = typeof subject === 'string' ? subject || '无提交说明' : '提交说明暂缺'
   const subjectRef = useRef(null)
@@ -56,7 +56,7 @@ export function Commit({ value, subject, summary = false }) {
       <TooltipTrigger asChild>
         <Action
           variant="ghost"
-          className={summary ? 'commit-button commit-summary' : 'commit-button'}
+          className={`commit-button${summary ? ' commit-summary' : ''}${compact ? ' tile-commit' : ''}`}
           aria-label={`复制 commit ${value}${summary ? `；${text}` : ''}`}
           onClick={async () => {
             await copy(value)
@@ -70,7 +70,7 @@ export function Commit({ value, subject, summary = false }) {
           )}
           <span className="inline-flex items-center gap-1.5">
             <GitCommitHorizontal className="size-3.5 shrink-0" />
-            <code className="commit-sha">{value.slice(0, 10)}</code>
+            <code className="commit-sha">{value.slice(0, compact ? 14 : 10)}</code>
           </span>
         </Action>
       </TooltipTrigger>
@@ -83,7 +83,7 @@ export function Commit({ value, subject, summary = false }) {
       </TooltipContent>
     </Tooltip>
   ) : (
-    <span className="text-xs text-muted-foreground">尚未发布</span>
+    <span className="text-xs text-muted-foreground">版本待识别</span>
   )
 }
 export function HostResources({
@@ -109,7 +109,7 @@ export function HostResources({
                 <div className="flex justify-between gap-1 text-xs">
                   <span className="text-muted-foreground">{label}</span>
                   <span
-                    className={`tabular-nums ${level === 'critical' ? 'text-destructive' : level === 'warning' ? 'text-amber-700 dark:text-amber-400' : ''}`}
+                    className={`tabular-nums ${level === 'critical' || level === 'warning' ? 'text-destructive' : ''}`}
                   >
                     {known ? `${Math.round(value)}%` : '—'}
                   </span>
@@ -120,15 +120,9 @@ export function HostResources({
                   aria-valuetext={
                     known ? `${Math.round(value)}%${message ? `，${message}` : ''}` : '暂无有效数据'
                   }
-                  className={`h-1.5 ${!known ? '[&_[data-slot=progress-indicator]]:invisible' : level === 'critical' ? '[&_[data-slot=progress-indicator]]:bg-destructive' : level === 'warning' ? '[&_[data-slot=progress-indicator]]:bg-amber-500' : ''}`}
+                  className={`${compact ? 'h-[3px]' : 'h-1.5'} ${!known ? '[&_[data-slot=progress-indicator]]:invisible' : level === 'critical' || level === 'warning' ? '[&_[data-slot=progress-indicator]]:bg-destructive' : ''}`}
                 />
-                {!compact && message && (
-                  <p
-                    className={`text-xs ${level === 'critical' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}`}
-                  >
-                    {message}
-                  </p>
-                )}
+                {!compact && message && <p className="text-xs text-destructive">{message}</p>}
                 {!compact && label === '磁盘' && known && remaining != null && (
                   <p className="text-xs text-muted-foreground">剩余 {size(remaining)}</p>
                 )}
@@ -163,19 +157,27 @@ export function HostResources({
 }
 export function ServiceState({ targets, servers, failedTask }) {
   const health = serviceHealth(targets, servers)
-  const showFailure = failedTask && !health.attention
-  const label = showFailure
-    ? failedTask.status === 'rolled_back'
-      ? '已回退'
-      : '发布失败'
-    : health.label
+  const label =
+    {
+      健康: '运行中',
+      健康待确认: '运行中',
+      失联待确认: '离线',
+      状态待上报: '待上报',
+      健康异常: '异常',
+    }[health.label] || health.label.replace(' 待处理', ' 异常')
   const description = `${health.description}${failedTask ? `；最近任务：${statusNames[failedTask.status]}` : ''}`
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0} aria-label={description}>
-          <Status value={showFailure ? failedTask.status : health.value}>{label}</Status>
-        </span>
+        <Badge
+          variant="ghost"
+          tabIndex={0}
+          className={`tile-runtime ${health.value === 'healthy' ? 'text-emerald-700 dark:text-emerald-400' : health.value === 'unhealthy' ? 'text-destructive' : 'text-muted-foreground'}`}
+          aria-label={description}
+        >
+          <span className="size-1 shrink-0 rounded-full bg-current" />
+          {label}
+        </Badge>
       </TooltipTrigger>
       <TooltipContent className="max-w-80">{description}</TooltipContent>
     </Tooltip>
@@ -183,40 +185,50 @@ export function ServiceState({ targets, servers, failedTask }) {
 }
 
 function ServiceVersion({ row, onDetails }) {
-  const { version } = row
-  const label =
-    version.kind === 'mixed'
-      ? `${row.targets.length} 个位置 · 版本不同`
-      : version.kind === 'observed'
-        ? '运行版本'
-        : version.kind === 'drift'
-          ? '运行版本不一致'
-          : version.label
+  const { version, source } = row
+  const branch = version.branch || source?.branch
+  const branchDescription = version.branch
+    ? '当前发布版本的分支'
+    : source?.branch
+      ? '配置的发布分支；运行版本所属分支尚未确认'
+      : '尚未识别分支'
   return (
-    <div
-      className="flex min-w-0 items-center justify-between gap-3 text-xs text-muted-foreground"
-      data-service-version
-    >
+    <div className="tile-version" data-service-version>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="link"
-            className={`h-auto min-w-0 flex-1 shrink justify-start gap-1.5 p-0 text-xs font-normal has-[>svg]:px-0 ${version.kind === 'drift' ? 'text-destructive' : 'text-muted-foreground'}`}
+            className="tile-branch"
             onClick={onDetails}
+            aria-label={`${branchDescription}：${branch || '分支待识别'}`}
           >
-            {version.kind === 'released' && <GitBranch className="size-3.5" />}
-            <span className="truncate">{label}</span>
+            <GitBranch />
+            <span className="truncate">{branch || '分支待识别'}</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent className="max-w-80 space-y-1">
+          <p>
+            {branchDescription}：{branch || '—'}
+          </p>
           <p>{version.repositoryName || row.repository?.name || '未关联仓库'}</p>
-          <p>{version.label}</p>
-          <p>{row.targets.length} 个部署位置</p>
+          <p>
+            {row.targets.length} 个部署位置
+            {version.kind === 'drift' ? '；实际运行 Commit 与发布记录不同' : ''}
+          </p>
           {row.lastDeployedAt && <p>最近发布：{date(row.lastDeployedAt)}</p>}
           <p>点击查看服务详情</p>
         </TooltipContent>
       </Tooltip>
-      {version.revision && <Commit value={version.revision} subject={version.subject} />}
+      <span aria-hidden="true">·</span>
+      {version.revision ? (
+        <Commit value={version.revision} subject={version.subject} compact />
+      ) : version.kind === 'mixed' ? (
+        <Button variant="link" className="tile-version-detail" onClick={onDetails}>
+          版本不同
+        </Button>
+      ) : (
+        <span className="tile-version-unknown">{row.targets.length ? '版本待识别' : '—'}</span>
+      )}
     </div>
   )
 }
@@ -224,11 +236,13 @@ function ServiceVersion({ row, onDetails }) {
 function ServiceAction({ row, servers, go, onTask }) {
   const reason = (target) => {
     const server = servers.find((item) => item.id === target.serverId)
-    return !server?.online || server.revoked
-      ? '服务器未在线'
-      : !row.repository?.enabled
-        ? '请先配置并启用源码仓库'
-        : ''
+    return target.mode !== 'managed'
+      ? '此目标不由平台管理，请查看服务配置'
+      : !server?.online || server.revoked
+        ? '服务器未在线'
+        : !row.repository?.enabled
+          ? '请先配置并启用源码仓库'
+          : ''
   }
   if (row.activeTasks.length) {
     const task = row.activeTasks.length === 1 ? row.activeTasks[0] : null
@@ -238,12 +252,12 @@ function ServiceAction({ row, servers, go, onTask }) {
           <Button
             variant="outline"
             size="sm"
+            className="tile-service-action"
             aria-label={`${row.name} · 查看进度`}
             onClick={() =>
               task ? onTask(task.id) : go('service', { serviceId: row.id, tab: 'history' })
             }
           >
-            <LoaderCircle className="size-3 animate-spin" />
             进度
           </Button>
         </TooltipTrigger>
@@ -259,8 +273,13 @@ function ServiceAction({ row, servers, go, onTask }) {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" aria-label={`${row.name} · 选择目标发布`}>
-            发布
+          <Button
+            variant="outline"
+            size="sm"
+            className="tile-service-action"
+            aria-label={`${row.name} · 选择目标更新`}
+          >
+            更新
             <ChevronDown className="size-3" />
           </Button>
         </DropdownMenuTrigger>
@@ -297,13 +316,14 @@ function ServiceAction({ row, servers, go, onTask }) {
           <Button
             variant="outline"
             size="sm"
+            className="tile-service-action"
             disabled={!!disabledReason}
-            aria-label={`${row.name} · ${target ? '发布' : '配置'}`}
+            aria-label={`${row.name} · ${target ? '更新' : '配置'}`}
             onClick={() =>
               target ? go('release', { targetId: target.id }) : go('setup', { serviceId: row.id })
             }
           >
-            {target ? '发布' : '配置'}
+            {target ? '更新' : '配置'}
           </Button>
         </span>
       </TooltipTrigger>
@@ -328,160 +348,245 @@ export function ProjectTile({ project }) {
     db.environments.find((e) => e.name === '测试') ||
     db.environments[0]
   const [serverId, setServerId] = useState('')
+  const [pageSelection, setPageSelection] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(`${storageKey}:page`))
+    } catch {
+      return null
+    }
+  })
   const servers = db.servers.filter((s) => !s.revoked)
   const server = servers.find((s) => s.id === serverId) || servers[0]
   const rows = homeServices(db, environment?.id)
+  const pageCount = Math.max(1, Math.ceil(rows.length / 3))
+  const requestedPage =
+    pageSelection?.environmentId === environment?.id && Number.isInteger(pageSelection?.index)
+      ? pageSelection.index
+      : 0
+  const page = Math.min(Math.max(0, requestedPage), pageCount - 1)
   const attention = rows.filter((row) => row.needsAttention).length
   const go = (view, extra = {}) => {
     location.hash = routeUrl(view, project.id, environment?.id, null, extra)
   }
+  const changePage = (index, environmentId = environment?.id) => {
+    const selection = { environmentId, index }
+    setPageSelection(selection)
+    try {
+      sessionStorage.setItem(`${storageKey}:page`, JSON.stringify(selection))
+    } catch {}
+  }
+  const changeEnvironment = (id) => {
+    setChosen(id)
+    changePage(0, id)
+    try {
+      sessionStorage.setItem(storageKey, id)
+    } catch {}
+  }
   return (
     <Card className="project-tile workspace-card" data-workspace-id={project.id}>
-      <CardHeader className="pb-0">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="min-w-0">
-            <Button
-              asChild
-              variant="link"
-              className="h-auto max-w-full p-0 text-base font-semibold"
-            >
-              <a href={routeUrl('overview', project.id, environment?.id)}>
-                <span className="truncate">{project.name}</span>
-              </a>
-            </Button>
-          </CardTitle>
-          <Button asChild variant="ghost" size="icon" aria-label={`进入 ${project.name}`}>
-            <a href={routeUrl('overview', project.id, environment?.id)}>
-              <ArrowRight className="size-4" />
-            </a>
-          </Button>
-        </div>
-        {db.environments.length > 1 ? (
+      <CardHeader className="tile-heading">
+        <CardTitle className="min-w-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button asChild variant="link" className="tile-project-name">
+                <a
+                  href={routeUrl('overview', project.id, environment?.id)}
+                  aria-label={`进入 ${project.name}`}
+                >
+                  <span className="truncate">{project.name}</span>
+                  <ArrowUpRight />
+                </a>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{project.name}</TooltipContent>
+          </Tooltip>
+        </CardTitle>
+        {db.environments.length > 2 ? (
+          <Selection
+            value={environment?.id || ''}
+            onChange={(e) => changeEnvironment(e.target.value)}
+            className="tile-environment-select"
+            aria-label={`${project.name}的环境`}
+          >
+            {db.environments.map((env) => (
+              <SelectionOption key={env.id} value={env.id}>
+                {env.name}
+              </SelectionOption>
+            ))}
+          </Selection>
+        ) : db.environments.length > 1 ? (
           <Tabs
             value={environment?.id || ''}
-            onValueChange={(id) => {
-              setChosen(id)
-              try {
-                sessionStorage.setItem(storageKey, id)
-              } catch {}
-            }}
-            className="min-w-0"
+            onValueChange={changeEnvironment}
+            className="tile-environments"
           >
-            <TabsList
-              className="max-w-full overflow-x-auto overflow-y-hidden"
-              aria-label={`${project.name}的环境`}
-            >
+            <TabsList aria-label={`${project.name}的环境`}>
               {db.environments.map((env) => (
                 <TabsTrigger key={env.id} value={env.id}>
-                  {env.name}
+                  <span className="truncate">{env.name}</span>
                 </TabsTrigger>
               ))}
             </TabsList>
           </Tabs>
         ) : (
-          <Badge variant="secondary" className="w-fit">
+          <Badge variant="secondary" className="tile-environment-single">
             {environment?.name || '未配置环境'}
           </Badge>
         )}
       </CardHeader>
-      <CardContent className="tile-body">
-        <div className="space-y-3" data-host-resources>
-          <div className="flex min-w-0 items-center gap-3">
+      <CardContent className="tile-resources" data-host-resources>
+        <div className="tile-host-heading">
+          <div className="tile-host-identity">
+            <Server className="size-3.5 shrink-0" />
+            {servers.length > 1 ? (
+              <Selection
+                id={hostId}
+                className="tile-host-select"
+                aria-label={`${project.name}的资源服务器`}
+                value={server?.id || ''}
+                onChange={(e) => setServerId(e.target.value)}
+              >
+                {servers.map((item) => (
+                  <SelectionOption key={item.id} value={item.id}>
+                    {item.name}
+                  </SelectionOption>
+                ))}
+              </Selection>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="truncate" tabIndex={0}>
+                    {server?.name || '未绑定服务器'}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{server?.name || '未绑定服务器'}</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Label
-                  htmlFor={hostId}
-                  tabIndex={0}
-                  className="shrink-0 text-xs font-normal text-muted-foreground"
-                >
-                  整机资源
-                </Label>
+                <span className="tile-host-scope" tabIndex={0}>
+                  整机
+                </span>
               </TooltipTrigger>
-              <TooltipContent>项目共享的服务器资源，切换仅影响此区域的指标。</TooltipContent>
+              <TooltipContent>
+                整台服务器的资源；选择服务器仅切换指标，服务列表仍显示当前环境全部服务。
+              </TooltipContent>
             </Tooltip>
-            <Selection
-              id={hostId}
-              className="min-w-0 flex-1 shrink"
-              aria-label={`${project.name}的资源服务器`}
-              value={server?.id || ''}
-              disabled={!servers.length}
-              onChange={(e) => setServerId(e.target.value)}
-            >
-              {!servers.length && <SelectionOption value="">未绑定服务器</SelectionOption>}
-              {servers.map((item) => (
-                <SelectionOption key={item.id} value={item.id}>
-                  {item.name} · {item.online ? '在线' : '离线'}
-                </SelectionOption>
-              ))}
-            </Selection>
           </div>
-          <HostResources server={server} showConnection={false} compact />
+          <Badge variant="ghost" className="tile-connection">
+            <span
+              className={`size-1 shrink-0 rounded-full ${server?.online ? 'bg-emerald-600 dark:bg-emerald-400' : 'bg-muted-foreground'}`}
+            />
+            {server ? (server.online ? '在线' : '离线') : '待绑定'}
+          </Badge>
         </div>
-        <div
-          className="tile-services"
-          aria-label={`${project.name} ${environment?.name || ''}服务列表`}
-          key={environment?.id}
-        >
-          {!rows.length && <Empty title="暂无服务" />}
-          {rows.slice(0, 3).map((row, index) => (
-            <Fragment key={row.id}>
-              {index > 0 && <Separator />}
-              <div className="tile-service space-y-2" data-home-service={row.id}>
-                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
-                  <Button
-                    variant="link"
-                    className="h-auto min-w-0 max-w-full justify-start p-0 text-sm font-medium"
-                    onClick={() => go('service', { serviceId: row.id })}
-                    title={row.name}
-                  >
-                    <span className="truncate">{row.name}</span>
-                  </Button>
-                  <ServiceState
-                    targets={row.targets}
-                    servers={db.servers}
-                    failedTask={row.failedTask}
-                  />
-                  <ServiceAction
-                    row={row}
-                    servers={db.servers}
-                    go={go}
-                    onTask={(id) => {
-                      location.hash = routeUrl('tasks', project.id, environment?.id, id)
-                    }}
-                  />
-                </div>
+        <HostResources server={server} showConnection={false} compact />
+      </CardContent>
+      <div
+        className="tile-services"
+        aria-label={`${project.name} ${environment?.name || ''}服务列表`}
+      >
+        <div className="tile-service-page" key={`${environment?.id}-${page}`}>
+          {!rows.length && (
+            <div className="tile-empty">
+              <span>还没有服务</span>
+              <Button variant="outline" size="sm" onClick={() => go('setup')}>
+                <Plus />
+                添加服务
+              </Button>
+            </div>
+          )}
+          {rows.slice(page * 3, page * 3 + 3).map((row) => (
+            <div className="tile-service" data-home-service={row.id} key={row.id}>
+              <div className="min-w-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="link"
+                      className="tile-service-name"
+                      onClick={() => go('service', { serviceId: row.id })}
+                    >
+                      <span className="truncate">{row.name}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{row.name}</TooltipContent>
+                </Tooltip>
                 <ServiceVersion row={row} onDetails={() => go('service', { serviceId: row.id })} />
               </div>
-            </Fragment>
+              <div className="tile-service-end">
+                <ServiceAction
+                  row={row}
+                  servers={db.servers}
+                  go={go}
+                  onTask={(id) => {
+                    location.hash = routeUrl('tasks', project.id, environment?.id, id)
+                  }}
+                />
+                <ServiceState
+                  targets={row.targets}
+                  servers={db.servers}
+                  failedTask={row.failedTask}
+                />
+              </div>
+            </div>
           ))}
         </div>
-      </CardContent>
+      </div>
       <CardFooter className="tile-footer">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          onClick={() => go('setup')}
-        >
-          <Plus />
-          新增服务
-        </Button>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => go('services')}
-              aria-label={`查看全部 ${rows.length} 个服务${attention ? `，${attention} 个待处理` : ''}`}
-            >
-              查看全部 {rows.length} 个服务
-              <ArrowRight />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {attention ? `${attention} 个服务需要处理，已优先展示` : '查看当前环境的全部服务'}
-          </TooltipContent>
-        </Tooltip>
+        <div className="tile-footer-links">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`为${project.name}新增服务`}
+                onClick={() => go('setup')}
+              >
+                <Plus />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>新增服务</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => go('services')}
+                aria-label={`查看全部 ${rows.length} 个服务${attention ? `，${attention} 个待处理` : ''}`}
+              >
+                {rows.length} 个服务
+                <ArrowUpRight />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {attention ? `${attention} 个服务需要处理；查看全部服务` : '查看当前环境的全部服务'}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        <nav className="tile-pagination" aria-label={`${project.name}服务分页`}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="上一页服务"
+            disabled={page === 0}
+            onClick={() => changePage(page - 1)}
+          >
+            <ChevronLeft />
+          </Button>
+          <span aria-live="polite">
+            {page + 1} / {pageCount}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="下一页服务"
+            disabled={page === pageCount - 1}
+            onClick={() => changePage(page + 1)}
+          >
+            <ChevronRight />
+          </Button>
+        </nav>
       </CardFooter>
     </Card>
   )

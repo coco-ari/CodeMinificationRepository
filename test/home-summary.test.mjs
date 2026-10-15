@@ -9,7 +9,9 @@ const release = { id: 'r1', revision: 'a'.repeat(40), sourceSnapshot: { id: 'rep
 test('首页区分发布记录、未知分支、仅有运行版本及实际版本偏离', () => {
   assert.equal(targetVersion(target({ currentRelease: release })).label, 'main');
   assert.equal(targetVersion(target({ currentRelease: { ...release, sourceSnapshot: null } })).label, '分支未知');
-  assert.equal(targetVersion(target()).label, '尚未发布');
+  assert.equal(targetVersion(target()).label, '版本待识别');
+  assert.equal(targetVersion(target()).kind, 'unknown');
+  assert.equal(targetVersion(target({ observation: null })).kind, 'unknown');
   assert.equal(targetVersion(target({ observation: { revision: release.revision } })).kind, 'observed');
   const drift = targetVersion(target({ currentRelease: release, observation: { revision: 'b'.repeat(40) } }));
   assert.equal(drift.kind, 'drift');
@@ -27,7 +29,7 @@ test('多位置版本汇总不选择任意服务器，不把部分发布当成�
   assert.equal(serviceVersion([a, target({ id: 't2', serverId: 'b' })]).kind, 'mixed');
   assert.equal(serviceVersion([a, { ...b, currentRelease: { ...release, revision: 'b'.repeat(40) } }]).kind, 'mixed');
   assert.equal(serviceVersion([a, { ...b, currentRelease: { ...release, sourceSnapshot: { ...release.sourceSnapshot, branch: 'develop' } } }]).kind, 'mixed');
-  assert.equal(serviceVersion([]).kind, 'unpublished');
+  assert.equal(serviceVersion([]).kind, 'unconfigured');
 });
 
 test('聚合健康状态明确区分部分异常、服务器离线和等待上报', () => {
@@ -39,7 +41,7 @@ test('聚合健康状态明确区分部分异常、服务器离线和等待上�
   assert.equal(serviceHealth([target({ observation: null })], servers).label, '状态待上报');
 });
 
-test('首页按环境汇总全部服务，原列表第四个异常服务进入前三位，进行中任务也优先', () => {
+test('首页按环境汇总全部服务，异常与发布进度不改变服务顺序', () => {
   const db = {
     servers,
     services: Array.from({ length: 5 }, (_, i) => ({ id: `s${i + 1}`, name: `服务 ${i + 1}` })),
@@ -49,7 +51,10 @@ test('首页按环境汇总全部服务，原列表第四个异常服务进入�
   };
   const rows = homeServices(db, 'test');
   assert.equal(rows.length, 5);
-  assert.deepEqual(rows.slice(0, 3).map(row => row.id), ['s4', 's3', 's1']);
+  assert.deepEqual(rows.map(row => row.id), ['s1', 's2', 's3', 's4', 's5']);
+  db.targets[3].observation = { state: 'running', health: 'healthy' };
+  db.tasks[0].status = 'succeeded';
+  assert.deepEqual(homeServices(db, 'test').map(row => row.id), rows.map(row => row.id));
   assert.equal(rows.find(row => row.id === 's1').needsAttention, false);
   assert.equal(rows.find(row => row.id === 's2').activeTasks.length, 0);
   assert.equal(rows.find(row => row.id === 's5').health.label, '待配置');
@@ -80,4 +85,23 @@ test('资源按类型阈值告警，显示剩余磁盘，离线与缺失指标�
   assert.ok(hostMetrics({ ...servers[0], metrics: {} }).every(metric => metric.level === 'unknown'));
   assert.equal(hostMetrics({ ...servers[0], metrics: { cpuPercent: 0 } })[0].known, true);
   assert.equal(hostMetrics({ ...servers[0], metrics: { disk: { used: 0, total: 0 } } })[2].remaining, null);
+});
+
+
+test('运行版本与配置分支分别取值，不使用仓库默认分支或最新源码冒充运行版本', () => {
+  const db = { servers, services: [{ id: 's1', name: 'API' }],
+    targets: [target({ currentRelease: release })], tasks: [],
+    environmentSources: [{ serviceId: 's1', environmentId: 'test', sourceProjectId: 'repo', branch: 'next-test' }],
+    repositories: [{ id: 'repo', branch: 'download-only' }],
+  };
+  const deployed = homeServices(db, 'test')[0];
+  assert.equal(deployed.version.branch, 'main');
+  assert.equal(deployed.version.revision, release.revision);
+  assert.equal(deployed.source.branch, 'next-test');
+  db.targets[0].currentRelease = null;
+  const unknown = homeServices(db, 'test')[0];
+  assert.equal(unknown.health.label, '健康');
+  assert.equal(unknown.version.label, '版本待识别');
+  assert.equal(unknown.version.revision, undefined);
+  assert.equal(unknown.source.branch, 'next-test');
 });
