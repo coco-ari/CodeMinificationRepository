@@ -60,7 +60,7 @@ export class StaticDeployment {
     if (release?.kind !== 'static' || release.artifact !== `static/${task.targetId}/${release.id}`) throw new Error('静态版本不属于当前部署目标');
     normalizeConfig(release.config);
     const root = this.releasePath(task, release.id), info = await lstat(root);
-    if (!info.isDirectory() || info.isSymbolicLink() || (await readFile(path.join(root, '__cmr_release.txt'), 'utf8')).trim() !== release.id) throw new Error('静态版本文件缺失或不匹配');
+    if (!info.isDirectory() || info.isSymbolicLink() || (await readFile(path.join(root, '__cmr_release.txt'), 'utf8')).trim() !== release.id) throw new Error('静态版本归属标记不匹配，拒绝恢复');
     return release;
   }
   async build(task, config) {
@@ -70,19 +70,26 @@ export class StaticDeployment {
     await this.owner.client.download(task, zip); await extractZip(zip, source); await this.owner.makeSourceWritable(source);
     const project = config.module ? safeChild(source, ...config.module.split('/')) : source;
     await lstat(path.join(project, 'package.json'));
+    const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'));
+    if (!Object.hasOwn(manifest.scripts || {}, config.buildScript)) throw new Error(`所选提交的 package.json 缺少 ${config.buildScript} 构建脚本`);
+    await lstat(path.join(project, config.packageManager === 'npm' ? 'package-lock.json' : 'pnpm-lock.yaml')).catch(() => { throw new Error('所选提交缺少依赖锁文件，请先提交锁文件'); });
+    const resolved = await this.owner.buildConfig(task, config); config = resolved.config;
     const cache = safeChild(this.owner.root, 'cache', identifier(task.applicationId || task.targetId), 'node');
     const tools = path.join(work, 'static-tools');
     await this.owner.mountDirectory(cache); await this.owner.mountDirectory(tools);
     await copyFile(path.join(directory, 'static-build.mjs'), path.join(tools, 'static-build.mjs'));
     await this.event(task, 'building', `正在安装锁定依赖并执行 ${config.packageManager} run ${config.buildScript}`);
-    await this.owner.builder(task, config, 'node', [[source, '/workspace'], [cache, '/cache'], [tools, '/cmr', true]], ['node', '/cmr/static-build.mjs', config.packageManager, config.packageManagerVersion, config.buildScript, ...config.buildArgs]);
+    let versionOutput = '';
+    await this.owner.builder(task, config, 'node', [[source, '/workspace'], [cache, '/cache'], [tools, '/cmr', true]], ['node', '/cmr/static-build.mjs', config.packageManager, config.packageManagerVersion, config.buildScript, ...config.buildArgs], 'building', text => { if (versionOutput.length < 8192) versionOutput += text; });
+    const versionInfo = /CMR_BUILD_INFO=(\{[^\n]+\})/.exec(versionOutput)?.[1];
+    if (versionInfo) Object.assign(resolved.snapshot, JSON.parse(versionInfo));
     const output = this.releasePath(task, task.id);
     try { await lstat(output); throw new Error('本次版本目录已存在，拒绝覆盖'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const copied = await copyStaticSite(source, config.artifactPath, output);
     await writeFile(path.join(output, '__cmr_release.txt'), task.id, { mode: 0o644 });
     await chmod(path.join(output, '__cmr_release.txt'), 0o644);
     await this.event(task, 'building', `静态产物已固定：${copied.files} 个文件，共 ${copied.bytes} 字节`);
-    return { id: task.id, kind: 'static', artifact: `static/${task.targetId}/${task.id}`, revision: task.source.revision, config, createdAt: new Date().toISOString() };
+    return { id: task.id, kind: 'static', artifact: `static/${task.targetId}/${task.id}`, revision: task.source.revision, config: normalizeConfig(task.config), sourceSha256: task.source.sha256, buildSnapshot: resolved.snapshot, createdAt: new Date().toISOString() };
   }
   async activate(task, release) {
     await this.preflight(task); await this.requireRelease(task, release); await this.selected(task);
@@ -106,7 +113,7 @@ export class StaticDeployment {
     await this.owner.saveRelease(task, release, previous);
     // 清理只处理本目标的版本；不操作共用 Nginx、其他站点或中间件。
     try { await this.cleanup(task, release, previous); } catch (error) { await this.event(task, 'verifying', `静态站点已更新，历史清理延后：${error.message}`); }
-    await this.event(task, 'verifying', '前端发布成功，站点已返回本次版本', { status: 'succeeded', result: { release } });
+    await this.event(task, 'verifying', '前端发布成功，站点已返回本次版本', { status: 'succeeded', result: { release, baseline: previous, recoveryMethod: release.recoveryMethod } });
   }
   async rollbackFailure(task, error, previous) {
     if (!previous) {
@@ -133,11 +140,11 @@ export class StaticDeployment {
       if (!['deploy', 'rollback'].includes(task.action)) throw new Error('静态站点不重启共用 Nginx，请发布或回退版本');
       await this.preflight(task); previous = await this.owner.current(task);
       if (await this.selected(task) !== (previous?.id || null) || (!previous && task.previousRelease)) throw new Error('站点指针与本地成功版本记录不一致，请先恢复 Agent 数据');
-      if (previous) await this.requireRelease(task, previous);
+      previous = await this.owner.ensureBaseline(task, previous, this);
       await journal.update(task.id, { previousRelease: previous });
-      const release = task.action === 'deploy' ? await this.build(task, config) : await readJson(safeChild(this.owner.targetRoot(task), 'releases', `${identifier(task.release?.id)}.json`));
+      const release = task.action === 'deploy' ? await this.build(task, config) : await this.owner.recoverRelease(task, task.release, this);
       await this.requireRelease(task, release);
-      if (task.action === 'rollback' && release.artifact !== task.release.artifact) throw new Error('回退版本与本机保留版本不一致');
+      if (task.action === 'rollback' && release.id !== task.id && release.artifact !== task.release.artifact) throw new Error('回退版本与本机保留版本不一致');
       await journal.update(task.id, { release });
       await this.event(task, 'deploying', '正在原子切换站点版本，共用 Nginx 保持运行');
       deploying = true; await this.activate(task, release);
@@ -146,7 +153,7 @@ export class StaticDeployment {
     } catch (error) {
       if (deploying) await this.rollbackFailure(task, error, previous);
       else await this.event(task, (await journal.get(task.id)).stage, error.message, { status: 'failed', result: { error: error.message } });
-    } finally { if (terminal((await journal.get(task.id))?.status)) await this.cleanupWork(task).catch(() => {}); }
+    } finally { if (terminal((await journal.get(task.id))?.status)) await this.owner.cleanupWork(task).catch(() => {}); }
   }
   async recover(record) {
     const task = record.task;
@@ -157,18 +164,20 @@ export class StaticDeployment {
         try { await this.health(task, record.release); await this.finish(task, record.release, record.previousRelease); }
         catch (error) { await this.rollbackFailure(task, error, record.previousRelease); }
       } else {
-        const name = `cmr-build-${task.id}-node`;
-        if (await this.owner.requireOwned(task, name)) await this.owner.mutation(task, ['rm', '-f', name], { timeoutMs: 15000 });
+        for (const buildTask of [task, record.baselineTask].filter(Boolean)) {
+          const name = `cmr-build-${buildTask.id}-node`;
+          if (await this.owner.requireOwned(task, name)) await this.owner.mutation(task, ['rm', '-f', name], { timeoutMs: 15000 });
+        }
         await this.event(task, record.stage, '前端构建被中断，未修改线上版本，请重新发布', { status: 'interrupted' });
       }
     } catch (error) { await this.event(task, record.stage, error.message, { status: 'interrupted' }); }
-    finally { if (terminal((await this.owner.journal.get(task.id))?.status)) await this.cleanupWork(task).catch(() => {}); }
+    finally { if (terminal((await this.owner.journal.get(task.id))?.status)) await this.owner.cleanupWork(task).catch(() => {}); }
   }
   async cleanupWork(task) {
     assertManaged(this.owner.getIdentity(), task);
     for (const name of ['source.zip', 'source', 'static-tools']) await rm(path.join(this.owner.taskRoot(task), name), { recursive: true, force: true });
     const record = await this.owner.journal.get(task.id);
-    if (task.action === 'deploy' && record?.status !== 'succeeded') {
+    if (['deploy', 'rollback'].includes(task.action) && record?.status !== 'succeeded') {
       await this.preflight(task);
       if (await this.selected(task) !== task.id) await rm(this.releasePath(task, task.id), { recursive: true, force: true });
     }
@@ -179,8 +188,9 @@ export class StaticDeployment {
     const releases = (await Promise.all((await readdir(root)).filter(name => name.endsWith('.json')).map(name => readJson(safeChild(root, name))))).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     const keep = new Set([...releases.slice(0, 5).map(item => item.id), current.id, previous?.id]);
     for (const release of releases) if (!keep.has(release.id)) {
-      await this.requireRelease(task, release);
-      await rm(this.releasePath(task, release.id), { recursive: true }); await rm(safeChild(root, `${identifier(release.id)}.json`));
+      try { await this.requireRelease(task, release); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      await rm(this.releasePath(task, release.id), { recursive: true, force: true }); await rm(safeChild(root, `${identifier(release.id)}.json`));
     }
   }
 }

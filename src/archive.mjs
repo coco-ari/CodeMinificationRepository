@@ -69,6 +69,30 @@ export class ArchiveBuilder {
     });
   }
   root(project) { return path.join(this.directory, project.id, sourceKey(project).split(':')[1]); }
+  async branches(project, credential) {
+    if (!this.allowLocal) validateRepository(project.repository);
+    const result = await this.git(['ls-remote', '--symref', project.repository, 'HEAD', 'refs/heads/*'], credential, AbortSignal.timeout(this.timeoutMs));
+    if (result.code !== 0) throw new HttpError(502, '查询分支失败，请检查仓库地址、凭证和网络');
+    const branches = [], seen = new Set(); let defaultBranch = null;
+    for (const line of result.output.split('\n')) {
+      const head = /^ref: refs\/heads\/(.+)\tHEAD$/.exec(line.trim());
+      if (head) defaultBranch = validateBranch(head[1]);
+      const branch = /^([a-f0-9]{40}|[a-f0-9]{64})\trefs\/heads\/(.+)$/.exec(line.trim());
+      if (branch && !seen.has(branch[2])) { seen.add(branch[2]); branches.push({ name: validateBranch(branch[2]), revision: validateRevision(branch[1]) }); }
+    }
+    if (!seen.has(defaultBranch)) defaultBranch = null;
+    return { branches: branches.sort((a, b) => a.name.localeCompare(b.name)), defaultBranch, refreshedAt: new Date().toISOString() };
+  }
+  async pinRevision(project, taskId) {
+    validateRevision(project.revision);
+    if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new HttpError(400, '任务标识无效');
+    const result = await this.git(['--git-dir', path.join(this.root(project), 'repository.git'), 'update-ref', `refs/cmr/tasks/${taskId}`, project.revision], null, AbortSignal.timeout(10000));
+    if (result.code !== 0) throw new HttpError(409, '所选提交已不可用，请刷新提交列表后重试');
+  }
+  async releasePin(project, taskId) {
+    if (!/^[a-f0-9-]{36}$/.test(taskId)) throw new HttpError(400, '任务标识无效');
+    await this.git(['--git-dir', path.join(this.root(project), 'repository.git'), 'update-ref', '-d', `refs/cmr/tasks/${taskId}`], null, AbortSignal.timeout(10000));
+  }
   async cachedCommitSubject(project, revision) {
     validateRevision(revision);
     // 历史发布只读取准确提交的本地对象，不拉取分支或用最新提交代替。

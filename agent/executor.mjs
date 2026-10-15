@@ -2,7 +2,7 @@ import { mkdir, writeFile, readdir, lstat, realpath, copyFile, chown, chmod, rm 
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { identifier, safeChild, normalizeConfig, managedName, releaseImage, labels, owns, assertManaged } from './config.mjs';
+import { identifier, safeChild, normalizeConfig, imageName, managedName, releaseImage, labels, owns, assertManaged } from './config.mjs';
 import { readJson, writeJson } from './state.mjs';
 import { extractZip } from './archive.mjs';
 import { StaticDeployment } from './static-deployment.mjs';
@@ -33,7 +33,7 @@ export class DeploymentExecutor {
   getIdentity() { return typeof this.identity === 'function' ? this.identity() : this.identity; }
   targetRoot(task) { return safeChild(this.root, 'targets', identifier(task.targetId)); }
   taskRoot(task) { return safeChild(this.root, 'work', identifier(task.id)); }
-  async event(task, stage, message, extra = {}) { return this.journal.emit(task.id, { stage, message, ...extra }); }
+  async event(task, stage, message, extra = {}) { return this.journal.emit(task.journalTaskId || task.id, { stage, message, ...extra }); }
   async output(task, stage, text) {
     for (let offset = 0; offset < text.length; offset += 16384) await this.event(task, stage, text.slice(offset, offset + 16384));
   }
@@ -67,7 +67,7 @@ export class DeploymentExecutor {
       else throw new Error('源码中出现了不允许的文件类型');
     }
   }
-  async builder(task, config, suffix, mounts, args, stage = 'building') {
+  async builder(task, config, suffix, mounts, args, stage = 'building', capture) {
     const name = `cmr-build-${task.id}-${suffix}`;
     await this.requireOwned(task, name);
     const labelArgs = Object.entries(labels(this.getIdentity().serverId, task.targetId, task.id)).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
@@ -77,7 +77,7 @@ export class DeploymentExecutor {
     const run = ['run', '--rm', '--name', name, ...labelArgs, '--cpus', String(config.build.cpus), '--memory', `${config.build.memoryMb}m`, '--memory-swap', `${Math.round(config.build.memoryMb * 1.5)}m`, '--pids-limit', '256', '--user', '1000:1000', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
       ...environment.flatMap(value => ['--env', value]),
       ...mounts.flatMap(([hostPath, containerPath, readOnly]) => ['--mount', `type=bind,src=${hostPath},dst=${containerPath}${readOnly ? ',readonly' : ''}`]), '--workdir', config.kind === 'static' && config.module ? `/workspace/${config.module}` : '/workspace', config.buildImage, ...args];
-    try { return await this.mutation(task, run, { onOutput: text => this.output(task, stage, text) }); }
+    try { return await this.mutation(task, run, { onOutput: text => { capture?.(text); return this.output(task, stage, text); } }); }
     finally {
       const leftover = await this.requireOwned(task, name);
       if (leftover) await this.mutation(task, ['rm', '-f', name], { timeoutMs: 15000 });
@@ -96,16 +96,71 @@ export class DeploymentExecutor {
     if (!info.isFile() || info.isSymbolicLink() || info.size < 22 || info.size > 512 * 1024 * 1024) throw new Error('JAR 产物无效');
     return artifact;
   }
+  async buildConfig(task, config) {
+    const frozen = task.release?.buildSnapshot, result = structuredClone(config), snapshot = {};
+    for (const key of config.kind === 'static' ? ['buildImage'] : ['buildImage', 'runtimeImage']) {
+      const requested = imageName(frozen?.[key] || config[key]);
+      if (frozen?.[key] && !/(?:^|@)sha256:[a-f0-9]{64}$/.test(requested)) throw new Error('历史构建镜像未固定到摘要，不能静默替换');
+      let image = await this.docker.inspect(requested, 'image');
+      if (!image) { await this.mutation(task, ['pull', requested], { onOutput: text => this.output(task, 'building', text) }); image = await this.docker.inspect(requested, 'image'); }
+      if (!image) throw new Error(`构建所需镜像不可用：${requested}`);
+      const pinned = image.RepoDigests?.find(value => /@sha256:[a-f0-9]{64}$/.test(value)) || image.Id;
+      if (!pinned) throw new Error(`无法确认镜像的固定版本：${requested}`);
+      result[key] = pinned; snapshot[key] = pinned;
+    }
+    if (config.kind === 'static') {
+      result.packageManager = frozen?.packageManager || config.packageManager;
+      result.packageManagerVersion = frozen?.packageManagerVersion || config.packageManagerVersion;
+      snapshot.packageManager = result.packageManager; snapshot.packageManagerVersion = result.packageManagerVersion;
+    }
+    return { config: result, snapshot };
+  }
+  async recoverRelease(task, requested, backend = this) {
+    if (!requested?.id) throw new Error('必须指定需要回退的成功版本');
+    const local = await readJson(safeChild(this.targetRoot(task), 'releases', `${identifier(requested.id)}.json`));
+    const agrees = local && local.id === requested.id && local.image === requested.image && local.artifact === requested.artifact && local.revision === requested.revision && JSON.stringify(normalizeConfig(local.config)) === JSON.stringify(normalizeConfig(requested.config))
+      && (!local.sourceSha256 || !task.source || local.sourceSha256 === task.source.sha256);
+    if (agrees) {
+      try {
+        await backend.requireRelease(task, local);
+        await this.event(task, 'building', '已核验历史产物，直接恢复本机缓存');
+        return { ...local, recoveryMethod: 'cache' };
+      } catch (error) {
+        // 只把明确的产物缺失作为重建条件，归属错误和 Docker 连接错误继续中止。
+        if (error.code !== 'ENOENT' && !/历史镜像不存在|静态版本文件缺失/.test(error.message)) throw error;
+      }
+    }
+    if (!task.recoveryAllowed || !task.source?.archiveId) throw new Error('历史产物已缺失，且当前任务没有中心源码重建授权；请升级 Agent 或恢复源码档案');
+    await this.event(task, 'building', '历史产物已清理，正在使用中心原源码包和历史配置重新构建');
+    const release = await backend.build(task, normalizeConfig(requested.config));
+    return { ...release, restoredFromReleaseId: requested.id, recoveryMethod: 'rebuild' };
+  }
+  async ensureBaseline(task, previous, backend = this) {
+    if (!previous) return null;
+    try { await backend.requireRelease(task, previous); return previous; }
+    catch (error) { if (error.code !== 'ENOENT' && !/历史镜像不存在|静态版本文件缺失/.test(error.message)) throw error; }
+    if (!task.recoveryAllowed || !task.baselineSource || !task.baselineReleaseId) throw new Error('当前版本的恢复基线缺失，停止切换以保护运行服务');
+    const baselineTask = { ...task, id: task.baselineReleaseId, downloadTaskId: task.id, journalTaskId: task.id, source: task.baselineSource, config: previous.config, release: previous };
+    await this.journal.update(task.id, { baselineTask });
+    await this.event(task, 'building', '正在从中心源码准备当前版本的失败恢复基线');
+    const rebuilt = await backend.build(baselineTask, normalizeConfig(previous.config));
+    return { ...rebuilt, restoredFromReleaseId: previous.id, recoveryMethod: 'rebuild' };
+  }
   async build(task, config) {
     const root = this.taskRoot(task); await mkdir(root, { recursive: true, mode: 0o700 });
     const zip = safeChild(root, 'source.zip'), source = safeChild(root, 'source');
     await this.event(task, 'downloading', '正在下载固定版本的完整源码 ZIP');
     await this.client.download(task, zip); await extractZip(zip, source); await this.makeSourceWritable(source);
     await lstat(safeChild(source, 'pom.xml'));
+    if (config.module) await lstat(safeChild(source, ...config.module.split('/'), 'pom.xml')).catch(() => { throw new Error(`所选提交中不存在 Maven 模块目录：${config.module}`); });
     await this.event(task, 'building', '正在编译目标模块及公共依赖');
+    const resolved = await this.buildConfig(task, config); config = resolved.config;
     const cache = safeChild(this.root, 'cache', identifier(task.applicationId || task.targetId), 'maven'); await this.mountDirectory(cache);
-    const args = ['mvn', '-B', '-ntp', '-Dmaven.repo.local=/cache', '-DskipTests', ...(config.module ? ['-pl', config.module, '-am'] : []), 'clean', 'package'];
-    await this.builder(task, config, 'maven', [[source, '/workspace'], [cache, '/cache']], args);
+    const args = ['mvn', '-V', '-B', '-ntp', '-Dmaven.repo.local=/cache', '-DskipTests', ...(config.module ? ['-pl', config.module, '-am'] : []), 'clean', 'package'];
+    let versionOutput = '';
+    await this.builder(task, config, 'maven', [[source, '/workspace'], [cache, '/cache']], args, 'building', text => { if (versionOutput.length < 4096) versionOutput += text; });
+    const mavenVersion = /Apache Maven ([\d.]+)/.exec(versionOutput)?.[1];
+    if (mavenVersion) resolved.snapshot.mavenVersion = mavenVersion;
     await this.event(task, 'image', '编译完成，正在构建运行镜像');
     const imageRoot = safeChild(root, 'image'); await this.mountDirectory(imageRoot);
     await copyFile(await this.findArtifact(source, config.artifactPath), safeChild(imageRoot, 'app.jar'));
@@ -115,7 +170,7 @@ export class DeploymentExecutor {
     const dockerfile = [`FROM ${config.runtimeImage}`, 'WORKDIR /app', `RUN ${JSON.stringify(['mkdir', '-p', '/app/logs', '/cmr', ...config.volumes.map(v => v.mountPath)])}`, 'RUN ["chown","-R","1000:1000","/app"]', 'COPY app.jar /app/app.jar', 'COPY HealthProbe.class /cmr/HealthProbe.class', 'USER 1000:1000', `ENTRYPOINT ${JSON.stringify(entrypoint)}`, ''].join('\n');
     await writeFile(safeChild(imageRoot, 'Dockerfile'), dockerfile, { mode: 0o600 });
     await writeFile(safeChild(imageRoot, '.dockerignore'), '*\n!Dockerfile\n!app.jar\n!HealthProbe.class\n', { mode: 0o600 });
-    const release = { id: task.id, image: releaseImage(task.targetId, task.id), revision: task.source.revision, config, createdAt: new Date().toISOString() };
+    const release = { id: task.id, image: releaseImage(task.targetId, task.id), revision: task.source.revision, config: normalizeConfig(task.config), sourceSha256: task.source.sha256, buildSnapshot: resolved.snapshot, createdAt: new Date().toISOString() };
     await this.requireOwned(task, release.image, 'image');
     const labelArgs = Object.entries(labels(this.getIdentity().serverId, task.targetId, task.id)).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
     await this.mutation(task, ['build', ...labelArgs, '-t', release.image, imageRoot], { onOutput: text => this.output(task, 'image', text) });
@@ -124,7 +179,9 @@ export class DeploymentExecutor {
   async requireRelease(task, release) {
     if (!release || release.image !== releaseImage(task.targetId, release.id)) throw new Error('发布版本不属于当前部署目标');
     normalizeConfig(release.config);
-    if (!await this.requireOwned(task, release.image, 'image')) throw new Error('需要的历史镜像不存在');
+    const image = await this.requireOwned(task, release.image, 'image');
+    if (!image) throw new Error('需要的历史镜像不存在');
+    if (image.Config?.Labels?.['io.cmr.task'] !== release.id) throw new Error('历史镜像的版本归属不匹配');
     return release;
   }
   async activate(task, release) {
@@ -145,13 +202,14 @@ export class DeploymentExecutor {
     throw new Error('业务健康检查超时');
   }
   async saveRelease(task, release, previous) {
+    if (previous) await writeJson(safeChild(this.targetRoot(task), 'releases', `${identifier(previous.id)}.json`), previous);
     await writeJson(safeChild(this.targetRoot(task), 'releases', `${identifier(release.id)}.json`), release);
     await writeJson(safeChild(this.targetRoot(task), 'current.json'), { ...release, previousId: previous?.id ?? null });
   }
   async finish(task, release, previous) {
     await this.saveRelease(task, release, previous);
     try { await this.cleanup(task, release, previous); } catch (error) { await this.event(task, 'verifying', `发布已成功，历史清理延后：${error.message}`); }
-    await this.event(task, 'verifying', '部署成功，业务健康检查通过', { status: 'succeeded', result: { release } });
+    await this.event(task, 'verifying', '部署成功，业务健康检查通过', { status: 'succeeded', result: { release, baseline: previous, recoveryMethod: release.recoveryMethod } });
   }
   async rollbackFailure(task, error, previous) {
     const message = String(error.message || error).slice(0, 3000);
@@ -187,16 +245,15 @@ export class DeploymentExecutor {
       const actual = await this.requireOwned(task);
       if (actual && (!previous || actual.Config.Image !== previous.image)) throw new Error('运行容器与本地成功版本记录不一致，拒绝覆盖');
       if (!previous && task.previousRelease) throw new Error('本机缺少上一版本记录，必须先恢复 Agent 持久化数据');
-      if (previous) await this.requireRelease(task, previous);
+      if (task.action === 'restart') {
+        if (task.release && previous?.id !== task.release.id) throw new Error('当前版本已变化，请刷新后重新创建重启任务');
+        await this.requireRelease(task, previous);
+      } else previous = await this.ensureBaseline(task, previous);
       await this.journal.update(task.id, { previousRelease: previous });
       let release;
       if (task.action === 'deploy') release = await this.build(task, config);
       else if (task.action === 'rollback') {
-        const requested = task.release;
-        if (!requested?.id) throw new Error('必须指定需要回退的成功版本');
-        release = await readJson(safeChild(this.targetRoot(task), 'releases', `${identifier(requested.id)}.json`));
-        if (!release || release.image !== requested.image) throw new Error('指定版本不在本机保留的成功版本中');
-        await this.requireRelease(task, release);
+        release = await this.recoverRelease(task, task.release);
       } else { if (!previous) throw new Error('目标尚无成功部署版本'); release = previous; }
       await this.journal.update(task.id, { release });
       await this.event(task, 'deploying', task.action === 'restart' ? '正在重启当前平台容器' : '正在更新当前部署目标');
@@ -221,8 +278,8 @@ export class DeploymentExecutor {
         try { await this.health(task, record.release); await this.finish(task, record.release, record.previousRelease); }
         catch (error) { await this.rollbackFailure(task, error, record.previousRelease); }
       } else {
-        for (const suffix of ['maven', 'probe']) {
-          const name = `cmr-build-${task.id}-${suffix}`, container = await this.requireOwned(task, name);
+        for (const buildTask of [task, record.baselineTask].filter(Boolean)) for (const suffix of ['maven', 'probe']) {
+          const name = `cmr-build-${buildTask.id}-${suffix}`, container = await this.requireOwned(task, name);
           if (container) await this.mutation(task, ['rm', '-f', name], { timeoutMs: 15000 });
         }
         await this.event(task, record.stage, 'Agent 重启时编译或下载被中断；请重新创建发布任务', { status: 'interrupted', result: { error: 'Agent 在部署开始前重启，未重复执行任务' } });
@@ -231,10 +288,24 @@ export class DeploymentExecutor {
     finally { if (terminal((await this.journal.get(task.id))?.status)) await this.cleanupWork(task).catch(() => {}); }
   }
   async cleanupWork(task) {
+    const record = await this.journal.get(task.journalTaskId || task.id);
+    if (!task.journalTaskId && record?.baselineTask) {
+      for (const name of ['source.zip', 'source', 'image', 'static-tools']) await rm(safeChild(this.taskRoot(record.baselineTask), name), { recursive: true, force: true });
+      const baseline = record.baselineTask;
+      const saved = await readJson(safeChild(this.targetRoot(task), 'releases', `${identifier(baseline.id)}.json`));
+      if (!saved && record.status !== 'succeeded') {
+        if (task.config?.kind === 'static') {
+          await this.static.preflight(task);
+          if (await this.static.selected(task) !== baseline.id) await rm(this.static.releasePath(task, baseline.id), { recursive: true, force: true });
+        } else {
+          const image = releaseImage(task.targetId, baseline.id), actual = await this.requireOwned(task);
+          if (actual?.Config.Image !== image && await this.requireOwned(task, image, 'image')) await this.mutation(task, ['image', 'rm', image], { allowFailure: true, timeoutMs: 30000 });
+        }
+      }
+    }
     if (task.config?.kind === 'static') return this.static.cleanupWork(task);
     assertManaged(this.getIdentity(), task);
-    const record = await this.journal.get(task.id);
-    if (task.action === 'deploy' && record?.status !== 'succeeded') {
+    if (['deploy', 'rollback'].includes(task.action) && record?.status !== 'succeeded') {
       const image = releaseImage(task.targetId, task.id), actual = await this.requireOwned(task);
       if (actual?.Config.Image !== image && await this.requireOwned(task, image, 'image')) {
         await this.mutation(task, ['image', 'rm', image], { allowFailure: true, timeoutMs: 30000 });
@@ -250,8 +321,9 @@ export class DeploymentExecutor {
     const keep = new Set([...releases.slice(0, 5).map(r => r.id), current.id, previous?.id].filter(Boolean));
     for (const release of releases) {
       if (keep.has(release.id)) continue;
-      await this.requireRelease(task, release);
-      const result = await this.mutation(task, ['image', 'rm', release.image], { allowFailure: true, timeoutMs: 30000 });
+      if (release.image !== releaseImage(task.targetId, release.id)) throw new Error('拒绝清理不属于目标的历史镜像');
+      const image = await this.requireOwned(task, release.image, 'image');
+      const result = image ? await this.mutation(task, ['image', 'rm', release.image], { allowFailure: true, timeoutMs: 30000 }) : { code: 0 };
       if (result.code === 0) await rm(safeChild(root, `${identifier(release.id)}.json`));
     }
   }

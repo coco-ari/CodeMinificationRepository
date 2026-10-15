@@ -29,6 +29,12 @@ Java 目标的容器和 Compose 项目名为 `cmr-<目标 ID>`，镜像为 `cmr/
 
 ## 配置与恢复
 
+Agent 1.4.0 声明 `source-archive-recovery-v1`。回退首先核验本机版本的配置、commit、产物和归属；缓存缺失则下载中心原 ZIP，使用历史配置及已记录的构建镜像摘要重建。新产物使用新版本 ID 并记录 `restoredFromReleaseId`，原版本记录不覆盖。旧 Agent 只维持原有缓存恢复能力，不能执行源码重建。
+
+切换前必须有可用的当前版本恢复基线。基线产物缺失时先按中心明确授权的基线档案准备，准备失败则停止切换；构建中断不影响当前业务。中心不可用时任务仍按已领取的快照执行，但尚未下载的目标或基线源码不可凭空取得，会明确失败。
+
+构建记录 Maven/Node/npm/pnpm 实际版本和镜像固定标识。npm、pnpm 使用配置的准确版本，历史重建优先使用已记录版本；无法获得固定镜像或依赖时失败，不静默改用新版本。源码与配置档案不包含全部外部依赖，不保证重新构建逐字节相同。
+
 配置包括 `module`、`artifactPath`、`buildImage`、`runtimeImage`、`jvmArgs`、`args`、`profile`、`ports`、`networks`、`volumes`、`build`、`runtime`、`health`。`artifactPath` 是源码根目录相对路径，只有文件名可使用 `*`，且必须匹配唯一 JAR。JVM 入口固定为 `java ... -jar /app/app.jar`。HTTP 就绪探针由 Java 8 编译，不要求运行镜像安装 curl。
 
 第一版按 256 MiB Agent 内存配置限制源码 ZIP 不超过 64 MiB、单个解压文件不超过 32 MiB、总解压体积不超过 1 GiB。超限会明确失败，不跳过完整性校验。发布结束会清除本任务的源码和镜像构建目录，保留日志与回退记录。

@@ -140,9 +140,9 @@ export class RepositoryService {
   async saveProject(input, id) {
     const name = requireText(input.name, '项目名称', 80);
     const repository = validateRepository(input.repository);
-    const branch = validateBranch(input.branch);
+    const branch = input.branch ? validateBranch(input.branch) : undefined;
     const token = id ? undefined : randomSecret();
-    return this.store.change(state => {
+    const saved = await this.store.change(state => {
       if (input.credentialId && !state.credentials.some(item => item.id === input.credentialId)) throw new HttpError(400, '请选择有效的 Gitee 凭证');
       let project;
       if (id) {
@@ -154,19 +154,28 @@ export class RepositoryService {
         project = { id: randomUUID(), createdAt: timestamp(), tokenHash: digest(token), status: 'idle', lastSuccess: null };
         state.projects.push(project);
       }
-      if (project.repository !== repository || project.branch !== branch) {
+      if (project.repository !== repository || (branch && project.branch !== branch)) {
         project.status = 'idle'; project.lastSuccess = null; project.error = null;
+      }
+      if (project.repository !== repository || project.credentialId !== (input.credentialId || null)) {
+        project.branchInfo = null; project.defaultBranch = null;
       }
       if (input.applicationId !== undefined) {
         if (!state.deployments?.applications.some(item => item.id === input.applicationId)) throw new HttpError(400, '项目不存在');
         if (project.applicationId && project.applicationId !== input.applicationId) throw new HttpError(400, '不能更改仓库所属项目');
         project.applicationId = input.applicationId;
       }
-      Object.assign(project, { name, repository, branch, credentialId: input.credentialId || null,
+      Object.assign(project, { name, repository, ...(branch ? { branch } : {}), credentialId: input.credentialId || null,
         enabled: input.enabled !== false, updatedAt: timestamp() });
       audit(state, project.id, 'project', `已保存项目：${name}`);
       return { project: publicProject(project), ...(token ? { token } : {}) };
     });
+    // 旧调用明确传入分支时保持原接口行为；新表单保存后查询远端，失败也保留接入记录。
+    if (!branch && this.builder.branches) {
+      await this.branches(saved.project.id, true).catch(() => {});
+      saved.project = publicProject(this.store.state.projects.find(item => item.id === saved.project.id));
+    }
+    return saved;
   }
   async rotateToken(id) {
     const token = randomSecret();
@@ -202,11 +211,35 @@ export class RepositoryService {
     if (!this.builder.history) return { commits: [], refreshedAt: null };
     return this.queue.run(() => this.builder.history(project, this.credential(project), refresh));
   }
+  async branches(id, refresh = false) {
+    const project = this.store.state.projects.find(item => item.id === id);
+    if (!project) throw new HttpError(404, '仓库不存在');
+    if (!refresh && project.branchInfo) return project.branchInfo;
+    if (!this.builder.branches) return { branches: project.branch ? [{ name: project.branch }] : [], defaultBranch: project.defaultBranch || project.branch || null, refreshedAt: null };
+    const snapshot = structuredClone(project);
+    const unchanged = current => current && current.repository === snapshot.repository && current.credentialId === snapshot.credentialId;
+    try {
+      const info = await this.queue.run(() => this.builder.branches(snapshot, this.credential(snapshot)));
+      await this.store.change(state => {
+        const current = state.projects.find(item => item.id === id);
+        if (!unchanged(current)) throw new HttpError(409, '仓库配置已变化，请重新刷新');
+        Object.assign(current, { branchInfo: info, defaultBranch: info.defaultBranch, connectionStatus: info.branches.length ? 'ready' : 'empty', connectionError: null });
+        // 已有下载地址仍使用原分支，新仓库才自动初始化兼容下载分支。
+        if (!current.branch && info.defaultBranch) current.branch = info.defaultBranch;
+      });
+      return info;
+    } catch (error) {
+      const safe = error instanceof HttpError ? error : new HttpError(502, '查询分支失败，请检查仓库、凭证和网络');
+      await this.store.change(state => { const current = state.projects.find(item => item.id === id); if (unchanged(current)) Object.assign(current, { connectionStatus: 'failed', connectionError: safe.message }); });
+      throw safe;
+    }
+  }
   async sync(id, frozen, onPhase) {
     const project = this.store.state.projects.find(item => item.id === id);
     if (!project) throw new HttpError(404, '项目不存在');
     if (!project.enabled) throw new HttpError(409, '项目已停用');
     const snapshot = structuredClone(frozen || project);
+    if (!snapshot.branch) throw new HttpError(409, '仓库尚无默认分支，请先刷新仓库信息');
     if (snapshot.id !== id) throw new HttpError(400, '源码快照不匹配');
     const key = archiveKey(snapshot);
     if (onPhase) {

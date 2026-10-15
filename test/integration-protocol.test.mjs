@@ -20,7 +20,7 @@ function sourceZip() {
 
 class ProtocolDocker {
   constructor() { this.calls = []; this.containers = new Map(); this.images = new Map(); this.other = new Map(); this.unhealthyTask = null; this.beforeMaven = null; this.failCompile = false; }
-  async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
+  async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); if (kind === 'image' && /^(maven:|eclipse-temurin:|sha256:)/.test(name)) return { Id: `sha256:${'c'.repeat(64)}` }; return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
   async run(args, options = {}) {
     this.calls.push([...args]);
     if (args[0] === 'run') {

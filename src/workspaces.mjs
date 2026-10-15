@@ -130,15 +130,19 @@ export class WorkspaceService {
       applications: [project], environments: scoped(this.data.environments), services: scoped(this.data.services), targets,
       environmentSources: scoped(this.data.environmentSources), tasks: scoped(this.data.tasks).slice(-200).reverse() };
   }
-  async targetSource(applicationId, targetId, refresh = false) {
+  async targetSource(applicationId, targetId, refresh = false, branch) {
     const target = this.owned('targets', targetId, applicationId);
     const environment = this.owned('environments', target.environmentId, applicationId);
     const selected = this.data.environmentSources.find(item => item.environmentId === target.environmentId && item.serviceId === target.serviceId);
     const repository = this.owned('repositories', selected?.sourceProjectId || environment.sourceProjectId, applicationId);
     if (!repository.enabled) throw new HttpError(409, '代码仓库已停用');
-    const snapshot = sourceSnapshot(repository, selected?.branch || repository.branch);
+    const running = target.currentRelease?.sourceSnapshot;
+    const preferredBranch = running?.id === repository.id && running.repository === repository.repository ? running.branch : selected?.branch || repository.defaultBranch || repository.branch || null;
+    const chosen = branch === undefined ? preferredBranch : validateBranch(branch);
+    if (!chosen) return { commits: [], refreshedAt: null, repositoryId: repository.id, repositoryName: repository.name, branch: null, preferredBranch, configKey: this.deployment.configKey(targetId) };
+    const snapshot = sourceSnapshot(repository, chosen);
     const history = await this.repository.history(snapshot, refresh);
-    return { ...history, sourceKey: sourceKey(snapshot), repositoryId: repository.id, repositoryName: repository.name, branch: snapshot.branch };
+    return { ...history, sourceKey: sourceKey(snapshot), repositoryId: repository.id, repositoryName: repository.name, branch: snapshot.branch, preferredBranch, configKey: this.deployment.configKey(targetId) };
   }
   async create(input) { return this.deployment.saveEntity('applications', input, undefined, { defaultEnvironments: true }); }
   async bind(applicationId, serverId, remove = false) {
@@ -159,11 +163,11 @@ export class WorkspaceService {
     const environment = this.owned('environments', input.environmentId, applicationId);
     this.owned('services', input.serviceId, applicationId);
     this.owned('repositories', input.sourceProjectId, applicationId);
-    const value = { applicationId, environmentId: environment.id, serviceId: input.serviceId, sourceProjectId: input.sourceProjectId, branch: validateBranch(input.branch), updatedAt: now() };
+    const value = { applicationId, environmentId: environment.id, serviceId: input.serviceId, sourceProjectId: input.sourceProjectId, ...(input.branch ? { branch: validateBranch(input.branch) } : {}), updatedAt: now() };
     await this.store.change(state => {
       const items = state.deployments.environmentSources;
       const previous = items.find(item => item.environmentId === value.environmentId && item.serviceId === value.serviceId);
-      if (previous) Object.assign(previous, value); else items.push(value);
+      if (previous) { if (previous.sourceProjectId !== value.sourceProjectId) delete previous.branch; Object.assign(previous, value); } else items.push(value);
     });
     this.deployment.changed('environmentSources', environment.id, applicationId); return value;
   }
@@ -173,7 +177,7 @@ export class WorkspaceService {
     if (kind === 'targets') {
       this.owned('environments', input.environmentId, applicationId); this.owned('services', input.serviceId, applicationId);
       if (!this.data.serverBindings.some(item => item.applicationId === applicationId && item.serverId === input.serverId)) throw new HttpError(400, '请先绑定此服务器');
-      if (!this.data.environmentSources.some(item => item.environmentId === input.environmentId && item.serviceId === input.serviceId)) throw new HttpError(400, '请先为该环境的服务配置仓库和分支');
+      if (!this.data.environmentSources.some(item => item.environmentId === input.environmentId && item.serviceId === input.serviceId)) throw new HttpError(400, '请先为该环境的服务关联源码仓库');
     }
     const result = await this.deployment.saveEntity(kind, { ...input, applicationId, ...(kind === 'environments' ? { sourceProjectId: undefined } : {}) }, id);
     return result;

@@ -26,6 +26,13 @@ if (!executable) throw new Error('未找到浏览器，请设置 BROWSER_PATH �
 
 const dataDirectory = path.join(temporary, 'data')
 const builder = {
+  async branches() {
+    return {
+      branches: [{ name: 'release/vietnam', revision: 'a'.repeat(40) }],
+      defaultBranch: 'release/vietnam',
+      refreshedAt: new Date().toISOString(),
+    }
+  },
   async initialize() {
     await mkdir(dataDirectory, { recursive: true })
     await writeFile(path.join(dataDirectory, 'test.zip'), 'test')
@@ -132,6 +139,9 @@ try {
     )
   const mouseClick = async (selector) => {
     await animationsSettled()
+    await evaluate(
+      `new Promise(resolve => { document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'}); requestAnimationFrame(() => requestAnimationFrame(resolve)); })`,
+    )
     const point = await evaluate(
       `(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
     )
@@ -227,7 +237,10 @@ try {
   await visible('#project-dialog')
   await fill('#project-form [name=name]', '越南 SOL 标准版')
   await fill('#project-form [name=repository]', 'https://gitee.com/example/sol-standard.git')
-  await fill('#project-form [name=branch]', 'release/vietnam')
+  assert.equal(
+    await evaluate('Boolean(document.querySelector("#project-form [name=branch]"))'),
+    false,
+  )
   await mouseClick('#repository-add-credential')
   await visible('#credential-dialog')
   await fill('#credential-form [name=name]', '项目内新建凭证')
@@ -250,9 +263,9 @@ try {
   const publicUrl = await evaluate('document.querySelector("#secret-page").value')
   await click('#secret-dialog [data-close]')
   await until(() => evaluate('!document.querySelector("#secret-value")'), '关闭弹窗后清除密码')
-  await click('[aria-label="立即同步"]')
+  await click('[aria-label="刷新仓库信息"]')
   await until(
-    () => evaluate('document.querySelector(".project-card .badge").textContent === "已就绪"'),
+    () => evaluate('document.querySelector(".project-card .badge").textContent === "已连接"'),
     '手动同步',
   )
   assert.equal(service.store.state.projects.length, 1)
@@ -298,6 +311,10 @@ try {
     'Array.from(document.querySelector("[role=alertdialog]").querySelectorAll("button")).find(b=>b.textContent === "取消").click()',
   )
   await until(() => evaluate('!document.querySelector("[role=alertdialog]")'), '取消重置密码')
+  await until(
+    () => evaluate('getComputedStyle(document.body).pointerEvents !== "none"'),
+    '关闭确认后恢复页面交互',
+  )
   service.authorizeDownload(service.store.state.projects[0].id, secret)
   await mouseClick('#project-list table [role=switch]')
   await until(() => !service.store.state.projects[0].enabled, '停用源码下载')
@@ -348,8 +365,8 @@ try {
   )
   await visible('#project-dialog')
   assert.equal(
-    await evaluate('document.querySelector("#project-form [name=branch]").value'),
-    'release/vietnam',
+    await evaluate('Boolean(document.querySelector("#project-form [name=branch]"))'),
+    false,
   )
   await command('Page.navigate', { url: publicUrl })
   await visible('#download-view')

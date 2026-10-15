@@ -2,7 +2,8 @@ import { EventEmitter } from 'node:events';
 import { mkdir, copyFile, readFile, stat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { sourceKey, archiveKey, validateRevision } from './archive.mjs';
+import { sourceKey, archiveKey, validateRevision, validateBranch } from './archive.mjs';
+import { SourceArchives } from './source-archives.mjs';
 import { migrateWorkspaces, sourceSnapshot } from './workspaces.mjs';
 import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
@@ -75,7 +76,7 @@ export function validateConfig(input = {}, module = '.', kind = input?.kind || '
       bodyIncludes: input.health?.bodyIncludes || '', timeoutSeconds: integer(input.health?.timeoutSeconds, 180, 10, 900, '健康检查超时'), intervalSeconds: integer(input.health?.intervalSeconds, 5, 2, 60, '健康检查间隔') },
   };
   if (isStatic) {
-    Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || '10.11.0',
+    Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || (input.packageManager === 'pnpm' ? '10.11.0' : '10.9.9'),
       buildScript: input.buildScript || 'build', buildArgs: list(input.buildArgs, 40, '构建参数').map(value => requireText(value, '构建参数', 1024)),
       jvmArgs: [], args: [], profile: '' });
     if (!['npm', 'pnpm'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) fail('请选择 npm 或指定准确版本的 pnpm');
@@ -109,6 +110,7 @@ export class DeploymentService extends EventEmitter {
   constructor(repository, { publicOrigin = '' } = {}) {
     super(); this.repository = repository; this.store = repository.store; this.publicOrigin = publicOrigin;
     this.root = path.join(repository.directory, 'deployments'); this.pins = new Map(); this.pinErrors = new Map(); this.archivePending = new Map(); this.preparations = new Map();
+    this.archives = new SourceArchives(this);
   }
   get data() { return this.store.state.deployments; }
   changed(type, id, applicationId) { this.emit('update', { type, id, applicationId, at: now() }); }
@@ -123,6 +125,10 @@ export class DeploymentService extends EventEmitter {
       for (const target of state.deployments.targets) if (target.mode !== 'managed' && !target.retiredAt) target.retiredAt = now();
     });
     await migrateWorkspaces(this.store, this.repository.directory);
+    await this.archives.migrate();
+    await this.cleanupSources();
+    this.archiveCleanupTimer = setInterval(() => this.cleanupSources().catch(() => this.emit('error-safe', { message: '过期失败源码清理延后' })), 3600000);
+    this.archiveCleanupTimer.unref();
     const original = this.repository.builder.build.bind(this.repository.builder);
     // 固定任务源码与原缓存清理共享锁，复制完成后才允许下一次构建清理旧缓存。
     this.repository.builder.build = (project, credential, onPhase) => this.archiveLock(sourceKey(project), async () => {
@@ -181,11 +187,12 @@ export class DeploymentService extends EventEmitter {
     this.archivePending.set(projectId, pending); return operation;
   }
   async copyArchive(archive, taskId) {
-    if (archive.size > 64 * 1024 * 1024) throw new HttpError(413, 'Agent 第一版仅支持不超过 64 MiB 的源码 ZIP；原 Jenkins 下载接口不受此限制');
+    if (archive.size > 64 * 1024 * 1024) throw new HttpError(413, 'Agent 仅支持不超过 64 MiB 的源码 ZIP；普通源码下载接口不受此限制');
     const directory = path.join(this.root, 'tasks', taskId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
+    const source = await this.archives.import(find(this.data.tasks, taskId, '任务'), archive);
     await copyFile(archive.file, path.join(directory, 'source.zip'));
-    await atomicWrite(path.join(directory, 'source.json'), JSON.stringify({ revision: archive.revision, commitSubject: archive.commitSubject, sha256: archive.sha256, size: archive.size }));
+    await atomicWrite(path.join(directory, 'source.json'), JSON.stringify(source));
   }
   overview() {
     return { servers: this.data.servers.map(safeServer), applications: this.data.applications, environments: this.data.environments,
@@ -324,47 +331,81 @@ export class DeploymentService extends EventEmitter {
     if (server.revoked) throw new HttpError(409, '服务器已撤销');
     return target;
   }
+  configKey(targetId) {
+    const target = find(this.data.targets, targetId), service = find(this.data.services, target.serviceId);
+    const source = this.data.environmentSources.find(item => item.environmentId === target.environmentId && item.serviceId === target.serviceId);
+    return digest(JSON.stringify([validateConfig(target.config, service.module, service.kind || 'java'), source?.sourceProjectId]));
+  }
   async createTask(input) {
     if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
     if (!['deploy', 'restart', 'rollback'].includes(input.action)) fail('操作类型无效');
-    let selection;
+    const requestFingerprint = digest(JSON.stringify([input.targetId, input.action, input.branch || null, input.revision || null, input.releaseId || null, input.sourceKey || null, input.configKey || null]));
+    if (input.requestId && !/^[a-f0-9-]{36}$/.test(input.requestId)) fail('幂等请求标识无效');
+    const duplicate = data => {
+      const existing = input.requestId && data.tasks.find(item => item.requestId === input.requestId);
+      if (existing && existing.requestFingerprint !== requestFingerprint) throw new HttpError(409, '同一请求标识不能用于不同发布参数');
+      return existing;
+    };
+    const repeated = duplicate(this.data); if (repeated) return structuredClone(repeated);
+    if (input.action === 'rollback') {
+      const release = this.data.releases.find(item => item.id === input.releaseId && item.targetId === input.targetId);
+      if (release?.sourceArchiveId && !release.sourceClearedAt) await this.archives.verify(release);
+    }
+    if (input.branch !== undefined && input.action === 'deploy' && (!input.revision || !input.sourceKey || !input.configKey || !input.requestId)) fail('请选择分支和具体提交，并刷新发布配置');
+    const taskId = randomUUID();
+    let selection, selectedCommit;
     if (input.action === 'deploy' && input.revision) {
       validateRevision(input.revision);
       const target = this.ensureManaged(this.data, input.targetId);
       const environment = find(this.data.environments, target.environmentId);
       const source = this.data.environmentSources.find(item => item.environmentId === target.environmentId && item.serviceId === target.serviceId);
       const repository = find(this.store.state.projects, source?.sourceProjectId || environment.sourceProjectId);
-      selection = sourceSnapshot(repository, source?.branch || repository.branch);
+      selection = sourceSnapshot(repository, validateBranch(input.branch || source?.branch || repository.defaultBranch || repository.branch));
       const history = await this.repository.history(selection);
-      if (!history.commits.some(commit => commit.revision === input.revision)) throw new HttpError(409, '提交记录已变化，请更新代码后重新选择');
+      selectedCommit = history.commits.find(commit => commit.revision === input.revision);
+      if (!selectedCommit) throw new HttpError(409, '提交记录已变化，请更新代码后重新选择');
+      if (this.repository.builder.pinRevision) await this.archiveLock(sourceKey(selection), () => this.repository.builder.pinRevision({ ...selection, revision: input.revision }, taskId));
     }
-    const task = await this.store.change(state => {
+    let task;
+    try { task = await this.store.change(state => {
       if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
       const data = state.deployments; const target = this.ensureManaged(data, input.targetId); const environment = find(data.environments, target.environmentId); const service = find(data.services, target.serviceId);
+      const previousRequest = duplicate(data); if (previousRequest) return structuredClone(previousRequest);
       if (service.kind === 'static' && !find(data.servers, target.serverId).capabilities?.includes('static-site-v1')) throw new HttpError(409, '请先升级目标服务器 Agent，使其支持静态站点发布');
       if (service.kind === 'static' && input.action === 'restart') throw new HttpError(400, '静态站点无需重启共用 Nginx，请使用发布或回退');
       if (service.kind === 'static' && input.action === 'deploy' && !target.config.health?.url) throw new HttpError(400, '请先配置站点访问地址，并将已有 Nginx 指向该目标的发布目录');
       if (data.tasks.filter(task => !terminal.has(task.status)).length >= 200) throw new HttpError(503, '部署队列已满');
       const selected = data.environmentSources.find(item => item.environmentId === environment.id && item.serviceId === service.id);
-      const sourceProject = find(state.projects, selected?.sourceProjectId || environment.sourceProjectId, '源码仓库');
-      if (sourceProject.applicationId && sourceProject.applicationId !== target.applicationId) fail('仓库不属于当前项目');
-      if (!sourceProject.enabled && input.action === 'deploy') throw new HttpError(409, '源码项目已停用');
-      const snapshot = sourceSnapshot(sourceProject, selected?.branch || sourceProject.branch);
-      if (input.sourceKey && input.sourceKey !== sourceKey(snapshot)) throw new HttpError(409, '环境源码配置已变化，请刷新发布工作台');
-      if (selection && sourceKey(selection) !== sourceKey(snapshot)) throw new HttpError(409, '环境源码配置已变化，请重新选择提交');
-      if (input.revision && input.action === 'deploy') snapshot.revision = input.revision;
       let release;
       if (input.action === 'rollback') {
         release = find(data.releases.filter(release => release.targetId === target.id), input.releaseId, '回退版本');
-        if (!release.available) throw new HttpError(409, '该版本已超出保留范围');
+        if (!release.available || release.sourceClearedAt) throw new HttpError(409, '该版本源码已清理或无法恢复');
       }
-      if (input.action === 'restart' && !target.currentRelease) throw new HttpError(409, '目标尚未成功发布');
-      const task = { id: randomUUID(), targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: input.action === 'deploy' ? 'preparing' : 'queued', stage: 'queued',
+      if (input.action === 'restart') { release = target.currentRelease; if (!release) throw new HttpError(409, '目标尚无成功部署版本'); }
+      const sourceProject = input.action === 'deploy' ? find(state.projects, selected?.sourceProjectId || environment.sourceProjectId, '源码仓库') : (release.sourceSnapshot || { id: release.sourceProjectId });
+      if (sourceProject.applicationId && sourceProject.applicationId !== target.applicationId) fail('仓库不属于当前项目');
+      if (!sourceProject.enabled && input.action === 'deploy') throw new HttpError(409, '源码项目已停用');
+      const snapshot = input.action === 'deploy' ? sourceSnapshot(sourceProject, validateBranch(input.branch || selected?.branch || sourceProject.defaultBranch || sourceProject.branch)) : structuredClone(release.sourceSnapshot || null);
+      if (input.action === 'deploy' && input.sourceKey && input.sourceKey !== sourceKey(snapshot)) throw new HttpError(409, '环境源码配置已变化，请刷新发布工作台');
+      if (selection && sourceKey(selection) !== sourceKey(snapshot)) throw new HttpError(409, '环境源码配置已变化，请重新选择提交');
+      if (input.configKey && input.configKey !== this.configKey(target.id)) throw new HttpError(409, '发布配置已变化，请刷新后重新确认');
+      if (input.revision && input.action === 'deploy') snapshot.revision = input.revision;
+      const archived = release && this.archives.releaseSource(release);
+      const supportsRecovery = find(data.servers, target.serverId).capabilities?.includes('source-archive-recovery-v1');
+      if (input.action === 'rollback' && archived && input.requestId && !supportsRecovery) throw new HttpError(409, '请先升级目标 Agent 以支持源码档案恢复；旧客户端仍可使用原本机缓存恢复接口');
+      const task = { id: taskId, targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: input.action === 'deploy' ? 'preparing' : 'queued', stage: 'queued',
         detailedAgentStages: find(data.servers, target.serverId).capabilities?.includes('delivery-telemetry-v1') || false,
-        createdAt: now(), updatedAt: now(), config: validateConfig(target.config, service.module, service.kind || 'java'), sourceProjectId: sourceProject.id, sourceSnapshot: snapshot, source: null, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
+        createdAt: now(), updatedAt: now(), config: release ? structuredClone(release.config) : validateConfig(target.config, service.module, service.kind || 'java'),
+        sourceProjectId: sourceProject.id, sourceSnapshot: snapshot, source: archived ? { ...archived, url: `/api/agent/v1/tasks/${taskId}/source` } : null,
+        sourceArchiveId: archived?.archiveId, revision: release?.revision || input.revision, commitSubject: release?.commitSubject || selectedCommit?.subject,
+        recoveryAllowed: !!supportsRecovery, requestId: input.requestId, requestFingerprint, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
       transition(task, task.status);
       data.tasks.push(task); return structuredClone(task);
-    });
+    }); } catch (error) {
+      if (selection && this.repository.builder.releasePin) await this.archiveLock(sourceKey(selection), () => this.repository.builder.releasePin(selection, taskId)).catch(() => {});
+      throw error;
+    }
+    if (task.id !== taskId && selection && this.repository.builder.releasePin) await this.repository.builder.releasePin(selection, taskId).catch(() => {});
     if (task.status === 'preparing') this.startPrepare(task.id);
     this.changed('task', task.id); return task;
   }
@@ -380,7 +421,10 @@ export class DeploymentService extends EventEmitter {
     if (!this.pins.has(key)) this.pins.set(key, new Set()); this.pins.get(key).add(id);
     try {
       let source;
-      try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); await stat(path.join(this.root, 'tasks', id, 'source.zip')); }
+      try {
+        if (task.source?.archiveId) { await this.archives.verify(task.source); source = task.source; }
+        else { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); await stat(path.join(this.root, 'tasks', id, 'source.zip')); }
+      }
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
         const archive = await this.repository.sync(sourceId, snapshot, async phase => {
@@ -393,12 +437,13 @@ export class DeploymentService extends EventEmitter {
         if (this.pinErrors.has(id)) throw this.pinErrors.get(id);
         // 兼容准备任务加入时已有同步即将结束的情况。
         try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); }
-        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(sourceKey(snapshot), () => this.copyArchive(archive, id)); source = { revision: archive.revision, commitSubject: archive.commitSubject, sha256: archive.sha256, size: archive.size }; }
+        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(sourceKey(snapshot), () => this.copyArchive(archive, id)); source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); }
       }
+      if (source.archiveId) await this.archives.verify(source);
       await this.store.change(state => {
         const current = find(state.deployments.tasks, id); if (current.status !== 'preparing') return;
         transition(current, 'queued'); current.stage = 'queued';
-        Object.assign(current, { source: { ...source, url: `/api/agent/v1/tasks/${id}/source` }, revision: source.revision, commitSubject: typeof source.commitSubject === 'string' ? source.commitSubject.slice(0, 500) : undefined, status: 'queued', updatedAt: now() });
+        Object.assign(current, { sourceArchiveId: source.archiveId, source: { ...source, url: `/api/agent/v1/tasks/${id}/source` }, revision: source.revision, commitSubject: typeof source.commitSubject === 'string' ? source.commitSubject.slice(0, 500) : undefined, status: 'queued', updatedAt: now() });
       });
     } catch (error) {
       await this.store.change(state => {
@@ -406,7 +451,10 @@ export class DeploymentService extends EventEmitter {
         transition(current, 'failed', true);
         Object.assign(current, { status: 'failed', stage: 'failed', error: error instanceof HttpError ? error.message : '固定源码失败，请检查服务存储', finishedAt: now(), updatedAt: now() });
       });
-    } finally { this.pins.get(key)?.delete(id); this.pinErrors.delete(id); if (!this.pins.get(key)?.size) this.pins.delete(key); this.changed('task', id); }
+    } finally {
+      if (snapshot.revision && this.repository.builder.releasePin) await this.archiveLock(sourceKey(snapshot), () => this.repository.builder.releasePin(snapshot, id)).catch(() => {});
+      this.pins.get(key)?.delete(id); this.pinErrors.delete(id); if (!this.pins.get(key)?.size) this.pins.delete(key); this.changed('task', id);
+    }
   }
   async claim(serverId) {
     if (this.closing) return null;
@@ -428,6 +476,11 @@ export class DeploymentService extends EventEmitter {
         return null;
       }
       Object.assign(next, { status: 'running', startedAt: now(), updatedAt: now(), previousRelease: target.currentRelease || null });
+      if (next.recoveryAllowed && !server.capabilities?.includes('source-archive-recovery-v1')) {
+        Object.assign(next, { status: 'interrupted', stage: 'interrupted', error: 'Agent 已降级，请升级后重新创建任务', finishedAt: now() }); transition(next, 'interrupted', true); interruptedId = next.id; return null;
+      }
+      const baselineSource = this.archives.releaseSource(target.currentRelease);
+      if (baselineSource && next.recoveryAllowed) Object.assign(next, { baselineReleaseId: randomUUID(), baselineSource: { ...baselineSource, url: `/api/agent/v1/tasks/${next.id}/source?role=baseline` } });
       if (next.action !== 'deploy') { const release = next.release || target.currentRelease; next.revision = release?.revision || null; next.commitSubject = release?.commitSubject; }
       return structuredClone(next);
     });
@@ -449,8 +502,13 @@ export class DeploymentService extends EventEmitter {
     if (task.serverId !== serverId || !task.startedAt) throw new HttpError(403, '无权访问此任务');
     this.ensureManaged(this.data, task.targetId); return task;
   }
-  source(serverId, taskId) {
-    const task = this.ownedTask(serverId, taskId); if (!task.source) throw new HttpError(409, '任务没有源码包');
+  source(serverId, taskId, role = 'selected') {
+    const task = this.ownedTask(serverId, taskId);
+    if (!['selected', 'baseline'].includes(role)) throw new HttpError(400, '源码用途无效');
+    const source = role === 'baseline' ? task.baselineSource : task.source;
+    if (!source) throw new HttpError(409, '任务没有源码包');
+    if (source.archiveId) return this.archives.resolve(source);
+    if (role === 'baseline') throw new HttpError(410, '恢复基线源码不可用');
     if (terminal.has(task.status) && !this.data.releases.some(release => release.id === taskId && release.available)) throw new HttpError(410, '已完成任务的源码包已清理');
     return { ...task.source, file: path.join(this.root, 'tasks', taskId, 'source.zip') };
   }
@@ -470,14 +528,32 @@ export class DeploymentService extends EventEmitter {
       if (seq <= task.lastSeq) return task.lastSeq;
       if (seq !== task.lastSeq + 1) throw new HttpError(409, `日志序号不连续，下一序号为 ${task.lastSeq + 1}`);
       if (terminal.has(task.status)) throw new HttpError(409, '任务已完成');
+      const baseline = result?.baseline || (status === 'rolled_back' ? result?.rollback?.release : null);
+      if (baseline?.id === task.baselineReleaseId && baseline) {
+        const prior = task.previousRelease;
+        const valid = task.recoveryAllowed && task.baselineSource && prior && baseline.restoredFromReleaseId === prior.id && baseline.revision === prior.revision
+          && (prior.kind === 'static' ? baseline.artifact === `static/${target.id}/${baseline.id}` : baseline.image === `cmr/${target.id}:${baseline.id}`);
+        if (!valid) fail('恢复基线与任务授权不一致');
+        if (!data.releases.some(item => item.id === baseline.id)) data.releases.push({ ...structuredClone(prior), id: baseline.id, image: baseline.image, artifact: baseline.artifact,
+          restoredFromReleaseId: prior.id, buildSnapshot: baseline.buildSnapshot || prior.buildSnapshot, createdAt: now(), available: true });
+        task.recoveryBaselineId = baseline.id;
+      }
       const release = result?.release;
+      for (const value of [release, baseline].filter(Boolean)) if (value.buildSnapshot) {
+        const snapshot = value.buildSnapshot;
+        if (typeof snapshot !== 'object' || Array.isArray(snapshot) || Object.keys(snapshot).some(key => !['buildImage', 'runtimeImage', 'packageManager', 'packageManagerVersion', 'mavenVersion', 'nodeVersion'].includes(key))) fail('实际构建信息格式错误');
+        for (const key of ['buildImage', 'runtimeImage']) if (snapshot[key] !== undefined && (!imagePattern.test(snapshot[key]) || !/(?:^|@)sha256:[a-f0-9]{64}$/.test(snapshot[key]))) fail('实际构建镜像必须固定到摘要');
+        for (const key of ['packageManager', 'packageManagerVersion', 'mavenVersion', 'nodeVersion']) if (snapshot[key] !== undefined && (typeof snapshot[key] !== 'string' || snapshot[key].length > 200 || /[\x00-\x1f]/.test(snapshot[key]))) fail('实际构建工具版本无效');
+      }
       if (release) {
         const validArtifact = task.config.kind === 'static'
           ? release.kind === 'static' && release.artifact === `static/${target.id}/${release.id}`
           : release.image === `cmr/${target.id}:${release.id}`;
         if (typeof release.id !== 'string' || !/^[a-f0-9-]{36}$/.test(release.id) || !validArtifact) fail('发布版本不属于平台目标');
         if (task.action === 'deploy' && status === 'succeeded' && (release.id !== task.id || release.revision !== task.revision)) fail('发布版本与任务源码不一致');
-        if (task.action !== 'deploy' && !data.releases.some(existing => existing.targetId === target.id && existing.id === release.id)) fail('目标历史版本不存在');
+        const rebuilt = task.action === 'rollback' && task.recoveryAllowed && task.sourceArchiveId && release.id === task.id && release.revision === task.release?.revision && release.restoredFromReleaseId === task.release?.id;
+        if (task.action !== 'deploy' && status === 'succeeded' && !rebuilt && !data.releases.some(existing => existing.targetId === target.id && existing.id === release.id && existing.id === task.release?.id)) fail('目标历史版本不存在');
+        if (task.action === 'rollback' && status === 'succeeded' && release.revision !== task.release?.revision) fail('回退版本与历史源码不一致');
       }
       if (status === 'succeeded' && !release) fail('成功任务必须包含实际运行版本');
       const timing = agentEventTime(task, input.timestamp, now());
@@ -490,19 +566,22 @@ export class DeploymentService extends EventEmitter {
       if (terminal.has(status)) {
         task.finishedAt = timing.at; task.resultReceivedAt = timing.receivedAt; task.result = result || {}; if (status !== 'succeeded') task.error = input.message || '任务执行失败';
         if (release && status === 'succeeded') {
-          const saved = { id: release.id, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision, commitSubject: task.action === 'deploy' ? task.commitSubject : data.releases.find(r => r.id === release.id)?.commitSubject, config: task.action === 'deploy' ? task.config : release.config, targetId: target.id, sourceSnapshot: task.action === 'deploy' ? task.sourceSnapshot : release.sourceSnapshot || data.releases.find(r => r.id === release.id)?.sourceSnapshot, createdAt: timing.at, available: true };
+          const saved = { id: release.id, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision,
+            commitSubject: task.commitSubject, config: structuredClone(task.config), targetId: target.id, applicationId: target.applicationId,
+            sourceSnapshot: task.sourceSnapshot, sourceArchiveId: task.sourceArchiveId,
+            buildSnapshot: release.buildSnapshot || task.release?.buildSnapshot,
+            ...(release.id === task.id && task.action === 'rollback' ? { restoredFromReleaseId: task.release.id } : {}), createdAt: timing.at, available: true };
           if (!data.releases.some(existing => existing.id === saved.id && existing.targetId === target.id)) data.releases.push(saved);
           target.currentRelease = structuredClone(data.releases.find(existing => existing.id === saved.id && existing.targetId === target.id));
+          target.rollbackBaselineId = task.recoveryBaselineId || task.previousRelease?.id || null;
           target.lastDeployedAt = timing.at;
         }
         const rollbackRelease = result?.rollback?.release;
         if (status === 'rolled_back' && rollbackRelease) {
           const saved = data.releases.find(existing => existing.id === rollbackRelease.id && existing.targetId === target.id);
-          if (!saved || saved.image !== rollbackRelease.image || saved.artifact !== rollbackRelease.artifact) fail('回退版本不属于此目标'); target.currentRelease = structuredClone(saved);
+          if (!saved || ![task.previousRelease?.id, task.recoveryBaselineId].includes(saved.id) || saved.image !== rollbackRelease.image || saved.artifact !== rollbackRelease.artifact) fail('回退版本不属于此目标'); target.currentRelease = structuredClone(saved);
         }
-        const recent = data.releases.filter(existing => existing.targetId === target.id).slice(-5).map(existing => existing.id);
-        const baseline = task.previousRelease?.id;
-        for (const existing of data.releases.filter(existing => existing.targetId === target.id)) existing.available = recent.includes(existing.id) || existing.id === target.currentRelease?.id || existing.id === baseline;
+        for (const existing of data.releases.filter(existing => existing.targetId === target.id)) if (existing.sourceArchiveId && !existing.sourceClearedAt) existing.available = true;
       }
       return seq;
     });
@@ -511,15 +590,11 @@ export class DeploymentService extends EventEmitter {
     return { ackSeq: ack };
   }
   async cleanupSources() {
-    const projects = new Set(this.data.tasks.filter(task => terminal.has(task.status)).map(task => task.sourceProjectId));
-    for (const projectId of projects) await this.archiveLock(projectId, async () => {
-      const keep = new Set(this.data.releases.filter(release => release.available).map(release => release.id));
-      for (const task of this.data.tasks) {
-        if (task.sourceProjectId !== projectId || !terminal.has(task.status) || keep.has(task.id)) continue;
-        const directory = path.join(this.root, 'tasks', task.id);
-        await rm(path.join(directory, 'source.zip'), { force: true }); await rm(path.join(directory, 'source.json'), { force: true });
-      }
-    });
+    await this.archives.cleanup();
+    for (const task of this.data.tasks) if (terminal.has(task.status) && task.sourceArchiveId) {
+      const directory = path.join(this.root, 'tasks', task.id);
+      await rm(path.join(directory, 'source.zip'), { force: true }); await rm(path.join(directory, 'source.json'), { force: true });
+    }
   }
   async taskDetails(id, after = 0) {
     const task = structuredClone(find(this.data.tasks, id, '任务')); after = integer(after, 0, 0, Number.MAX_SAFE_INTEGER, '日志起始序号');
@@ -527,11 +602,16 @@ export class DeploymentService extends EventEmitter {
     for (let seq = after + 1; seq <= Math.min(task.lastSeq, after + 500); seq++) logs.push(JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'logs', `${seq}.json`), 'utf8')));
     return { task, logs, nextSeq: (logs.at(-1)?.seq ?? after) + 1 };
   }
-  releases(targetId) { find(this.data.targets, targetId, '部署目标'); return this.data.releases.filter(release => release.targetId === targetId).slice().reverse().map(release => ({ ...release, current: release.id === find(this.data.targets, targetId).currentRelease?.id })); }
-  beginClose() { if (!this.closing) { this.closing = true; this.emit('shutdown'); } }
+  releases(targetId) { find(this.data.targets, targetId, '部署目标'); return this.data.releases.filter(release => release.targetId === targetId).slice().reverse().map(release => ({ ...release, archiveStatus: this.archives.status(release), archiveProtected: this.archives.protected(this.data, release), current: release.id === find(this.data.targets, targetId).currentRelease?.id })); }
+  releasePage(targetId, offset = 0, limit = 20) {
+    offset = integer(offset, 0, 0, 1000000000, '分页起点'); limit = integer(limit, 20, 1, 100, '分页条数');
+    const releases = this.releases(targetId); return { releases: releases.slice(offset, offset + limit), total: releases.length, offset, nextOffset: offset + limit < releases.length ? offset + limit : null };
+  }
+  beginClose() { if (!this.closing) { this.closing = true; clearInterval(this.archiveCleanupTimer); this.emit('shutdown'); } }
   async close() {
     this.beginClose();
     await Promise.allSettled([this.commitBackfill, ...this.preparations.values(), ...this.repository.inFlight.values()]);
     await Promise.allSettled([...this.archivePending.values()]); this.removeAllListeners();
+    await this.archives.pending;
   }
 }

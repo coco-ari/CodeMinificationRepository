@@ -21,7 +21,9 @@ export async function handleAgentRequest(req, res, url, { deployment, body, json
   const task = new RegExp(`^/tasks/${id}/(source|events)$`).exec(route);
   if (task?.[2] === 'events' && req.method === 'POST') { json(res, 200, await deployment.events(serverId, task[1], await body(req))); return true; }
   if (task?.[2] === 'source' && req.method === 'GET') {
-    const archive = deployment.source(serverId, task[1]); const file = await open(archive.file, 'r');
+    const selected = deployment.source(serverId, task[1], url.searchParams.get('role') || 'selected');
+    const archive = selected.archiveId ? await deployment.archives.verify(selected) : selected;
+    const file = await open(archive.file, 'r');
     try {
       deployment.authenticate(token);
       res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': archive.size,

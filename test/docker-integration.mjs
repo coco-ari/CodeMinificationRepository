@@ -194,11 +194,24 @@ try {
   assert.equal((await inspectContainer(otherTarget.containerName)).State.Health.Status, 'healthy');
   assert.ok(!(await api(workspacePath)).targets.some(item => item.id === otherTarget.id));
   scenarios.push({ name: '两个项目共享真实 Agent，跨项目串行发布且目标独立', passed: true });
+  // 清理目标历史镜像、停用远端并修改当前模块，恢复必须只依赖中心历史档案。
+  await docker(['image', 'rm', good.result.release.image], true);
+  await application.service.setEnabled(source.id, false);
+  await api(`${workspacePath}/services/${service.id}`, { name: service.name, module: 'missing-current-module', kind: 'java' }, 'PUT');
+  const rebuiltJava = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'rollback', releaseId: good.id })).task.id);
+  assert.equal(rebuiltJava.status, 'succeeded'); assert.equal(rebuiltJava.result.recoveryMethod, 'rebuild');
+  assert.equal(rebuiltJava.result.release.restoredFromReleaseId, good.id); assert.notEqual(rebuiltJava.result.release.image, good.result.release.image);
+  assert.equal((await inspectContainer(target.containerName)).State.Health.Status, 'healthy');
+  assert.equal(application.deployment.data.releases.find(item => item.id === good.id).image, good.result.release.image);
+  assert.equal(application.deployment.archives.status(application.deployment.data.releases.find(item => item.id === good.id)), 'available');
+  await application.service.setEnabled(source.id, true);
+  await api(`${workspacePath}/services/${service.id}`, { name: service.name, module: '.', kind: 'java' }, 'PUT');
+  scenarios.push({ name: '历史 Java 镜像删除、仓库停用及当前模块改变后按中心原 ZIP 与历史配置重建', passed: true, taskId: rebuiltJava.id });
   // 一个已有 Nginx 同时提供静态页面和 Java API；发布不重建或重启该 Nginx。
   const nginx = `${network}-nginx`, publicRoot = `${workRoot}/agent-0-static`;
   const frontendService = await api(`${workspacePath}/services`, { name: '演示前端', kind: 'static', module: '.' });
   await api(`${workspacePath}/environment-sources`, { environmentId: environment.id, serviceId: frontendService.id, sourceProjectId: source.id, branch: 'main' }, 'PUT');
-  const frontendConfig = { buildImage: process.env.CMR_IT_NODE_IMAGE || 'node:24-bookworm-slim', artifactPath: 'dist', packageManager: 'npm', buildScript: 'build', build: { cpus: 1, memoryMb: 512 }, health: { url: `http://${nginx}/`, bodyIncludes: 'static-ready', timeoutSeconds: 12, intervalSeconds: 2 } };
+  const frontendConfig = { buildImage: process.env.CMR_IT_NODE_IMAGE || 'node:24-bookworm-slim', artifactPath: 'dist', packageManager: 'npm', packageManagerVersion: '10.9.9', buildScript: 'build', build: { cpus: 1, memoryMb: 512 }, health: { url: `http://${nginx}/`, bodyIncludes: 'static-ready', timeoutSeconds: 12, intervalSeconds: 2 } };
   const frontendInput = { environmentId: environment.id, serviceId: frontendService.id, serverId: first.server.id, mode: 'managed', config: frontendConfig };
   const frontend = await api(`${workspacePath}/targets`, frontendInput); targets.push(frontend);
   const nginxConfig = `server {
@@ -239,6 +252,14 @@ try {
   await api(`${workspacePath}/targets/${frontend.id}`, { ...frontendInput, config: { ...frontendConfig, health: { ...frontendConfig.health, bodyIncludes: 'missing-health-marker' } } }, 'PUT');
   await frontendSource('bad-health'); assert.equal((await publishFrontend()).status, 'rolled_back');
   assert.equal(await readSite('__cmr_release.txt'), frontendV1.id); assert.match(await readSite('api/health'), /cmr-demo-ready/);
+  await docker(['exec', agents[0], 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; const [root,target,release]=process.argv.slice(1); if(!new RegExp("^/tmp/cmr-it-[a-f0-9]{8}/agent-0-static$").test(root)||![target,release].every(v=>/^[a-f0-9-]{36}$/.test(v))) throw Error("验收目录无效"); await fs.rm(`${root}/${target}/releases/${release}`,{recursive:true,force:true});', publicRoot, frontend.id, frontendV2.id]);
+  await application.service.setEnabled(source.id, false);
+  const rebuiltStatic = await waitTask((await api(`${workspacePath}/tasks`, { targetId: frontend.id, action: 'rollback', releaseId: frontendV2.id })).task.id);
+  assert.equal(rebuiltStatic.status, 'succeeded'); assert.equal(rebuiltStatic.result.recoveryMethod, 'rebuild');
+  assert.equal(rebuiltStatic.result.release.restoredFromReleaseId, frontendV2.id);
+  assert.equal(await readSite('__cmr_release.txt'), rebuiltStatic.id); assert.match(await readSite(), /static-ready v2/);
+  await application.service.setEnabled(source.id, true);
+  scenarios.push({ name: '静态历史目录删除、远端停用及当前健康配置改变后按历史源码重建，原发布记录不变', passed: true, taskId: rebuiltStatic.id });
   const nginxAfter = await inspectContainer(nginx), backendAfter = await inspectContainer(otherTarget.containerName);
   assert.equal(nginxAfter.Id, nginxBefore.Id); assert.equal(nginxAfter.State.StartedAt, nginxBefore.State.StartedAt); assert.equal(nginxAfter.RestartCount, nginxBefore.RestartCount);
   assert.equal(backendAfter.Id, backendBefore.Id); assert.equal(backendAfter.State.StartedAt, backendBefore.State.StartedAt);

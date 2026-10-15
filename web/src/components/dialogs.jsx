@@ -133,7 +133,7 @@ function RepositoryForm({ item, onClose }) {
         id="project-dialog"
         formId="project-form"
         title={item ? '编辑仓库' : '添加仓库'}
-        description="发布分支在服务配置中选择，不会改变这里的默认下载分支。"
+        description="接入后自动识别远端默认分支，每次发布时再选择分支和具体提交。"
         onClose={onClose}
         submitLabel="保存仓库"
         onSubmit={async (input) => {
@@ -162,13 +162,6 @@ function RepositoryForm({ item, onClose }) {
           required
           type="url"
           placeholder="https://gitee.com/team/service.git"
-        />
-        <Field
-          name="branch"
-          label="默认下载分支"
-          defaultValue={item?.branch || 'main'}
-          required
-          maxLength={200}
         />
         <div className="space-y-2">
           <Field
@@ -238,14 +231,14 @@ export function ServiceForm({ item, onClose, onSave, step = false }) {
       <Field
         key={serviceKind}
         name="module"
-        label={serviceKind === 'static' ? '前端项目目录' : 'Maven 模块'}
+        label={serviceKind === 'static' ? '前端项目目录' : 'Maven 模块目录'}
         required
         defaultValue={item?.module || '.'}
         placeholder={serviceKind === 'static' ? '. 或 frontend' : '. 或 api'}
         hint={
           serviceKind === 'static'
             ? '相对仓库根目录，目录中应有 package.json 和依赖锁文件；不包含 SSR。'
-            : '发布时同时编译该模块及其公共依赖。'
+            : '填写相对仓库根目录的模块路径，例如 brezze-communication 或 services/api；目录中需有 pom.xml。发布时编译该模块及公共依赖，不填写 artifactId。'
         }
       />
     </FormDialog>
@@ -307,17 +300,16 @@ export function SourceForm({ item, onClose, onSaved }) {
   const [repository, setRepository] = useState(
     selected?.sourceProjectId || data.repositories[0]?.id || '',
   )
-  const [branch, setBranch] = useState(selected?.branch || data.repositories[0]?.branch || '')
   return (
     <FormDialog
       title="配置环境源码"
-      description={`${find('environments', environmentId)?.name} / ${item.name}。仓库和分支对该环境的所有部署位置生效。`}
+      description={`${find('environments', environmentId)?.name} / ${item.name}。仓库关联对该环境的所有部署位置生效，分支在每次发布时选择。`}
       onClose={onClose}
       submitLabel={onSaved ? '保存并配置部署' : '保存源码配置'}
       onSubmit={async () => {
         await request(
           `${endpoint}/environment-sources`,
-          { environmentId, serviceId: item.id, sourceProjectId: repository, branch },
+          { environmentId, serviceId: item.id, sourceProjectId: repository },
           'PUT',
         )
         await refresh()
@@ -332,18 +324,11 @@ export function SourceForm({ item, onClose, onSaved }) {
         choices={data.repositories.map((r) => [r.id, `${r.name}${r.enabled ? '' : '（已停用）'}`])}
         onChange={(e) => {
           setRepository(e.target.value)
-          setBranch(data.repositories.find((r) => r.id === e.target.value)?.branch || '')
         }}
       />
-      <Field
-        name="branch"
-        label="发布分支"
-        value={branch}
-        onChange={(e) => setBranch(e.target.value)}
-        required
-        maxLength={200}
-        hint="不会修改仓库的默认下载分支；已创建任务使用原快照。"
-      />
+      <p className="text-sm text-muted-foreground">
+        发布时选择分支和提交；已创建的任务与历史版本保持原快照。
+      </p>
     </FormDialog>
   )
 }
@@ -506,7 +491,7 @@ export function Dialogs({ value, onClose }) {
         {[
           ['secret-value', '下载密码', item.token],
           ['secret-page', '浏览器下载页面', downloadPage(item.project.id)],
-          ['secret-url', 'Jenkins 下载接口', downloadUrl(item.project.id)],
+          ['secret-url', '源码下载接口', downloadUrl(item.project.id)],
         ].map(([id, label, value]) => (
           <div className="space-y-2" key={id}>
             <Field id={id} label={label} value={value} readOnly />

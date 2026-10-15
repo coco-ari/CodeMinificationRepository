@@ -1,7 +1,7 @@
 import path from 'node:path';
 
-export const VERSION = '1.3.0';
-export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1'];
+export const VERSION = '1.4.0';
+export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
   if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error(`${label}无效`);
@@ -55,7 +55,7 @@ export function normalizeConfig(input) {
       bodyIncludes: input.health?.bodyIncludes ?? '', timeoutSeconds: number(input.health?.timeoutSeconds, 180, 10, 900, true), intervalSeconds: number(input.health?.intervalSeconds, 5, 2, 60, true) },
   };
   if (isStatic) {
-    Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || '10.11.0',
+    Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || (input.packageManager === 'pnpm' ? '10.11.0' : '10.9.9'),
       buildScript: input.buildScript || 'build', buildArgs: strings(input.buildArgs, 40), jvmArgs: [], args: [], profile: '' });
     if (!['npm', 'pnpm'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) throw new Error('包管理器或版本无效');
     if (!/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,79}$/.test(result.buildScript)) throw new Error('静态站点构建配置无效');

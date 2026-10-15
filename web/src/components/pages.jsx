@@ -178,16 +178,17 @@ function RepositoryActions({ repo }) {
         <Action
           variant="ghost"
           size="sm"
-          aria-label="立即同步"
+          aria-label="刷新仓库信息"
           disabled={!repo.enabled || ['syncing', 'queued'].includes(repo.status)}
           onClick={async () => {
-            await request(`${endpoint}/repositories/${repo.id}/sync`, {})
+            await request(`${endpoint}/repositories/${repo.id}/branches/refresh`, {})
             await refresh()
-            notify('源码同步完成')
+            notify('仓库分支信息已刷新')
           }}
         >
           <RefreshCw />
-          <span className="repo-sync-label">同步</span>
+          <span className="hidden xl:inline">刷新仓库信息</span>
+          <span className="xl:hidden">刷新</span>
         </Action>
         <Button
           variant="ghost"
@@ -243,7 +244,7 @@ function RepositoryActions({ repo }) {
               onSelect={() =>
                 confirm(
                   '重置下载密码',
-                  `「${repo.name}」的旧密码会立即失效，请同步更新 Jenkins 凭据。`,
+                  `「${repo.name}」的旧下载密码会立即失效，请更新使用此地址的调用方。`,
                   async () => {
                     const result = await request(
                       `${endpoint}/repositories/${repo.id}/rotate-token`,
@@ -288,9 +289,21 @@ export function Repositories() {
         {repo.repository}
       </a>
       <div className="mt-2">
-        <Status value={repo.enabled ? repo.status : 'disabled'} />
+        <Status value={!repo.enabled ? 'disabled' : repo.connectionStatus || 'idle'}>
+          {!repo.enabled
+            ? '已停用'
+            : repo.connectionStatus === 'ready'
+              ? '已连接'
+              : repo.connectionStatus === 'empty'
+                ? '暂无提交'
+                : repo.connectionStatus === 'failed'
+                  ? '连接失败'
+                  : '待刷新'}
+        </Status>
       </div>
-      {repo.error && <p className="mt-2 break-words text-xs text-destructive">{repo.error}</p>}
+      {repo.connectionError && (
+        <p className="mt-2 break-words text-xs text-destructive">{repo.connectionError}</p>
+      )}
       {repo.needsDownloadTokenReset && (
         <p className="mt-1 text-xs text-muted-foreground">首次下载前请重置密码</p>
       )}
@@ -301,7 +314,7 @@ export function Repositories() {
       <DataTable
         data={data.repositories}
         searchPlaceholder="搜索代码仓库…"
-        searchText={(r) => [r.name, r.repository, r.branch].join(' ')}
+        searchText={(r) => [r.name, r.repository].join(' ')}
         filters={[
           { value: 'enabled', label: '已启用' },
           { value: 'disabled', label: '已停用' },
@@ -317,22 +330,13 @@ export function Repositories() {
             cell: ({ row }) => repoName(row.original),
           },
           {
-            accessorKey: 'branch',
-            header: '下载分支',
-            sortingFn: 'text',
-            meta: { className: 'max-w-36' },
-            cell: ({ row }) => (
-              <span className="block truncate font-mono text-xs" title={row.original.branch}>
-                {row.original.branch}
-              </span>
-            ),
-          },
-          {
             id: 'sync',
-            header: '最近同步',
+            header: '最近成功刷新',
             cell: ({ row }) => (
               <span className="text-xs text-muted-foreground">
-                {row.original.lastSuccess ? date(row.original.lastSuccess.at) : '尚未同步'}
+                {row.original.branchInfo?.refreshedAt
+                  ? date(row.original.branchInfo.refreshedAt)
+                  : '尚未刷新'}
               </span>
             ),
           },
@@ -345,7 +349,7 @@ export function Repositories() {
           {
             id: 'actions',
             header: '操作',
-            meta: { className: 'w-40 text-right' },
+            meta: { className: 'w-48 text-right xl:w-64' },
             cell: ({ row }) => <RepositoryActions repo={row.original} />,
           },
         ]}
@@ -353,9 +357,6 @@ export function Repositories() {
           <>
             {repoName(repo)}
             <div className="flex items-center justify-between gap-2">
-              <Badge variant="outline" className="max-w-40 truncate">
-                {repo.branch}
-              </Badge>
               <RepositoryToggle repo={repo} />
             </div>
             <RepositoryActions repo={repo} />
@@ -364,7 +365,7 @@ export function Repositories() {
         emptyTitle="尚未添加代码仓库"
       />
       <p className="text-xs text-muted-foreground">
-        默认下载分支供浏览器与 Jenkins 使用；服务的发布分支在「服务与部署」中单独配置。
+        仓库接入后可查询凭证有权访问的分支，每次发布时选择分支和具体提交。
       </p>
     </div>
   )

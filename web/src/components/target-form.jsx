@@ -92,7 +92,8 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
           ...(isStatic
             ? {
                 packageManager,
-                packageManagerVersion: input.packageManagerVersion || '10.11.0',
+                packageManagerVersion:
+                  input.packageManagerVersion || (packageManager === 'pnpm' ? '10.11.0' : '10.9.9'),
                 buildScript: input.buildScript,
                 buildArgs: lines(input.buildArgs),
               }
@@ -215,15 +216,17 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
                   ]}
                   onChange={(event) => setPackageManager(event.target.value)}
                 />
-                {packageManager === 'pnpm' && (
-                  <Field
-                    name="packageManagerVersion"
-                    label="pnpm 版本"
-                    defaultValue={c.packageManagerVersion || '10.11.0'}
-                    required
-                    hint="填写准确版本，并与 package.json 的 packageManager 一致。"
-                  />
-                )}
+                <Field
+                  key={packageManager}
+                  name="packageManagerVersion"
+                  label={`${packageManager} 版本`}
+                  defaultValue={
+                    (c.packageManager === packageManager && c.packageManagerVersion) ||
+                    (packageManager === 'pnpm' ? '10.11.0' : '10.9.9')
+                  }
+                  required
+                  hint="使用此准确版本安装依赖并构建；pnpm 需与 package.json 的 packageManager 一致。"
+                />
               </Grid>
               <Grid>
                 <Field

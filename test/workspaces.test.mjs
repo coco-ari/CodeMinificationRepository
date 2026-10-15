@@ -49,6 +49,49 @@ async function project(f, name, server) {
 }
 async function ready(f, target) { const task = await f.deployment.createTask({ targetId: target.id, action: 'deploy' }); await f.deployment.preparations.get(task.id); return f.deployment.data.tasks.find(item => item.id === task.id); }
 
+test('仓库默认分支自动识别，失败保留记录，空仓库与无默认分支不擅自选择', async t => {
+  const f = await fixture(t), application = await f.workspaces.create({ name: '仓库接入' });
+  let info = { branches: [{ name: 'release/v2', revision: 'a'.repeat(40) }], defaultBranch: 'release/v2', refreshedAt: new Date().toISOString() };
+  f.builder.branches = async () => info;
+  const input = { applicationId: application.id, name: '无需分支', repository: repositoryInput.repository };
+  const saved = await f.service.saveProject(input);
+  assert.equal(saved.project.defaultBranch, 'release/v2'); assert.equal(saved.project.branch, 'release/v2');
+  info = { ...info, defaultBranch: null };
+  const noDefault = await f.service.saveProject(input);
+  assert.equal(noDefault.project.defaultBranch, null); assert.equal(noDefault.project.branch, undefined);
+  info = { ...info, branches: [] };
+  assert.equal((await f.service.saveProject(input)).project.connectionStatus, 'empty');
+  f.builder.branches = async () => { throw new Error('模拟认证失败'); };
+  const failed = await f.service.saveProject(input);
+  assert.equal(failed.project.connectionStatus, 'failed'); assert.ok(failed.project.id); assert.ok(failed.token);
+  assert.equal(f.service.store.state.projects.length, 4);
+});
+
+test('发布分支与具体提交独立固定，幂等请求冲突、配置变化和跨分支提交被拒绝', async t => {
+  const f = await fixture(t), a = await project(f, '分支发布');
+  const revisions = { main: 'a'.repeat(40), feature: 'b'.repeat(40) };
+  f.builder.history = async source => ({ commits: [{ revision: revisions[source.branch], subject: source.branch, author: '测试作者' }], refreshedAt: new Date().toISOString() });
+  f.builder.build = async source => { const bytes = Buffer.from(source.revision); const file = path.join(f.directory, source.revision + '.zip'); await writeFile(file, bytes); return { file, revision: source.revision, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length }; };
+  const target = a.targets[0], history = await f.workspaces.targetSource(a.app.id, target.id, true, 'feature');
+  const input = { targetId: target.id, action: 'deploy', branch: 'feature', revision: revisions.feature, sourceKey: history.sourceKey, configKey: history.configKey, requestId: randomUUID() };
+  await assert.rejects(f.deployment.createTask({ ...input, revision: revisions.main }), /提交记录已变化/);
+  await assert.rejects(f.deployment.createTask({ ...input, configKey: 'old-config' }), /发布配置已变化/);
+  const first = await f.deployment.createTask(input);
+  assert.equal((await f.deployment.createTask(input)).id, first.id);
+  await assert.rejects(f.deployment.createTask({ ...input, branch: 'main' }), /同一请求标识/);
+  await f.deployment.preparations.get(first.id);
+  const saved = f.deployment.data.tasks.find(task => task.id === first.id);
+  assert.equal(saved.revision, revisions.feature); assert.equal(saved.sourceSnapshot.branch, 'feature');
+  assert.equal(f.workspaces.overview(a.app.id).environmentSources[0].branch, 'develop');
+  assert.equal(f.service.store.state.projects[0].branch, 'main');
+  await f.service.store.change(state => { const server = state.deployments.servers[0]; server.lastSeenAt = new Date().toISOString(); server.registeredAt ||= server.lastSeenAt; });
+  await f.deployment.claim(a.server.id);
+  await f.deployment.events(a.server.id, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: { id: first.id, image: `cmr/${target.id}:${first.id}`, revision: saved.revision } } });
+  assert.equal((await f.workspaces.targetSource(a.app.id, target.id)).branch, 'feature');
+  assert.equal((await f.workspaces.targetSource(a.app.id, a.targets[1].id)).branch, 'main');
+  assert.equal((await f.deployment.createTask(input)).id, first.id);
+});
+
 test('共享服务器的项目归属、环境源码、目标、日志与版本接口隔离', async t => {
   const f = await fixture(t, true), a = await project(f, '商城'), b = await project(f, '办公', a.server);
   const base = `/api/workspaces/${a.app.id}`;
@@ -143,6 +186,12 @@ test('真实 Git 的不同分支拥有独立缓存，并发打包不污染默认
   await git('checkout', '-b', 'develop'); await writeFile(path.join(directory, 'branch.txt'), 'develop'); await git('commit', '-am', '测试开发分支');
   const builder = new ArchiveBuilder(path.join(directory, 'cache'), { allowLocal: true }); await builder.initialize();
   const source = { id: randomUUID(), repository: directory, branch: 'main' };
+  const discovered = await builder.branches(source);
+  assert.equal(discovered.defaultBranch, 'develop');
+  assert.deepEqual(discovered.branches.map(item => item.name).sort(), ['develop', 'main']);
+  await git('symbolic-ref', 'HEAD', 'refs/heads/empty-default');
+  assert.equal((await builder.branches(source)).defaultBranch, null);
+  await git('symbolic-ref', 'HEAD', 'refs/heads/develop');
   const [main, dev] = await Promise.all([builder.build(source), builder.build({ ...source, branch: 'develop' })]);
   assert.notEqual(main.revision, dev.revision); assert.notEqual(path.dirname(main.file), path.dirname(dev.file));
   assert.equal((await execute('unzip', ['-p', main.file, 'branch.txt'])).stdout, 'main');

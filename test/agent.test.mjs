@@ -36,7 +36,7 @@ function task(id = 'task-1', extra = {}) { return { id, targetId: 'target-1', se
 
 class FakeDocker {
   constructor() { this.calls = []; this.containers = new Map(); this.images = new Map(); this.other = new Map(); this.unhealthyTask = null; }
-  async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
+  async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); if (kind === 'image' && /^(maven:|node:|eclipse-temurin:|sha256:)/.test(name)) return { Id: `sha256:${'c'.repeat(64)}` }; return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
   async run(args, options = {}) {
     this.calls.push([...args]);
     if (args[0] === 'run') {
@@ -254,6 +254,63 @@ test('发布健康失败自动恢复上一成功版本，编译失败不会重�
   executor.client.download = async () => { throw new Error('网络失败'); };
   await executor.execute(task('download-failure')); assert.equal((await journal.get('download-failure')).status, 'failed');
   assert.equal(docker.calls.filter(c => c[0] === 'compose').length, before);
+});
+
+test('Java 历史镜像清理后使用原源码和历史配置重建，不覆盖原版本记录', async t => {
+  const f = await fixture(t);
+  await f.executor.execute(task('original'));
+  const original = (await f.journal.get('original')).result.release;
+  await f.executor.execute(task('current', { config: config({ profile: 'changed' }) }));
+  f.docker.images.delete(original.image);
+  const restore = task('rebuild', { action: 'rollback', release: original, config: original.config, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-old' } });
+  await f.executor.execute(restore);
+  const result = await f.journal.get(restore.id);
+  assert.equal(result.status, 'succeeded', result.result?.error);
+  assert.equal(result.result.release.restoredFromReleaseId, original.id);
+  assert.equal(result.result.release.config.profile, original.config.profile);
+  assert.equal(result.result.recoveryMethod, 'rebuild');
+  assert.equal((await readJson(path.join(f.root, 'targets', 'target-1', 'releases', 'original.json'))).image, original.image);
+  assert.notEqual(result.result.release.image, original.image);
+  const count = f.docker.calls.length; await f.executor.execute(restore); assert.equal(f.docker.calls.length, count);
+});
+
+test('Java 回退重建失败不切换，健康失败恢复当前版本，缺失基线先重建并保护', async t => {
+  const f = await fixture(t);
+  await f.executor.execute(task('original')); const original = (await f.journal.get('original')).result.release;
+  await f.executor.execute(task('current')); const current = (await f.journal.get('current')).result.release;
+  f.docker.images.delete(original.image);
+  const restore = id => task(id, { action: 'rollback', release: original, config: original.config, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-old' } });
+  const download = f.client.download; f.client.download = async () => { throw new Error('原源码校验失败'); };
+  const before = f.docker.calls.filter(c => c[0] === 'compose').length;
+  await f.executor.execute(restore('bad-source'));
+  assert.equal((await f.journal.get('bad-source')).status, 'failed'); assert.equal(f.docker.calls.filter(c => c[0] === 'compose').length, before);
+  f.client.download = download; f.docker.unhealthyTask = 'bad-health';
+  await f.executor.execute(restore('bad-health'));
+  assert.equal((await f.journal.get('bad-health')).status, 'rolled_back'); assert.equal((await f.executor.current(task())).id, current.id);
+  f.docker.images.delete(current.image);
+  const guarded = { ...restore('good-with-baseline'), baselineReleaseId: 'prepared-baseline', baselineSource: { ...task().source, archiveId: 'archive-current', url: '/api/agent/v1/tasks/good-with-baseline/source?role=baseline' } };
+  await f.executor.execute(guarded);
+  const finished = await f.journal.get(guarded.id);
+  assert.equal(finished.status, 'succeeded', finished.result?.error);
+  assert.equal(finished.result.baseline.restoredFromReleaseId, current.id);
+  assert.ok(f.docker.images.has('cmr/target-1:prepared-baseline'));
+});
+
+test('静态历史产物删除后从中心源码重建，恢复失败保留原页面', async t => {
+  const f = await staticFixture(t);
+  await f.executor.execute(f.staticTask('original')); const original = (await f.journal.get('original')).result.release;
+  assert.ok(original, (await f.journal.get('original')).result?.error);
+  await f.executor.execute(f.staticTask('current'));
+  await rm(f.executor.static.releasePath(f.staticTask('unused'), original.id), { recursive: true });
+  const restore = id => f.staticTask(id, { action: 'rollback', release: original, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-old' } });
+  f.docker.failStaticBuild = true; await f.executor.execute(restore('build-failed'));
+  assert.equal((await f.journal.get('build-failed')).status, 'failed');
+  assert.equal(await f.executor.static.selected(restore('unused')), 'current');
+  f.docker.failStaticBuild = false; await f.executor.execute(restore('rebuilt'));
+  const completed = await f.journal.get('rebuilt');
+  assert.equal(completed.status, 'succeeded', completed.result?.error);
+  assert.equal(completed.result.release.restoredFromReleaseId, original.id);
+  assert.equal(await f.executor.static.selected(restore('unused')), 'rebuilt');
 });
 
 test('首次发布失败仅删除本任务的失败容器，之后可以正常重试发布', async t => {

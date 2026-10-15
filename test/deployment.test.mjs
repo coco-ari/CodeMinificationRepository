@@ -42,6 +42,77 @@ async function ready(f, targetId, action = 'deploy', extra = {}) {
 }
 function release(task) { return { id: task.id, image: `cmr/${task.targetId}:${task.id}`, revision: task.revision, config: task.config }; }
 
+test('中心保留所有成功源码，清理保护当前版本与基线，共享包按引用释放', async t => {
+  const f = await fixture(t), records = await targetFixture(f), versions = [];
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  for (let i = 0; i < 7; i++) {
+    f.fake.revision = String(i + 1).repeat(40); f.fake.content = i < 2 ? '共享源码' : `源码 ${i}`;
+    const task = await ready(f, records.target.id); await f.deployment.claim(records.agent.serverId);
+    await f.deployment.events(records.agent.serverId, task.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(task) } });
+    versions.push(f.deployment.releases(records.target.id).find(r => r.id === task.id));
+  }
+  assert.equal(f.deployment.releases(records.target.id).filter(r => r.archiveStatus === 'available').length, 7);
+  assert.equal(versions[0].sourceArchiveId, versions[1].sourceArchiveId);
+  await assert.rejects(f.deployment.archives.clear(versions[6].id, records.application.id), /不能清理/);
+  await assert.rejects(f.deployment.archives.clear(versions[5].id, records.application.id), /不能清理/);
+  const sharedFile = f.deployment.archives.resolve(versions[0]).file;
+  await f.deployment.archives.clear(versions[0].id, records.application.id);
+  assert.equal(await readFile(sharedFile, 'utf8'), '共享源码');
+  await f.deployment.archives.clear(versions[1].id, records.application.id);
+  await assert.rejects(readFile(sharedFile), { code: 'ENOENT' });
+  assert.equal(f.deployment.releases(records.target.id).find(r => r.id === versions[0].id).archiveStatus, 'cleared');
+  assert.equal(f.deployment.releasePage(records.target.id, 0, 2).nextOffset, 2);
+  assert.equal(f.deployment.releasePage(records.target.id, 6, 2).nextOffset, null);
+});
+
+test('档案回退不读取当前仓库或配置，重建产生独立版本并保留来源', async t => {
+  const f = await fixture(t), records = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  await f.deployment.heartbeat(records.agent.serverId, { capabilities: ['source-archive-recovery-v1'] });
+  const first = await ready(f, records.target.id); await f.deployment.claim(records.agent.serverId);
+  await f.deployment.events(records.agent.serverId, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(first) } });
+  await f.deployment.heartbeat(records.agent.serverId, { capabilities: [] });
+  await assert.rejects(f.deployment.createTask({ targetId: records.target.id, action: 'rollback', releaseId: first.id, requestId: randomUUID() }), /升级目标 Agent/);
+  await f.deployment.heartbeat(records.agent.serverId, { capabilities: ['source-archive-recovery-v1'] });
+  await f.repository.store.change(state => { state.projects[0].enabled = false; state.projects[0].branch = 'deleted'; state.deployments.services[0].module = 'new-module'; state.deployments.targets[0].config.profile = 'changed'; });
+  f.fake.build = () => { throw new Error('回退不应访问远端'); };
+  const rollback = await ready(f, records.target.id, 'rollback', { releaseId: first.id });
+  const claimed = await f.deployment.claim(records.agent.serverId);
+  assert.equal(claimed.config.module, first.config.module); assert.equal(claimed.config.profile, first.config.profile);
+  assert.equal(claimed.source.sha256, first.source.sha256); assert.equal(claimed.sourceSnapshot.branch, 'main');
+  assert.equal(claimed.baselineSource.archiveId, first.sourceArchiveId);
+  await assert.rejects(f.deployment.archives.clear(first.id, records.application.id), /不能清理/);
+  assert.throws(() => f.deployment.source('foreign-agent', rollback.id), /无权/);
+  await f.deployment.events(records.agent.serverId, rollback.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { recoveryMethod: 'rebuild', release: { ...release(claimed), restoredFromReleaseId: first.id } } });
+  const versions = f.deployment.releases(records.target.id);
+  assert.equal(versions.length, 2); assert.equal(versions[0].restoredFromReleaseId, first.id);
+  assert.equal(versions[1].image, release(first).image); assert.notEqual(versions[0].image, versions[1].image);
+  const file = f.deployment.archives.resolve(versions[0]).file;
+  await writeFile(file, Buffer.alloc(first.source.size, 48));
+  await assert.rejects(f.deployment.archives.verify(versions[0]), /校验失败/);
+  assert.equal(f.deployment.archives.status(versions[0]), 'invalid');
+  await assert.rejects(f.deployment.createTask({ targetId: records.target.id, action: 'rollback', releaseId: first.id }), /档案缺失、损坏/);
+});
+
+test('历史源码迁移校验后去重，缺失源码不从远端补档，重复迁移保留版本身份', async t => {
+  const f = await fixture(t), records = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  const first = await ready(f, records.target.id); await f.deployment.claim(records.agent.serverId);
+  await f.deployment.events(records.agent.serverId, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(first) } });
+  const original = f.deployment.archives.resolve(first.source);
+  await writeFile(path.join(f.deployment.root, 'tasks', first.id, 'source.zip'), await readFile(original.file));
+  await f.repository.store.change(state => { state.deployments.sourceArchives = []; delete state.deployments.tasks[0].sourceArchiveId; delete state.deployments.tasks[0].source.archiveId; delete state.deployments.releases[0].sourceArchiveId; });
+  f.fake.build = () => { throw new Error('迁移不得拉取最新代码'); };
+  await f.deployment.archives.migrate();
+  const archiveId = f.deployment.releases(records.target.id)[0].sourceArchiveId;
+  await f.deployment.archives.migrate();
+  assert.equal(f.deployment.data.sourceArchives.length, 1); assert.equal(f.deployment.releases(records.target.id)[0].sourceArchiveId, archiveId);
+  await rm(original.file);
+  await f.deployment.archives.migrate();
+  assert.equal(f.deployment.releases(records.target.id)[0].archiveStatus, 'missing');
+  assert.equal(f.deployment.data.sourceArchiveMigration.missing, 1);
+});
+
 test('提交说明固定到源码版本，忽略 Agent 伪造值并随回退恢复', async t => {
   const f = await fixture(t), records = await targetFixture(f);
   f.fake.commitSubject = '修复设备连接';
@@ -366,6 +437,13 @@ test('固定源码失败封闭阶段并允许下一任务领取，过期源码�
   await f.deployment.events(records.agent.serverId, task.id, { seq: 3, stage: 'building', status: 'failed', message: '编译失败' });
   const detail = await f.deployment.taskDetails(task.id); assert.deepEqual(detail.task.stageHistory.map(stage => stage.stage), ['preparing', 'queued', 'downloading', 'building']);
   assert.ok(detail.task.stageHistory.every(stage => typeof stage.durationMs === 'number'));
+  const archived = f.deployment.source(records.agent.serverId, task.id);
+  assert.equal(await readFile(archived.file, 'utf8'), f.fake.content);
+  await f.repository.store.change(state => {
+    state.deployments.tasks.find(item => item.id === task.id).finishedAt = '2020-01-01T00:00:00Z';
+    state.deployments.sourceArchives.find(item => item.id === archived.archiveId).createdAt = '2020-01-01T00:00:00Z';
+  });
+  await f.deployment.cleanupSources();
   assert.throws(() => f.deployment.source(records.agent.serverId, task.id), { status: 410 });
   await assert.rejects(readFile(path.join(f.root, 'deployments', 'tasks', task.id, 'source.zip')), { code: 'ENOENT' });
   assert.equal(detail.logs.length, 3);

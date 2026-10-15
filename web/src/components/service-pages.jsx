@@ -54,13 +54,6 @@ export function TargetActions({ target, service }) {
         ? '部署目标不可操作'
         : ''
   const publishReason = reason || (!repository?.enabled ? '请先配置并启用源码仓库' : '')
-  const detail = (tab) => {
-    location.hash = routeUrl('service', scope, environmentId, null, {
-      serviceId: service.id,
-      targetId: target.id,
-      tab,
-    })
-  }
   return (
     <div
       className="card-actions flex shrink-0 items-center justify-end gap-1"
@@ -99,10 +92,6 @@ export function TargetActions({ target, service }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem onSelect={() => detail('config')}>查看配置</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => open('target', target)}>编辑部署配置</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => detail('history')}>发布记录与版本</DropdownMenuItem>
-          <DropdownMenuSeparator />
           {(service.kind || 'java') === 'java' && (
             <DropdownMenuItem
               disabled={!!reason || !target.currentRelease}
@@ -193,9 +182,16 @@ export function ServiceList({ compact = false, serverId }) {
       </p>
       <p
         className="mt-1 truncate font-mono text-xs text-muted-foreground"
-        title={service.source?.branch}
+        title={service.targets
+          .map((t) => t.currentRelease?.sourceSnapshot?.branch)
+          .filter(Boolean)
+          .join('、')}
       >
-        {service.source?.branch || '待配置分支'}
+        {[
+          ...new Set(
+            service.targets.map((t) => t.currentRelease?.sourceSnapshot?.branch).filter(Boolean),
+          ),
+        ].join('、') || '尚未发布'}
       </p>
     </div>
   )
@@ -283,6 +279,9 @@ export function ServiceList({ compact = false, serverId }) {
               target={target}
               server={data.servers.find((s) => s.id === target.serverId)}
             />
+            <Badge variant="outline">
+              {target.currentRelease?.sourceSnapshot?.branch || '尚未发布'}
+            </Badge>
             <Commit
               value={target.currentRelease?.revision}
               subject={target.currentRelease?.commitSubject}
@@ -376,7 +375,7 @@ export function ServiceList({ compact = false, serverId }) {
         data={rows}
         columns={columns}
         searchText={(r) =>
-          `${r.name} ${r.module} ${r.repository?.name || ''} ${r.source?.branch || ''}`
+          `${r.name} ${r.module} ${r.repository?.name || ''} ${r.targets.map((t) => t.currentRelease?.sourceSnapshot?.branch || '').join(' ')}`
         }
         searchPlaceholder="搜索服务、仓库或分支…"
         filters={[
@@ -571,7 +570,9 @@ export function Environments() {
         <SheetContent>
           <SheetHeader>
             <SheetTitle>{selected?.name}</SheetTitle>
-            <SheetDescription>环境中的源码分支和部署位置独立配置。</SheetDescription>
+            <SheetDescription>
+              环境中的仓库关联和部署位置独立配置，分支在发布时选择。
+            </SheetDescription>
           </SheetHeader>
           <div className="space-y-3 px-4">
             {data.services.map((service) => {
@@ -582,7 +583,7 @@ export function Environments() {
                 <div className="rounded-md border p-3" key={service.id}>
                   <p className="font-medium">{service.name}</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {source?.branch || '尚未配置源码'}
+                    {source ? '已关联仓库，发布时选择分支' : '尚未配置源码'}
                   </p>
                 </div>
               )

@@ -12,7 +12,9 @@
 | `PUT /api/workspaces/{workspaceId}` | 修改项目名称、说明 |
 | `POST /api/workspaces/{workspaceId}/repositories` | 添加仓库；字段沿用旧仓库接口，项目归属由路径决定 |
 | `PUT /api/workspaces/{workspaceId}/repositories/{id}` | 修改本项目仓库，不能转移归属 |
-| `POST /api/workspaces/{workspaceId}/repositories/{id}/sync` | 同步默认下载分支 |
+| `POST /api/workspaces/{workspaceId}/repositories/{id}/sync` | 兼容入口：刷新仓库分支信息，不生成源码包 |
+| `GET /api/workspaces/{workspaceId}/repositories/{id}/branches` | 已保存的分支列表、远端默认分支和刷新时间；无缓存时查询远端 |
+| `POST /api/workspaces/{workspaceId}/repositories/{id}/branches/refresh` | 重新查询远端 HEAD 和分支 |
 | `POST /api/workspaces/{workspaceId}/repositories/{id}/rotate-token` | 重置并返回独立下载密码 |
 | `POST /api/workspaces/{workspaceId}/repositories/{id}/enabled` | `{enabled}`；停用或启用源码交付 |
 | `GET /api/workspaces/{workspaceId}/server-candidates` | 可绑定服务器的 ID、名称、模式和在线状态，不包含其他项目容器或任务 |
@@ -23,12 +25,15 @@
 | `PUT /api/workspaces/{workspaceId}/environments/{id}` | 修改环境名称 |
 | `POST /api/workspaces/{workspaceId}/services` | `{name, module, kind?}`；`kind` 为 `java`（默认）或 `static`，模块为 Maven 模块或前端项目目录 |
 | `PUT /api/workspaces/{workspaceId}/services/{id}` | 修改服务名称及模块；已有目标时不能更改类型 |
-| `PUT /api/workspaces/{workspaceId}/environment-sources` | `{environmentId, serviceId, sourceProjectId, branch}`；设置环境中的服务源码 |
+| `PUT /api/workspaces/{workspaceId}/environment-sources` | `{environmentId, serviceId, sourceProjectId}`；只关联仓库，旧 `branch` 保留为首次发布兼容预选 |
 | `POST /api/workspaces/{workspaceId}/targets` | 沿用原目标配置字段；环境、服务须属于本项目，服务器须已绑定，并且已配置环境服务源码 |
 | `PUT /api/workspaces/{workspaceId}/targets/{id}` | 更新运行配置；目标归属及管理方式仍不可改变 |
-| `POST /api/workspaces/{workspaceId}/tasks` | `{targetId, action, releaseId?}`；单目标 deploy/restart/rollback |
+| `POST /api/workspaces/{workspaceId}/tasks` | 新发布提交 `{targetId, action:"deploy", branch, revision, sourceKey, configKey, requestId}`；回退提交历史 `releaseId`，配置由中心解析 |
+| `POST /api/workspaces/{workspaceId}/targets/{id}/source/refresh` | `{branch}`；加载最近 100 条具体提交及 `sourceKey`、`configKey` |
 | `GET /api/workspaces/{workspaceId}/tasks/{id}?after=0` | 本项目任务详情和增量日志 |
-| `GET /api/workspaces/{workspaceId}/targets/{id}/releases` | 本项目目标的历史版本 |
+| `GET /api/workspaces/{workspaceId}/targets/{id}/releases?offset=0&limit=20` | 服务端分页，返回 `releases`、`total`、`nextOffset`；最大每页 100 条 |
+| `GET /api/workspaces/{workspaceId}/releases/{id}/source` | 登录后下载该版本原始 ZIP；校验失败或源码清理后拒绝下载 |
+| `DELETE /api/workspaces/{workspaceId}/releases/{id}/source` | 释放该版本源码引用并留审计；当前版本、基线和执行中引用返回 409 |
 | `GET /api/workspaces/{workspaceId}/events` | 本项目 SSE 更新通知；共享服务器心跳会通知绑定的项目，不包含其他项目目标或任务详情 |
 | `GET /api/credentials` | 可供仓库表单选择的共享凭证元数据，不含密码 |
 
@@ -36,11 +41,11 @@
 
 系统级 `DELETE /api/deploy/servers/{serverId}` 删除已撤销且无部署目标、发布历史的服务器记录，同时清理空项目绑定并记录审计。仍沿用管理员会话和 CSRF。
 
-仓库字段为 `{name, repository, branch, credentialId?, enabled?}`。`branch` 是默认下载分支，环境服务配置中的 `branch` 是发布分支。关联键为 `(environmentId, serviceId)`，同环境同服务的不同服务器共用该源码选择。
+仓库字段为 `{name, repository, credentialId?, enabled?}`。旧 `branch` 仅保留下载兼容。环境关联键为 `(environmentId, serviceId)`，同环境同服务共用仓库关联；每次任务独立选择分支和提交，不改写其他部署位置。
 
 项目详情中的服务器容器列表按项目过滤，指标仍是整台机器的指标。其他项目资源通过项目范围的详情/写接口访问时返回 404；未绑定服务器或缺少源码选择返回 400。原有观察权限、撤销状态及目标忙碌校验继续执行。
 
-新任务包含 `sourceSnapshot`（仓库 ID、名称、所属项目、地址、分支及凭证 ID）和独立的部署配置快照，不保存 Gitee 明文凭证。Agent v1 仍领取已有任务格式中的固定 ZIP、版本、摘要和配置，无需协议升级。
+新任务包含 `sourceSnapshot`、固定配置、源码档案引用与 SHA-256，不保存 Gitee 明文凭证。Agent v1 下载路径保持不变；具备 `source-archive-recovery-v1` 才获准源码重建。恢复基线使用相同任务地址的 `?role=baseline`，必须属于该 Agent 已领取任务的明确引用。相同 `requestId` 与参数返回原任务，不同参数返回 409。
 
 目标配置的 `kind` 由服务类型确定，不能通过提交配置绕过。前端 `static` 配置包括 `buildImage`、`module`、`artifactPath`、`packageManager`（npm/pnpm）、`packageManagerVersion`（准确 pnpm 版本）、`buildScript`、`buildArgs`、`build` 和 `health`。`health.url` 为 Agent 可访问的站点根地址，`bodyIncludes` 可选；版本标识与首页必须返回 HTTP 200。静态目标不配置运行镜像、端口、网络或存储卷，`containerName` 为 null。配置示例与首次接入见 [前端部署](static-sites.md)。
 

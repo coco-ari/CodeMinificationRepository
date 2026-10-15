@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Selection, SelectionOption } from '@/components/selection'
+import { Choice, Selection, SelectionOption } from '@/components/selection'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { Action, Detail, Empty, Notice, Status, TargetStatus } from './shared'
@@ -48,7 +48,7 @@ export function Configuration({ target }) {
       '构建配置',
       [
         ['构建镜像', config.buildImage],
-        [isStatic ? '前端目录' : 'Maven 模块', config.module || '.'],
+        [isStatic ? '前端项目目录' : 'Maven 模块目录', config.module || '.'],
         ['产物路径', config.artifactPath],
         ['构建资源', `${config.build?.cpus ?? '—'} CPU / ${config.build?.memoryMb ?? '—'} MB`],
         ...(isStatic
@@ -139,20 +139,29 @@ export function Configuration({ target }) {
   )
 }
 export function ConfigurationPage({ selectedTarget }) {
-  const { data, route, find, navigate, open, endpoint, request, scope } = useConsole(),
+  const { data, route, find, navigate, open, endpoint, request, scope, confirm } = useConsole(),
     target = selectedTarget || find('targets', route.targetId)
   const [tab, setTab] = useState(
       ['config', 'runtime', 'history'].includes(route.tab) ? route.tab : 'runtime',
     ),
     [configTab, setConfigTab] = useState('next'),
     [releases, setReleases] = useState([]),
+    [releaseNext, setReleaseNext] = useState(null),
     [error, setError] = useState('')
+  const historyGeneration = useRef(0)
   useEffect(() => {
     let active = true
+    historyGeneration.current++
+    setReleases([])
+    setReleaseNext(null)
+    setError('')
     if (target)
       request(`${endpoint}/targets/${target.id}/releases`)
         .then((r) => {
-          if (active) setReleases(r.releases)
+          if (active) {
+            setReleases(r.releases)
+            setReleaseNext(r.nextOffset)
+          }
         })
         .catch((e) => {
           if (active && e.name !== 'AbortError') setError(e.message)
@@ -168,7 +177,10 @@ export function ConfigurationPage({ selectedTarget }) {
     ),
     repo = find('repositories', source?.sourceProjectId)
   const tasks = data.tasks.filter((t) => t.targetId === target.id)
-  const configuration = configTab === 'current' ? target.currentRelease?.config : target.config
+  const configuration =
+    configTab === 'current'
+      ? target.currentRelease?.config
+      : { ...target.config, module: service.module === '.' ? '' : service.module }
   const server = find('servers', target.serverId)
   const activeTask = tasks.find((task) => !finished(task))
   const sourceConfig = configTab === 'current' ? target.currentRelease?.sourceSnapshot : null
@@ -184,9 +196,6 @@ export function ConfigurationPage({ selectedTarget }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => open('service', service)}>
-            编辑服务
-          </Button>
           <Button
             disabled={
               target.mode !== 'managed' || !server?.online || server?.revoked || !!activeTask
@@ -246,6 +255,16 @@ export function ConfigurationPage({ selectedTarget }) {
               </TabsTrigger>
             </TabsList>
           </Tabs>
+          {configTab === 'next' && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                服务名称、类型和模块目录对该服务的所有环境生效。
+              </p>
+              <Button variant="outline" onClick={() => open('service', service)}>
+                编辑服务信息
+              </Button>
+            </div>
+          )}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>源码与模块</CardTitle>
@@ -273,14 +292,14 @@ export function ConfigurationPage({ selectedTarget }) {
                 <Detail label="发布分支">
                   {configTab === 'current'
                     ? sourceConfig?.branch || '见对应发布记录'
-                    : source?.branch || '—'}
+                    : '每次发布时选择'}
                 </Detail>
-                <Detail label={service.kind === 'static' ? '前端目录' : 'Maven 模块'}>
+                <Detail label={service.kind === 'static' ? '前端项目目录' : 'Maven 模块目录'}>
                   {configTab === 'current' ? configuration?.module || '—' : service.module}
                 </Detail>
               </dl>
               <p className="mt-4 text-xs text-muted-foreground">
-                源码修改影响当前环境的所有部署位置；已执行任务保留原始快照。
+                仓库关联影响当前服务、当前环境；模块目录影响服务的所有环境。已执行任务保留原始快照。
               </p>
             </CardContent>
           </Card>
@@ -293,7 +312,7 @@ export function ConfigurationPage({ selectedTarget }) {
               disabled={configTab === 'current'}
               onClick={() => open('target', target)}
             >
-              编辑运行配置
+              编辑部署配置
             </Button>
           </div>
           <Configuration target={{ ...target, config: configuration }} />
@@ -318,6 +337,9 @@ export function ConfigurationPage({ selectedTarget }) {
                   summary
                 />
               </Detail>
+              <Detail label="来源分支">
+                {target.currentRelease?.sourceSnapshot?.branch || '历史未记录'}
+              </Detail>
               <Detail label="镜像">
                 {target.currentRelease?.image || target.observation?.image || '—'}
               </Detail>
@@ -330,22 +352,103 @@ export function ConfigurationPage({ selectedTarget }) {
         <Card>
           <CardContent>
             {releases.map((r) => (
-              <div className="version-item" key={r.id}>
+              <div className="version-item flex-wrap" key={r.id}>
                 <span className="status-dot good mt-2" />
                 <div className="min-w-0 flex-1">
                   <Commit value={r.revision} subject={r.commitSubject} summary />
                   <p className="mt-1 text-xs text-muted-foreground">{date(r.createdAt)}</p>
+                  <p className="mt-1 break-all text-xs text-muted-foreground">
+                    {r.sourceSnapshot?.branch || '历史分支未记录'}
+                    {r.restoredFromReleaseId ? ' · 从历史源码重建' : ''}
+                  </p>
+                  {r.restoredFromReleaseId && (
+                    <p className="mt-1 break-all text-xs text-muted-foreground">
+                      来源版本：{r.restoredFromReleaseId}
+                    </p>
+                  )}
+                  {r.buildSnapshot && (
+                    <p className="mt-2 break-all text-xs text-muted-foreground">
+                      构建镜像：{r.buildSnapshot.buildImage}
+                      {r.buildSnapshot.runtimeImage
+                        ? ` · 运行镜像：${r.buildSnapshot.runtimeImage}`
+                        : ''}
+                      {r.buildSnapshot.packageManagerVersion
+                        ? ` · ${r.buildSnapshot.packageManager} ${r.buildSnapshot.packageManagerVersion}`
+                        : ''}
+                      {r.buildSnapshot.mavenVersion
+                        ? ` · Maven ${r.buildSnapshot.mavenVersion}`
+                        : ''}
+                    </p>
+                  )}
                 </div>
                 <Badge variant="outline">
                   {target.currentRelease?.id === r.id
                     ? '当前版本'
                     : r.available
                       ? '可回退'
-                      : '已清理'}
+                      : '不可回退'}
                 </Badge>
+                <Badge variant="outline">
+                  {r.archiveStatus === 'available'
+                    ? '源码已归档'
+                    : r.archiveStatus === 'cleared'
+                      ? '源码已清理'
+                      : r.archiveStatus === 'invalid'
+                        ? '源码校验失败'
+                        : '中心源码缺失'}
+                </Badge>
+                {r.archiveStatus === 'available' && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="ghost" size="sm" asChild>
+                      <a href={`${endpoint}/releases/${r.id}/source`}>下载源码</a>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={r.archiveProtected}
+                      title={
+                        r.archiveProtected
+                          ? '当前版本、恢复基线或执行中任务引用的版本不能清理'
+                          : undefined
+                      }
+                      onClick={() =>
+                        confirm(
+                          '清理源码档案',
+                          `清理 ${r.sourceSnapshot?.branch || '历史分支'} / ${short(r.revision)} 的源码后，此版本将不能通过中心重建。版本说明和操作记录仍保留；其他版本共享的源码包继续保留。`,
+                          async () => {
+                            await request(`${endpoint}/releases/${r.id}/source`, {}, 'DELETE')
+                            const page = await request(`${endpoint}/targets/${target.id}/releases`)
+                            setReleases(page.releases)
+                            setReleaseNext(page.nextOffset)
+                          },
+                        )
+                      }
+                    >
+                      清理源码
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
             {!releases.length && <p className="text-sm text-muted-foreground">尚无成功版本</p>}
+            {releaseNext != null && (
+              <Action
+                variant="outline"
+                className="mt-4 mr-3"
+                onClick={async () => {
+                  const epoch = historyGeneration.current
+                  const page = await request(
+                    `${endpoint}/targets/${target.id}/releases?offset=${releaseNext}`,
+                  )
+                  if (historyGeneration.current === epoch) {
+                    setReleases((old) => [...old, ...page.releases])
+                    setReleaseNext(page.nextOffset)
+                  }
+                }}
+              >
+                加载更早版本
+              </Action>
+            )}
             <Button
               className="mt-4"
               variant="outline"
@@ -371,8 +474,17 @@ export function ConfigurationPage({ selectedTarget }) {
                 className="flex flex-wrap items-center justify-between gap-3 border-b py-4"
               >
                 <Status value={t.status}>{resultName(t)}</Status>
+                <span className="min-w-0 break-all text-xs text-muted-foreground">
+                  {t.sourceSnapshot?.branch ||
+                    t.release?.sourceSnapshot?.branch ||
+                    '历史分支未记录'}{' '}
+                  / {short(revisionOf(t))}
+                </span>
                 <span className="text-xs text-muted-foreground">
-                  {date(t.createdAt)} · {duration(t)}
+                  {actionNames[t.action]} · {date(t.createdAt)} · {duration(t)}
+                  {t.result?.recoveryMethod
+                    ? ` · ${t.result.recoveryMethod === 'cache' ? '缓存恢复' : '源码重建'}`
+                    : ''}
                 </span>
                 <Button
                   variant="ghost"
@@ -390,7 +502,8 @@ export function ConfigurationPage({ selectedTarget }) {
   )
 }
 export function ReleaseWorkbench() {
-  const { data, route, find, request, endpoint, navigate, open, environmentId } = useConsole()
+  const { data, route, find, request, endpoint, navigate, open, environmentId, confirm } =
+    useConsole()
   const target = find('targets', route.targetId),
     source = data.environmentSources.find(
       (s) => s.environmentId === target?.environmentId && s.serviceId === target?.serviceId,
@@ -399,23 +512,33 @@ export function ReleaseWorkbench() {
     service = find('services', target?.serviceId)
   const [history, setHistory] = useState(null),
     [releases, setReleases] = useState([]),
+    [releaseNext, setReleaseNext] = useState(null),
+    [branchInfo, setBranchInfo] = useState(null),
+    [branch, setBranch] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [choice, setChoice] = useState('latest'),
+    [choice, setChoice] = useState(''),
     [tab, setTab] = useState(route.action === 'rollback' ? 'releases' : 'commits'),
     [releaseId, setReleaseId] = useState(''),
     [showConfig, setShowConfig] = useState(false),
     [loading, setLoading] = useState(true)
   const live = useRef(true),
     locked = useRef(false),
-    generation = useRef(0)
+    generation = useRef(0),
+    submission = useRef(null)
   useEffect(() => {
     live.current = true
     return () => {
       live.current = false
     }
   }, [])
-  const signature = `${source?.sourceProjectId}:${source?.branch}:${find('repositories', source?.sourceProjectId)?.repository}`
+  const signature = JSON.stringify([
+    source?.sourceProjectId,
+    source?.branch,
+    find('repositories', source?.sourceProjectId)?.repository,
+    target?.config,
+    service?.module,
+  ])
   useEffect(() => {
     let active = true
     generation.current++
@@ -423,20 +546,47 @@ export function ReleaseWorkbench() {
     setBusy(false)
     setLoading(true)
     setHistory(null)
-    setChoice('latest')
+    setChoice('')
+    setBranch('')
+    setBranchInfo(null)
+    setReleaseNext(null)
     setReleases([])
     setError('')
     if (!target) return
     Promise.allSettled([
-      request(`${endpoint}/targets/${target.id}/source`),
+      source?.sourceProjectId && !['rollback', 'restart'].includes(route.action)
+        ? request(`${endpoint}/repositories/${source.sourceProjectId}/branches`)
+        : Promise.resolve({ branches: [], defaultBranch: null }),
       request(`${endpoint}/targets/${target.id}/releases`),
     ]).then(([h, r]) => {
       if (!active) return
       setLoading(false)
-      if (h.status === 'fulfilled') setHistory(h.value)
-      else if (h.reason.name !== 'AbortError') setError(`源码记录：${h.reason.message}`)
+      if (h.status === 'fulfilled') {
+        setBranchInfo(h.value)
+        const running = target.currentRelease?.sourceSnapshot
+        const preferred =
+          running?.id === source?.sourceProjectId &&
+          running.repository === find('repositories', source?.sourceProjectId)?.repository
+            ? running.branch
+            : source?.branch || h.value.defaultBranch || ''
+        setBranch(preferred)
+        if (
+          preferred &&
+          h.value.branches.some((item) => item.name === preferred) &&
+          !['rollback', 'restart'].includes(route.action)
+        )
+          loadBranch(preferred)
+        else if (preferred && route.action !== 'rollback' && route.action !== 'restart')
+          setError(`原分支 ${preferred} 已不存在，请选择其他分支；历史版本仍可从发布记录恢复。`)
+      } else if (
+        h.reason.name !== 'AbortError' &&
+        route.action !== 'rollback' &&
+        route.action !== 'restart'
+      )
+        setError(`仓库分支：${h.reason.message}`)
       if (r.status === 'fulfilled') {
         setReleases(r.value.releases)
+        setReleaseNext(r.value.nextOffset)
         setReleaseId(
           r.value.releases.find((v) => v.available && v.id !== target.currentRelease?.id)?.id || '',
         )
@@ -445,7 +595,7 @@ export function ReleaseWorkbench() {
     return () => {
       active = false
     }
-  }, [target?.id, signature])
+  }, [target?.id, signature, route.action])
   if (!target)
     return (
       <Empty
@@ -468,9 +618,7 @@ export function ReleaseWorkbench() {
       ? selectedRelease?.revision
       : action === 'restart'
         ? target.currentRelease?.revision
-        : choice === 'latest'
-          ? null
-          : choice
+        : choice
   const releaseSource =
     action === 'rollback'
       ? selectedRelease?.sourceSnapshot ||
@@ -481,18 +629,36 @@ export function ReleaseWorkbench() {
       ? selectedRelease?.config || target.config
       : action === 'restart'
         ? target.currentRelease?.config || target.config
-        : target.config
-  async function updateCode() {
-    if (locked.current) return
+        : { ...target.config, module: service.module === '.' ? '' : service.module }
+  async function loadBranch(nextBranch, preserve = false) {
+    if (!nextBranch) return
+    const previousChoice = preserve ? choice : ''
+    const epoch = ++generation.current
+    setBranch(nextBranch)
+    setChoice('')
+    setHistory(null)
     locked.current = true
-    const epoch = generation.current
     setBusy(true)
     setError('')
     try {
-      const result = await request(`${endpoint}/targets/${target.id}/source/refresh`, {})
+      const result = await request(`${endpoint}/targets/${target.id}/source/refresh`, {
+        branch: nextBranch,
+      })
       if (live.current && generation.current === epoch) {
         setHistory(result)
-        setChoice(result.commits[0]?.revision || 'latest')
+        setChoice(
+          preserve
+            ? result.commits.some((c) => c.revision === previousChoice)
+              ? previousChoice
+              : ''
+            : result.commits[0]?.revision || '',
+        )
+        if (
+          preserve &&
+          previousChoice &&
+          !result.commits.some((c) => c.revision === previousChoice)
+        )
+          setError('原提交已不在刷新后的列表中，请重新选择。')
       }
     } catch (e) {
       if (live.current && generation.current === epoch && e.name !== 'AbortError')
@@ -502,6 +668,37 @@ export function ReleaseWorkbench() {
         locked.current = false
         setBusy(false)
       }
+    }
+  }
+  async function updateCode() {
+    if (!locked.current) await loadBranch(branch, true)
+  }
+  async function refreshBranches() {
+    if (!source?.sourceProjectId) {
+      setError('请先关联源码仓库')
+      return
+    }
+    const epoch = ++generation.current
+    locked.current = false
+    setBusy(true)
+    setChoice('')
+    setHistory(null)
+    setError('')
+    try {
+      const info = await request(
+        `${endpoint}/repositories/${source.sourceProjectId}/branches/refresh`,
+        {},
+      )
+      if (!live.current || generation.current !== epoch) return
+      setBranchInfo(info)
+      const preferred = branch || info.defaultBranch
+      if (preferred && info.branches.some((item) => item.name === preferred))
+        await loadBranch(preferred, preferred === branch)
+      else if (preferred) setError('原分支已不存在，请选择其他分支。')
+    } catch (e) {
+      if (live.current && generation.current === epoch) setError(e.message)
+    } finally {
+      if (live.current && generation.current === epoch) setBusy(false)
     }
   }
   return (
@@ -541,7 +738,14 @@ export function ReleaseWorkbench() {
             {action !== 'restart' ? (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Tabs value={tab} onValueChange={setTab}>
+                  <Tabs
+                    value={tab}
+                    onValueChange={(value) => {
+                      setTab(value)
+                      if (value === 'commits' && !history && source?.sourceProjectId)
+                        refreshBranches()
+                    }}
+                  >
                     <TabsList>
                       <TabsTrigger value="commits">Git 提交</TabsTrigger>
                       <TabsTrigger value="releases">已发布版本</TabsTrigger>
@@ -551,22 +755,58 @@ export function ReleaseWorkbench() {
                     <Button
                       variant="outline"
                       onClick={updateCode}
-                      disabled={loading || busy}
+                      disabled={loading || busy || !branch}
                       id="refresh-commits"
                     >
                       <RefreshCw className={busy ? 'animate-spin' : ''} />
-                      {busy ? '正在更新…' : '更新代码'}
+                      {busy ? '正在刷新…' : '刷新提交'}
                     </Button>
                   )}
                 </div>
                 {tab === 'commits' ? (
                   <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium" htmlFor="release-branch">
+                        发布分支
+                      </label>
+                      <div className="flex min-w-0 gap-2">
+                        <Choice
+                          id="release-branch"
+                          aria-label="发布分支"
+                          searchable
+                          value={branch}
+                          options={(branchInfo?.branches || []).map((item) => ({
+                            value: item.name,
+                            label:
+                              item.name +
+                              (item.name === branchInfo.defaultBranch ? '（默认分支）' : ''),
+                          }))}
+                          onValueChange={(value) => loadBranch(value)}
+                          disabled={loading}
+                          className="min-w-0 flex-1"
+                        />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          aria-label="刷新分支列表"
+                          disabled={loading || busy || !source?.sourceProjectId}
+                          onClick={refreshBranches}
+                        >
+                          <RefreshCw />
+                        </Button>
+                      </div>
+                      {!loading && branchInfo && !branchInfo.branches.length && (
+                        <p className="text-sm text-muted-foreground">
+                          暂无可用分支，请确认仓库已有提交。
+                        </p>
+                      )}
+                    </div>
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1.5">
                         <GitBranch className="size-3.5" />
                         {history?.repositoryName ||
                           find('repositories', source?.sourceProjectId)?.name}{' '}
-                        / {source?.branch}
+                        / {branch || '请选择分支'}
                       </span>
                       <span>
                         {loading
@@ -590,22 +830,6 @@ export function ReleaseWorkbench() {
                         </div>
                       )}
                       <div hidden={loading}>
-                        <Button
-                          variant="ghost"
-                          disabled={busy}
-                          aria-pressed={choice === 'latest'}
-                          className={`commit-option ${choice === 'latest' ? 'selected' : ''}`}
-                          onClick={() => setChoice('latest')}
-                        >
-                          <RefreshCw className="size-4 shrink-0" />
-                          <span className="text-left">
-                            <span className="block font-medium">最新代码</span>
-                            <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                              发布时重新拉取该分支最新提交
-                            </span>
-                          </span>
-                          {choice === 'latest' && <Check className="ml-auto size-4" />}
-                        </Button>
                         {busy && !history?.commits.length && (
                           <div className="space-y-3 py-3">
                             <Skeleton className="h-20" />
@@ -637,14 +861,14 @@ export function ReleaseWorkbench() {
                             {choice === commit.revision ? (
                               <Check className="size-4 shrink-0" />
                             ) : index === 0 ? (
-                              <Badge variant="secondary">最新记录</Badge>
+                              <Badge variant="secondary">最新提交</Badge>
                             ) : null}
                           </Button>
                         ))}
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      显示当前分支最近 100 条提交；“更新代码”只刷新记录，不会发布服务。
+                      显示所选分支最近 100 条提交；刷新只更新列表，确认发布后固定所选提交。
                     </p>
                   </>
                 ) : loading ? (
@@ -658,6 +882,7 @@ export function ReleaseWorkbench() {
                     </label>
                     <Selection
                       id="deploy-releaseId"
+                      searchable
                       value={releaseId}
                       onChange={(e) => setReleaseId(e.target.value)}
                     >
@@ -666,7 +891,8 @@ export function ReleaseWorkbench() {
                         .filter((r) => r.available && r.id !== target.currentRelease?.id)
                         .map((r) => (
                           <SelectionOption key={r.id} value={r.id}>
-                            {short(r.revision)} · {date(r.createdAt)}
+                            {r.sourceSnapshot?.branch || '历史分支未记录'} · {short(r.revision)} ·{' '}
+                            {r.commitSubject || '无提交说明'} · {date(r.createdAt)}
                           </SelectionOption>
                         ))}
                     </Selection>
@@ -686,13 +912,34 @@ export function ReleaseWorkbench() {
                               </Badge>
                             </div>
                             <p className="mt-2 text-xs text-muted-foreground">
-                              {date(r.createdAt)}
+                              {r.sourceSnapshot?.branch || '历史分支未记录'} · {date(r.createdAt)} ·{' '}
+                              {r.archiveStatus === 'available'
+                                ? '中心源码可重建'
+                                : r.archiveStatus === 'cleared'
+                                  ? '源码已清理'
+                                  : '中心源码缺失，仅可核验本机缓存'}
                             </p>
                           </div>
                         </div>
                       ))}
                       {!releases.length && (
                         <p className="py-8 text-sm text-muted-foreground">尚无成功发布版本</p>
+                      )}
+                      {releaseNext != null && (
+                        <Action
+                          variant="outline"
+                          onClick={async () => {
+                            const page = await request(
+                              `${endpoint}/targets/${target.id}/releases?offset=${releaseNext}`,
+                            )
+                            if (live.current) {
+                              setReleases((items) => [...items, ...page.releases])
+                              setReleaseNext(page.nextOffset)
+                            }
+                          }}
+                        >
+                          加载更多历史版本
+                        </Action>
                       )}
                     </div>
                   </div>
@@ -720,7 +967,9 @@ export function ReleaseWorkbench() {
               <Detail label="分支">
                 {action === 'rollback'
                   ? releaseSource?.branch || '历史未保存'
-                  : source?.branch || '—'}
+                  : action === 'restart'
+                    ? target.currentRelease?.sourceSnapshot?.branch || '—'
+                    : branch || '—'}
               </Detail>
               <Detail label="服务器">
                 <Selection
@@ -745,9 +994,21 @@ export function ReleaseWorkbench() {
               <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
                 <span>{short(target.currentRelease?.revision)}</span>
                 <ArrowRight className="size-3.5" />
-                <span>{selectedRevision ? short(selectedRevision) : '分支最新提交'}</span>
+                <span>{selectedRevision ? short(selectedRevision) : '请选择具体提交'}</span>
               </div>
-              {selectedRevision && <Commit value={selectedRevision} />}
+              {selectedRevision && (
+                <Commit
+                  value={selectedRevision}
+                  subject={
+                    action === 'deploy'
+                      ? history?.commits.find((c) => c.revision === choice)?.subject
+                      : action === 'rollback'
+                        ? selectedRelease?.commitSubject
+                        : target.currentRelease?.commitSubject
+                  }
+                  summary
+                />
+              )}
             </div>
             <dl className="review-details">
               <Detail label={config.kind === 'static' ? '站点' : '端口'}>
@@ -770,22 +1031,37 @@ export function ReleaseWorkbench() {
                 !!activeTask ||
                 busy ||
                 loading ||
+                (action === 'deploy' &&
+                  (!choice || !history?.sourceKey || !branch || !history?.configKey)) ||
                 (action === 'rollback' && !selectedRelease?.available) ||
                 (action === 'restart' && !target.currentRelease)
               }
               onClick={async () => {
-                const result = await request(`${endpoint}/tasks`, {
+                const payload = {
                   targetId: target.id,
                   action,
                   ...(action === 'rollback' ? { releaseId } : {}),
                   ...(action === 'deploy'
                     ? {
                         sourceKey: history?.sourceKey,
-                        ...(choice !== 'latest' ? { revision: choice } : {}),
+                        configKey: history?.configKey,
+                        branch,
+                        revision: choice,
                       }
                     : {}),
-                })
-                if (live.current) navigate('tasks', result.task.id, target.environmentId)
+                }
+                const fingerprint = JSON.stringify(payload)
+                if (submission.current?.fingerprint !== fingerprint)
+                  submission.current = { fingerprint, requestId: crypto.randomUUID() }
+                const requestId = submission.current.requestId
+                confirm(
+                  `确认${actionNames[action]}`,
+                  `${service?.name} · ${server?.name}\n${action === 'deploy' ? branch : releaseSource?.branch || target.currentRelease?.sourceSnapshot?.branch || '历史分支未记录'}\n${selectedRevision}\n${action === 'deploy' ? history?.commits.find((c) => c.revision === choice)?.subject || '' : selectedRelease?.commitSubject || ''}`,
+                  async () => {
+                    const result = await request(`${endpoint}/tasks`, { ...payload, requestId })
+                    if (live.current) navigate('tasks', result.task.id, target.environmentId)
+                  },
+                )
               }}
             >
               确认{actionNames[action]} <ArrowRight />
@@ -794,7 +1070,7 @@ export function ReleaseWorkbench() {
               {!managed
                 ? '服务器离线、接入已撤销或目标已停用。'
                 : action === 'rollback'
-                  ? '恢复所选成功版本的产物和运行配置。'
+                  ? '优先恢复已核验的本机产物；缓存缺失时使用中心原源码包和历史配置重建。'
                   : '本次只操作这个部署目标。提交任务后固定源码与配置。'}
             </p>
           </CardContent>

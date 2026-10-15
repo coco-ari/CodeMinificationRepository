@@ -1,4 +1,6 @@
 import { HttpError } from './security.mjs';
+import { open } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 
 const id = '([a-f0-9-]{36})';
 export async function handleWorkspaceRequest(req, res, url, { workspaces, deployment, service, body, json, expiresAt, sessionValid, trackStream }) {
@@ -22,6 +24,11 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
     await workspaces.bind(applicationId, binding[1], req.method === 'DELETE'); return respond({ ok: true });
   }
   if (sub === '/environment-sources' && req.method === 'PUT') return respond(await workspaces.saveSource(applicationId, await body(req)));
+  const branches = new RegExp(`^/repositories/${id}/branches(?:/(refresh))?$`).exec(sub);
+  if (branches && ((!branches[2] && req.method === 'GET') || (branches[2] && req.method === 'POST'))) {
+    workspaces.owned('repositories', branches[1], applicationId);
+    return respond(await service.branches(branches[1], !!branches[2]));
+  }
   const repository = new RegExp(`^/repositories(?:/${id})?(?:/(sync|rotate-token|enabled))?$`).exec(sub);
   if (repository) {
     const [, sourceId, action] = repository;
@@ -32,7 +39,7 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
     }
     if (sourceId && req.method === 'POST') {
       let value;
-      if (action === 'sync') { const { file, ...result } = await service.sync(sourceId); value = result; }
+      if (action === 'sync') value = await service.branches(sourceId, true);
       else if (action === 'rotate-token') value = await service.rotateToken(sourceId);
       else if (action === 'enabled') { await service.setEnabled(sourceId, (await body(req)).enabled); value = { ok: true }; }
       if (value) { deployment.changed('repository', sourceId, applicationId); return respond(value); }
@@ -52,11 +59,24 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
   }
   const source = new RegExp(`^/targets/${id}/source(?:/(refresh))?$`).exec(sub);
   if (source && ((!source[2] && req.method === 'GET') || (source[2] && req.method === 'POST'))) {
-    return respond(await workspaces.targetSource(applicationId, source[1], Boolean(source[2])));
+    const input = source[2] ? await body(req) : {};
+    return respond(await workspaces.targetSource(applicationId, source[1], Boolean(source[2]), input.branch ?? url.searchParams.get('branch') ?? undefined));
   }
   const releases = new RegExp(`^/targets/${id}/releases$`).exec(sub);
   if (releases && req.method === 'GET') {
-    workspaces.owned('targets', releases[1], applicationId); return respond({ releases: deployment.releases(releases[1]) });
+    workspaces.owned('targets', releases[1], applicationId); return respond(deployment.releasePage(releases[1], Number(url.searchParams.get('offset') || 0), Number(url.searchParams.get('limit') || 20)));
+  }
+  const archive = new RegExp(`^/releases/${id}/source$`).exec(sub);
+  if (archive && ['GET', 'DELETE'].includes(req.method)) {
+    const release = workspaces.owned('releases', archive[1], applicationId);
+    if (req.method === 'DELETE') return respond(await deployment.archives.clear(release.id, applicationId));
+    if (release.sourceClearedAt) throw new HttpError(410, '此版本源码档案已清理');
+    const source = await deployment.archives.verify(release), file = await open(source.file, 'r');
+    try {
+      res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': source.size, 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="source-${release.revision.slice(0, 12)}.zip"`, 'X-Archive-SHA256': source.sha256 });
+      await pipeline(file.createReadStream(), res);
+    } finally { await file.close().catch(() => {}); }
+    return true;
   }
   if (sub === '/events' && req.method === 'GET') {
     if (!sessionValid()) throw new HttpError(401, '会话已失效');

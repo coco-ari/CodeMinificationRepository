@@ -17,8 +17,8 @@ export class CenterClient {
   register(registrationToken) { return this.post('register', { registrationToken, version: VERSION, capabilities: CAPABILITIES }); }
   async download(task, destination, maxBytes = 64 * 1024 * 1024) {
     identifier(task.id);
-    const expectedPath = `/api/agent/v1/tasks/${task.id}/source`, url = new URL(task.source.url, this.url);
-    if (url.origin !== this.url.origin || url.pathname !== expectedPath || url.search || url.hash) throw new Error('拒绝下载非当前中心或非当前任务的源码');
+    const expectedPath = `/api/agent/v1/tasks/${identifier(task.downloadTaskId || task.id)}/source`, url = new URL(task.source.url, this.url);
+    if (url.origin !== this.url.origin || url.pathname !== expectedPath || (url.search && url.search !== '?role=baseline') || url.hash || (url.search && !task.downloadTaskId)) throw new Error('拒绝下载非当前中心或非当前任务的源码');
     if (!/^[a-f0-9]{64}$/.test(task.source.sha256) || !/^[a-f0-9]{40,64}$/.test(task.source.revision)) throw new Error('源码摘要或版本无效');
     const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(900000), headers: { authorization: `Bearer ${this.token}` } });
     if (!response.ok) throw new Error(`下载源码失败（HTTP ${response.status}）`);

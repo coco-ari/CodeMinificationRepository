@@ -273,9 +273,10 @@ export function ProjectTile({ project }) {
                 <div className="service-meta">
                   <span
                     className="truncate"
-                    title={`${repository?.name || '未关联仓库'} / ${source?.branch || '—'}`}
+                    title={`${repository?.name || '未关联仓库'} / ${target?.currentRelease?.sourceSnapshot?.branch || '尚未发布'}`}
                   >
-                    {repository?.name || '未关联仓库'} / {source?.branch || '—'}
+                    {repository?.name || '未关联仓库'} /{' '}
+                    {target?.currentRelease?.sourceSnapshot?.branch || '尚未发布'}
                   </span>
                   <Commit
                     value={target?.currentRelease?.revision || target?.observation?.revision}

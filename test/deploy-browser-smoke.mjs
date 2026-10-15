@@ -28,6 +28,16 @@ if (!executable) throw new Error('未找到浏览器，请设置 BROWSER_PATH �
 const dataDirectory = path.join(temporary, 'data')
 let version = 1
 const builder = {
+  async branches() {
+    return {
+      branches: ['main', 'test-branch', 'frontend-test'].map((name) => ({
+        name,
+        revision: String(version).repeat(40),
+      })),
+      defaultBranch: 'main',
+      refreshedAt: new Date().toISOString(),
+    }
+  },
   async initialize() {
     await mkdir(dataDirectory, { recursive: true })
     await writeFile(path.join(dataDirectory, 'test.zip'), 'isolated-source')
@@ -240,6 +250,10 @@ try {
   }
   const clickText = async (label, parent = '#deploy-view') => {
     await animationsSettled()
+    await evaluate(
+      `(()=>{const e=[...document.querySelectorAll(${JSON.stringify(parent)})].filter(e=>e.getClientRects().length).flatMap(r=>[...r.querySelectorAll('button,[role=menuitem],[role=option]')]).find(e=>e.getClientRects().length&&e.textContent.trim()===${JSON.stringify(label)}); e?.scrollIntoView({block:'center',behavior:'instant'});})()`,
+    )
+    await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
     const point = await evaluate(
       `(()=>{const roots=[...document.querySelectorAll(${JSON.stringify(parent)})].filter(e=>e.getClientRects().length);const e=roots.flatMap(r=>[...r.querySelectorAll('button,[role=menuitem],[role=option]')]).find(e=>e.getClientRects().length&&e.textContent.trim()===${JSON.stringify(label)});if(!e)throw Error('未找到按钮 '+${JSON.stringify(label)});e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
     )
@@ -343,7 +357,7 @@ try {
   const firstAgent = await agentRequest('register', {
     registrationToken: token,
     version: '1.3.0-browser',
-    capabilities: ['static-site-v1'],
+    capabilities: ['static-site-v1', 'source-archive-recovery-v1'],
   })
   await close()
   await click('#create-button')
@@ -356,7 +370,7 @@ try {
   const secondAgent = await agentRequest('register', {
     registrationToken: secondToken,
     version: '1.3.0-browser',
-    capabilities: ['static-site-v1'],
+    capabilities: ['static-site-v1', 'source-archive-recovery-v1'],
   })
   await close()
   const metrics = {
@@ -378,19 +392,15 @@ try {
   await clickText('取消', '[role=alertdialog]')
   assert.equal(await evaluate(`document.querySelector('#deploy-name').value`), 'API 服务')
   await submit()
-  await visible('#deploy-branch')
+  await visible('#deploy-sourceProjectId')
   const apiService = deployment.data.services.find((s) => s.name === 'API 服务')
   assert.ok(apiService)
   await clickText('稍后继续')
   await visible(`[data-service-id="${apiService.id}"]`)
   await clickText('继续配置', `[data-service-id="${apiService.id}"]`)
-  await visible('#deploy-branch')
-  await fill('#deploy-branch', 'invalid..branch')
-  await click('.deploy-dialog [type=submit]')
-  await visible('.form-error')
-  assert.equal(await evaluate(`document.querySelector('#deploy-branch').value`), 'invalid..branch')
+  await visible('#deploy-sourceProjectId')
+  assert.equal(await evaluate(`Boolean(document.querySelector('#deploy-branch'))`), false)
   assert.equal(deployment.data.environmentSources.length, 0)
-  await fill('#deploy-branch', 'test-branch')
   await submit()
   await visible('#deploy-buildImage')
   assert.equal(deployment.data.services.filter((s) => s.name === 'API 服务').length, 1)
@@ -435,12 +445,16 @@ try {
   await visible(`[data-target-actions="${firstTarget.id}"]`)
   await screenshot('console-services-multiple-desktop.png')
   await clickText('发布', `[data-target-actions="${firstTarget.id}"]`)
+  await visible('#release-branch')
+  await choose('#release-branch', 'test-branch')
   await visible('#confirm-release')
   await until(
     () => evaluate(`!document.querySelector('#confirm-release').disabled`),
     '发布准备完成',
   )
   await click('#confirm-release')
+  await visible('[role=alertdialog]')
+  await clickText('确认', '[role=alertdialog]')
   await visible('#deploy-task-logs')
   await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '源码准备')
   const task = (await agentRequest('claim', {}, firstAgent.token)).task
@@ -507,6 +521,8 @@ try {
       '发布可确认',
     )
     await click('#confirm-release')
+    await visible('[role=alertdialog]')
+    await clickText('确认', '[role=alertdialog]')
     await visible('#deploy-task-logs')
     await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '任务已排队')
     return (await agentRequest('claim', {}, firstAgent.token)).task
@@ -573,12 +589,13 @@ try {
   await choose('#environment-select', '测试')
   await clickText('配置')
   await visible('.configuration-stack')
-  await clickText('编辑运行配置')
+  await clickText('编辑部署配置')
   await fill('#deploy-profile', 'changed-unsaved')
   await choose('#environment-select', '生产')
   await visible('[role=alertdialog]')
   await clickText('取消', '[role=alertdialog]')
   assert.equal(await evaluate(`document.querySelector('#deploy-profile').value`), 'changed-unsaved')
+  await until(() => evaluate(`!document.querySelector('[role=alertdialog]')`), '取消离开提示已关闭')
   await clickText('返回')
   await visible('[role=alertdialog]')
   await clickText('放弃修改并离开', '[role=alertdialog]')
@@ -592,8 +609,7 @@ try {
   await choose('#deploy-kind', '前端静态站点（Vue / React）')
   await fill('#deploy-module', 'web')
   await submit()
-  await visible('#deploy-branch')
-  await fill('#deploy-branch', 'frontend-test')
+  await visible('#deploy-sourceProjectId')
   await submit()
   await visible('#deploy-healthUrl')
   assert.equal(await evaluate(`Boolean(document.querySelector('#deploy-runtimeImage'))`), false)
@@ -615,6 +631,8 @@ try {
     '前端发布准备',
   )
   await click('#confirm-release')
+  await visible('[role=alertdialog]')
+  await clickText('确认', '[role=alertdialog]')
   await visible('#deploy-task-logs')
   await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '前端任务排队')
   const staticTask = (await agentRequest('claim', {}, firstAgent.token)).task
@@ -641,6 +659,58 @@ try {
   // 提交选择、日志补读和任务快照继续兼容。
   await go('release', `?environment=${firstTarget.environmentId}&target=${firstTarget.id}`)
   await visible('#refresh-commits')
+  await until(
+    () => evaluate(`!document.querySelector('#confirm-release').disabled`),
+    '按当前版本预选分支',
+  )
+  assert.ok(
+    await evaluate(`document.querySelector('#release-branch').textContent.includes('test-branch')`),
+  )
+  // 故意让旧分支请求迟到，确认它不能覆盖新分支的提交列表。
+  const originalHistory = builder.history
+  let releaseOldResponse,
+    oldStarted = false,
+    oldReturned = false
+  const oldResponseGate = new Promise((resolve) => {
+    releaseOldResponse = resolve
+  })
+  builder.history = async function (source, credential, refresh) {
+    if (source.branch === 'frontend-test') {
+      oldStarted = true
+      await oldResponseGate
+      oldReturned = true
+      return {
+        commits: [
+          {
+            revision: 'e'.repeat(40),
+            subject: '迟到分支的提交',
+            author: '测试',
+            at: new Date().toISOString(),
+          },
+        ],
+        refreshedAt: new Date().toISOString(),
+      }
+    }
+    return originalHistory.call(this, source, credential, refresh)
+  }
+  await choose('#release-branch', 'frontend-test')
+  await until(() => oldStarted, '旧分支请求开始')
+  assert.equal(await evaluate(`document.querySelector('#confirm-release').disabled`), true)
+  await choose('#release-branch', 'test-branch')
+  await until(
+    () => evaluate(`!document.querySelector('#confirm-release').disabled`),
+    '新分支提交就绪',
+  )
+  releaseOldResponse()
+  await until(() => oldReturned, '旧分支请求返回')
+  await evaluate('new Promise(resolve => setTimeout(resolve, 100))')
+  assert.equal(
+    await evaluate(
+      `document.querySelector('#release-workbench').textContent.includes('迟到分支的提交')`,
+    ),
+    false,
+  )
+  builder.history = originalHistory
   await click('#refresh-commits')
   await visible('[data-commit]')
   const before = deployment.data.tasks.length
@@ -649,7 +719,20 @@ try {
     'true',
   )
   assert.equal(deployment.data.tasks.length, before)
+  version++
+  await click('#refresh-commits')
+  await until(
+    () =>
+      evaluate(
+        `document.querySelector('#release-workbench').textContent.includes('原提交已不在刷新后的列表中')`,
+      ),
+    '刷新后过期提交不能自动替换',
+  )
+  assert.equal(await evaluate(`document.querySelector('#confirm-release').disabled`), true)
+  await click('[data-commit]')
   await click('#confirm-release')
+  await visible('[role=alertdialog]')
+  await clickText('确认', '[role=alertdialog]')
   await visible('#deploy-task-logs')
   await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '固定提交任务排队')
   const pinned = (await agentRequest('claim', {}, firstAgent.token)).task
