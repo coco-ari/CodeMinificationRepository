@@ -104,7 +104,7 @@ test('损坏的旧数据拒绝迁移，不创建空数据库', async t => {
 test('一次性 Agent 注册、过期、撤销与凭据隔离', async t => {
   const f = await fixture(t); const first = await f.deployment.createServer({ name: '只读服务器' });
   const agent = await f.deployment.register({ registrationToken: first.registrationToken, version: 'test' });
-  assert.equal(f.deployment.authenticate(agent.token), agent.serverId); assert.equal(agent.mode, 'observe');
+  assert.equal(f.deployment.authenticate(agent.token), agent.serverId); assert.equal(agent.mode, 'managed');
   await assert.rejects(f.deployment.register({ registrationToken: first.registrationToken }), { status: 401 });
   const expired = await f.deployment.createServer({ name: '过期服务器' });
   await f.repository.store.change(state => { state.deployments.servers.find(server => server.id === expired.server.id).registrationExpiresAt = '2000-01-01T00:00:00Z'; });
@@ -153,38 +153,38 @@ test('保留身份升级 Agent 后心跳更新版本，旧客户端省略版本�
   await f.deployment.heartbeat(agent.serverId, { containers: [] }); assert.equal(f.deployment.overview().servers[0].version, '2.0.0');
 });
 
-test('观察目标只上报登记容器，禁止发布、重启、回退及转换管理模式', async t => {
-  const f = await fixture(t); const records = await targetFixture(f, 'observe');
-  for (const action of ['deploy', 'restart', 'rollback']) await assert.rejects(f.deployment.createTask({ targetId: records.target.id, action }), { status: 403 });
-  await f.deployment.heartbeat(records.agent.serverId, { metrics: { memory: { total: 1000 } }, containers: [{ targetId: records.target.id, status: 'running', health: 'healthy' }, { targetId: 'unregistered', status: 'running' }] });
-  assert.equal(f.deployment.overview().servers[0].containers.length, 1); assert.equal(f.deployment.overview().targets[0].observation.health, 'healthy');
-  assert.equal(await f.deployment.claim(records.agent.serverId), null);
-  await assert.rejects(f.deployment.saveEntity('targets', { ...records.target, mode: 'managed' }, records.target.id), { status: 400 });
+test('默认接入即可部署，拒绝重新创建监控模式及外部容器目标', async t => {
+  const f = await fixture(t); const records = await targetFixture(f);
+  assert.equal(records.agent.mode, 'managed');
+  await assert.rejects(f.deployment.createServer({ name: '旧模式', mode: 'observe' }), { status: 400 });
+  await assert.rejects(f.deployment.saveEntity('targets', { ...records.target, mode: 'observe' }), { status: 400 });
+  const task = await ready(f, records.target.id);
+  assert.equal((await f.deployment.claim(records.agent.serverId)).id, task.id);
+  await f.deployment.close(); await f.repository.store.close();
 });
 
-test('保留 Agent 身份启用平台部署，原 Jenkins 观察目标不变，任务执行时禁止切换', async t => {
-  const f = await fixture(t), records = await targetFixture(f, 'observe');
-  const before = structuredClone(f.deployment.data.targets.find(item => item.id === records.target.id));
-  const changed = await f.deployment.setServerMode(records.agent.serverId, { mode: 'managed' });
-  assert.equal(changed.mode, 'managed'); assert.equal(changed.tokenHash, undefined);
-  assert.equal(f.deployment.authenticate(records.agent.token), records.agent.serverId);
-  assert.deepEqual(f.deployment.data.targets.find(item => item.id === records.target.id), before);
-  assert.equal(f.deployment.assignment(records.agent.serverId).mode, 'managed');
-  await assert.rejects(f.deployment.createTask({ targetId: before.id, action: 'deploy' }), { status: 403 });
-  const service = await f.deployment.saveEntity('services', { applicationId: records.application.id, name: '验证副本', module: 'demo' });
-  const target = await f.deployment.saveEntity('targets', { environmentId: records.environment.id, serviceId: service.id, serverId: records.agent.serverId, mode: 'managed', config: {} });
-  const task = await ready(f, target.id); await f.deployment.claim(records.agent.serverId);
-  await assert.rejects(f.deployment.setServerMode(records.agent.serverId, { mode: 'observe' }), { status: 409 });
-  await f.deployment.events(records.agent.serverId, task.id, { seq: 1, stage: 'failed', message: '结束验证任务' });
-  await f.deployment.setServerMode(records.agent.serverId, { mode: 'observe' });
-  await assert.rejects(f.deployment.createTask({ targetId: target.id, action: 'deploy' }), { status: 403 });
-  assert.equal(f.deployment.data.targets.find(item => item.id === target.id).mode, 'managed');
-  assert.equal(f.repository.store.state.events.filter(item => item.action === 'server-mode').length, 2);
-  await f.deployment.setServerMode(records.agent.serverId, { mode: 'observe' });
-  assert.equal(f.repository.store.state.events.filter(item => item.action === 'server-mode').length, 2);
-  await f.deployment.revokeServer(records.agent.serverId);
-  await assert.rejects(f.deployment.setServerMode(records.agent.serverId, { mode: 'managed' }), { status: 409 });
-  await f.deployment.close(); await f.repository.store.close();
+test('旧监控记录升级后停止下发并保留身份和历史，不接管外部容器', async t => {
+  const f = await fixture(t); const records = await targetFixture(f);
+  await f.repository.store.change(state => {
+    const d=state.deployments;
+    d.servers.find(s=>s.id===records.agent.serverId).mode='observe';
+    Object.assign(d.targets.find(x=>x.id===records.target.id),{mode:'observe',owner:'Jenkins',containerName:'jenkins-api'});
+  });
+  await f.deployment.close();
+  const next = new DeploymentService(f.repository); await next.initialize();
+  assert.equal(next.authenticate(records.agent.token), records.agent.serverId);
+  assert.equal(next.assignment(records.agent.serverId).mode, 'managed');
+  assert.deepEqual(next.assignment(records.agent.serverId).targets, []);
+  assert.deepEqual(next.overview().targets, []);
+  const retired=next.data.targets.find(x=>x.id===records.target.id);
+  assert.ok(retired.retiredAt); assert.equal(retired.containerName,'jenkins-api'); assert.equal(retired.owner,'Jenkins');
+  for(const action of ['deploy','restart','rollback']) await assert.rejects(next.createTask({targetId:retired.id,action}),{status:403});
+  await assert.rejects(next.saveEntity('targets',{...retired,mode:'managed'},retired.id),{status:400});
+  await next.heartbeat(records.agent.serverId,{containers:[{targetId:retired.id,status:'running'}]});
+  assert.deepEqual(next.overview().servers[0].containers,[]);
+  const replacement=await next.saveEntity('targets',{environmentId:records.environment.id,serviceId:records.service.id,serverId:records.agent.serverId,config:{}});
+  assert.equal(replacement.mode,'managed'); assert.notEqual(replacement.containerName,'jenkins-api');
+  await next.close(); await f.repository.store.close();
 });
 
 test('部署配置拒绝目录逃逸、外部容器名称及跨项目目标', async t => {
@@ -307,7 +307,7 @@ test('成功版本、失败回退和手动回退具有独立结果且保留来�
 });
 
 test('心跳过期只标记失联，不把最后业务健康状态误报为停止', async t => {
-  const f = await fixture(t); const records = await targetFixture(f, 'observe');
+  const f = await fixture(t); const records = await targetFixture(f);
   await f.deployment.heartbeat(records.agent.serverId, { containers: [{ targetId: records.target.id, status: 'running', health: 'healthy' }] });
   assert.equal(f.deployment.overview().servers[0].online, true);
   await f.repository.store.change(state => { state.deployments.servers[0].lastSeenAt = new Date(Date.now() - 61000).toISOString(); });
@@ -360,10 +360,10 @@ test('HTTP 管理接口沿用登录与 CSRF，Agent 来源文件严格隔离', a
   assert.equal((await request(removePath, 'DELETE', null, auth)).status, 200);
   assert.equal((await request(removePath, 'DELETE', null, auth)).status, 404);
   const f = { repository: app.service, deployment: app.deployment }; const first = await targetFixture(f); const other = await targetFixture(f); const task = await ready(f, first.target.id); await app.deployment.claim(first.agent.serverId);
-  const observer = await targetFixture(f, 'observe');
+  const observer = await targetFixture(f);
   assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, { Cookie: auth.Cookie })).status, 403);
-  assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, auth)).status, 200);
-  assert.equal(app.deployment.data.targets.find(item => item.id === observer.target.id).mode, 'observe');
+  assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, auth)).status, 404);
+  assert.equal(app.deployment.data.targets.find(item => item.id === observer.target.id).mode, 'managed');
   const own = await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, { Authorization: `Bearer ${first.agent.token}` }); assert.equal(own.status, 200); assert.equal(await own.text(), '测试源码第一版');
   assert.equal((await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, { Authorization: `Bearer ${other.agent.token}` })).status, 403);
   assert.equal((await request('/api/deploy/overview', 'GET', null, { Authorization: `Bearer ${first.agent.token}` })).status, 401);

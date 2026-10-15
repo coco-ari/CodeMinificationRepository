@@ -32,7 +32,9 @@
 | `GET /api/workspaces/{workspaceId}/events` | 本项目 SSE 更新通知；共享服务器心跳会通知绑定的项目，不包含其他项目目标或任务详情 |
 | `GET /api/credentials` | 可供仓库表单选择的共享凭证元数据，不含密码 |
 
-系统级 `PUT /api/deploy/servers/{serverId}/mode` 接收 `{mode: "observe" | "managed"}`，沿用管理员会话和 CSRF。它保留 Agent 身份与已有目标模式，并记录全局操作事件；有未完成任务或服务器已撤销时返回 409。已有观察目标不会因服务器启用平台管理而获得发布权限。
+服务器和部署目标默认直接用于平台部署，不再提供模式选择或切换接口。创建请求可省略 `mode`；为兼容旧客户端仍接受 `managed`，其他值返回 400。旧监控目标升级后停止下发并保留历史，不能转换为平台目标。
+
+系统级 `DELETE /api/deploy/servers/{serverId}` 删除已撤销且无部署目标、发布历史的服务器记录，同时清理空项目绑定并记录审计。仍沿用管理员会话和 CSRF。
 
 仓库字段为 `{name, repository, branch, credentialId?, enabled?}`。`branch` 是默认下载分支，环境服务配置中的 `branch` 是发布分支。关联键为 `(environmentId, serviceId)`，同环境同服务的不同服务器共用该源码选择。
 

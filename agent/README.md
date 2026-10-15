@@ -4,7 +4,7 @@ Agent 主动通过 HTTPS 接入中心，不开放入站端口。Linux、Docker E
 
 Agent 1.1.0 增加 `static-site-v1` 能力，支持 Vue / React 静态产物部署到已有 Docker Nginx。只启动临时 Node 构建容器，不创建或操作共用 Nginx。首次目录挂载及站点配置由运维完成，参见 [前端部署与升级说明](../examples/static-sites.md)。
 
-Agent 挂载 `/var/run/docker.sock`，具有近似宿主机 root 的容器管理能力。请只在受信任的内部服务器安装。仅观察模式会同时在中心和 Agent 拒绝所有部署、重启、回退及清理动作。Agent 仅检查明确登记的容器；不能把监控失联理解为业务停止。
+Agent 挂载 `/var/run/docker.sock`，具有近似宿主机 root 的容器管理能力。请只在受信任的内部服务器安装。Agent 只接受平台分配的部署目标，变更前核对资源归属标签，拒绝修改外部容器。不能把监控失联理解为业务停止。
 
 ## 接入和升级
 

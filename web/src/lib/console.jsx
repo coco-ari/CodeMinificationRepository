@@ -52,7 +52,6 @@ export const size = (bytes) =>
   Number.isFinite(Number(bytes)) && bytes != null
     ? `${(Number(bytes) / 1024 ** 3).toFixed(1)} GB`
     : '—'
-export const modeName = (mode) => (mode === 'managed' ? '平台管理' : '仅监控')
 export const actionNames = { deploy: '发布', restart: '重启', rollback: '回退' }
 export const statusNames = {
   preparing: '准备源码',

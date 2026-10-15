@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
@@ -95,7 +95,7 @@ export function assertManaged(identity, task) {
   identifier(task.id, '任务'); identifier(task.targetId, '部署目标');
   const target = identity.targets?.find(t => t.id === task.targetId);
   if (identity.mode !== 'managed' || !target || target.mode !== 'managed' || (task.serverId && task.serverId !== identity.serverId)
-    || (target.serverId && target.serverId !== identity.serverId)) throw new Error('仅观察模式禁止发布、重启、回退和清理');
+    || target.retiredAt || (target.serverId && target.serverId !== identity.serverId)) throw new Error('目标不属于平台，禁止发布、重启、回退和清理');
   if (!['deploy', 'restart', 'rollback'].includes(task.action)) throw new Error('任务操作无效');
   return target;
 }

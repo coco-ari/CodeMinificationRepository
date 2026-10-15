@@ -19,7 +19,6 @@ import {
   useConsole,
   date,
   short,
-  modeName,
   actionNames,
   copy,
   downloadPage,
@@ -291,10 +290,7 @@ function BindingForm({ onClose }) {
           name="serverId"
           label="服务器"
           required
-          choices={candidates.map((s) => [
-            s.id,
-            `${s.name} · ${modeName(s.mode)} · ${s.online ? '在线' : '未在线'}`,
-          ])}
+          choices={candidates.map((s) => [s.id, `${s.name} · ${s.online ? '在线' : '未在线'}`])}
         />
       ) : (
         <Notice>暂无可绑定的服务器，请先接入新服务器。</Notice>
@@ -450,18 +446,8 @@ export function Dialogs({ value, onClose }) {
         }}
       >
         <Field name="name" label="服务器名称" required maxLength={80} />
-        <Field
-          name="mode"
-          label="平台权限"
-          defaultValue="observe"
-          choices={[
-            ['observe', '仅监控（不执行部署）'],
-            ['managed', '平台管理'],
-          ]}
-        />
         <Notice>
-          Agent 需要 Linux、Docker 和
-          Compose。仅监控：采集服务器和已登记容器的状态，不执行发布、重启或回退。平台管理：允许为平台管理的服务构建、部署、重启和回退，不会自动接管现有容器。
+          Agent 需要 Linux、Docker 和 Compose。接入后可创建服务并部署，平台只操作自己创建的容器。
         </Notice>
       </FormDialog>
     )

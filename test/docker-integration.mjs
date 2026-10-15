@@ -94,10 +94,9 @@ try {
   const service = await api(`${workspacePath}/services`, { name: '演示 Java 服务', module: '.' });
   await api(`${workspacePath}/environment-sources`, { environmentId: environment.id, serviceId: service.id, sourceProjectId: source.id, branch: 'main' }, 'PUT');
   const first = await api(`${workspacePath}/servers`, { name: '验收部署节点', mode: 'managed' });
-  const second = await api(`${workspacePath}/servers`, { name: '验收观察节点', mode: 'observe' });
+  const second = await api(`${workspacePath}/servers`, { name: '验收隔离节点' });
   const config = { artifactPath: 'target/demo.jar', buildImage, runtimeImage: buildImage, jvmArgs: ['-Xms32m', '-Xmx96m'], profile: '', args: [], ports: [], networks: [], volumes: [], build: { cpus: 1, memoryMb: 768 }, runtime: { cpus: 0.5, memoryMb: 192 }, health: { path: '/health', port: 18081, status: 200, bodyIncludes: 'cmr-demo-ready', timeoutSeconds: 45, intervalSeconds: 2 } };
   const target = await api(`${workspacePath}/targets`, { environmentId: environment.id, serviceId: service.id, serverId: first.server.id, mode: 'managed', config }); targets.push(target);
-  const observed = await api(`${workspacePath}/targets`, { environmentId: environment.id, serviceId: service.id, serverId: second.server.id, mode: 'observe', containerName: target.containerName, config });
   mavenCacheDirectory = `${workRoot}/agent-0/cache/${project.id}/maven`;
   const seedCache = process.env.CMR_IT_SEED_MAVEN_CACHE;
   if (seedCache) {
@@ -111,13 +110,13 @@ try {
     await docker(['exec', name, 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; const root=process.argv[1]; await fs.chmod(root, 0o755); await fs.writeFile(root+"/.cmr-static-root", root, {mode:0o644});', `${directory}-static`]);
   }
   await until(async () => (await api('/api/deploy/overview')).servers.every(server => server.online), '两个 Agent 注册', 90000);
-  for (const action of ['deploy', 'restart', 'rollback']) await assert.rejects(api(`${workspacePath}/tasks`, { targetId: observed.id, action }), { status: 403 });
+  await assert.rejects(api(`${workspacePath}/targets`, { environmentId: environment.id, serviceId: service.id, serverId: second.server.id, mode: 'observe', containerName: target.containerName, config }), { status: 400 });
   const publish = async () => waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task.id);
   const good = await publish(); assert.equal(good.status, 'succeeded');
   if (good.detailedAgentStages) assert.ok(good.stageHistory.some(entry => entry.stage === 'image' && Number.isFinite(entry.durationMs)), '新 Agent 应独立上报镜像构建耗时');
   const inspected = JSON.parse(await docker(['inspect', target.containerName]))[0]; assert.equal(inspected.State.Health.Status, 'healthy');
-  await until(async () => (await api('/api/deploy/overview')).targets.find(item => item.id === observed.id)?.observation?.health === 'healthy', '只读节点上报业务健康状态', 45000);
-  scenarios.push({ name: '两个 Agent 接入、观察隔离和真实健康状态', passed: true });
+  assert.deepEqual((await api('/api/deploy/overview')).servers.find(s=>s.id===second.server.id).containers, []);
+  scenarios.push({ name: '两个 Agent 接入、空节点隔离和真实健康状态', passed: true });
   const restart = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'restart' })).task.id); assert.equal(restart.status, 'succeeded');
   await docker(['restart', agents[0]]);
   await until(async () => JSON.parse(await docker(['inspect', agents[0]]))[0].State.Running, 'Agent 重启');
@@ -246,7 +245,7 @@ try {
   assert.equal(await docker(['ps', '-aq', '--filter', `label=io.cmr.target=${frontend.id}`]), '');
   scenarios.push({ name: '真实 Node 构建、共用 Nginx 静态版本切换、手动与失败回退、后端转发和 Nginx 持续运行', passed: true, nginxId: nginxBefore.Id });
   passed = true;
-  console.log('真实 Docker 验收通过：Java 与前端发布、共用 Nginx、自动和手动回退、中心离线和重启、日志补报、Agent 崩溃恢复、观察隔离。');
+  console.log('真实 Docker 验收通过：Java 与前端发布、共用 Nginx、自动和手动回退、中心离线和重启、日志补报、Agent 崩溃恢复、资源归属隔离。');
 } finally {
   const artifactDirectory = path.join(repo, '.test-artifacts'); await mkdir(artifactDirectory, { recursive: true });
   for (const name of agents) {

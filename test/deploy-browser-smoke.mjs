@@ -104,14 +104,14 @@ try {
   await click('#auth-form [type=submit]'); await visible('#app-view');
   await click(`[data-workspace-id="${initialProject.id}"] button`); await until(() => evaluate('document.querySelector("#workspace-name").textContent === "SOL 标准版"'), '进入项目');
   await click('[data-view=servers]'); await visible('#deploy-view'); await click('#create-button'); await visible('.deploy-dialog');
-  assert.equal(await evaluate('document.querySelector("#deploy-mode").value'), 'observe');
+  assert.equal(await evaluate('Boolean(document.querySelector("#deploy-mode"))'), false);
   await fill('#deploy-name', 'SOL 测试服务器 · Jenkins'); await click('.deploy-dialog [type=submit]');
   await visible('#deploy-installCommand');
   const commandValue = await evaluate('document.querySelector("#deploy-installCommand").value');
   const observeToken = commandValue.match(/'([A-Za-z0-9_-]{43})'$/)[1];
   const observeAgent = await agentRequest('register', { registrationToken: observeToken, version: '1.0.0-browser' });
   await closeModal(); assert.ok(!await evaluate(`document.body.textContent.includes(${JSON.stringify(observeToken)})`));
-  await click('#create-button'); await fill('#deploy-name', '独立验证服务器'); await fill('#deploy-mode', 'managed');
+  await click('#create-button'); await fill('#deploy-name', '独立验证服务器');
   await click('.deploy-dialog [type=submit]'); await visible('#deploy-installCommand');
   const managedToken = (await evaluate('document.querySelector("#deploy-installCommand").value')).match(/'([A-Za-z0-9_-]{43})'$/)[1];
   const managedAgent = await agentRequest('register', { registrationToken: managedToken, version: '1.1.0-browser', capabilities: ['static-site-v1'] }); await closeModal();
@@ -120,19 +120,19 @@ try {
   await click('.deploy-dialog [type=submit]'); await saved();
   await clickText('配置当前环境源码', '#deploy-view'); await fill('#deploy-branch', 'main'); await click('.deploy-dialog [type=submit]'); await saved();
   await click('[data-view=deployments]'); await click('#create-button');
-  await fill('#deploy-containerName', 'solstandard-java-brezze-api-1'); await click('.deploy-dialog [type=submit]'); await saved();
-  const observed = deployment.data.targets.find(item => item.mode === 'observe');
+  assert.equal(await evaluate('Boolean(document.querySelector("#deploy-containerName"))'),false); await click('.deploy-dialog [type=submit]'); await saved();
+  const observed = deployment.data.targets.find(item => item.serverId === observeAgent.serverId);
   const metrics = { cpuPercent: 18.5, memory: { used: 2.1 * 1024 ** 3, total: 3.5 * 1024 ** 3 }, disk: { used: 17 * 1024 ** 3, total: 50 * 1024 ** 3 } };
   await agentRequest('heartbeat', { metrics, containers: [{ targetId: observed.id, containerName: observed.containerName, status: 'running', health: 'healthy', restartCount: 0, image: 'solstandard/brezze-api:jenkins', observedAt: new Date().toISOString() }] }, observeAgent.token);
   await until(() => evaluate(`document.querySelector('[data-target-id="${observed.id}"]').textContent.includes('健康')`), '观察状态更新');
-  assert.equal(await evaluate(`Array.from(document.querySelector('[data-target-id="${observed.id}"]').querySelectorAll('.card-actions button')).slice(0,3).every(item=>item.disabled)`), true);
-  await click('#create-button'); await fill('#deploy-serverId', managedAgent.serverId); await fill('#deploy-mode', 'managed');
+  assert.equal(observed.mode,'managed');
+  await click('#create-button'); await fill('#deploy-serverId', managedAgent.serverId);
   assert.equal(await evaluate('document.querySelector("#deploy-artifactPath").value'), 'brezze-api/target/*.jar');
   await fill('#deploy-healthPath', '/api/swagger-resources'); await fill('#deploy-healthBody', 'swaggerVersion');
   await fill('#deploy-jvmArgs', '-Duser.timezone=Asia/Shanghai\n-XX:+ExitOnOutOfMemoryError\n-Dsun.net.inetaddr.ttl=60');
   await fill('#deploy-args', '--spring.cloud.nacos.discovery.server-addr=shared-nacos.test.internal:8848\n--spring.profiles.active=test');
   await click('.deploy-dialog [type=submit]'); await saved();
-  const managed = deployment.data.targets.find(item => item.mode === 'managed');
+  const managed = deployment.data.targets.find(item => item.serverId === managedAgent.serverId);
   assert.equal(managed.config.health.path, '/api/swagger-resources'); assert.equal(managed.config.runtime.memoryMb, 512);
   await agentRequest('heartbeat', { metrics, containers: [] }, managedAgent.token);
   await until(() => evaluate(`!document.querySelector('[data-target-id="${managed.id}"] .card-actions button:first-child').disabled`), '平台目标可发布');
@@ -177,7 +177,7 @@ try {
   }
   await click('[data-view=deployments]'); await visible('[data-target-id]'); await screenshot('deploy-targets-mobile.png');
   await clickText('编辑配置', `[data-target-id="${observed.id}"]`);
-  assert.equal(await evaluate('document.querySelector("#deploy-mode").disabled'), true); await closeModal();
+  assert.equal(await evaluate('Boolean(document.querySelector("#deploy-mode"))'), false); await closeModal();
   await service.store.change(state => { state.deployments.servers.find(item => item.id === observeAgent.serverId).lastSeenAt = new Date(Date.now() - 120000).toISOString(); });
   deployment.changed('heartbeat', observeAgent.serverId);
   await until(() => evaluate(`document.querySelector('[data-target-id="${observed.id}"]').textContent.includes('当前待确认')`), '失联不误报业务停止');
@@ -217,7 +217,7 @@ try {
   await clickText('配置当前环境源码', `[data-service-id="${staticService.id}"]`);
   await fill('#deploy-branch', 'frontend-test'); await click('.deploy-dialog [type=submit]'); await saved();
   await click('[data-view=deployments]'); await click('#create-button');
-  await fill('#deploy-serviceId', staticService.id); await fill('#deploy-serverId', managedAgent.serverId); await fill('#deploy-mode', 'managed');
+  await fill('#deploy-serviceId', staticService.id); await fill('#deploy-serverId', managedAgent.serverId);
   await visible('#deploy-healthUrl');
   assert.equal(await evaluate('document.querySelector("#deploy-artifactPath").value'), 'web/dist');
   assert.equal(await evaluate('document.querySelector("#deploy-buildImage").value'), 'node:24-bookworm-slim');
@@ -250,7 +250,7 @@ try {
   await agentRequest(`tasks/${staticTask.id}/events`, { seq: 2, stage: 'verifying', status: 'succeeded', message: '共用 Nginx 已返回本次版本', result: { release: { id: staticTask.id, kind: 'static', artifact: `static/${staticTarget.id}/${staticTask.id}`, revision: staticTask.revision, config: staticTask.config } } }, managedAgent.token);
   await until(() => evaluate('document.querySelector("#deploy-task-result").textContent.includes("静态版本")'), '前端版本结果');
   await screenshot('static-release-desktop.png'); await closeModal();
-  // 系统级能力切换不能把已有 Jenkins 观察目标变成受管目标，也不能更换 Agent 身份。
+  // 服务器接入后直接提供部署能力，临时记录仍可撤销删除。
   await click('[data-view=system-servers]');
   const disposable = await deployment.createServer({ name: '临时验收待删除' });
   await deployment.revokeServer(disposable.server.id);
@@ -263,21 +263,9 @@ try {
   await clickText('确认', '[role=alertdialog]');
   await until(() => !deployment.data.servers.some(s => s.id === disposable.server.id), '删除临时验收服务器');
   await until(() => evaluate(`!document.querySelector('${disposableCard}')`), '移除服务器卡片');
-  const observedServerCard = `[data-server-id="${observeAgent.serverId}"]`;
-  await visible(observedServerCard);
-  await clickText('启用平台部署', observedServerCard); await visible('[role=alertdialog]');
-  assert.match(await evaluate('document.querySelector("[role=alertdialog]").textContent'), /现有仅监控目标保持只读/);
-  await clickText('确认', '[role=alertdialog]');
-  await until(() => deployment.data.servers.find(item => item.id === observeAgent.serverId).mode === 'managed', '启用平台部署');
-  await until(() => evaluate('!document.querySelector("[role=alertdialog]")'), '关闭模式确认');
-  assert.equal(deployment.authenticate(observeAgent.token), observeAgent.serverId);
-  assert.equal(deployment.data.targets.find(item => item.id === observed.id).mode, 'observe');
-  await clickText('切换为仅监控', observedServerCard); await visible('[role=alertdialog]');
-  await clickText('确认', '[role=alertdialog]');
-  await until(() => deployment.data.servers.find(item => item.id === observeAgent.serverId).mode === 'observe', '恢复仅观察');
-  await until(() => evaluate('!document.querySelector("[role=alertdialog]")'), '关闭模式确认');
-  assert.equal(deployment.authenticate(observeAgent.token), observeAgent.serverId);
-  assert.equal(deployment.data.targets.find(item => item.id === observed.id).containerName, 'solstandard-java-brezze-api-1');
+  assert.equal(await evaluate("document.body.textContent.includes('仅监控')"),false);
+  assert.equal(await evaluate("document.body.textContent.includes('启用平台部署')"),false);
+  assert.equal(deployment.authenticate(observeAgent.token),observeAgent.serverId);
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await until(() => evaluate('!document.querySelector("[data-slot=sidebar-gap]")'), '响应式导航切换到手机');
   await click('[data-view=home]'); await visible('#workspace-home');
@@ -386,7 +374,7 @@ try {
   await screenshot('prototype-home-mobile.png');
   assert.deepEqual(errors, []);
   assert.ok(!warnings.some(item => /Content Security Policy|Refused to/.test(item)), warnings.join('\n'));
-  console.log('部署浏览器验证通过：服务器接入、系统管理模式切换保留身份和观察目标、项目/环境/服务配置、观察权限、平台模板发布、SSE 日志、阶段耗时、历史版本回退、失联状态、日志转义、前端静态服务与共用 Nginx 配置、桌面与手机布局。');
+  console.log('部署浏览器验证通过：服务器接入、默认接入即可部署、移除模式选择、项目/环境/服务配置、资源归属检查、平台模板发布、SSE 日志、阶段耗时、历史版本回退、失联状态、日志转义、前端静态服务与共用 Nginx 配置、桌面与手机布局。');
   console.log(`截图目录：${artifactDirectory}`);
 } finally {
   socket?.close(); browser.kill();

@@ -129,16 +129,16 @@ test('中心真实断网与重启期间 Agent 继续已领取部署，重连只�
   const identity = JSON.parse(await readFile(path.join(runner.root, 'identity.json'), 'utf8')); assert.equal(identity.token, runner.identity.token);
 });
 
-test('两个真实 HTTP Agent 只能领取自己的任务，观察 Agent 无写入权限', async t => {
-  const f = await fixture(t); const one = await f.agent('agent-a'); const two = await f.agent('agent-b'); const observer = await f.agent('agent-observe', 'observe');
-  const first = await f.target(one, '甲'); const second = await f.target(two, '乙'); const observed = await f.target(observer, '观察');
+test('两个真实 HTTP Agent 只能领取自己的任务，空节点不操作其他容器', async t => {
+  const f = await fixture(t); const one = await f.agent('agent-a'); const two = await f.agent('agent-b'); const observer = await f.agent('agent-idle');
+  const first = await f.target(one, '甲'); const second = await f.target(two, '乙');
   const taskA = await f.task(first); const taskB = await f.task(second);
   const claimed = (await one.client.post('claim')).task; assert.equal(claimed.id, taskA.id);
   const invalid = await fetch(`${f.url}/api/agent/v1/tasks/${taskA.id}/source`, { headers: { authorization: `Bearer ${two.identity.token}` } }); assert.equal(invalid.status, 403);
   await Promise.all([one.tick(), two.tick()]);
   assert.equal((await f.request(`/api/deploy/tasks/${taskA.id}`)).task.status, 'succeeded'); assert.equal((await f.request(`/api/deploy/tasks/${taskB.id}`)).task.status, 'succeeded');
-  const response = await fetch(`${f.url}/api/deploy/tasks`, { method: 'POST', headers: { ...f.auth, 'content-type': 'application/json' }, body: JSON.stringify({ targetId: observed.id, action: 'deploy' }) }); assert.equal(response.status, 403);
-  const calls = f.docker.calls.length; await observer.heartbeat(); assert.ok(f.docker.calls.slice(calls).every(call => call[0] === 'inspect'));
+  assert.equal((await observer.client.post('claim')).task,null);
+  const calls=f.docker.calls.length;await observer.heartbeat();assert.deepEqual(f.docker.calls.slice(calls),[]);
 });
 
 test('Agent 实例重建后中断编译明确失败，已更新容器只核验不重复发布', async t => {

@@ -100,7 +100,7 @@ export class WorkspaceService {
   }
   list() {
     return this.data.applications.map(project => {
-      const targets = this.data.targets.filter(item => item.applicationId === project.id);
+      const targets = this.deployment.overview().targets.filter(item => item.applicationId === project.id);
       const tasks = this.data.tasks.filter(item => item.applicationId === project.id);
       const overview = this.overview(project.id);
       const dashboard = {
@@ -121,7 +121,7 @@ export class WorkspaceService {
     const project = this.project(applicationId), all = this.deployment.overview();
     const scoped = items => items.filter(item => item.applicationId === applicationId);
     const bound = new Set(scoped(this.data.serverBindings).map(item => item.serverId));
-    const targets = scoped(this.data.targets), targetIds = new Set(targets.map(item => item.id));
+    const targets = scoped(all.targets), targetIds = new Set(targets.map(item => item.id));
     const taskIds = new Set(scoped(this.data.tasks).map(item => item.id));
     return { project, repositories: scoped(this.store.state.projects).map(safeRepository),
       servers: all.servers.filter(item => bound.has(item.id)).map(item => ({ ...item,

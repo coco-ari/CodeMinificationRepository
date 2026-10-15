@@ -33,7 +33,7 @@ export class AgentRunner {
       const token = this.registrationToken || (this.registrationTokenFile ? (await readFile(this.registrationTokenFile, 'utf8')).trim() : '');
       if (!token) throw new Error('首次启动需要中心生成的一次性注册令牌');
       const registered = await this.client.register(token); identifier(registered.serverId);
-      if (typeof registered.token !== 'string' || registered.token.length < 32 || !['managed', 'observe'].includes(registered.mode)) throw new Error('中心注册响应无效');
+      if (typeof registered.token !== 'string' || registered.token.length < 32 || registered.mode !== 'managed') throw new Error('中心注册响应无效');
       this.identity = { ...registered, targets: registered.targets || [], centerUrl: new URL(this.centerUrl).origin, registeredAt: new Date().toISOString() };
       await this.saveIdentity(); this.client.token = this.identity.token;
     }
@@ -53,7 +53,7 @@ export class AgentRunner {
     const started = performance.now();
     const response = await this.client.post('heartbeat', { version: VERSION, capabilities: CAPABILITIES, metrics, containers, activeTaskId: this.activeTaskId });
     this.centerRttMs = Math.max(0, Math.round(performance.now() - started));
-    if (!['managed', 'observe'].includes(response.mode) || !Array.isArray(response.targets)) throw new Error('中心心跳响应无效');
+    if (response.mode !== 'managed' || !Array.isArray(response.targets)) throw new Error('中心心跳响应无效');
     this.identity.mode = response.mode; this.identity.targets = response.targets; await this.saveIdentity();
   }
   async flushEvents() {

@@ -251,8 +251,7 @@ export function ConfigurationPage() {
           </Card>
           <div className="flex justify-between gap-3">
             <span className="text-sm text-muted-foreground">
-              {find('servers', target.serverId)?.name} ·{' '}
-              {target.mode === 'observe' ? '仅监控' : '平台管理'}
+              {find('servers', target.serverId)?.name}
             </span>
             <Button variant="outline" onClick={() => open('target', target)}>
               编辑运行配置
@@ -744,9 +743,7 @@ export function ReleaseWorkbench() {
             </Action>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {!managed
-                ? target.mode === 'observe'
-                  ? '此目标由 Jenkins / 外部管理，仅供查看。'
-                  : '服务器离线或未启用平台部署。'
+                ? '服务器离线、接入已撤销或目标已停用。'
                 : action === 'rollback'
                   ? '恢复所选成功版本的产物和运行配置。'
                   : '本次只操作这个部署目标。提交任务后固定源码与配置。'}

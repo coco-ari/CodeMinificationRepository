@@ -51,7 +51,6 @@ import {
   date,
   size,
   short,
-  modeName,
   finished,
   resultName,
   actionNames,
@@ -389,15 +388,11 @@ export function Servers() {
                   </Status>
                 </div>
                 <CardTitle>{server.name}</CardTitle>
-                <CardDescription>
-                  {modeName(server.mode)}
-                  {scope ? ' · 主机指标' : ''}
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <HostResources server={server} />
                 <p className="text-xs text-muted-foreground">
-                  Agent {server.version || '等待接入'} · {modeName(server.mode)}
+                  Agent {server.version || '等待接入'}
                 </p>
                 <p className="border-t pt-3 text-xs text-muted-foreground">
                   最近采集：{date(server.lastSeenAt)}
@@ -414,32 +409,6 @@ export function Servers() {
                     onClick={() => setSelectedServer(selectedServer === server.id ? '' : server.id)}
                   >
                     查看服务器
-                  </Button>
-                )}
-                {!scope && !server.revoked && (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      confirm(
-                        server.mode === 'observe' ? '启用平台部署' : '切换为仅监控',
-                        server.mode === 'observe'
-                          ? `允许在「${server.name}」新建平台管理目标。现有仅监控目标保持只读，Agent 身份保持不变。`
-                          : `暂停「${server.name}」的平台发布能力。已有容器继续运行，目标配置与版本记录保留。`,
-                        async () => {
-                          await request(
-                            `/api/deploy/servers/${server.id}/mode`,
-                            {
-                              mode: server.mode === 'observe' ? 'managed' : 'observe',
-                            },
-                            'PUT',
-                          )
-                          await refresh()
-                          notify('服务器管理方式已更新，Agent 将在心跳时同步')
-                        },
-                      )
-                    }
-                  >
-                    {server.mode === 'observe' ? '启用平台部署' : '切换为仅监控'}
                   </Button>
                 )}
                 {!scope && server.revoked && (
@@ -699,11 +668,6 @@ export function Targets({ compact = false, serverId }) {
                         {find('environments', target.environmentId)?.name}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground md:hidden">{server?.name}</p>
-                      {target.mode === 'observe' && (
-                        <Badge variant="secondary" className="mt-2">
-                          仅监控 · 外部部署
-                        </Badge>
-                      )}
                     </TableCell>
                     <TableCell className="hidden max-w-44 whitespace-normal text-xs md:table-cell">
                       <p>{server?.name}</p>

@@ -324,20 +324,23 @@ test('网络客户端下载仅允许当前中心任务地址并校验 SHA-256', 
   await assert.rejects(client.download({ ...value, source: { ...value.source, sha256: '0'.repeat(64) } }, path.join(root, 'wrong.zip')), /校验失败/);
 });
 
-test('监控只读取登记目标，保持 Jenkins 管理容器只读', async t => {
+test('不再采集旧外部目标，只采集平台目标和主机资源', async t => {
   const { root, docker } = await fixture(t), monitoringIdentity = identity('observe');
   docker.containers.set('jenkins-service', { Config: { Image: 'jenkins/app:1', Labels: {} }, State: { Status: 'running', Health: { Status: 'healthy' }, StartedAt: 'yesterday' }, RestartCount: 2 });
   const monitor = new Monitor({ root, docker, procRoot: root });
   const containers = await monitor.containers(monitoringIdentity);
-  assert.equal(containers[0].managed, false); assert.equal(containers[0].health, 'healthy'); assert.equal(containers[0].restartCount, 2);
-  assert.deepEqual(docker.calls, [['inspect', 'container', 'jenkins-service']]);
+  assert.deepEqual(containers, []); assert.deepEqual(docker.calls, []);
+  const ownedIdentity=identity();
+  docker.containers.set('cmr-target-1', { Config: { Image: 'cmr/app:1', Labels: labels('server-1','target-1') }, State: { Status: 'running', Health: { Status: 'healthy' } }, RestartCount: 2 });
+  const owned=await monitor.containers(ownedIdentity);
+  assert.equal(owned[0].managed,true);assert.equal(owned[0].health,'healthy');
   const metrics = await monitor.metrics(); assert.equal(metrics.cpuPercent, null); assert.ok(metrics.disk.total > 0);
 });
 
 test('Agent 身份持久化且不重复注册，接入其他中心时拒绝复用身份', async t => {
   const { root, docker } = await fixture(t), tokenFile = path.join(root, 'registration-token'); let registrations = 0;
   await writeFile(tokenFile, 'r'.repeat(43));
-  const client = { register: async () => { registrations++; return identity('observe'); } };
+  const client = { register: async () => { registrations++; return identity(); } };
   const runner = new AgentRunner({ root, centerUrl: 'https://center.example', registrationTokenFile: tokenFile, docker, client });
   await runner.initialize(); assert.equal(registrations, 1); await assert.rejects(readFile(tokenFile), { code: 'ENOENT' });
   await runner.close();
@@ -370,8 +373,8 @@ test('领取任务后刷新白名单，刚创建的目标可正常部署', async
 
 test('心跳上报上一成功请求的实测往返耗时，首次和失败时不伪造延迟', async t => {
   const {root,docker}=await fixture(t); const reports=[];
-  const runner=new AgentRunner({root,centerUrl:'https://center.example',docker,client:{post:async(route,body)=>{reports.push(structuredClone(body));return {mode:'observe',targets:[]}}}});
-  runner.identity=identity('observe'); runner.monitor={metrics:async()=>({cpuPercent:1}),containers:async()=>[]};
+  const runner=new AgentRunner({root,centerUrl:'https://center.example',docker,client:{post:async(route,body)=>{reports.push(structuredClone(body));return {mode:'managed',targets:[]}}}});
+  runner.identity=identity(); runner.monitor={metrics:async()=>({cpuPercent:1}),containers:async()=>[]};
   await runner.heartbeat(); await runner.heartbeat();
   assert.equal(reports[0].metrics.centerRttMs,undefined);assert.ok(Number.isFinite(reports[1].metrics.centerRttMs));assert.ok(reports[1].metrics.centerRttMs>=0);
 });

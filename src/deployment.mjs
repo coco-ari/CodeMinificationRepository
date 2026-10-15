@@ -27,7 +27,7 @@ function relative(value, label, allowGlob = false) {
   if (value.startsWith('/') || value.startsWith('-') || value.includes('\\') || value.split('/').some(part => part === '..' || !part || (part === '.' && value !== '.')) || !/^[a-zA-Z0-9_./*+-]+$/.test(value) || (!allowGlob && value.includes('*')) || (allowGlob && value.slice(0, value.lastIndexOf('/') + 1).includes('*'))) fail(`${label}必须是安全的相对路径`);
   return value;
 }
-function mode(value) { if (!['observe', 'managed'].includes(value)) fail('管理模式无效'); return value; }
+function managedMode(value) { if (value !== undefined && value !== 'managed') fail('仅支持平台部署，不再提供监控模式'); return 'managed'; }
 function capabilities(value) { return [...new Set(list(value, 20, 'Agent 能力').map(item => requireText(item, 'Agent 能力', 80)))]; }
 function transition(task, stage, done = false, occurredAt = now()) {
   task.stageHistory ||= [];
@@ -118,6 +118,9 @@ export class DeploymentService extends EventEmitter {
       state.deployments ||= { version: 1 };
       if (![1, 2].includes(state.deployments.version)) throw new Error('不支持的部署数据版本');
       for (const key of collections) state.deployments[key] ||= [];
+      // 升级只开放服务器部署能力，旧外部目标停止采集并保留历史，不转换其容器归属。
+      for (const server of state.deployments.servers) if (server.mode === 'observe') server.mode = 'managed';
+      for (const target of state.deployments.targets) if (target.mode !== 'managed' && !target.retiredAt) target.retiredAt = now();
     });
     await migrateWorkspaces(this.store, this.repository.directory);
     const original = this.repository.builder.build.bind(this.repository.builder);
@@ -151,10 +154,10 @@ export class DeploymentService extends EventEmitter {
   }
   overview() {
     return { servers: this.data.servers.map(safeServer), applications: this.data.applications, environments: this.data.environments,
-      services: this.data.services, targets: this.data.targets, tasks: this.data.tasks.slice(-200).reverse() };
+      services: this.data.services, targets: this.data.targets.filter(target => !target.retiredAt && target.mode === 'managed'), tasks: this.data.tasks.slice(-200).reverse() };
   }
   async createServer(input) {
-    const name = requireText(input.name, '服务器名称', 80); const serverMode = mode(input.mode || 'observe');
+    const name = requireText(input.name, '服务器名称', 80); const serverMode = managedMode(input.mode);
     const registrationToken = randomSecret(); const expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
     const server = { id: randomUUID(), name, mode: serverMode, createdAt: now(), registrationHash: digest(registrationToken), registrationExpiresAt: expiresAt,
       registeredAt: null, lastSeenAt: null, version: null, revoked: false, metrics: null, containers: [] };
@@ -186,22 +189,6 @@ export class DeploymentService extends EventEmitter {
     });
     this.changed('server', id);
   }
-  async setServerMode(id, input) {
-    const next = mode(input.mode);
-    const result = await this.store.change(state => {
-      const server = find(state.deployments.servers, id, '服务器');
-      if (server.revoked) throw new HttpError(409, '服务器接入已撤销');
-      if (server.mode === next) return safeServer(server);
-      if (state.deployments.tasks.some(task => task.serverId === id && !terminal.has(task.status))) throw new HttpError(409, '服务器存在未完成任务，请完成后再切换管理方式');
-      const previous = server.mode;
-      Object.assign(server, { mode: next, updatedAt: now() });
-      state.events.unshift({ id: randomUUID(), projectId: null, action: 'server-mode', serverId: id, at: now(),
-        message: `服务器 ${server.name}：${previous === 'observe' ? '仅观察' : '平台管理'} → ${next === 'observe' ? '仅观察' : '平台管理'}；已有部署目标管理方式保持不变` });
-      state.events = state.events.slice(0, 100);
-      return safeServer(server);
-    });
-    this.changed('server', id); return result;
-  }
   async register(input) {
     if (typeof input.registrationToken !== 'string') throw new HttpError(401, '接入口令无效');
     const token = randomSecret(); let id;
@@ -220,7 +207,7 @@ export class DeploymentService extends EventEmitter {
     if (!server) throw new HttpError(401, 'Agent 凭据无效或已撤销');
     return server.id;
   }
-  assignment(serverId) { const server = find(this.data.servers, serverId, '服务器'); return { mode: server.mode, targets: this.data.targets.filter(target => target.serverId === serverId) }; }
+  assignment(serverId) { find(this.data.servers, serverId, '服务器'); return { mode: 'managed', targets: this.overview().targets.filter(target => target.serverId === serverId) }; }
   async heartbeat(serverId, input) {
     if (input.metrics !== undefined && (!input.metrics || typeof input.metrics !== 'object' || Array.isArray(input.metrics))) fail('主机指标格式错误');
     const containers = list(input.containers, 500, '容器状态');
@@ -231,7 +218,7 @@ export class DeploymentService extends EventEmitter {
       Object.assign(server, { lastSeenAt: now(), metrics: input.metrics || null, activeTaskId: input.activeTaskId || null });
       if (version !== undefined) server.version = version;
       if (input.capabilities !== undefined || version !== undefined) server.capabilities = capabilities(input.capabilities);
-      const targets = state.deployments.targets.filter(target => target.serverId === serverId);
+      const targets = state.deployments.targets.filter(target => target.serverId === serverId && target.mode === 'managed' && !target.retiredAt);
       server.containers = containers.filter(container => container && targets.some(target => container.targetId === target.id)).map(container => structuredClone(container));
       for (const target of targets) {
         const observation = server.containers.find(container => container.targetId === target.id);
@@ -275,15 +262,14 @@ export class DeploymentService extends EventEmitter {
           if (!environment.sourceProjectId) fail('请先在项目内绑定服务器');
           data.serverBindings.push({ applicationId: environment.applicationId, serverId: server.id, createdAt: now() });
         }
-        const targetMode = mode(input.mode || 'observe');
-        if (server.revoked) fail('服务器已撤销'); if (targetMode === 'managed' && server.mode !== 'managed') fail('仅观察服务器禁止创建平台管理目标');
-        if (id && ['mode', 'serverId', 'environmentId', 'serviceId'].some(key => item[key] !== input[key])) fail('不能改变已有目标的归属或管理模式，请新建隔离目标');
-        if (data.targets.some(target => target.id !== id && target.environmentId === environment.id && target.serviceId === service.id && target.serverId === server.id)) fail('该服务在此服务器已存在部署目标');
-        let containerName;
-        if (targetMode === 'observe') { containerName = requireText(input.containerName, '观察容器名称', 150); if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(containerName)) fail('容器名称无效'); }
-        else if (input.containerName) fail('平台目标不能指定外部容器名称');
-        fields = { environmentId: environment.id, serviceId: service.id, serverId: server.id, applicationId: environment.applicationId, mode: targetMode, containerName: containerName || (service.kind === 'static' ? null : `cmr-${item.id}`),
-          config: validateConfig(input.config, service.module, service.kind || 'java'), owner: targetMode === 'observe' ? (input.owner === 'external' ? 'external' : 'Jenkins') : 'platform' };
+        managedMode(input.mode);
+        if (server.revoked) fail('服务器已撤销');
+        if (id && (item.retiredAt || item.mode !== 'managed')) fail('旧外部目标已停用，请新建部署目标');
+        if (id && ['serverId', 'environmentId', 'serviceId'].some(key => item[key] !== input[key])) fail('不能改变已有目标的归属，请新建隔离目标');
+        if (data.targets.some(target => !target.retiredAt && target.id !== id && target.environmentId === environment.id && target.serviceId === service.id && target.serverId === server.id)) fail('该服务在此服务器已存在部署目标');
+        if (input.containerName) fail('平台目标不能指定外部容器名称');
+        fields = { environmentId: environment.id, serviceId: service.id, serverId: server.id, applicationId: environment.applicationId, mode: 'managed', containerName: service.kind === 'static' ? null : `cmr-${item.id}`,
+          config: validateConfig(input.config, service.module, service.kind || 'java'), owner: 'platform' };
       }
       Object.assign(item, fields, { updatedAt: now() });
       if (!id) {
@@ -299,7 +285,7 @@ export class DeploymentService extends EventEmitter {
   }
   ensureManaged(data, targetId) {
     const target = find(data.targets, targetId, '部署目标'); const server = find(data.servers, target.serverId, '服务器');
-    if (target.mode !== 'managed' || server.mode !== 'managed') throw new HttpError(403, '仅观察目标禁止发布、重启和回退');
+    if (target.retiredAt || target.mode !== 'managed' || server.mode !== 'managed') throw new HttpError(403, '目标不属于平台，禁止发布、重启和回退');
     if (server.revoked) throw new HttpError(409, '服务器已撤销');
     return target;
   }
