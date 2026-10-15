@@ -113,6 +113,39 @@ test('一次性 Agent 注册、过期、撤销与凭据隔离', async t => {
   await f.deployment.revokeServer(agent.serverId); assert.throws(() => f.deployment.authenticate(agent.token), { status: 401 });
 });
 
+test('删除已撤销服务器会清理空绑定并留审计，不删除关联资源和发布历史', async t => {
+  const f = await fixture(t);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  const application = await f.deployment.saveEntity('applications', { name: '临时验收项目' });
+  const created = await f.deployment.createServer({ name: '临时验收服务器', applicationId: application.id });
+  const agent = await f.deployment.register({ registrationToken: created.registrationToken, version: 'test' });
+  const other = await f.deployment.createServer({ name: '保留服务器' });
+  const otherAgent = await f.deployment.register({ registrationToken: other.registrationToken, version: 'test' });
+  await assert.rejects(f.deployment.deleteServer(agent.serverId), { status: 409 });
+  await f.deployment.revokeServer(agent.serverId);
+  for (const collection of ['targets', 'tasks', 'releases']) {
+    await f.repository.store.change(state => { state.deployments[collection].push({ id: randomUUID(), serverId: agent.serverId, status: 'succeeded' }); });
+    const before = structuredClone(f.repository.store.state);
+    await assert.rejects(f.deployment.deleteServer(agent.serverId), { status: 409 });
+    assert.deepEqual(f.repository.store.state, before);
+    await f.repository.store.change(state => { state.deployments[collection] = []; });
+  }
+  const updates = []; f.deployment.on('update', value => updates.push(value));
+  await f.deployment.deleteServer(agent.serverId);
+  assert.ok(!f.deployment.data.servers.some(s => s.id === agent.serverId));
+  assert.ok(!f.deployment.data.serverBindings.some(b => b.serverId === agent.serverId));
+  assert.equal(f.deployment.data.applications[0].id, application.id);
+  assert.equal(f.deployment.authenticate(otherAgent.token), otherAgent.serverId);
+  assert.throws(() => f.deployment.authenticate(agent.token), { status: 401 });
+  await assert.rejects(f.deployment.register({ registrationToken: created.registrationToken }), { status: 401 });
+  assert.equal(f.repository.store.state.events.filter(e => e.action === 'server-delete' && e.serverId === agent.serverId).length, 1);
+  assert.ok(updates.some(e => e.type === 'server' && e.id === agent.serverId));
+  await assert.rejects(f.deployment.deleteServer(agent.serverId), { status: 404 });
+  await f.repository.store.close();
+  await f.repository.store.open();
+  assert.ok(!f.deployment.data.servers.some(s => s.id === agent.serverId));
+});
+
 test('保留身份升级 Agent 后心跳更新版本，旧客户端省略版本时保持现值', async t => {
   const f = await fixture(t); const created = await f.deployment.createServer({ name: '版本验证' });
   const agent = await f.deployment.register({ registrationToken: created.registrationToken, version: '1.0.0' });
@@ -318,6 +351,14 @@ test('HTTP 管理接口沿用登录与 CSRF，Agent 来源文件严格隔离', a
   const auth = { Cookie: response.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': (await response.json()).csrf };
   assert.equal((await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, { Cookie: auth.Cookie })).status, 403);
   assert.equal((await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, auth)).status, 201);
+  const temporary = await app.deployment.createServer({ name: '可删除服务器' });
+  const removePath = `/api/deploy/servers/${temporary.server.id}`;
+  assert.equal((await request(removePath, 'DELETE')).status, 401);
+  assert.equal((await request(removePath, 'DELETE', null, { Cookie: auth.Cookie })).status, 403);
+  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 409);
+  await app.deployment.revokeServer(temporary.server.id);
+  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 200);
+  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 404);
   const f = { repository: app.service, deployment: app.deployment }; const first = await targetFixture(f); const other = await targetFixture(f); const task = await ready(f, first.target.id); await app.deployment.claim(first.agent.serverId);
   const observer = await targetFixture(f, 'observe');
   assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, { Cookie: auth.Cookie })).status, 403);

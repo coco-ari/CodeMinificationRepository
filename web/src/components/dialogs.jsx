@@ -452,16 +452,16 @@ export function Dialogs({ value, onClose }) {
         <Field name="name" label="服务器名称" required maxLength={80} />
         <Field
           name="mode"
-          label="管理方式"
+          label="平台权限"
           defaultValue="observe"
           choices={[
-            ['observe', '仅观察（Jenkins 继续发布）'],
+            ['observe', '仅监控（不执行部署）'],
             ['managed', '平台管理'],
           ]}
         />
         <Notice>
           Agent 需要 Linux、Docker 和
-          Compose。平台管理模式允许构建镜像和更新容器；仅观察模式只采集已登记容器状态。
+          Compose。仅监控：采集服务器和已登记容器的状态，不执行发布、重启或回退。平台管理：允许为平台管理的服务构建、部署、重启和回退，不会自动接管现有容器。
         </Notice>
       </FormDialog>
     )

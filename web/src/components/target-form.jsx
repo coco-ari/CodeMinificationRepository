@@ -166,17 +166,17 @@ export function TargetForm({ item, onClose }) {
             choices={
               available.find((s) => s.id === serverId)?.mode === 'managed'
                 ? [
-                    ['observe', '仅观察（Jenkins / 外部管理）'],
+                    ['observe', '仅监控（由外部系统部署）'],
                     ['managed', '平台管理'],
                   ]
-                : [['observe', '仅观察（Jenkins / 外部管理）']]
+                : [['observe', '仅监控（由外部系统部署）']]
             }
             onChange={(e) => setMode(e.target.value)}
           />
         </Grid>
       </Section>
       {mode === 'observe' ? (
-        <Section title="观察配置">
+        <Section title="监控配置">
           <Notice>只采集已存在的容器状态，发布、重启和回退由原系统执行。</Notice>
           <Field
             name="containerName"

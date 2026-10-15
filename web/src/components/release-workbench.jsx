@@ -252,7 +252,7 @@ export function ConfigurationPage() {
           <div className="flex justify-between gap-3">
             <span className="text-sm text-muted-foreground">
               {find('servers', target.serverId)?.name} ·{' '}
-              {target.mode === 'observe' ? '仅观察' : '平台管理'}
+              {target.mode === 'observe' ? '仅监控' : '平台管理'}
             </span>
             <Button variant="outline" onClick={() => open('target', target)}>
               编辑运行配置

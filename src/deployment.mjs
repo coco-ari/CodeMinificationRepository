@@ -173,6 +173,19 @@ export class DeploymentService extends EventEmitter {
     });
     this.changed('server', id);
   }
+  async deleteServer(id) {
+    await this.store.change(state => {
+      const data = state.deployments, server = find(data.servers, id, '服务器');
+      if (!server.revoked) throw new HttpError(409, '请先撤销服务器接入，再删除记录');
+      if (data.targets.some(item => item.serverId === id)) throw new HttpError(409, '服务器仍有关联的部署目标，不能删除');
+      if (data.tasks.some(item => item.serverId === id) || data.releases.some(item => item.serverId === id)) throw new HttpError(409, '服务器存在发布历史，需保留记录供追溯，不能删除');
+      data.serverBindings = data.serverBindings.filter(item => item.serverId !== id);
+      data.servers = data.servers.filter(item => item.id !== id);
+      state.events.unshift({ id: randomUUID(), projectId: null, action: 'server-delete', serverId: id, at: now(), message: `删除已撤销的服务器记录：${server.name}；未操作服务器上的容器或文件` });
+      state.events = state.events.slice(0, 100);
+    });
+    this.changed('server', id);
+  }
   async setServerMode(id, input) {
     const next = mode(input.mode);
     const result = await this.store.change(state => {

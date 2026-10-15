@@ -421,9 +421,9 @@ export function Servers() {
                     variant="outline"
                     onClick={() =>
                       confirm(
-                        server.mode === 'observe' ? '启用平台部署' : '切换为仅观察',
+                        server.mode === 'observe' ? '启用平台部署' : '切换为仅监控',
                         server.mode === 'observe'
-                          ? `允许在「${server.name}」新建平台管理目标。现有 Jenkins 观察目标保持只读，Agent 身份保持不变。`
+                          ? `允许在「${server.name}」新建平台管理目标。现有仅监控目标保持只读，Agent 身份保持不变。`
                           : `暂停「${server.name}」的平台发布能力。已有容器继续运行，目标配置与版本记录保留。`,
                         async () => {
                           await request(
@@ -439,7 +439,25 @@ export function Servers() {
                       )
                     }
                   >
-                    {server.mode === 'observe' ? '启用平台部署' : '切换为仅观察'}
+                    {server.mode === 'observe' ? '启用平台部署' : '切换为仅监控'}
+                  </Button>
+                )}
+                {!scope && server.revoked && (
+                  <Button
+                    variant="destructive"
+                    onClick={() =>
+                      confirm(
+                        '删除服务器记录',
+                        `删除「${server.name}」及其项目绑定。有关联部署目标或发布历史时不能删除。此操作仅清理中心记录，不卸载 Agent，也不删除服务器上的容器和文件。`,
+                        async () => {
+                          await request(`/api/deploy/servers/${server.id}`, {}, 'DELETE')
+                          await refresh()
+                          notify('服务器记录已删除')
+                        },
+                      )
+                    }
+                  >
+                    删除记录
                   </Button>
                 )}
                 {scope ? (
@@ -683,7 +701,7 @@ export function Targets({ compact = false, serverId }) {
                       <p className="mt-1 text-xs text-muted-foreground md:hidden">{server?.name}</p>
                       {target.mode === 'observe' && (
                         <Badge variant="secondary" className="mt-2">
-                          仅观察 · Jenkins / 外部管理
+                          仅监控 · 外部部署
                         </Badge>
                       )}
                     </TableCell>
@@ -897,6 +915,8 @@ export function Activity() {
     failure: '同步失败',
     token: '下载密码',
     enabled: '状态',
+    'server-mode': '平台权限',
+    'server-delete': '删除服务器记录',
   }
   return (
     <div id="activity-list">

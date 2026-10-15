@@ -42,6 +42,8 @@ export async function handleDeployRequest(req, res, url, { deployment, body, jso
   if (serverMode && req.method === 'PUT') { json(res, 200, await deployment.setServerMode(serverMode[1], await body(req))); return true; }
   const revoke = new RegExp(`^/servers/${id}/revoke$`).exec(route);
   if (revoke && req.method === 'POST') { await deployment.revokeServer(revoke[1]); json(res, 200, { ok: true }); return true; }
+  const server = new RegExp(`^/servers/${id}$`).exec(route);
+  if (server && req.method === 'DELETE') { await deployment.deleteServer(server[1]); json(res, 200, { ok: true }); return true; }
   const entity = new RegExp(`^/(applications|environments|services|targets)(?:/${id})?$`).exec(route);
   if (entity && ((req.method === 'POST' && !entity[2]) || (req.method === 'PUT' && entity[2]))) {
     const result = await deployment.saveEntity(entity[1], await body(req), entity[2]);
