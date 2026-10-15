@@ -312,7 +312,11 @@ export function ConfigurationPage({ selectedTarget }) {
                 <TargetStatus target={target} server={server} />
               </Detail>
               <Detail label="当前版本">
-                <Commit value={target.currentRelease?.revision} />
+                <Commit
+                  value={target.currentRelease?.revision}
+                  subject={target.currentRelease?.commitSubject}
+                  summary
+                />
               </Detail>
               <Detail label="镜像">
                 {target.currentRelease?.image || target.observation?.image || '—'}
@@ -329,7 +333,7 @@ export function ConfigurationPage({ selectedTarget }) {
               <div className="version-item" key={r.id}>
                 <span className="status-dot good mt-2" />
                 <div className="min-w-0 flex-1">
-                  <Commit value={r.revision} />
+                  <Commit value={r.revision} subject={r.commitSubject} summary />
                   <p className="mt-1 text-xs text-muted-foreground">{date(r.createdAt)}</p>
                 </div>
                 <Badge variant="outline">
@@ -672,7 +676,7 @@ export function ReleaseWorkbench() {
                           <span className="status-dot good mt-1.5" />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <Commit value={r.revision} />
+                              <Commit value={r.revision} subject={r.commitSubject} summary />
                               <Badge variant="secondary">
                                 {r.id === target.currentRelease?.id
                                   ? '当前版本'

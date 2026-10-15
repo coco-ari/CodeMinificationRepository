@@ -69,6 +69,13 @@ export class ArchiveBuilder {
     });
   }
   root(project) { return path.join(this.directory, project.id, sourceKey(project).split(':')[1]); }
+  async cachedCommitSubject(project, revision) {
+    validateRevision(revision);
+    // 历史发布只读取准确提交的本地对象，不拉取分支或用最新提交代替。
+    const result = await this.git(['--git-dir', path.join(this.root(project), 'repository.git'),
+      'show', '-s', '--format=%s', revision, '--'], null, AbortSignal.timeout(3000));
+    return result.code === 0 ? result.output.trim().slice(0, 500) : null;
+  }
   async history(project, credential, refresh = false) {
     if (!this.allowLocal) validateRepository(project.repository);
     validateBranch(project.branch);
@@ -128,6 +135,7 @@ export class ArchiveBuilder {
       else validateRevision(project.revision);
       await onPhase('source_resolve');
       const revision = await run(inRepo(['rev-parse', '--verify', `${project.revision || 'refs/heads/source'}^{commit}`]));
+      const commitSubject = (await run(inRepo(['show', '-s', '--format=%s', revision, '--']))).slice(0, 500);
       await onPhase('source_archive');
       const file = path.join(root, `${revision}.zip`);
       let cached = false;
@@ -158,7 +166,7 @@ export class ArchiveBuilder {
         if (Date.now() - (await stat(old)).mtimeMs > 3600000) await rm(old, { force: true }).catch(() => {});
       }
       if (controller.signal.aborted) throw new Error('同步超时');
-      return { file, revision, sha256: hash.digest('hex'), size: details.size, cached };
+      return { file, revision, commitSubject, sha256: hash.digest('hex'), size: details.size, cached };
     } catch (error) {
       if (controller.signal.aborted) throw new HttpError(504, '同步超时，请稍后重试或调整服务超时配置');
       if (error instanceof HttpError) throw error;

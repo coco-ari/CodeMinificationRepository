@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Plus, GitCommitHorizontal, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
@@ -10,25 +10,50 @@ import { Progress } from '@/components/ui/progress'
 import { Empty, Action, Status } from './shared'
 import { useConsole, copy, duration, stageLabel, routeUrl } from '@/lib/console'
 
-export function Commit({ value }) {
+export function Commit({ value, subject, summary = false }) {
   const { notify } = useConsole()
+  const text = typeof subject === 'string' ? subject || '无提交说明' : '提交说明暂缺'
+  const subjectRef = useRef(null)
+  const [overflow, setOverflow] = useState(false)
+  useLayoutEffect(() => {
+    const element = subjectRef.current
+    if (!element) return
+    const measure = () => setOverflow(element.scrollWidth > element.clientWidth + 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [value, subject, summary])
   return value ? (
     <Tooltip>
       <TooltipTrigger asChild>
         <Action
           variant="ghost"
-          className="commit-button"
-          aria-label={`复制 commit ${value}`}
+          className={summary ? 'commit-button commit-summary' : 'commit-button'}
+          aria-label={`复制 commit ${value}${summary ? `；${text}` : ''}`}
           onClick={async () => {
             await copy(value)
             notify('Commit 已复制')
           }}
         >
-          <GitCommitHorizontal className="size-3.5 shrink-0" />
-          <code className="commit-sha">{value.slice(0, 10)}</code>
+          {summary && (
+            <span className="commit-subject" ref={subjectRef} data-overflow={overflow}>
+              {text}
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1.5">
+            <GitCommitHorizontal className="size-3.5 shrink-0" />
+            <code className="commit-sha">{value.slice(0, 10)}</code>
+          </span>
         </Action>
       </TooltipTrigger>
-      <TooltipContent className="max-w-72 break-all">{value} · 点击复制</TooltipContent>
+      <TooltipContent className="max-w-80 break-words">
+        {(summary || typeof subject === 'string') && (
+          <p className="mb-1 whitespace-normal">{text}</p>
+        )}
+        <p className="break-all font-mono text-xs">{value}</p>
+        <p className="mt-1 text-xs">点击复制提交号</p>
+      </TooltipContent>
     </Tooltip>
   ) : (
     <span className="text-xs text-muted-foreground">尚未发布</span>
@@ -254,6 +279,7 @@ export function ProjectTile({ project }) {
                   </span>
                   <Commit
                     value={target?.currentRelease?.revision || target?.observation?.revision}
+                    subject={target?.currentRelease?.commitSubject}
                   />
                 </div>
                 {active && (

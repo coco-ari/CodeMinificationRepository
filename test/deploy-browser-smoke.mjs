@@ -52,6 +52,10 @@ const builder = {
     return {
       file: path.join(dataDirectory, 'test.zip'),
       revision: String(version).repeat(40),
+      commitSubject:
+        version === 1
+          ? '修复设备连接超时并优化消息重试，保留失败原因和处理记录，方便排查跨环境部署后的连接问题与异常恢复情况'
+          : '修复登录超时',
       sha256: createHash('sha256').update('isolated-source').digest('hex'),
       size: 15,
       cached: false,
@@ -467,6 +471,31 @@ try {
     '首次成功',
   )
   await screenshot('console-task-desktop.png')
+  await go('services')
+  await clickText('选择部署位置', `[data-service-id="${apiService.id}"]`)
+  const commitSelector = `[data-target-id="${firstTarget.id}"] .commit-summary`
+  await visible(commitSelector)
+  assert.equal(
+    await evaluate(`(${query(commitSelector + ' .commit-subject')}).textContent`),
+    task.commitSubject,
+  )
+  await until(
+    () => evaluate(`(${query(commitSelector + ' .commit-subject')}).dataset.overflow === 'true'`),
+    '超长提交说明渐隐',
+  )
+  assert.match(
+    await evaluate(`getComputedStyle(${query(commitSelector + ' .commit-subject')}).maskImage`),
+    /linear-gradient/,
+  )
+  await evaluate(`(${query(commitSelector)}).focus()`)
+  await visible('[role="tooltip"]')
+  assert.ok(
+    await evaluate(
+      `[...document.querySelectorAll('[role="tooltip"]')].some(el=>el.textContent.includes(${JSON.stringify(task.commitSubject)}) && el.textContent.includes(${JSON.stringify(task.revision)}))`,
+    ),
+  )
+  await screenshot('console-commit-summary.png')
+  await evaluate('document.activeElement.blur()')
   const publish = async (action) => {
     await go(
       'release',

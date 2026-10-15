@@ -283,7 +283,11 @@ export function ServiceList({ compact = false, serverId }) {
               target={target}
               server={data.servers.find((s) => s.id === target.serverId)}
             />
-            <Commit value={target.currentRelease?.revision} />
+            <Commit
+              value={target.currentRelease?.revision}
+              subject={target.currentRelease?.commitSubject}
+              summary
+            />
             <TargetActions target={target} service={service} />
           </div>
         ))}
@@ -307,13 +311,13 @@ export function ServiceList({ compact = false, serverId }) {
       accessorKey: 'name',
       header: '服务',
       sortingFn: 'text',
-      meta: { className: 'w-[18%] min-w-32' },
+      meta: { className: 'w-[17%] min-w-32' },
       cell: ({ row }) => name(row.original),
     },
     {
       id: 'source',
       header: '仓库 / 分支',
-      meta: { className: 'w-[18%] max-w-48' },
+      meta: { className: 'w-[16%] max-w-48' },
       cell: ({ row }) => source(row.original),
     },
     {
@@ -325,7 +329,7 @@ export function ServiceList({ compact = false, serverId }) {
     {
       id: 'status',
       header: '运行 / 健康',
-      meta: { className: 'w-[20%]' },
+      meta: { className: 'w-[18%]' },
       cell: ({ row }) => status(row.original),
     },
     {
@@ -335,7 +339,11 @@ export function ServiceList({ compact = false, serverId }) {
         row.original.targets.length > 1 ? (
           <span className="text-xs text-muted-foreground">按部署位置查看</span>
         ) : (
-          <Commit value={row.original.targets[0]?.currentRelease?.revision} />
+          <Commit
+            value={row.original.targets[0]?.currentRelease?.revision}
+            subject={row.original.targets[0]?.currentRelease?.commitSubject}
+            summary
+          />
         ),
     },
     {
@@ -392,7 +400,13 @@ export function ServiceList({ compact = false, serverId }) {
             {source(r)}
             {placement(r)}
             {status(r)}
-            {r.targets.length === 1 && <Commit value={r.targets[0].currentRelease?.revision} />}
+            {r.targets.length === 1 && (
+              <Commit
+                value={r.targets[0].currentRelease?.revision}
+                subject={r.targets[0].currentRelease?.commitSubject}
+                summary
+              />
+            )}
           </>
         )}
       />

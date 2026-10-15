@@ -17,7 +17,7 @@ async function directory(t) {
 }
 function builder(root) {
   return { revision: 'a'.repeat(40), content: '测试源码第一版', async initialize() { await mkdir(path.join(root, 'cache'), { recursive: true }); },
-    async build() { const file = path.join(root, 'cache', 'source.zip'); const content = Buffer.from(this.content); await writeFile(file, content); return { file, revision: this.revision, sha256: createHash('sha256').update(content).digest('hex'), size: content.length, cached: false }; } };
+    async build() { const file = path.join(root, 'cache', 'source.zip'); const content = Buffer.from(this.content); await writeFile(file, content); return { file, revision: this.revision, commitSubject: this.commitSubject, sha256: createHash('sha256').update(content).digest('hex'), size: content.length, cached: false }; } };
 }
 async function fixture(t) {
   const root = await directory(t); const fake = builder(root); const repository = new RepositoryService({ directory: root, builder: fake }); await repository.initialize();
@@ -41,6 +41,47 @@ async function ready(f, targetId, action = 'deploy', extra = {}) {
   return f.deployment.data.tasks.find(item => item.id === task.id);
 }
 function release(task) { return { id: task.id, image: `cmr/${task.targetId}:${task.id}`, revision: task.revision, config: task.config }; }
+
+test('提交说明固定到源码版本，忽略 Agent 伪造值并随回退恢复', async t => {
+  const f = await fixture(t), records = await targetFixture(f);
+  f.fake.commitSubject = '修复设备连接';
+  const first = await ready(f, records.target.id);
+  assert.equal(first.commitSubject, '修复设备连接');
+  assert.equal(JSON.parse(await readFile(path.join(f.root, 'deployments/tasks', first.id, 'source.json'), 'utf8')).commitSubject, first.commitSubject);
+  await f.deployment.claim(records.agent.serverId);
+  await f.deployment.events(records.agent.serverId, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: { ...release(first), commitSubject: '伪造说明' } } });
+  assert.equal(f.deployment.data.targets[0].currentRelease.commitSubject, '修复设备连接');
+  f.fake.revision = 'b'.repeat(40); f.fake.commitSubject = '修复登录超时';
+  const second = await ready(f, records.target.id); await f.deployment.claim(records.agent.serverId);
+  await f.deployment.events(records.agent.serverId, second.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(second) } });
+  assert.equal(f.deployment.data.targets[0].currentRelease.commitSubject, '修复登录超时');
+  const rollback = await ready(f, records.target.id, 'rollback', { releaseId: first.id }); await f.deployment.claim(records.agent.serverId);
+  await f.deployment.events(records.agent.serverId, rollback.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(first) } });
+  assert.equal(f.deployment.data.targets[0].currentRelease.commitSubject, '修复设备连接');
+  await f.deployment.close(); await f.repository.store.close();
+});
+
+test('旧发布说明按源码快照与准确提交补齐，缓存缺失时不误用最新说明', async t => {
+  const f = await fixture(t), records = await targetFixture(f);
+  const first = await ready(f, records.target.id); await f.deployment.claim(records.agent.serverId);
+  await f.deployment.events(records.agent.serverId, first.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(first) } });
+  await f.repository.store.change(state => { state.projects[0].branch = 'new-branch'; });
+  const taskCount = f.deployment.data.tasks.length;
+  f.fake.cachedCommitSubject = async (snapshot, revision) => {
+    assert.equal(snapshot.branch, 'main'); assert.equal(revision, first.revision); return null;
+  };
+  await f.deployment.backfillCommitSubjects();
+  assert.equal(f.deployment.data.targets[0].currentRelease.commitSubject, undefined);
+  f.fake.cachedCommitSubject = async (snapshot, revision) => {
+    assert.equal(snapshot.branch, 'main'); assert.equal(revision, first.revision); return '历史版本的真实说明';
+  };
+  await f.deployment.backfillCommitSubjects();
+  assert.equal(f.deployment.data.targets[0].currentRelease.commitSubject, '历史版本的真实说明');
+  assert.equal(f.deployment.releases(records.target.id)[0].commitSubject, '历史版本的真实说明');
+  assert.equal(f.deployment.data.tasks[0].commitSubject, '历史版本的真实说明');
+  assert.equal(f.deployment.data.tasks.length, taskCount);
+  await f.deployment.close(); await f.repository.store.close();
+});
 
 test('前端目标按服务类型固定配置，旧 Agent 拒绝任务，版本与回退使用静态产物引用', async t => {
   const f = await fixture(t), base = await targetFixture(f);

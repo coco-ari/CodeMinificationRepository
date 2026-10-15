@@ -108,7 +108,7 @@ export class WorkspaceService {
         repositories: overview.repositories.map(({ id, name, branch }) => ({ id, name, branch })),
         servers: overview.servers.map(({ id, name, online, revoked, metrics, version, mode, lastSeenAt }) => ({ id, name, online, revoked, metrics, version, mode, lastSeenAt })),
         targets: targets.map(({ id, serviceId, environmentId, serverId, mode, observation, currentRelease }) => ({ id, serviceId, environmentId, serverId, mode, observation,
-          currentRelease: currentRelease ? { id: currentRelease.id, revision: currentRelease.revision } : null })),
+          currentRelease: currentRelease ? { id: currentRelease.id, revision: currentRelease.revision, commitSubject: currentRelease.commitSubject } : null })),
         tasks: tasks.filter(task => !terminal(task)).map(({ id, targetId, status, stage, createdAt, startedAt }) => ({ id, targetId, status, stage, createdAt, startedAt })),
       };
       return { ...project, dashboard, repositories: this.store.state.projects.filter(item => item.applicationId === project.id).length,

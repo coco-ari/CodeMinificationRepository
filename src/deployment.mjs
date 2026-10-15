@@ -138,6 +138,41 @@ export class DeploymentService extends EventEmitter {
       this.repository.builder.history = (project, credential, refresh) => this.archiveLock(sourceKey(project), () => history(project, credential, refresh));
     }
     for (const task of this.data.tasks.filter(task => task.status === 'preparing')) this.startPrepare(task.id);
+    this.commitBackfill = this.backfillCommitSubjects().catch(() => {
+      this.emit('error-safe', { message: '部分历史版本的提交说明暂时无法补齐' });
+    });
+  }
+  async backfillCommitSubjects() {
+    if (!this.repository.builder.cachedCommitSubject) return;
+    const updates = new Map(), cache = new Map();
+    const releases = this.data.releases.filter(release => typeof release.commitSubject !== 'string');
+    for (const release of releases) {
+      if (this.closing) break;
+      const task = this.data.tasks.find(task => task.id === release.id);
+      const snapshot = release.sourceSnapshot || task?.sourceSnapshot;
+      if (!snapshot || !release.revision) continue;
+      const key = `${sourceKey(snapshot)}:${release.revision}`;
+      if (!cache.has(key)) {
+        const subject = await this.archiveLock(sourceKey(snapshot), () =>
+          this.repository.builder.cachedCommitSubject(snapshot, release.revision)).catch(() => null);
+        cache.set(key, subject);
+      }
+      const subject = cache.get(key);
+      if (typeof subject === 'string') updates.set(release.id, { revision: release.revision, subject: subject.slice(0, 500) });
+    }
+    if (!updates.size) return;
+    await this.store.change(state => {
+      const apply = release => {
+        const update = release && updates.get(release.id);
+        if (update && release.revision === update.revision && typeof release.commitSubject !== 'string') release.commitSubject = update.subject;
+      };
+      for (const release of state.deployments.releases) apply(release);
+      for (const target of state.deployments.targets) apply(target.currentRelease);
+      for (const task of state.deployments.tasks) {
+        apply(task); apply(task.previousRelease); apply(task.release);
+      }
+    });
+    this.changed('releases');
   }
   archiveLock(projectId, work) {
     // 缓存清理只影响本项目；不同项目仍遵守原同步队列的并发额度。
@@ -150,7 +185,7 @@ export class DeploymentService extends EventEmitter {
     const directory = path.join(this.root, 'tasks', taskId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await copyFile(archive.file, path.join(directory, 'source.zip'));
-    await atomicWrite(path.join(directory, 'source.json'), JSON.stringify({ revision: archive.revision, sha256: archive.sha256, size: archive.size }));
+    await atomicWrite(path.join(directory, 'source.json'), JSON.stringify({ revision: archive.revision, commitSubject: archive.commitSubject, sha256: archive.sha256, size: archive.size }));
   }
   overview() {
     return { servers: this.data.servers.map(safeServer), applications: this.data.applications, environments: this.data.environments,
@@ -358,12 +393,12 @@ export class DeploymentService extends EventEmitter {
         if (this.pinErrors.has(id)) throw this.pinErrors.get(id);
         // 兼容准备任务加入时已有同步即将结束的情况。
         try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); }
-        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(sourceKey(snapshot), () => this.copyArchive(archive, id)); source = { revision: archive.revision, sha256: archive.sha256, size: archive.size }; }
+        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(sourceKey(snapshot), () => this.copyArchive(archive, id)); source = { revision: archive.revision, commitSubject: archive.commitSubject, sha256: archive.sha256, size: archive.size }; }
       }
       await this.store.change(state => {
         const current = find(state.deployments.tasks, id); if (current.status !== 'preparing') return;
         transition(current, 'queued'); current.stage = 'queued';
-        Object.assign(current, { source: { ...source, url: `/api/agent/v1/tasks/${id}/source` }, revision: source.revision, status: 'queued', updatedAt: now() });
+        Object.assign(current, { source: { ...source, url: `/api/agent/v1/tasks/${id}/source` }, revision: source.revision, commitSubject: typeof source.commitSubject === 'string' ? source.commitSubject.slice(0, 500) : undefined, status: 'queued', updatedAt: now() });
       });
     } catch (error) {
       await this.store.change(state => {
@@ -393,7 +428,7 @@ export class DeploymentService extends EventEmitter {
         return null;
       }
       Object.assign(next, { status: 'running', startedAt: now(), updatedAt: now(), previousRelease: target.currentRelease || null });
-      if (next.action !== 'deploy') next.revision = (next.release || target.currentRelease)?.revision || null;
+      if (next.action !== 'deploy') { const release = next.release || target.currentRelease; next.revision = release?.revision || null; next.commitSubject = release?.commitSubject; }
       return structuredClone(next);
     });
     if (interruptedId) this.changed('task', interruptedId);
@@ -455,7 +490,7 @@ export class DeploymentService extends EventEmitter {
       if (terminal.has(status)) {
         task.finishedAt = timing.at; task.resultReceivedAt = timing.receivedAt; task.result = result || {}; if (status !== 'succeeded') task.error = input.message || '任务执行失败';
         if (release && status === 'succeeded') {
-          const saved = { id: release.id, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision, config: task.action === 'deploy' ? task.config : release.config, targetId: target.id, sourceSnapshot: task.action === 'deploy' ? task.sourceSnapshot : release.sourceSnapshot || data.releases.find(r => r.id === release.id)?.sourceSnapshot, createdAt: timing.at, available: true };
+          const saved = { id: release.id, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision, commitSubject: task.action === 'deploy' ? task.commitSubject : data.releases.find(r => r.id === release.id)?.commitSubject, config: task.action === 'deploy' ? task.config : release.config, targetId: target.id, sourceSnapshot: task.action === 'deploy' ? task.sourceSnapshot : release.sourceSnapshot || data.releases.find(r => r.id === release.id)?.sourceSnapshot, createdAt: timing.at, available: true };
           if (!data.releases.some(existing => existing.id === saved.id && existing.targetId === target.id)) data.releases.push(saved);
           target.currentRelease = structuredClone(data.releases.find(existing => existing.id === saved.id && existing.targetId === target.id));
           target.lastDeployedAt = timing.at;
@@ -496,7 +531,7 @@ export class DeploymentService extends EventEmitter {
   beginClose() { if (!this.closing) { this.closing = true; this.emit('shutdown'); } }
   async close() {
     this.beginClose();
-    await Promise.allSettled([...this.preparations.values(), ...this.repository.inFlight.values()]);
+    await Promise.allSettled([this.commitBackfill, ...this.preparations.values(), ...this.repository.inFlight.values()]);
     await Promise.allSettled([...this.archivePending.values()]); this.removeAllListeners();
   }
 }
