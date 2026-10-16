@@ -27,10 +27,11 @@ for (const candidate of candidates) {
 if (!executable) throw new Error('未找到浏览器，请设置 BROWSER_PATH 后重试')
 const dataDirectory = path.join(temporary, 'data')
 let version = 1
+const longBranch = `feature/${'continuous-branch-name-'.repeat(8)}`
 const builder = {
   async branches() {
     return {
-      branches: ['main', 'test-branch', 'frontend-test'].map((name) => ({
+      branches: ['main', 'test-branch', 'frontend-test', longBranch].map((name) => ({
         name,
         revision: String(version).repeat(40),
       })),
@@ -427,6 +428,33 @@ try {
   await visible(`[data-repository-id="${repositoryId}"]`)
   await click(`[data-repository-id="${repositoryId}"] .repo-name`)
   await visible('#deploy-repository')
+  await evaluate(`document.querySelector('#repository-add-credential').focus()`)
+  await click('#repository-add-credential')
+  await visible('#credential-dialog[role=dialog]')
+  await animationsSettled()
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Tab',
+    code: 'Tab',
+    windowsVirtualKeyCode: 9,
+  })
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Tab',
+    code: 'Tab',
+    windowsVirtualKeyCode: 9,
+  })
+  await evaluate(`document.querySelector('#credential-dialog [data-slot=dialog-close]').focus()`)
+  assert.ok(
+    await evaluate(
+      `(()=>{const e=document.activeElement,r=e.getBoundingClientRect(),s=getComputedStyle(e);return e.dataset.ui==='button'&&r.width>=32&&r.height>=32&&parseFloat(s.borderRadius)>0&&s.outlineStyle!=='none'})()`,
+    ),
+    '弹窗关闭按钮拥有完整点击区域及圆角键盘焦点',
+  )
+  await screenshot('glass-dialog-close-focus.png')
+  await click('#credential-dialog [data-slot=dialog-close]')
+  await until(() => evaluate(`!document.querySelector('#credential-dialog')`), '关闭凭证弹窗')
+  assert.equal(await evaluate(`document.activeElement.id`), 'repository-add-credential')
   await close()
   await click('[data-view=servers]')
   await click('#create-button')
@@ -480,8 +508,33 @@ try {
   const disposableEnv = deployment.data.environments.find((e) => e.name === '待删除环境')
   await visible(`[data-environment-id="${disposableEnv.id}"]`)
   await clickText('编辑', `[data-environment-id="${disposableEnv.id}"]`)
-  await fill('#deploy-name', '空环境待清理')
+  const longEnvironment = 'EnvironmentWithoutSpaces'.repeat(3)
+  await fill('#deploy-name', longEnvironment)
   await submit()
+  await go('services')
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 1050,
+    deviceScaleFactor: 1,
+    mobile: true,
+  })
+  await click('[aria-label="当前环境"]')
+  await visible('[data-slot=select-content]')
+  await animationsSettled()
+  assert.ok(
+    await evaluate(
+      `(()=>{const p=document.querySelector('[data-slot=select-content]'),r=p.getBoundingClientRect(),item=[...p.querySelectorAll('[role=option]')].find(e=>e.textContent.includes(${JSON.stringify(longEnvironment)}));return r.left>=0&&r.right<=innerWidth&&item.scrollWidth<=item.clientWidth+1})()`,
+    ),
+    '普通选择器的长环境名称在移动端完整换行',
+  )
+  await screenshot('glass-long-select-390.png')
+  await dismissPopup('[data-slot=select-content]')
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 1100,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
   await go('environments', `?environment=${disposableEnv.id}`)
   await clickText('删除', `[data-environment-id="${disposableEnv.id}"]`)
   await visible('[role=alertdialog]')
@@ -687,6 +740,31 @@ try {
   await screenshot('glass-branch-menu-desktop.png')
   await dismissPopup('[data-slot=popover-content]')
   assert.equal(await evaluate('document.activeElement.id'), 'release-branch')
+  // 无空格的长分支不能被菜单边缘截断，也不能把移动端浮层撑出屏幕。
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 1050,
+    deviceScaleFactor: 1,
+    mobile: true,
+  })
+  await click('#release-branch')
+  await visible('[cmdk-input]')
+  await fill('[cmdk-input]', longBranch)
+  await animationsSettled()
+  assert.ok(
+    await evaluate(
+      `(()=>{const p=document.querySelector('[data-slot=popover-content]'),r=p.getBoundingClientRect(),item=p.querySelector('[cmdk-item]');return r.left>=0&&r.right<=innerWidth&&item.scrollWidth<=item.clientWidth+1&&item.textContent.includes(${JSON.stringify(longBranch)})})()`,
+    ),
+    '移动端长分支完整换行',
+  )
+  await screenshot('glass-long-branch-390.png')
+  await dismissPopup('[data-slot=popover-content]')
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 1100,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
   await choose('#release-branch', 'test-branch')
   await visible('#confirm-release')
   await until(
@@ -792,6 +870,34 @@ try {
   )
   await screenshot('console-commit-summary.png')
   await evaluate('document.activeElement.blur()')
+  // 提示框的内容、边界和焦点交互一并验证，避免只检查文字而漏掉材质残留。
+  for (const width of [390, 768, 1280, 1920]) {
+    await command('Emulation.setDeviceMetricsOverride', {
+      width,
+      height: 1100,
+      deviceScaleFactor: 1,
+      mobile: width < 768,
+    })
+    await evaluate(`(${query(commitSelector)}).focus()`)
+    await visible('[data-slot=tooltip-content]')
+    await animationsSettled()
+    assert.ok(
+      await evaluate(
+        `(()=>{const e=document.querySelector('[data-slot=tooltip-content]'),r=e.getBoundingClientRect();return !e.querySelector('svg polygon')&&r.left>=0&&r.right<=innerWidth&&e.scrollWidth<=e.clientWidth+1&&e.textContent.includes(${JSON.stringify(task.revision)})})()`,
+      ),
+      `提交提示在 ${width}px 完整显示且没有残留箭头`,
+    )
+    await screenshot(`glass-commit-tooltip-${width}.png`)
+    await dismissPopup('[data-slot=tooltip-content]')
+    assert.equal(await evaluate(`document.activeElement.matches('.commit-summary')`), true)
+    await evaluate('document.activeElement.blur()')
+  }
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 1100,
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
   const publish = async (action, chosenRelease) => {
     await go(
       'release',

@@ -95,7 +95,9 @@ export function Choice({
                           selected !== String(o.value) && 'opacity-0',
                         )}
                       />
-                      <span className="break-words">{o.label}</span>
+                      <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">
+                        {o.label}
+                      </span>
                     </CommandItem>
                   ))}
                 </CommandGroup>

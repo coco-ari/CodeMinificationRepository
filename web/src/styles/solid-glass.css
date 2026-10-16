@@ -206,6 +206,12 @@ body {
 [data-slot='popover-content'] > [data-slot='command'] {
   border-radius: inherit;
 }
+/* Radix ItemText 不透传 className，使用稳定标记控制长选项换行。 */
+[data-slot='select-item-text'] {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 [data-slot='select-item'],
 [data-slot='dropdown-menu-item'],
 [data-slot='dropdown-menu-checkbox-item'],
@@ -220,14 +226,21 @@ body {
   background: oklch(0.25 0.025 265 / 30%);
 }
 [data-slot='tooltip-content'] {
+  max-width: min(20rem, calc(100vw - 16px), var(--radix-tooltip-content-available-width));
+  white-space: normal;
+  overflow-wrap: anywhere;
   background: var(--glass-solid);
   color: var(--foreground);
   border: 1px solid var(--border);
   border-radius: var(--glass-radius-popup);
   box-shadow: var(--glass-floating-shadow);
 }
-[data-slot='tooltip-content'] > .bg-foreground {
-  display: none;
+/* 关闭按钮预留独立空间，避免长标题与圆角点击区域重叠。 */
+[data-slot='dialog-content']:has(> [data-slot='dialog-close']) > [data-slot='dialog-header'] {
+  padding-inline-end: 2rem;
+}
+[data-ui='sheet']:has(> [data-slot='sheet-close']) > [data-slot='sheet-header']:not(.sr-only) {
+  padding-inline-end: 3rem;
 }
 
 /* 组合触发器可能覆盖 data-slot，材质使用稳定标记并保留 Tailwind 焦点环。 */

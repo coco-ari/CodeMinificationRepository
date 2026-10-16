@@ -39,8 +39,9 @@ function SelectContent({
         data-slot="select-content"
         position={position}
         sideOffset={4}
+        collisionPadding={8}
         className={cn(
-          'z-50 max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
+          'z-50 max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) max-w-(--radix-select-content-available-width) overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
           className,
         )}
         {...props}
@@ -72,7 +73,7 @@ function SelectItem({
       )}
       {...props}
     >
-      <Primitive.ItemText>{children}</Primitive.ItemText>
+      <Primitive.ItemText data-slot="select-item-text">{children}</Primitive.ItemText>
       <span className="absolute right-2">
         <Primitive.ItemIndicator>
           <Check className="size-4" />
