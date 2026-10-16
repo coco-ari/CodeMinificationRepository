@@ -352,6 +352,11 @@ try {
   await fill('#auth-form [name=password]', 'isolated-browser-password')
   await click('#auth-form [type=submit]')
   await visible('#workspace-home')
+  await fill('[aria-label="搜索项目"]', '不存在的项目')
+  await visible('[data-slot=empty]')
+  await click('[aria-label="清空搜索项目"]')
+  assert.equal(await evaluate(`document.activeElement.getAttribute('aria-label')`), '搜索项目')
+  await visible('[data-workspace-id]')
   await click(`[data-workspace-id="${initialProject.id}"] [aria-label="进入 SOL 标准版"]`)
   await visible('[data-onboarding]')
   assert.equal(
@@ -394,6 +399,15 @@ try {
   await service.store.change((state) => {
     state.projects[0].status = 'idle'
   })
+  await go('projects')
+  assert.equal(await evaluate(`!!document.querySelector('.repo-edit')`), false)
+  await fill('[aria-label="搜索代码仓库…"]', '不存在的仓库')
+  await visible('[data-slot=empty]')
+  await click('[aria-label="清空搜索代码仓库…"]')
+  await visible(`[data-repository-id="${repositoryId}"]`)
+  await click(`[data-repository-id="${repositoryId}"] .repo-name`)
+  await visible('#deploy-repository')
+  await close()
   await click('[data-view=servers]')
   await click('#create-button')
   await fill('#deploy-name', '测试服务器 A')
@@ -451,10 +465,18 @@ try {
   await go('environments', `?environment=${disposableEnv.id}`)
   await clickText('删除', `[data-environment-id="${disposableEnv.id}"]`)
   await visible('[role=alertdialog]')
+  assert.equal(
+    await evaluate(`document.querySelector('[data-confirm-action]').dataset.variant`),
+    'destructive',
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('[data-confirm-action]').textContent`),
+    '删除环境',
+  )
   await clickText('取消', '[role=alertdialog]')
   assert.ok(deployment.data.environments.some((e) => e.id === disposableEnv.id))
   await clickText('删除', `[data-environment-id="${disposableEnv.id}"]`)
-  await clickText('确认', '[role=alertdialog]')
+  await click('[data-confirm-action]')
   await until(
     () => !deployment.data.environments.some((e) => e.id === disposableEnv.id),
     '删除空环境',
@@ -468,6 +490,18 @@ try {
   // 分步保存、离开确认与继续配置均通过网页执行。
   await click('[data-view=services]')
   await click('#create-button')
+  assert.deepEqual(
+    await evaluate(
+      `[...document.querySelectorAll('[data-service-setup] h1, [data-service-setup] h2')].map(e => e.textContent)`,
+    ),
+    ['新增服务', '服务信息'],
+  )
+  assert.equal(
+    await evaluate(
+      `[...document.querySelectorAll('[data-service-setup] button')].some(e => ['返回', '取消'].includes(e.textContent.trim()))`,
+    ),
+    false,
+  )
   await visible('#deploy-name')
   await fill('#deploy-name', 'API 服务')
   await fill('#deploy-module', 'brezze-api')
@@ -482,6 +516,11 @@ try {
   await clickText('稍后继续')
   await visible(`[data-service-id="${apiService.id}"]`)
   await clickText('继续配置', `[data-service-id="${apiService.id}"]`)
+  await visible('#deploy-sourceProjectId')
+  await clickText('上一步')
+  await visible('#deploy-name')
+  assert.equal(await evaluate(`document.querySelector('#deploy-name').value`), 'API 服务')
+  await submit()
   await visible('#deploy-sourceProjectId')
   assert.equal(await evaluate(`Boolean(document.querySelector('#deploy-branch'))`), false)
   assert.equal(deployment.data.environmentSources.length, 0)
@@ -532,6 +571,10 @@ try {
   await fill('#deploy-buildImage', 'maven:custom-before-copy')
   await clickText('应用配置')
   await visible('[role=alertdialog]')
+  assert.equal(
+    await evaluate(`document.querySelector('[data-confirm-action]').dataset.variant`),
+    'default',
+  )
   await clickText('取消', '[role=alertdialog]')
   assert.equal(
     await evaluate(`document.querySelector('#deploy-buildImage').value`),
@@ -539,7 +582,7 @@ try {
   )
   await clickText('应用配置')
   await visible('[role=alertdialog]')
-  await clickText('确认', '[role=alertdialog]')
+  await click('[data-confirm-action]')
   await until(
     () =>
       evaluate(
@@ -642,11 +685,30 @@ try {
     '过滤不清除已选版本',
   )
   await click('[aria-label="清空搜索提交"]')
+  assert.equal(await evaluate(`document.activeElement.getAttribute('aria-label')`), '搜索提交')
+  assert.ok(
+    await evaluate(
+      `!!document.querySelector('[aria-label="选择发布提交"]').closest('[data-slot="scroll-area-viewport"]')`,
+    ),
+  )
   await fill('[aria-label="搜索提交"]', String(version).repeat(40))
   assert.equal(await evaluate(`document.querySelectorAll('[data-commit]').length`), 1)
   await click('#confirm-release')
   await visible('[role=alertdialog]')
-  await clickText('确认', '[role=alertdialog]')
+  assert.equal(
+    await evaluate(`document.querySelector('[data-confirm-action]').dataset.variant`),
+    'default',
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('[data-confirm-action]').textContent.trim()`),
+    '确认发布',
+  )
+  assert.equal(
+    await evaluate(`document.querySelectorAll('[data-confirmation-details] dt').length`),
+    6,
+  )
+  await screenshot('ux-publish-confirmation.png')
+  await click('[data-confirm-action]')
   await visible('#deploy-task-logs')
   await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '源码准备')
   const task = (await agentRequest('claim', {}, firstAgent.token)).task
@@ -715,7 +777,7 @@ try {
     )
     await click('#confirm-release')
     await visible('[role=alertdialog]')
-    await clickText('确认', '[role=alertdialog]')
+    await click('[data-confirm-action]')
     await visible('#deploy-task-logs')
     await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '任务已排队')
     return (await agentRequest('claim', {}, firstAgent.token)).task
@@ -742,7 +804,13 @@ try {
     state.deployments.releases.splice(
       at,
       0,
-      ...fillerIds.map((id, i) => ({ ...original, id, commitSubject: `历史填充 ${i}` })),
+      ...fillerIds.map((id, i) => ({
+        ...original,
+        id,
+        commitSubject: `历史填充 ${i}`,
+        available: i !== 0,
+        config: { ...original.config, profile: `history-profile-${i}` },
+      })),
     )
   })
   await go(
@@ -765,20 +833,101 @@ try {
   await clickText('加载更早版本')
   await visible(`[data-release-id="${task.id}"]`)
   await clickText('回退', `[data-release-id="${task.id}"]`)
-  await visible('#deploy-releaseId')
+  await visible('[data-release-option]')
   assert.ok((await evaluate('location.hash')).includes('release=' + task.id))
   await command('Page.reload')
-  await visible('#deploy-releaseId')
+  await visible('[data-release-option]')
   await until(
     () => evaluate(`!document.querySelector('#confirm-release').disabled`),
     '精确版本回退可确认',
   )
-  assert.ok(
-    !(await evaluate(`document.querySelector('#deploy-releaseId').textContent`)).includes(
-      '历史填充',
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[data-release-option="${task.id}"]').getAttribute('aria-pressed')`,
     ),
+    'true',
   )
-  const rollback = await publish('rollback', task.id)
+  assert.equal(await evaluate(`Boolean(document.querySelector('#deploy-releaseId'))`), false)
+  const tasksBeforeSelection = deployment.data.tasks.length
+  await click(`[data-release-option="${next.id}"]`)
+  assert.equal(
+    await evaluate(`document.querySelector('[data-release-option="${next.id}"]').disabled`),
+    true,
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('[data-selected-release]').dataset.selectedRelease`),
+    task.id,
+  )
+  // 同一提交的不同发布记录按版本 ID 选择，确认区必须使用该版本的历史配置。
+  const alternativeId = fillerIds.at(-1)
+  await click(`[data-release-option="${alternativeId}"]`)
+  assert.equal(
+    await evaluate(`document.querySelector('[data-selected-release]').dataset.selectedRelease`),
+    alternativeId,
+  )
+  assert.match(
+    await evaluate(`document.querySelector('.release-review').textContent`),
+    /history-profile-21/,
+  )
+  await fill('[aria-label="搜索已发布版本"]', alternativeId)
+  assert.equal(await evaluate(`document.querySelectorAll('[data-release-option]').length`), 1)
+  await fill('[aria-label="搜索已发布版本"]', '不存在的历史版本')
+  assert.equal(await evaluate(`document.querySelectorAll('[data-release-option]').length`), 0)
+  assert.equal(
+    await evaluate(`document.querySelector('[data-selected-release]').dataset.selectedRelease`),
+    alternativeId,
+  )
+  await click('[aria-label="清空搜索已发布版本"]')
+  await clickText('加载更多历史版本')
+  await visible(`[data-release-option="${fillerIds[0]}"]`)
+  await click(`[data-release-option="${fillerIds[0]}"]`)
+  assert.equal(
+    await evaluate(`document.querySelector('[data-release-option="${fillerIds[0]}"]').disabled`),
+    true,
+  )
+  assert.equal(
+    await evaluate(`document.querySelector('[data-selected-release]').dataset.selectedRelease`),
+    alternativeId,
+  )
+  await evaluate(`document.querySelector('[data-release-option="${task.id}"]').focus()`)
+  assert.equal(await evaluate(`document.activeElement.dataset.releaseOption`), task.id)
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+    text: '\r',
+  })
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+  })
+  await until(
+    () =>
+      evaluate(
+        `document.querySelector('[data-selected-release]').dataset.selectedRelease === '${task.id}'`,
+      ),
+    '键盘选择历史版本',
+  )
+  assert.equal(deployment.data.tasks.length, tasksBeforeSelection)
+  await click('#confirm-release')
+  await visible('[role=alertdialog]')
+  assert.ok(
+    (await evaluate(`document.querySelector('[role=alertdialog]').textContent`)).includes(task.id),
+  )
+  await clickText('取消', '[role=alertdialog]')
+  assert.equal(deployment.data.tasks.length, tasksBeforeSelection)
+  await click('#confirm-release')
+  await visible('[role=alertdialog]')
+  await click('[data-confirm-action]')
+  await visible('#deploy-task-logs')
+  await until(
+    () => deployment.data.tasks.some((t) => t.status === 'queued'),
+    '列表选择的回退任务已排队',
+  )
+  const rollback = (await agentRequest('claim', {}, firstAgent.token)).task
   assert.equal(rollback.release.id, task.id)
   await send(rollback, 1, 'verifying', '回退健康检查通过', 'succeeded', {
     release: rollback.release,
@@ -896,7 +1045,7 @@ try {
   )
   await click('#confirm-release')
   await visible('[role=alertdialog]')
-  await clickText('确认', '[role=alertdialog]')
+  await click('[data-confirm-action]')
   await visible('#deploy-task-logs')
   await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '前端任务排队')
   const staticTask = (await agentRequest('claim', {}, firstAgent.token)).task
@@ -926,7 +1075,7 @@ try {
   await choose('#deploy-configTemplate', templateLabel)
   await clickText('应用配置')
   await visible('[role=alertdialog]')
-  await clickText('确认', '[role=alertdialog]')
+  await click('[data-confirm-action]')
   await until(
     () => evaluate(`document.querySelector('#deploy-packageManager').textContent.includes('pnpm')`),
     '复用 pnpm',
@@ -937,7 +1086,7 @@ try {
     await evaluate(`document.querySelector('#health-check-preview').textContent`),
     /HTTP 200.*发布版本标记/,
   )
-  await clickText('返回')
+  await clickText('稍后继续')
   await visible('[role=alertdialog]')
   await clickText('放弃修改并离开', '[role=alertdialog]')
   assert.equal(deployment.data.targets.filter((t) => t.serviceId === staticService.id).length, 1)
@@ -1020,7 +1169,7 @@ try {
   await click('[data-commit]')
   await click('#confirm-release')
   await visible('[role=alertdialog]')
-  await clickText('确认', '[role=alertdialog]')
+  await click('[data-confirm-action]')
   await visible('#deploy-task-logs')
   await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '固定提交任务排队')
   const pinned = (await agentRequest('claim', {}, firstAgent.token)).task
@@ -1365,7 +1514,7 @@ try {
   await click('[data-view=home]')
   await visible(homeApi)
   await showHomeService(attentionService.id)
-  await click(`[aria-label="${attentionService.name} · 更新"]`)
+  await click(`[aria-label="${attentionService.name} · 发布"]`)
   await visible('#release-workbench')
   assert.ok((await evaluate('location.hash')).includes(`target=${attentionTarget.id}`))
   await click('[data-view=home]')
@@ -1453,7 +1602,7 @@ try {
     const cardContentFits = await evaluate(
       `(() => {const c=document.querySelector('${homeCard}');return [...c.querySelectorAll('[data-home-service]')].every(row=>{const version=row.querySelector('[data-service-version]'),actions=row.querySelector('.tile-service-end'),label=row.querySelector('.tile-runtime-label').getBoundingClientRect(),button=row.querySelector('.tile-service-action').getBoundingClientRect();return version.scrollWidth<=version.clientWidth+1&&version.getBoundingClientRect().right<=actions.getBoundingClientRect().left+1&&Math.abs(label.x+label.width/2-button.x-button.width/2)<1;});})()`,
     )
-    assert.ok(cardContentFits, `版本信息不与操作区重叠，状态文字在 ${width}px 与更新按钮居中对齐`)
+    assert.ok(cardContentFits, `版本信息不与操作区重叠，状态文字在 ${width}px 与发布按钮居中对齐`)
     await screenshot(`console-home-${width}.png`)
     for (const view of ['overview', 'services', 'projects', 'environments', 'servers', 'tasks']) {
       await go(view)
@@ -1537,6 +1686,14 @@ try {
       '长提交说明不超出历史记录内容区',
     )
     await screenshot(`console-history-${width}.png`)
+    const historyRow = '[data-release-id]:first-child'
+    await clickText('版本与构建明细', historyRow)
+    assert.equal(
+      await evaluate(`document.querySelector('${historyRow} button[aria-expanded]').dataset.state`),
+      'open',
+    )
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true)
+    await clickText('版本与构建明细', historyRow)
     await go('release', `?environment=${firstTarget.environmentId}&target=${firstTarget.id}`)
     await visible('[aria-label="搜索提交"]')
     await until(
@@ -1551,6 +1708,39 @@ try {
       `提交检索 ${width}px`,
     )
     await screenshot(`ux-commit-search-${width}.png`)
+    await clickText('已发布版本')
+    await visible('[data-release-option]')
+    assert.equal(
+      await evaluate(
+        `document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('[data-release-option]')].every(row => row.scrollWidth <= row.clientWidth + 1)`,
+      ),
+      true,
+      `历史版本列表在 ${width}px 完整显示`,
+    )
+    await screenshot(`ux-release-selection-${width}.png`)
+    await clickText('确认回退')
+    await visible('[role=alertdialog]')
+    assert.equal(
+      await evaluate(`document.querySelector('[data-confirm-action]').textContent.trim()`),
+      '确认回退',
+    )
+    assert.equal(
+      await evaluate(`document.querySelectorAll('[data-confirmation-details] dt').length`),
+      8,
+    )
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[role=alertdialog]').scrollWidth <= document.querySelector('[role=alertdialog]').clientWidth + 1`,
+      ),
+      true,
+      `回退确认在 ${width}px 不溢出`,
+    )
+    await screenshot(`ux-rollback-confirmation-${width}.png`)
+    await clickText('取消', '[role=alertdialog]')
+    await until(
+      () => evaluate(`document.activeElement.id === 'confirm-release'`),
+      '关闭回退确认后焦点返回操作按钮',
+    )
     await go('tasks', `?environment=${firstTarget.environmentId}&task=${pinned.id}`)
     await visible('#deploy-task-logs')
     await clickText('完整日志', '#task-workbench')
@@ -1582,6 +1772,14 @@ try {
       `document.querySelector('#health-check-preview').scrollIntoView({block:'center'})`,
     )
     await screenshot(`ux-health-${width}.png`)
+    await go('setup')
+    await visible('[data-service-setup]')
+    assert.equal(
+      await evaluate('document.documentElement.scrollWidth <= innerWidth'),
+      true,
+      `分步配置在 ${width}px 不溢出`,
+    )
+    await screenshot(`ux-setup-${width}.png`)
   }
   await go('services')
   await visible(`[data-service-id="${apiService.id}"]`)
@@ -1617,7 +1815,7 @@ try {
   await clickText('取消', '[role=alertdialog]')
   assert.ok(deployment.data.servers.some((s) => s.id === disposable.server.id))
   await menu(`[data-server-id="${disposable.server.id}"]`, '删除记录')
-  await clickText('确认', '[role=alertdialog]')
+  await click('[data-confirm-action]')
   await until(
     () => !deployment.data.servers.some((s) => s.id === disposable.server.id),
     '删除临时记录',
@@ -1651,7 +1849,7 @@ try {
   await visible(`[data-server-id="${secondAgent.serverId}"]`)
   assert.equal(workspaces.overview(another.id).targets.length, 0)
   await clickText('解除绑定', `[data-server-id="${secondAgent.serverId}"]`)
-  await clickText('确认', '[role=alertdialog]')
+  await click('[data-confirm-action]')
   await until(() => !workspaces.overview(another.id).servers.length, '解除绑定')
   assert.equal(deployment.authenticate(secondAgent.token), secondAgent.serverId)
   assert.equal(await evaluate(`document.body.textContent.includes('仅监控')`), false)

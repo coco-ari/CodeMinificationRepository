@@ -33,7 +33,7 @@ import {
 export function Confirmation({ value, onClose }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('')
-  const returnFocus = useRef(document.activeElement)
+  const returnFocus = useRef(value.returnFocus || document.activeElement)
   return (
     <AlertDialog
       open
@@ -42,6 +42,7 @@ export function Confirmation({ value, onClose }) {
       }}
     >
       <AlertDialogContent
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
         onCloseAutoFocus={(event) => {
           event.preventDefault()
           if (returnFocus.current?.isConnected) returnFocus.current.focus()
@@ -49,8 +50,22 @@ export function Confirmation({ value, onClose }) {
       >
         <AlertDialogHeader>
           <AlertDialogTitle>{value.title}</AlertDialogTitle>
-          <AlertDialogDescription>{value.description}</AlertDialogDescription>
+          <AlertDialogDescription className="whitespace-pre-wrap break-words">
+            {value.description}
+          </AlertDialogDescription>
         </AlertDialogHeader>
+        {value.details && (
+          <dl
+            className="grid min-w-0 gap-3 rounded-md border bg-muted/30 p-4"
+            data-confirmation-details
+          >
+            {value.details.map(([label, content]) => (
+              <Detail key={label} label={label}>
+                {content || '—'}
+              </Detail>
+            ))}
+          </dl>
+        )}
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}
@@ -59,7 +74,8 @@ export function Confirmation({ value, onClose }) {
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
           <Button
-            variant="destructive"
+            variant={value.destructive ? 'destructive' : 'default'}
+            data-confirm-action
             disabled={busy}
             onClick={async () => {
               setBusy(true)
@@ -225,7 +241,9 @@ export function ServiceForm({ item, onClose, onSave, step = false }) {
         hint={
           hasTargets
             ? '已有部署目标，服务类型保持不变。'
-            : '前端构建为静态文件，由现有共用 Nginx 提供访问。'
+            : serviceKind === 'static'
+              ? '前端构建为静态文件，由现有共用 Nginx 提供访问。'
+              : '编译所选 Maven 模块及公共依赖，由独立容器运行。'
         }
       />
       <Field

@@ -317,6 +317,7 @@ function Console({ route, session, reloadSession }) {
           description: '当前步骤的修改尚未保存。离开将放弃这些修改，已保存的步骤会保留。',
           action,
           confirmLabel: '放弃修改并离开',
+          destructive: true,
         }),
       ),
     [],
@@ -498,7 +499,15 @@ function Console({ route, session, reloadSession }) {
     }
     if (life.current.active) navigateSafely(() => setDialog({ kind, item }))
   }
-  const confirm = (title, description, action) => setConfirmation({ title, description, action })
+  const confirm = (title, description, action, options = {}) =>
+    setConfirmation({
+      title,
+      description,
+      action,
+      confirmLabel: title,
+      returnFocus: document.activeElement,
+      ...options,
+    })
   const inlineEditor = [
     'workspace',
     'repository',

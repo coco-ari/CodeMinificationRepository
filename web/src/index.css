@@ -560,11 +560,6 @@
 .review-details dt {
   flex-shrink: 0;
 }
-.commit-list {
-  max-height: 540px;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
 .commit-option {
   height: auto;
   width: 100%;

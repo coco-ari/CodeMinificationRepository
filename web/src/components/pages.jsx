@@ -145,15 +145,6 @@ function RepositoryActions({ repo }) {
           <span className="hidden xl:inline">刷新仓库信息</span>
           <span className="xl:hidden">刷新</span>
         </Action>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="repo-edit"
-          aria-label="编辑仓库"
-          onClick={() => open('repository', repo)}
-        >
-          编辑
-        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -207,6 +198,7 @@ function RepositoryActions({ repo }) {
                     )
                     open('secret', { project: repo, token: result.token })
                   },
+                  { destructive: true },
                 )
               }
             >
@@ -235,14 +227,19 @@ export function Repositories() {
       >
         {repo.name}
       </Button>
-      <a
-        className="mt-1 block truncate text-xs text-muted-foreground"
-        href={repo.repository}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        {repo.repository}
-      </a>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <a
+            className="mt-1 block truncate text-xs text-muted-foreground"
+            href={repo.repository}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {repo.repository}
+          </a>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-80 break-all">{repo.repository}</TooltipContent>
+      </Tooltip>
       <div className="mt-2">
         <RepositoryStatus repo={repo} />
       </div>
@@ -326,6 +323,7 @@ export function Servers() {
         await refresh()
         notify('服务器记录已删除')
       },
+      { destructive: true },
     )
   return (
     <div className="space-y-4">
@@ -388,6 +386,7 @@ export function Servers() {
                                 await request('/api/deploy/servers/' + server.id + '/revoke', {})
                                 await refresh()
                               },
+                              { destructive: true },
                             )
                           }
                         >
@@ -423,6 +422,7 @@ export function Servers() {
                         await refresh()
                         notify('已解除项目绑定')
                       },
+                      { destructive: true },
                     )
                   }
                 >
@@ -562,6 +562,7 @@ export function Credentials() {
               </Button>
               <Button
                 variant="ghost"
+                className="text-destructive hover:text-destructive"
                 onClick={() =>
                   confirm(
                     '删除共享凭证',
@@ -570,6 +571,7 @@ export function Credentials() {
                       await request(`/api/credentials/${item.id}`, {}, 'DELETE')
                       await refresh()
                     },
+                    { destructive: true },
                   )
                 }
               >

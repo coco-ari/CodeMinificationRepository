@@ -10,7 +10,7 @@ import {
   sortFn_alphanumeric,
   flexRender,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   Table,
   TableHeader,
@@ -20,7 +20,7 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { SearchField } from './search-field'
 import { Card, CardContent } from '@/components/ui/card'
 import { Choice } from './selection'
 import { Empty } from './shared'
@@ -86,16 +86,13 @@ export function DataTable({
   return (
     <div className="space-y-3" data-slot="data-table">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative min-w-40 flex-1 sm:max-w-72">
-          <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" />
-          <Input
-            aria-label={searchPlaceholder}
-            placeholder={searchPlaceholder}
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
+        <SearchField
+          label={searchPlaceholder}
+          placeholder={searchPlaceholder}
+          value={search}
+          onChange={setSearch}
+          className="min-w-40 sm:max-w-72"
+        />
         {!!filters.length && (
           <div className="w-36">
             <Choice

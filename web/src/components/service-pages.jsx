@@ -1,3 +1,4 @@
+import { TextTooltip } from './text-tooltip'
 import { useMemo, useState } from 'react'
 import {
   ArrowRight,
@@ -174,12 +175,10 @@ export function ServiceList({ compact = false, serverId }) {
   )
   const source = (service) => (
     <div className="min-w-0">
-      <p className="truncate" title={service.repository?.name}>
-        {service.repository?.name || '未关联仓库'}
-      </p>
-      <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={service.branches}>
+      <TextTooltip className="block">{service.repository?.name || '未关联仓库'}</TextTooltip>
+      <TextTooltip className="mt-1 block font-mono text-xs text-muted-foreground">
         {service.branches || '待配置'}
-      </p>
+      </TextTooltip>
     </div>
   )
   const placement = (service) =>
@@ -485,6 +484,7 @@ export function Environments() {
               await refresh()
               notify('环境已删除')
             },
+            { destructive: true },
           )
         }
       >
@@ -599,7 +599,14 @@ export function ServiceSetup() {
           。每个步骤单独保存，保存配置不会自动发布。
         </p>
       )}
-      <ConsoleContext.Provider value={{ ...context, formLayout: 'embedded' }}>
+      <ConsoleContext.Provider
+        value={{
+          ...context,
+          formLayout: 'embedded',
+          formStepTitle: ['服务信息', '当前环境源码', '部署配置'][step - 1],
+          previousStep: step > 1 ? () => go(step - 1) : null,
+        }}
+      >
         {step === 1 && (
           <ServiceForm
             key={service?.id || 'new'}

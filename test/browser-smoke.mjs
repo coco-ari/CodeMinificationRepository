@@ -272,7 +272,11 @@ try {
   assert.equal(service.store.state.projects[0].branch, 'release/vietnam')
   assert.ok(!(await evaluate('document.body.textContent.includes("test-only-password")')))
   // 仓库配置使用完整页面；嵌入的共享凭证仍使用 Radix 对话框。
-  await mouseClick('[aria-label="编辑仓库"]')
+  await mouseClick('[data-repository-menu]')
+  await visible('[role=menu]')
+  await evaluate(
+    'Array.from(document.querySelectorAll("[role=menuitem]")).find(b=>b.textContent.includes("编辑仓库")).click()',
+  )
   await visible('#project-dialog')
   assert.equal(
     await evaluate('Boolean(document.querySelector("#project-dialog[role=dialog]"))'),

@@ -303,7 +303,8 @@ export function FormDialog({
   useEffect(() => registerGuard(guardId, () => dirty.current && !submitting.current), [guardId])
   const close = () => navigateSafely(onClose)
   const returnFocus = useRef(document.activeElement)
-  const layout = useConsole()?.formLayout
+  const context = useConsole()
+  const layout = context?.formLayout
   const inline = ['page', 'embedded'].includes(layout) && id !== 'credential-dialog'
   const Heading = layout === 'embedded' ? 'h2' : 'h1'
   const form = (
@@ -352,9 +353,22 @@ export function FormDialog({
       {error && <FieldError className="form-error">{error}</FieldError>}
       {footer || (
         <div className="flex justify-end gap-2 border-t pt-4">
-          <Button type="button" variant="outline" disabled={busy} onClick={close}>
-            取消
-          </Button>
+          {layout === 'embedded' ? (
+            context.previousStep && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={context.previousStep}
+              >
+                上一步
+              </Button>
+            )
+          ) : (
+            <Button type="button" variant="outline" disabled={busy} onClick={close}>
+              取消
+            </Button>
+          )}
           <Button type="submit" disabled={busy}>
             {busy && <LoaderCircle className="animate-spin" />}
             {submitLabel}
@@ -374,15 +388,19 @@ export function FormDialog({
           <div>
             <Heading
               id={layout === 'embedded' ? undefined : 'page-title'}
-              className="text-xl font-semibold"
+              className={
+                layout === 'embedded' ? 'text-base font-semibold' : 'text-xl font-semibold'
+              }
             >
-              {title}
+              {layout === 'embedded' ? context.formStepTitle : title}
             </Heading>
             <p className="mt-2 text-sm text-muted-foreground">{description}</p>
           </div>
-          <Button variant="outline" data-slot="dialog-close" onClick={close}>
-            返回
-          </Button>
+          {layout !== 'embedded' && (
+            <Button variant="outline" data-slot="dialog-close" onClick={close}>
+              返回
+            </Button>
+          )}
         </div>
         <Card>
           <CardContent>{form}</CardContent>

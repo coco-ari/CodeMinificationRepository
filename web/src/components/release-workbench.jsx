@@ -17,11 +17,10 @@ import {
   Clock3,
   MoreHorizontal,
   Download,
-  Search,
-  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { SearchField } from './search-field'
+import { ReleaseInfo, ReleaseBuildDetails } from './release-info'
 import { navigateSafely } from '@/lib/navigation-guard'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -51,35 +50,6 @@ import {
   actionNames,
   copy,
 } from '@/lib/console'
-
-function SearchField({ label, placeholder, value, onChange, disabled = false }) {
-  return (
-    <div className="relative min-w-0 flex-1">
-      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        type="search"
-        aria-label={label}
-        placeholder={placeholder}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        className="pl-9 pr-10 [&::-webkit-search-cancel-button]:appearance-none"
-      />
-      {value && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`清空${label}`}
-          className="absolute right-1 top-1/2 -translate-y-1/2"
-          onClick={() => onChange('')}
-        >
-          <X />
-        </Button>
-      )}
-    </div>
-  )
-}
 
 export function Configuration({ target }) {
   if (!target) return <Empty title="部署目标不存在" />
@@ -250,7 +220,7 @@ export function ConfigurationPage({ selectedTarget }) {
             }
             onClick={() => open('release', { target, action: 'deploy' })}
           >
-            发布服务 <ArrowRight />
+            发布 <ArrowRight />
           </Button>
         </div>
       </div>
@@ -403,31 +373,8 @@ export function ConfigurationPage({ selectedTarget }) {
             {releases.map((r) => (
               <div className="version-item flex-col sm:flex-row" key={r.id} data-release-id={r.id}>
                 <div className="w-full min-w-0 flex-1">
-                  <Commit value={r.revision} subject={r.commitSubject} summary />
-                  <p className="mt-1 text-xs text-muted-foreground">{date(r.createdAt)}</p>
-                  <p className="mt-1 break-all text-xs text-muted-foreground">
-                    {r.sourceSnapshot?.branch || '历史分支未记录'}
-                    {r.restoredFromReleaseId ? ' · 从历史源码重建' : ''}
-                  </p>
-                  {r.restoredFromReleaseId && (
-                    <p className="mt-1 break-all text-xs text-muted-foreground">
-                      来源版本：{r.restoredFromReleaseId}
-                    </p>
-                  )}
-                  {r.buildSnapshot && (
-                    <p className="mt-2 break-all text-xs text-muted-foreground">
-                      构建镜像：{r.buildSnapshot.buildImage}
-                      {r.buildSnapshot.runtimeImage
-                        ? ` · 运行镜像：${r.buildSnapshot.runtimeImage}`
-                        : ''}
-                      {r.buildSnapshot.packageManagerVersion
-                        ? ` · ${r.buildSnapshot.packageManager} ${r.buildSnapshot.packageManagerVersion}`
-                        : ''}
-                      {r.buildSnapshot.mavenVersion
-                        ? ` · Maven ${r.buildSnapshot.mavenVersion}`
-                        : ''}
-                    </p>
-                  )}
+                  <ReleaseInfo release={r} />
+                  <ReleaseBuildDetails release={r} />
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2 self-start">
                   {target.currentRelease?.id === r.id ? (
@@ -504,6 +451,7 @@ export function ConfigurationPage({ selectedTarget }) {
                                   setReleases(page.releases)
                                   setReleaseNext(page.nextOffset)
                                 },
+                                { destructive: true },
                               )
                             }
                           >
@@ -517,17 +465,7 @@ export function ConfigurationPage({ selectedTarget }) {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </>
-                  ) : (
-                    <span
-                      className={`text-xs ${r.archiveStatus === 'invalid' ? 'text-destructive' : 'text-muted-foreground'}`}
-                    >
-                      {r.archiveStatus === 'cleared'
-                        ? '源码已清理'
-                        : r.archiveStatus === 'invalid'
-                          ? '源码校验失败'
-                          : '暂无源码档案'}
-                    </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -607,6 +545,7 @@ export function ReleaseWorkbench() {
     [error, setError] = useState(''),
     [choice, setChoice] = useState(''),
     [commitQuery, setCommitQuery] = useState(''),
+    [releaseQuery, setReleaseQuery] = useState(''),
     [tab, setTab] = useState(route.action === 'rollback' ? 'releases' : 'commits'),
     [releaseId, setReleaseId] = useState(''),
     [showConfig, setShowConfig] = useState(false),
@@ -621,6 +560,18 @@ export function ReleaseWorkbench() {
       .join(' ')
       .toLocaleLowerCase()
       .includes(commitQuery.trim().toLocaleLowerCase()),
+  )
+  const visibleReleases = releases.filter((release) =>
+    [
+      release.sourceSnapshot?.branch,
+      release.revision,
+      release.commitSubject,
+      release.id,
+      date(release.createdAt),
+    ]
+      .join(' ')
+      .toLocaleLowerCase()
+      .includes(releaseQuery.trim().toLocaleLowerCase()),
   )
   useEffect(() => {
     live.current = true
@@ -647,6 +598,7 @@ export function ReleaseWorkbench() {
     setBranchInfo(null)
     setReleaseNext(null)
     setReleaseId('')
+    setReleaseQuery('')
     setTab(route.action === 'rollback' ? 'releases' : 'commits')
     setReleases([])
     setError('')
@@ -712,7 +664,7 @@ export function ReleaseWorkbench() {
         title="部署目标不存在"
         description="返回项目选择有效的服务和服务器。"
         action={() => navigate('deployments')}
-        label="返回部署发布"
+        label="返回服务与部署"
       />
     )
   const activeTask = data.tasks.find((t) => t.targetId === target.id && !finished(t))
@@ -816,7 +768,7 @@ export function ReleaseWorkbench() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 id="page-title" className="text-xl font-semibold">
-            {action === 'restart' ? '重启' : '更新'} {service?.name}
+            {actionNames[action]} {service?.name}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {data.project.name} / {find('environments', target.environmentId)?.name} /{' '}
@@ -941,62 +893,68 @@ export function ReleaseWorkbench() {
                           : ''}
                       </p>
                     )}
-                    <div
-                      role="group"
-                      aria-label="选择发布提交"
-                      className="commit-list"
-                      aria-busy={loading || busy}
-                    >
-                      {loading && (
-                        <div className="space-y-4 py-3" role="status" aria-label="正在读取提交记录">
-                          <Skeleton className="h-16" />
-                          <Skeleton className="h-16" />
-                          <Skeleton className="h-16" />
-                        </div>
-                      )}
-                      <div hidden={loading}>
-                        {busy && !history?.commits.length && (
-                          <div className="space-y-3 py-3">
-                            <Skeleton className="h-20" />
-                            <Skeleton className="h-20" />
-                            <Skeleton className="h-20" />
+                    <ScrollArea className="max-h-[540px] [&_[data-slot=scroll-area-viewport]]:max-h-[540px]">
+                      <div
+                        role="group"
+                        aria-label="选择发布提交"
+                        className="pr-3"
+                        aria-busy={loading || busy}
+                      >
+                        {loading && (
+                          <div
+                            className="space-y-4 py-3"
+                            role="status"
+                            aria-label="正在读取提交记录"
+                          >
+                            <Skeleton className="h-16" />
+                            <Skeleton className="h-16" />
+                            <Skeleton className="h-16" />
                           </div>
                         )}
-                        {visibleCommits.map((commit) => (
-                          <Button
-                            key={commit.revision}
-                            variant="ghost"
-                            disabled={busy}
-                            aria-pressed={choice === commit.revision}
-                            data-commit={commit.revision}
-                            className={`commit-option ${choice === commit.revision ? 'selected' : ''}`}
-                            onClick={() => setChoice(commit.revision)}
-                          >
-                            <GitCommitHorizontal className="size-4 shrink-0" />
-                            <span className="min-w-0 flex-1 text-left">
-                              <span className="block whitespace-normal break-words font-medium">
-                                {commit.subject || '无提交说明'}
+                        <div hidden={loading}>
+                          {busy && !history?.commits.length && (
+                            <div className="space-y-3 py-3">
+                              <Skeleton className="h-20" />
+                              <Skeleton className="h-20" />
+                              <Skeleton className="h-20" />
+                            </div>
+                          )}
+                          {visibleCommits.map((commit) => (
+                            <Button
+                              key={commit.revision}
+                              variant="ghost"
+                              disabled={busy}
+                              aria-pressed={choice === commit.revision}
+                              data-commit={commit.revision}
+                              className={`commit-option ${choice === commit.revision ? 'selected' : ''}`}
+                              onClick={() => setChoice(commit.revision)}
+                            >
+                              <GitCommitHorizontal className="size-4 shrink-0" />
+                              <span className="min-w-0 flex-1 text-left">
+                                <span className="block whitespace-normal break-words font-medium">
+                                  {commit.subject || '无提交说明'}
+                                </span>
+                                <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
+                                  <code className="commit-sha">{commit.revision}</code>
+                                  <span>{commit.author}</span>
+                                  <span>{date(commit.at)}</span>
+                                </span>
                               </span>
-                              <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
-                                <code className="commit-sha">{commit.revision}</code>
-                                <span>{commit.author}</span>
-                                <span>{date(commit.at)}</span>
-                              </span>
-                            </span>
-                            {choice === commit.revision ? (
-                              <Check className="size-4 shrink-0" />
-                            ) : commit.revision === history?.commits[0]?.revision ? (
-                              <Badge variant="secondary">最新提交</Badge>
-                            ) : null}
-                          </Button>
-                        ))}
-                        {commitQuery.trim() && !visibleCommits.length && !busy && (
-                          <p className="py-6 text-sm text-muted-foreground">
-                            最近 100 条提交中没有匹配结果。可清空搜索、切换分支或刷新提交。
-                          </p>
-                        )}
+                              {choice === commit.revision ? (
+                                <Check className="size-4 shrink-0" />
+                              ) : commit.revision === history?.commits[0]?.revision ? (
+                                <Badge variant="secondary">最新提交</Badge>
+                              ) : null}
+                            </Button>
+                          ))}
+                          {commitQuery.trim() && !visibleCommits.length && !busy && (
+                            <p className="py-6 text-sm text-muted-foreground">
+                              最近 100 条提交中没有匹配结果。可清空搜索、切换分支或刷新提交。
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    </ScrollArea>
                     <p className="text-xs text-muted-foreground">
                       显示所选分支最近 100 条提交；刷新只更新列表，确认发布后固定所选提交。
                     </p>
@@ -1007,76 +965,82 @@ export function ReleaseWorkbench() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <label className="text-sm font-medium" htmlFor="deploy-releaseId">
+                    <p className="text-sm font-medium" id="release-list-label">
                       恢复到版本
-                    </label>
-                    <Selection
-                      id="deploy-releaseId"
-                      searchable
-                      value={releaseId}
-                      onChange={(e) => setReleaseId(e.target.value)}
-                    >
-                      <SelectionOption value="">请选择成功版本</SelectionOption>
-                      {releases
-                        .filter((r) => r.available && r.id !== target.currentRelease?.id)
-                        .map((r) => (
-                          <SelectionOption key={r.id} value={r.id}>
-                            {r.sourceSnapshot?.branch || '历史分支未记录'} · {short(r.revision)} ·{' '}
-                            {r.commitSubject || '无提交说明'} · {date(r.createdAt)}
-                          </SelectionOption>
-                        ))}
-                    </Selection>
-                    <div className="version-chain">
-                      {releases.map((r) => (
-                        <div key={r.id} className="version-item">
-                          <span className="status-dot good mt-1.5" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <Commit value={r.revision} subject={r.commitSubject} summary />
-                              {r.id === target.currentRelease?.id ? (
-                                <Badge variant="secondary" className="h-5 self-start font-normal">
-                                  当前版本
-                                </Badge>
-                              ) : !r.available ? (
-                                <span className="text-xs text-muted-foreground">不可回退</span>
-                              ) : null}
-                            </div>
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              {r.sourceSnapshot?.branch || '历史分支未记录'} · {date(r.createdAt)} ·{' '}
-                              {r.archiveStatus === 'available'
-                                ? '中心源码可重建'
-                                : r.archiveStatus === 'cleared'
-                                  ? '源码已清理'
-                                  : '中心源码缺失，仅可核验本机缓存'}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                      {!releases.length && (
-                        <p className="py-8 text-sm text-muted-foreground">尚无成功发布版本</p>
-                      )}
-                      {releaseNext != null && (
-                        <Action
-                          variant="outline"
-                          onClick={async () => {
-                            const page = await request(
-                              `${endpoint}/targets/${target.id}/releases?offset=${releaseNext}`,
-                            )
-                            if (live.current) {
-                              setReleases((items) => [
-                                ...items,
-                                ...page.releases.filter(
-                                  (next) => !items.some((item) => item.id === next.id),
-                                ),
-                              ])
-                              setReleaseNext(page.nextOffset)
-                            }
-                          }}
-                        >
-                          加载更多历史版本
-                        </Action>
-                      )}
-                    </div>
+                    </p>
+                    <SearchField
+                      label="搜索已发布版本"
+                      placeholder="分支、提交说明、SHA 或版本 ID"
+                      value={releaseQuery}
+                      onChange={setReleaseQuery}
+                    />
+                    <ScrollArea className="max-h-[540px] [&_[data-slot=scroll-area-viewport]]:max-h-[540px]">
+                      <div role="group" aria-labelledby="release-list-label" className="pr-3">
+                        {visibleReleases.map((r) => {
+                          const current = r.id === target.currentRelease?.id
+                          const selected = releaseId === r.id && r.available && !current
+                          return (
+                            <Button
+                              key={r.id}
+                              type="button"
+                              variant="ghost"
+                              disabled={current || !r.available}
+                              aria-pressed={selected}
+                              data-release-option={r.id}
+                              className={`commit-option disabled:opacity-100 ${selected ? 'selected' : ''}`}
+                              onClick={() => setReleaseId(r.id)}
+                            >
+                              <Package className="size-4 shrink-0 text-muted-foreground" />
+                              <ReleaseInfo
+                                release={r}
+                                selectable
+                                badge={
+                                  current ? (
+                                    <Badge variant="secondary">当前版本</Badge>
+                                  ) : !r.available ? (
+                                    <Badge variant="outline">不可回退</Badge>
+                                  ) : null
+                                }
+                              />
+                              {selected && (
+                                <Check className="size-4 shrink-0" aria-label="已选择" />
+                              )}
+                            </Button>
+                          )
+                        })}
+                        {!visibleReleases.length && (
+                          <p className="py-8 text-sm text-muted-foreground" role="status">
+                            {releases.length ? '已加载版本中没有匹配结果。' : '尚无成功发布版本'}
+                          </p>
+                        )}
+                      </div>
+                    </ScrollArea>
+                    <p className="text-xs text-muted-foreground" role="status">
+                      已加载 {releases.length} 个版本
+                      {releaseQuery.trim() && `，匹配 ${visibleReleases.length} 个`}。
+                      点击记录选择，确认后恢复该次发布的源码与配置。
+                    </p>
+                    {releaseNext != null && (
+                      <Action
+                        variant="outline"
+                        onClick={async () => {
+                          const page = await request(
+                            `${endpoint}/targets/${target.id}/releases?offset=${releaseNext}`,
+                          )
+                          if (live.current) {
+                            setReleases((items) => [
+                              ...items,
+                              ...page.releases.filter(
+                                (next) => !items.some((item) => item.id === next.id),
+                              ),
+                            ])
+                            setReleaseNext(page.nextOffset)
+                          }
+                        }}
+                      >
+                        加载更多历史版本
+                      </Action>
+                    )}
                   </div>
                 )}
               </>
@@ -1087,7 +1051,7 @@ export function ReleaseWorkbench() {
         </Card>
         <Card className="release-review">
           <CardHeader>
-            <CardTitle>发布确认</CardTitle>
+            <CardTitle>{actionNames[action]}确认</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <dl className="review-details">
@@ -1129,7 +1093,13 @@ export function ReleaseWorkbench() {
               <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
                 <span>{short(target.currentRelease?.revision)}</span>
                 <ArrowRight className="size-3.5" />
-                <span>{selectedRevision ? short(selectedRevision) : '请选择具体提交'}</span>
+                <span>
+                  {selectedRevision
+                    ? short(selectedRevision)
+                    : action === 'rollback'
+                      ? '请选择历史版本'
+                      : '请选择具体提交'}
+                </span>
               </div>
               {selectedRevision && (
                 <Commit
@@ -1143,6 +1113,14 @@ export function ReleaseWorkbench() {
                   }
                   summary
                 />
+              )}
+              {action === 'rollback' && selectedRelease && (
+                <p
+                  className="text-xs text-muted-foreground break-all"
+                  data-selected-release={selectedRelease.id}
+                >
+                  发布于 {date(selectedRelease.createdAt)} · 版本 {selectedRelease.id}
+                </p>
               )}
             </div>
             <dl className="review-details">
@@ -1193,10 +1171,42 @@ export function ReleaseWorkbench() {
                 const requestId = submission.current.requestId
                 confirm(
                   `确认${actionNames[action]}`,
-                  `${service?.name} · ${server?.name}\n${action === 'deploy' ? branch : releaseSource?.branch || target.currentRelease?.sourceSnapshot?.branch || '历史分支未记录'}\n${selectedRevision}\n${action === 'deploy' ? history?.commits.find((c) => c.revision === choice)?.subject || '' : selectedRelease?.commitSubject || ''}`,
+                  action === 'rollback'
+                    ? '恢复所选版本的源码和历史配置，操作范围如下。'
+                    : '核对以下信息后提交任务，本次仅操作所选部署位置。',
                   async () => {
                     const result = await request(`${endpoint}/tasks`, { ...payload, requestId })
                     if (live.current) navigate('tasks', result.task.id, target.environmentId)
+                  },
+                  {
+                    details: [
+                      ['服务', service?.name],
+                      ['环境', find('environments', target.environmentId)?.name],
+                      ['服务器', server?.name],
+                      [
+                        '分支',
+                        action === 'deploy'
+                          ? branch
+                          : releaseSource?.branch ||
+                            target.currentRelease?.sourceSnapshot?.branch ||
+                            '历史分支未记录',
+                      ],
+                      [
+                        '提交说明',
+                        action === 'deploy'
+                          ? history?.commits.find((c) => c.revision === choice)?.subject
+                          : action === 'rollback'
+                            ? selectedRelease?.commitSubject
+                            : target.currentRelease?.commitSubject,
+                      ],
+                      ['Commit', selectedRevision],
+                      ...(action === 'rollback'
+                        ? [
+                            ['发布时间', date(selectedRelease.createdAt)],
+                            ['版本 ID', selectedRelease.id],
+                          ]
+                        : []),
+                    ],
                   },
                 )
               }}
@@ -1598,7 +1608,7 @@ export function TaskWorkbench({ id }) {
           </Action>
           {task && finished(task) && target?.mode === 'managed' && (
             <Button size="sm" onClick={() => open('release', { target, action: 'deploy' })}>
-              再次更新 <ArrowRight />
+              再次发布 <ArrowRight />
             </Button>
           )}
         </div>

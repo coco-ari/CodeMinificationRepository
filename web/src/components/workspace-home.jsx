@@ -19,7 +19,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
+import { SearchField } from './search-field'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Selection, SelectionOption } from '@/components/selection'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -280,9 +280,9 @@ function ServiceAction({ row, servers, go, onTask }) {
             variant="outline"
             size="sm"
             className="tile-service-action"
-            aria-label={`${row.name} · 选择目标更新`}
+            aria-label={`${row.name} · 选择部署位置发布`}
           >
-            更新
+            发布
             <ChevronDown className="size-3" />
           </Button>
         </DropdownMenuTrigger>
@@ -321,12 +321,12 @@ function ServiceAction({ row, servers, go, onTask }) {
             size="sm"
             className="tile-service-action"
             disabled={!!disabledReason}
-            aria-label={`${row.name} · ${target ? '更新' : '配置'}`}
+            aria-label={`${row.name} · ${target ? '发布' : '配置'}`}
             onClick={() =>
               target ? go('release', { targetId: target.id }) : go('setup', { serviceId: row.id })
             }
           >
-            {target ? '更新' : '配置'}
+            {target ? '发布' : '配置'}
           </Button>
         </span>
       </TooltipTrigger>
@@ -612,12 +612,12 @@ export function WorkspaceHome() {
           项目
         </h1>
         <div className="flex items-center gap-2">
-          <Input
-            aria-label="搜索项目"
+          <SearchField
+            label="搜索项目"
             placeholder="搜索项目…"
             className="w-32 sm:w-44"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
           />
           <Button id="create-button" onClick={() => open('workspace')}>
             <Plus />
