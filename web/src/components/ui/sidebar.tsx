@@ -156,6 +156,7 @@ function Sidebar({
   collapsible?: 'offcanvas' | 'icon' | 'none'
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const returnFocus = React.useRef<HTMLElement | null>(null)
 
   if (collapsible === 'none') {
     return (
@@ -186,6 +187,17 @@ function Sidebar({
             } as React.CSSProperties
           }
           side={side}
+          onOpenAutoFocus={() => {
+            // 导航由外部按钮或快捷键打开，记录进入抽屉前的焦点。
+            returnFocus.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null
+          }}
+          onCloseAutoFocus={(event) => {
+            if (returnFocus.current?.isConnected) {
+              event.preventDefault()
+              returnFocus.current.focus({ preventScroll: true })
+            }
+          }}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Sidebar</SheetTitle>

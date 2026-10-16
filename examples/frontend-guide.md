@@ -40,6 +40,25 @@ pnpm run test:deploy-browser
 
 新增组件使用 `pnpm dlx shadcn@latest add <component>`。核对组件 import 指向 `@/lib/utils`，不要引入重复的样式工具。提交源码与锁文件，随后运行 `pnpm format:ui` 和检查。保留组件的键盘操作、焦点管理与 ARIA 语义；共享表单在关闭时将焦点返回触发控件，秘密字段随弹窗卸载清除。
 
+## Solid Glass 材质规范
+
+后续 UI 修改以 [Solid Glass](https://github.com/deeplethe/solid-glass) 为浅色材质参考，通过本仓库 `web/src/styles/solid-glass.css` 适配 Radix。保留 shadcn/ui 组件、现有布局和业务行为，不直接复制上游针对其他组件状态的选择器。上游 MIT 许可保存在 `web/public/third-party/solid-glass-LICENSE.txt`。
+
+| 区域 | 材质与圆角 |
+| --- | --- |
+| 主卡片、确认框 | 面板层，18px 圆角，顶部高光与柔和投影 |
+| 表格外框 | 稳定实色底面，16px 圆角，内部行保持连续，不逐行加阴影 |
+| 菜单、选择器浮层、提示与通知 | 浮层层，14px 圆角，高不透明度；选项使用 8px 圆角 |
+| 内层卡片、配置片段、日志区域、提交选项 | 内层层，12px 圆角、轻边框；不叠加背景模糊和悬浮阴影 |
+| 按钮、输入框、普通页签 | 控件层，10px 圆角；菜单项等紧凑内容为 8px，首页小控件为 6px |
+| 贴边导航抽屉 | 只圆化露出的边缘，不为贴边一侧添加悬浮高光 |
+
+以上尺寸统一由 `--glass-radius-*` 变量控制。嵌套 Card 自动使用内层材质；其他需要收敛视觉的 Card 显式设置 `data-surface="inset"`，不要依赖 `shadow-none` 与主题样式的加载顺序。开关、圆形徽标与下划线页签保留原形状。主要操作保留厚度，文字链接与菜单触发按钮保持轻量。
+
+Button 的 `data-ui="button"` 是材质标记，`data-slot` 仍交给 Radix 组合组件使用，避免 Popover、DropdownMenu、Tooltip 包装后按钮样式丢失。新增组合控件需验证两类标记都保留。搜索型选择器的内部 Command 继承浮层圆角，限制背景溢出；不要为所有卡片增加 `overflow: hidden`，以免裁掉键盘焦点和非 Portal 内容。
+
+常规透明模式、减少透明效果、高对比度及 390 / 768 / 1280 / 1920 像素布局都要检查。截图应覆盖菜单展开、选项高亮、确认弹窗、日志和移动端导航，不以单张首页截图代替全站检查。
+
 ## 路由与状态
 
 项目地址沿用 `#/projects/{id}/{view}?environment={id}&task={id}`；系统管理使用 `#/system/{view}`。默认进入测试环境。环境、服务页签和任务选择保存在 URL 中，可刷新和直接打开。服务页签以 URL 为准，支持同服务地址切换及浏览器前进后退；更换部署位置时保留当前页签。

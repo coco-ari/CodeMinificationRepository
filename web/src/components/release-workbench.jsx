@@ -1560,7 +1560,7 @@ export function TaskWorkbench({ id }) {
           </p>
         )}
         <ScrollArea
-          className="h-80 rounded-md border bg-muted/30"
+          className="task-log-scroll h-80 rounded-md border bg-muted/30"
           viewportRef={output}
           onViewportScroll={(e) => {
             const el = e.currentTarget

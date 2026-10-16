@@ -7,7 +7,7 @@ export function Toaster(props: ToasterProps) {
       closeButton
       toastOptions={{
         classNames: {
-          toast: '!bg-popover !text-popover-foreground !border-border !rounded-lg !shadow-lg',
+          toast: 'glass-toast !text-popover-foreground',
           description: '!text-muted-foreground',
         },
       }}

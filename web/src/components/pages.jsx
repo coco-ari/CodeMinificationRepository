@@ -550,7 +550,7 @@ export function Credentials() {
         />
       )}
       {data.credentials.map((item) => (
-        <Card className="shadow-none" key={item.id}>
+        <Card data-surface="inset" key={item.id}>
           <CardContent className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="font-semibold">{item.name}</h2>

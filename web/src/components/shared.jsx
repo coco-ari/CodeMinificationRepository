@@ -198,7 +198,7 @@ export function Stats({ items }) {
   return (
     <div className="grid grid-cols-3 gap-2 sm:gap-4">
       {items.map(([label, value, hint]) => (
-        <Card key={label} className="py-0 shadow-none">
+        <Card key={label} className="py-0" data-surface="inset">
           <CardContent className="p-3 sm:p-5">
             <p className="min-h-8 text-xs text-muted-foreground sm:min-h-0 sm:text-sm">{label}</p>
             <p className="my-1 text-2xl font-semibold tracking-tight tabular-nums sm:my-2 sm:text-3xl">

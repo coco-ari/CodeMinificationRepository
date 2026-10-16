@@ -6,6 +6,14 @@
 
 :root {
   color-scheme: light;
+  --radius: 0.75rem;
+  --glass-radius-panel: 18px;
+  --glass-radius-table: 16px;
+  --glass-radius-popup: 14px;
+  --glass-radius-inset: 12px;
+  --glass-radius-control: 10px;
+  --glass-radius-item: 8px;
+  --glass-radius-compact: 6px;
   --background: oklch(0.919 0.009 265);
   --foreground: oklch(0.235 0.012 265);
   --card: oklch(0.968 0.008 265);
@@ -81,7 +89,7 @@ body {
 .console-main {
   background: var(--glass-canvas);
   border-color: oklch(1 0 0 / 55%);
-  border-radius: 18px;
+  border-radius: var(--glass-radius-panel);
   box-shadow:
     inset 0 1px 0 var(--glass-rim),
     0 4px 24px -12px var(--glass-shade);
@@ -101,7 +109,7 @@ body {
 [data-slot='card'] {
   background: var(--card);
   border-color: transparent;
-  border-radius: 18px;
+  border-radius: var(--glass-radius-panel);
   box-shadow: var(--glass-pane-shadow);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
@@ -111,26 +119,33 @@ body {
 [data-slot='data-table-surface'] {
   background: var(--glass-solid);
   border-color: transparent;
-  border-radius: 16px;
+  border-radius: var(--glass-radius-table);
   box-shadow: var(--glass-pane-shadow);
 }
 [data-slot='card'] [data-slot='card'],
+[data-slot='card'][data-surface='inset'],
 .task-log-card,
 [data-slot='data-table'] [data-slot='card'] {
   background: var(--glass-solid);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
-[data-slot='card'] [data-slot='card'] {
+[data-slot='card'] [data-slot='card'],
+[data-slot='card'][data-surface='inset'] {
   border-color: var(--border);
+  border-radius: var(--glass-radius-inset);
   box-shadow: inset 0 1px 0 var(--glass-rim);
 }
-.config-code {
+.config-code,
+.task-log-scroll {
   background: oklch(0.94 0.007 265);
   color: var(--foreground);
+  border-radius: var(--glass-radius-inset);
+  box-shadow: inset 0 1px 2px var(--glass-contact);
 }
 .task-log-text {
   color: var(--foreground);
+  padding: 12px 14px;
 }
 .stage-token {
   background: var(--glass-solid);
@@ -150,7 +165,8 @@ body {
 [data-slot='dropdown-menu-sub-content'],
 [data-slot='dialog-content'],
 [data-slot='alert-dialog-content'],
-[data-slot='sheet-content'] {
+[data-ui='sheet'],
+.glass-toast[data-sonner-toast][data-styled='true'] {
   background: var(--popover);
   border-color: transparent;
   box-shadow: var(--glass-floating-shadow);
@@ -159,10 +175,44 @@ body {
 }
 [data-slot='dialog-content'],
 [data-slot='alert-dialog-content'] {
-  border-radius: 18px;
+  border-radius: var(--glass-radius-panel);
+}
+[data-slot='popover-content'],
+[data-slot='select-content'],
+[data-slot='dropdown-menu-content'],
+[data-slot='dropdown-menu-sub-content'],
+.glass-toast[data-sonner-toast][data-styled='true'] {
+  border-radius: var(--glass-radius-popup);
+}
+/* 贴边抽屉只保留外露边缘的圆角，不给整块导航叠加悬浮卡片高光。 */
+[data-ui='sheet'] {
+  box-shadow: 0 8px 32px var(--glass-shade);
+}
+[data-ui='sheet'][data-side='left'] {
+  border-radius: 0 var(--glass-radius-panel) var(--glass-radius-panel) 0;
+}
+[data-ui='sheet'][data-side='right'] {
+  border-radius: var(--glass-radius-panel) 0 0 var(--glass-radius-panel);
+}
+[data-ui='sheet'][data-side='top'] {
+  border-radius: 0 0 var(--glass-radius-panel) var(--glass-radius-panel);
+}
+[data-ui='sheet'][data-side='bottom'] {
+  border-radius: var(--glass-radius-panel) var(--glass-radius-panel) 0 0;
 }
 [data-slot='command'] {
   background: transparent;
+}
+[data-slot='popover-content'] > [data-slot='command'] {
+  border-radius: inherit;
+}
+[data-slot='select-item'],
+[data-slot='dropdown-menu-item'],
+[data-slot='dropdown-menu-checkbox-item'],
+[data-slot='dropdown-menu-radio-item'],
+[data-slot='dropdown-menu-sub-trigger'],
+[cmdk-item] {
+  border-radius: var(--glass-radius-item);
 }
 [data-slot='dialog-overlay'],
 [data-slot='alert-dialog-overlay'],
@@ -173,15 +223,22 @@ body {
   background: var(--glass-solid);
   color: var(--foreground);
   border: 1px solid var(--border);
+  border-radius: var(--glass-radius-popup);
   box-shadow: var(--glass-floating-shadow);
 }
 [data-slot='tooltip-content'] > .bg-foreground {
   display: none;
 }
 
-/* 控件保留原尺寸与 Radix 状态；所有阴影都保留 Tailwind 焦点环。 */
-[data-slot='button'][data-variant='default'],
-[data-slot='button'][data-variant='destructive'] {
+/* 组合触发器可能覆盖 data-slot，材质使用稳定标记并保留 Tailwind 焦点环。 */
+[data-ui='button']:not([data-variant='link']):not(.rounded-full):not(.rounded-none),
+[data-slot='input'],
+[data-slot='textarea'],
+[data-slot='select-trigger'] {
+  border-radius: var(--glass-radius-control);
+}
+[data-ui='button'][data-variant='default'],
+[data-ui='button'][data-variant='destructive'] {
   background-image: linear-gradient(oklch(1 0 0 / 10%), oklch(0 0 0 / 5%));
   box-shadow:
     inset 0 1px 0 oklch(1 0 0 / 32%),
@@ -191,21 +248,35 @@ body {
     0 5px 8px -5px var(--glass-shade),
     var(--tw-ring-shadow, 0 0 #0000);
 }
-[data-slot='button'][data-variant='outline'],
-[data-slot='button'][data-variant='secondary'] {
+[data-ui='button'][data-variant='outline'],
+[data-ui='button'][data-variant='secondary'] {
   box-shadow: var(--glass-control-shadow), var(--tw-ring-shadow, 0 0 #0000);
 }
-[data-slot='button'][data-variant='outline'] {
+[data-ui='button'][data-variant='outline'] {
   background: var(--glass-field);
 }
 @media (hover: hover) {
-  [data-slot='button'][data-variant='outline']:not(:disabled):hover {
+  [data-ui='button'][data-variant='outline']:not(:disabled):hover {
     background: var(--accent);
   }
 }
+/* 首页的小型选择器保持轻量，普通选择器与搜索型选择器采用相同的输入面。 */
+[data-ui='button'].tile-host-select {
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--glass-radius-compact);
+  box-shadow: none;
+}
+.tile-environments [data-slot='tabs-list'] {
+  border-radius: var(--glass-radius-item);
+}
+.tile-environments [data-slot='tabs-trigger'] {
+  border-radius: var(--glass-radius-compact);
+}
 [data-slot='input'],
 [data-slot='textarea'],
-[data-slot='select-trigger']:not(.tile-host-select) {
+[data-slot='select-trigger']:not(.tile-host-select),
+[data-ui='button'][role='combobox']:not(.tile-host-select) {
   background: var(--glass-field);
   box-shadow:
     inset 0 1px 0 var(--glass-rim),
@@ -214,7 +285,7 @@ body {
     var(--tw-ring-shadow, 0 0 #0000);
 }
 :is(
-  [data-slot='button'],
+  [data-ui='button'],
   [data-slot='input'],
   [data-slot='textarea'],
   [data-slot='select-trigger'],
@@ -284,6 +355,12 @@ body {
     inset 0 1px 0 var(--glass-rim),
     inset 0 0 0 1px var(--border);
 }
+[data-ui='button'].commit-option {
+  border-radius: var(--glass-radius-inset);
+}
+.commit-option.selected {
+  border-color: transparent;
+}
 
 /* 触摸设备关闭常驻面板的模糊，浮层仍有高不透明度；高对比度模式使用系统配色。 */
 @media (pointer: coarse) {
@@ -323,7 +400,8 @@ body {
   [data-slot='dropdown-menu-sub-content'],
   [data-slot='dialog-content'],
   [data-slot='alert-dialog-content'],
-  [data-slot='sheet-content'] {
+  [data-ui='sheet'],
+  .glass-toast[data-sonner-toast][data-styled='true'] {
     border-color: ButtonBorder;
   }
   .commit-option.selected {

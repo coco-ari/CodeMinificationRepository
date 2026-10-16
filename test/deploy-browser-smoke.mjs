@@ -214,7 +214,7 @@ try {
     await animationsSettled()
     if (
       !(await evaluate(
-        `(${query(selector)}).matches('[role=combobox],[data-slot=dropdown-menu-trigger],[role=tab]')`,
+        `(${query(selector)}).matches('[role=combobox],[data-slot=dropdown-menu-trigger],[data-sidebar=trigger],[role=tab]')`,
       ))
     ) {
       await evaluate(`(${query(selector)}).click()`)
@@ -328,6 +328,21 @@ try {
     await click(`${selector} [data-slot=dropdown-menu-trigger]`)
     await visible('[role=menu]')
     await clickText(label, '[role=menu]')
+  }
+  const dismissPopup = async (selector) => {
+    await command('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'Escape',
+      code: 'Escape',
+      windowsVirtualKeyCode: 27,
+    })
+    await command('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Escape',
+      code: 'Escape',
+      windowsVirtualKeyCode: 27,
+    })
+    await until(() => evaluate(`!(${query(selector)})`), '关闭浮层')
   }
   const artifactDirectory = path.resolve('.test-artifacts')
   await mkdir(artifactDirectory, { recursive: true })
@@ -665,6 +680,13 @@ try {
   await screenshot('console-services-multiple-desktop.png')
   await clickText('发布', `[data-target-actions="${firstTarget.id}"]`)
   await visible('#release-branch')
+  // 组合触发器保留交互标记与材质标记，浮层关闭后仍能用键盘继续操作。
+  assert.equal(await evaluate(`document.querySelector('#release-branch').dataset.ui`), 'button')
+  await click('#release-branch')
+  await visible('[cmdk-input]')
+  await screenshot('glass-branch-menu-desktop.png')
+  await dismissPopup('[data-slot=popover-content]')
+  assert.equal(await evaluate('document.activeElement.id'), 'release-branch')
   await choose('#release-branch', 'test-branch')
   await visible('#confirm-release')
   await until(
@@ -1658,6 +1680,13 @@ try {
     )
     assert.ok(cardContentFits, `版本信息不与操作区重叠，状态文字在 ${width}px 与发布按钮居中对齐`)
     await screenshot(`console-home-${width}.png`)
+    if (width === 390) {
+      await click('[data-sidebar="trigger"]')
+      await visible('[data-ui=sheet]')
+      await screenshot('glass-mobile-navigation.png')
+      await dismissPopup('[data-ui=sheet]')
+      assert.equal(await evaluate(`document.activeElement.getAttribute('data-sidebar')`), 'trigger')
+    }
     for (const view of ['overview', 'services', 'projects', 'environments', 'servers', 'tasks']) {
       await go(view)
       await until(() => evaluate(`!document.querySelector('[aria-label="正在加载"]')`), '页面加载')
@@ -1711,6 +1740,13 @@ try {
       }
       if (['services', 'overview', 'environments', 'servers', 'projects'].includes(view))
         await screenshot(`console-${view}-${width}.png`)
+      if (view === 'services' && [390, 1280].includes(width)) {
+        await click('[data-slot=dropdown-menu-trigger][aria-label$="更多操作"]')
+        await visible('[role=menu]')
+        await screenshot(`glass-actions-menu-${width}.png`)
+        await dismissPopup('[role=menu]')
+        assert.equal(await evaluate('document.activeElement.dataset.ui'), 'button')
+      }
     }
     await go(
       'service',
