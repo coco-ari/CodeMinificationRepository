@@ -342,7 +342,8 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
               <Grid>
                 <Field
                   name="runtimeImage"
-                  label="运行镜像"
+                  label="运行基础镜像"
+                  hint="填写独立的 JRE 基础镜像，不要使用已打包业务 JAR 的历史镜像。"
                   defaultValue={c.runtimeImage || 'eclipse-temurin:8-jre'}
                   required
                 />

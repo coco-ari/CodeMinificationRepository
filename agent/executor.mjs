@@ -6,6 +6,7 @@ import { identifier, safeChild, normalizeConfig, imageName, managedName, release
 import { readJson, writeJson } from './state.mjs';
 import { extractZip } from './archive.mjs';
 import { StaticDeployment } from './static-deployment.mjs';
+import { checkRuntimeBase } from './image-policy.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 export const terminal = status => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(status);
@@ -104,6 +105,7 @@ export class DeploymentExecutor {
       let image = await this.docker.inspect(requested, 'image');
       if (!image) { await this.mutation(task, ['pull', requested], { onOutput: text => this.output(task, 'building', text) }); image = await this.docker.inspect(requested, 'image'); }
       if (!image) throw new Error(`构建所需镜像不可用：${requested}`);
+      if (key === 'runtimeImage') await checkRuntimeBase(this.docker, image);
       const pinned = image.RepoDigests?.find(value => /@sha256:[a-f0-9]{64}$/.test(value)) || image.Id;
       if (!pinned) throw new Error(`无法确认镜像的固定版本：${requested}`);
       result[key] = pinned; snapshot[key] = pinned;

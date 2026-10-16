@@ -17,6 +17,7 @@ import { acquireAgentLock } from '../agent/lock.mjs';
 import { Docker } from '../agent/docker.mjs';
 import { checkStaticResponse } from '../agent/static-deployment.mjs';
 import { copyStaticSite } from '../agent/static-site.mjs';
+import { assertRuntimeBase, checkRuntimeBase } from '../agent/image-policy.mjs';
 
 const revision = 'a'.repeat(40);
 function zip(entries) {
@@ -39,6 +40,7 @@ class FakeDocker {
   async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); if (kind === 'image' && /^(maven:|node:|eclipse-temurin:|sha256:)/.test(name)) return { Id: `sha256:${'c'.repeat(64)}` }; return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
   async run(args, options = {}) {
     this.calls.push([...args]);
+    if (args[0] === 'history') return { code: 0, output: JSON.stringify({ CreatedBy: 'RUN install java runtime' }) + '\n' };
     if (args[0] === 'run') {
       const mount = args.filter((_, i) => args[i - 1] === '--mount').find(v => v.includes('dst=/workspace'));
       const source = mount.match(/src=(.*?),dst=/)[1];
@@ -185,6 +187,38 @@ test('Agent 配置限制资源、路径、入口和卷，同时支持 Maven 根�
   assert.throws(() => assertManaged(identity('observe'), task()));
   assert.equal(owns({ Labels: labels('server-1', 'target-1') }, 'server-1', 'target-1'), true);
   assert.equal(owns({ Labels: labels('server-2', 'target-1') }, 'server-1', 'target-1'), false);
+});
+
+test('运行基础镜像拒绝业务标签、JAR 入口及改名后仍残留的旧 JAR 层', async () => {
+  assert.doesNotThrow(() => assertRuntimeBase({ Config: { Cmd: ['jshell'] } }, [{ CreatedBy: 'COPY jre /opt/java/openjdk' }]));
+  for (const Config of [{ Labels: { 'io.cmr.managed': 'true' } }, { Labels: { 'io.cmr.target': 'target-1' } },
+    { Entrypoint: ['java', '-Xmx192m', '-jar', '/srv/service.jar'] }, { Cmd: ['sh', '-c', 'java -jar /app/app.jar'] }]) {
+    assert.throws(() => assertRuntimeBase({ Config }), /禁止在旧业务镜像/);
+  }
+  for (const CreatedBy of ['COPY app.jar /app/app.jar # buildkit', '/bin/sh -c #(nop) COPY file:abc in /app/app.jar']) {
+    assert.throws(() => assertRuntimeBase({ Config: {} }, [{ CreatedBy }]), /禁止在旧业务镜像/);
+  }
+  const image = { Id: `sha256:${'e'.repeat(64)}` };
+  for (const output of ['', 'not-json', '{}', ' '.repeat(2 * 1024 * 1024)]) {
+    await assert.rejects(checkRuntimeBase({ run: async () => ({ output }) }, image), /无法完整核验/);
+  }
+  await assert.rejects(checkRuntimeBase({ run: async () => { throw new Error('Docker 连接失败'); } }, image), /连接失败/);
+});
+
+test('错误运行基础镜像在编译和切换之前失败，历史摘要同样不能绕过检查', async t => {
+  const f = await fixture(t);
+  await f.executor.execute(task('baseline'));
+  const before = f.docker.calls.filter(args => ['run', 'build', 'compose'].includes(args[0])).length;
+  const current = await f.executor.current(task());
+  const run = f.docker.run.bind(f.docker);
+  f.docker.run = (args, options) => args[0] === 'history'
+    ? Promise.resolve({ output: JSON.stringify({ CreatedBy: 'COPY app.jar /app/app.jar' }) }) : run(args, options);
+  await f.executor.execute(task('bad-runtime', { config: config({ runtimeImage: 'sha256:' + 'c'.repeat(64) }) }));
+  assert.equal((await f.journal.get('bad-runtime')).status, 'failed');
+  assert.match((await f.journal.get('bad-runtime')).result.error, /禁止在旧业务镜像/);
+  assert.equal(f.docker.calls.filter(args => ['run', 'build', 'compose'].includes(args[0])).length, before);
+  assert.equal((await f.executor.current(task())).id, current.id);
+  await assert.rejects(f.executor.buildConfig(task('recovery', { release: { buildSnapshot: { runtimeImage: 'sha256:' + 'c'.repeat(64) } } }), config()), /禁止在旧业务镜像/);
 });
 
 test('Docker 区分资源缺失和连接失败，覆盖网络资源的真实错误格式', async () => {

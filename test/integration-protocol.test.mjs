@@ -23,6 +23,7 @@ class ProtocolDocker {
   async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); if (kind === 'image' && /^(maven:|eclipse-temurin:|sha256:)/.test(name)) return { Id: `sha256:${'c'.repeat(64)}` }; return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
   async run(args, options = {}) {
     this.calls.push([...args]);
+    if (args[0] === 'history') return { code: 0, output: JSON.stringify({ CreatedBy: 'RUN install java runtime' }) + '\n' };
     if (args[0] === 'run') {
       const mount = args.filter((_, index) => args[index - 1] === '--mount').find(value => value.includes('dst=/workspace'));
       const source = mount.match(/src=(.*?),dst=/)[1];

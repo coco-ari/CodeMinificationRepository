@@ -37,6 +37,8 @@ Agent 1.4.0 声明 `source-archive-recovery-v1`。回退首先核验本机版本
 
 配置包括 `module`、`artifactPath`、`buildImage`、`runtimeImage`、`jvmArgs`、`args`、`profile`、`ports`、`networks`、`volumes`、`build`、`runtime`、`health`。`artifactPath` 是源码根目录相对路径，只有文件名可使用 `*`，且必须匹配唯一 JAR。JVM 入口固定为 `java ... -jar /app/app.jar`。HTTP 就绪探针由 Java 8 编译，不要求运行镜像安装 curl。
 
+Agent 1.4.1 在 Java 编译前核验运行基础镜像的固定 ID、资源标签、启动命令和完整构建历史，拒绝以旧业务镜像叠加新 JAR。建议使用 `eclipse-temurin:8-jre` 等独立 JRE 镜像，Maven 镜像只用于编译。镜像改名或使用 SHA ID 不能绕过此检查。已有缓存版本仍可直接回退；历史源码重建若依赖旧业务镜像，会明确失败，不会偷偷更换历史配置。此检查约束平台执行的构建；直接在服务器手工运行 Docker 的补丁脚本也必须使用干净基础镜像。
+
 第一版按 256 MiB Agent 内存配置限制源码 ZIP 不超过 64 MiB、单个解压文件不超过 32 MiB、总解压体积不超过 1 GiB。超限会明确失败，不跳过完整性校验。发布结束会清除本任务的源码和镜像构建目录，保留日志与回退记录。
 
 网络断开后正在执行的任务继续运行，事件先持久化再补报。中心重启不影响业务容器。Agent 重启后先刷新授权，再检查持久化记录：编译中断会报告 `interrupted`；部署中断会核验实际版本、继续健康检查或回退，绝不从头重复发布。丢失本地版本记录时拒绝覆盖仍在运行的容器。
