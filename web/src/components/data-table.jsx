@@ -112,6 +112,7 @@ export function DataTable({
       ) : (
         <>
           <div
+            data-slot="data-table-surface"
             className={`overflow-hidden rounded-lg border ${renderMobile ? 'hidden md:block' : ''}`}
           >
             <Table>

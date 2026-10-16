@@ -88,6 +88,10 @@ PORT=8080
 
 界面使用 shadcn/ui 的 Radix 组件体系：Select / Combobox、Field、Accordion、Table + TanStack Table、Sheet、ScrollArea 和 Sonner。通知组件在构建时接入页面 CSP nonce，不放宽样式安全策略。旧的环境与服务、部署发布和配置详情地址仍兼容。
 
+默认采用浅色玻璃主题，材质样式集中在 `web/src/styles/solid-glass.css`，保留现有 Radix 组件、布局和操作逻辑。主题参考 [Solid Glass](https://github.com/deeplethe/solid-glass)，已适配开关及页签的 Radix 状态；上游 [MIT 许可](web/public/third-party/solid-glass-LICENSE.txt)随构建分发。主题无额外运行依赖或外部字体请求。
+
+模糊仅用于卡片、侧栏、顶部与浮层；表格、日志和嵌套卡片使用稳定底色。触摸设备关闭常驻面板模糊，不支持模糊或系统要求减少透明效果时使用实色底面，同时保留键盘焦点、危险操作颜色与高对比度模式。回退主题时移除 `web/src/main.jsx` 中的主题导入并重新构建即可。
+
 所有 UI 开发必须遵守 [AGENTS.md](AGENTS.md) 中的 shadcn/ui 组件规范，统一复用 `web/src/components/ui/`，新增组件以 [官方文档](https://ui.shadcn.com/docs) 为准。
 
 项目和任务地址可以收藏、刷新、直接打开，例如 `/#/projects/<项目ID>/tasks?environment=<环境ID>&task=<任务ID>`。切换项目会关闭旧事件连接和弹窗，丢弃旧请求的迟到结果。

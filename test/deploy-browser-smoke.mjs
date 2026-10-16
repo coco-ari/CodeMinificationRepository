@@ -347,6 +347,7 @@ try {
   })
   await command('Page.navigate', { url: base })
   await visible('#bootstrap-field')
+  await screenshot('glass-login-desktop.png')
   await fill('#auth-form [name=bootstrapToken]', service.bootstrapToken)
   await fill('#auth-form [name=username]', 'admin')
   await fill('#auth-form [name=password]', 'isolated-browser-password')
@@ -1568,6 +1569,53 @@ try {
     '空项目与多服务项目等高',
   )
   await screenshot('console-home-desktop.png')
+
+  // 玻璃主题必须保留键盘焦点，并遵守系统的减少透明效果及高对比度偏好。
+  await command('Page.bringToFront')
+  await evaluate(`document.querySelector('[aria-label="搜索项目"]').focus()`)
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Tab',
+    code: 'Tab',
+    windowsVirtualKeyCode: 9,
+  })
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Tab',
+    code: 'Tab',
+    windowsVirtualKeyCode: 9,
+  })
+  assert.ok(
+    await evaluate(
+      `document.activeElement.matches(':focus-visible') && parseFloat(getComputedStyle(document.activeElement).outlineWidth) >= 2`,
+    ),
+    '键盘导航保留可见焦点',
+  )
+  await command('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }],
+  })
+  assert.equal(
+    await evaluate(`getComputedStyle(document.querySelector('[data-slot=card]')).backdropFilter`),
+    'none',
+    '减少透明效果时关闭模糊',
+  )
+  assert.ok(
+    await evaluate(
+      `!getComputedStyle(document.querySelector('[data-slot=card]')).backgroundColor.includes('/')`,
+    ),
+    '减少透明效果时使用不透明卡片',
+  )
+  await screenshot('glass-reduced-transparency.png')
+  await command('Emulation.setEmulatedMedia', {
+    features: [{ name: 'forced-colors', value: 'active' }],
+  })
+  assert.equal(
+    await evaluate(`getComputedStyle(document.body).backgroundImage`),
+    'none',
+    '高对比度模式清除装饰背景',
+  )
+  await screenshot('glass-high-contrast.png')
+  await command('Emulation.setEmulatedMedia', { features: [] })
 
   for (const width of [320, 390, 768, 1280, 1920]) {
     await command('Emulation.setDeviceMetricsOverride', {

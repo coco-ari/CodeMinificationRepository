@@ -3,6 +3,7 @@ import { setNonce } from 'get-nonce'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
+import './styles/solid-glass.css'
 import { Button } from '@/components/ui/button'
 
 // Radix 的滚动锁通过受信任的随机 nonce 注入样式，脚本策略继续仅允许同源。

@@ -35,7 +35,8 @@ pnpm run test:deploy-browser
 - `web/src/components/target-form.jsx`：Java/Maven/Docker 部署配置。
 - `web/src/components/shared.jsx`：表单布局、状态、空态等业务层组件。
 - `web/src/components/ui/`：shadcn/ui 组件，使用本地 `lib/utils.ts` 的 `cn`。
-- `web/src/index.css`：Tailwind 与主题变量，系统字体和中性黑白主题，无远程字体依赖。
+- `web/src/index.css`：Tailwind、基础变量和业务布局，使用系统字体，无远程字体依赖。
+- `web/src/styles/solid-glass.css`：在基础样式后加载的浅色玻璃主题，适配 Radix 状态与 Portal 浮层；保留实色表格、日志和嵌套卡片，并支持减少透明效果及高对比度模式。
 
 新增组件使用 `pnpm dlx shadcn@latest add <component>`。核对组件 import 指向 `@/lib/utils`，不要引入重复的样式工具。提交源码与锁文件，随后运行 `pnpm format:ui` 和检查。保留组件的键盘操作、焦点管理与 ARIA 语义；共享表单在关闭时将焦点返回触发控件，秘密字段随弹窗卸载清除。
 
