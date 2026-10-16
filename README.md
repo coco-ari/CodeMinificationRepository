@@ -90,7 +90,7 @@ PORT=8080
 
 默认采用浅色玻璃主题，材质样式集中在 `web/src/styles/solid-glass.css`，保留现有 Radix 组件、布局和操作逻辑。主题参考 [Solid Glass](https://github.com/deeplethe/solid-glass)，已适配开关及页签的 Radix 状态；上游 [MIT 许可](web/public/third-party/solid-glass-LICENSE.txt)随构建分发。主题无额外运行依赖或外部字体请求。
 
-模糊仅用于卡片、侧栏、顶部与浮层；表格、日志和嵌套卡片使用稳定底色。触摸设备关闭常驻面板模糊，不支持模糊或系统要求减少透明效果时使用实色底面，同时保留键盘焦点、危险操作颜色与高对比度模式。回退主题时移除 `web/src/main.jsx` 中的主题导入并重新构建即可。
+材质通过冷灰底色、浅色面板、白色边缘高光与分层投影呈现；页签和进度槽使用凹面层次。模糊仅用于卡片、侧栏、顶部与浮层，表格、日志和嵌套卡片使用稳定底色。触摸设备关闭常驻面板模糊，不支持模糊或系统要求减少透明效果时使用实色底面，仍保留边缘和投影层次，同时保留键盘焦点、危险操作颜色与高对比度模式。回退主题时移除 `web/src/main.jsx` 中的主题导入并重新构建即可。
 
 所有 UI 开发必须遵守 [AGENTS.md](AGENTS.md) 中的 shadcn/ui 组件规范，统一复用 `web/src/components/ui/`，新增组件以 [官方文档](https://ui.shadcn.com/docs) 为准。
 

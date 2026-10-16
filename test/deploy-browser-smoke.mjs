@@ -339,6 +339,10 @@ try {
   await command('Runtime.enable')
   await command('Log.enable')
   await command('Page.enable')
+  // 显式覆盖宿主机偏好，常规回归检查透明材质，降级模式在后面单独验证。
+  await command('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }],
+  })
   await command('Emulation.setDeviceMetricsOverride', {
     width: 1440,
     height: 1100,
@@ -1615,7 +1619,9 @@ try {
     '高对比度模式清除装饰背景',
   )
   await screenshot('glass-high-contrast.png')
-  await command('Emulation.setEmulatedMedia', { features: [] })
+  await command('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }],
+  })
 
   for (const width of [320, 390, 768, 1280, 1920]) {
     await command('Emulation.setDeviceMetricsOverride', {

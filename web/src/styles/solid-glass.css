@@ -6,45 +6,48 @@
 
 :root {
   color-scheme: light;
-  --background: oklch(0.945 0.008 265);
+  --background: oklch(0.919 0.009 265);
   --foreground: oklch(0.235 0.012 265);
-  --card: oklch(0.981 0.004 265);
+  --card: oklch(0.968 0.008 265);
   --card-foreground: var(--foreground);
   --popover: oklch(0.985 0.003 265);
   --popover-foreground: var(--foreground);
   --primary: oklch(0.26 0.016 265);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.925 0.009 265);
+  --secondary: oklch(0.909 0.011 265);
   --secondary-foreground: var(--foreground);
-  --muted: oklch(0.929 0.008 265);
+  --muted: oklch(0.913 0.01 265);
   --muted-foreground: oklch(0.46 0.015 265);
-  --accent: oklch(0.911 0.012 265);
+  --accent: oklch(0.895 0.013 265);
   --accent-foreground: var(--foreground);
   --border: oklch(0.38 0.025 265 / 16%);
-  --input: oklch(0.38 0.025 265 / 26%);
+  --input: oklch(0.38 0.025 265 / 23%);
   --ring: oklch(0.49 0.07 265);
-  --sidebar: oklch(0.949 0.007 265);
+  --sidebar: oklch(0.937 0.008 265);
   --sidebar-foreground: oklch(0.36 0.015 265);
   --sidebar-border: var(--border);
   --sidebar-accent: var(--accent);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-ring: var(--ring);
 
-  --glass-canvas: oklch(0.962 0.006 265);
-  --glass-header: oklch(0.981 0.004 265);
-  --glass-field: oklch(0.994 0.002 265);
-  --glass-solid: oklch(0.981 0.004 265);
-  --glass-rim: oklch(1 0 0 / 92%);
-  --glass-inner: oklch(1 0 0 / 42%);
-  --glass-shade: oklch(0.3 0.035 265 / 16%);
-  --glass-contact: oklch(0.3 0.025 265 / 7%);
-  --glass-control-shadow: inset 0 1px 0 var(--glass-rim), 0 1px 2px var(--glass-contact);
+  --glass-canvas: oklch(0.93 0.008 265);
+  --glass-header: oklch(0.956 0.006 265);
+  --glass-field: oklch(0.985 0.004 265);
+  --glass-solid: oklch(0.968 0.008 265);
+  --glass-rim: oklch(1 0 0 / 96%);
+  --glass-inner: oklch(1 0 0 / 48%);
+  --glass-edge: oklch(0.38 0.025 265 / 14%);
+  --glass-shade: oklch(0.3 0.04 265 / 28%);
+  --glass-contact: oklch(0.25 0.025 265 / 10%);
+  --glass-control-shadow:
+    inset 0 1px 0 var(--glass-rim), inset 0 -1px 0 oklch(0.38 0.025 265 / 6%),
+    0 1px 2px var(--glass-contact), 0 3px 5px -3px var(--glass-shade);
   --glass-pane-shadow:
-    inset 0 1px 0 var(--glass-rim), inset 0 0 0 1px var(--glass-inner),
-    0 2px 3px var(--glass-contact), 0 12px 28px -18px var(--glass-shade);
+    inset 0 1px 0 var(--glass-rim), inset 0 0 0 1px var(--glass-inner), 0 0 0 1px var(--glass-edge),
+    0 2px 3px var(--glass-contact), 0 16px 32px -12px var(--glass-shade);
   --glass-floating-shadow:
-    inset 0 1px 0 var(--glass-rim), 0 16px 48px -18px oklch(0.3 0.035 265 / 28%),
-    0 3px 10px var(--glass-contact);
+    inset 0 1px 0 var(--glass-rim), inset 0 0 0 1px var(--glass-inner), 0 0 0 1px var(--glass-edge),
+    0 20px 48px -12px var(--glass-shade), 0 4px 10px var(--glass-contact);
   --glass-blur: none;
   --glass-popup-blur: none;
 }
@@ -53,12 +56,12 @@
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   @media (prefers-reduced-transparency: no-preference) {
     :root {
-      --card: oklch(0.99 0.003 265 / 78%);
+      --card: oklch(0.987 0.007 265 / 72%);
       --popover: oklch(0.99 0.003 265 / 97%);
-      --sidebar: oklch(0.965 0.006 265 / 72%);
-      --glass-canvas: oklch(0.985 0.004 265 / 48%);
-      --glass-header: oklch(0.99 0.003 265 / 76%);
-      --glass-field: oklch(1 0 0 / 82%);
+      --sidebar: oklch(0.955 0.007 265 / 72%);
+      --glass-canvas: oklch(0.945 0.007 265 / 58%);
+      --glass-header: oklch(0.978 0.005 265 / 76%);
+      --glass-field: oklch(0.995 0.003 265 / 82%);
       --glass-blur: blur(10px);
       --glass-popup-blur: blur(16px);
     }
@@ -67,8 +70,8 @@
 
 body {
   background-image:
-    radial-gradient(ellipse at 8% 0%, oklch(0.81 0.045 175 / 16%), transparent 48%),
-    radial-gradient(ellipse at 95% 12%, oklch(0.79 0.06 265 / 17%), transparent 54%);
+    radial-gradient(ellipse at 15% 0%, oklch(1 0 0 / 24%), transparent 50%),
+    radial-gradient(ellipse at 95% 12%, oklch(0.76 0.035 265 / 12%), transparent 60%);
   background-repeat: no-repeat;
 }
 
@@ -77,7 +80,8 @@ body {
 }
 .console-main {
   background: var(--glass-canvas);
-  border-color: oklch(1 0 0 / 75%);
+  border-color: oklch(1 0 0 / 55%);
+  border-radius: 18px;
   box-shadow:
     inset 0 1px 0 var(--glass-rim),
     0 4px 24px -12px var(--glass-shade);
@@ -96,6 +100,8 @@ body {
 }
 [data-slot='card'] {
   background: var(--card);
+  border-color: transparent;
+  border-radius: 18px;
   box-shadow: var(--glass-pane-shadow);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
@@ -104,6 +110,8 @@ body {
 /* 表格、日志和卡片内层使用稳定底色，不在每行或嵌套区域叠加模糊。 */
 [data-slot='data-table-surface'] {
   background: var(--glass-solid);
+  border-color: transparent;
+  border-radius: 16px;
   box-shadow: var(--glass-pane-shadow);
 }
 [data-slot='card'] [data-slot='card'],
@@ -114,6 +122,7 @@ body {
   backdrop-filter: none;
 }
 [data-slot='card'] [data-slot='card'] {
+  border-color: var(--border);
   box-shadow: inset 0 1px 0 var(--glass-rim);
 }
 .config-code {
@@ -143,9 +152,14 @@ body {
 [data-slot='alert-dialog-content'],
 [data-slot='sheet-content'] {
   background: var(--popover);
+  border-color: transparent;
   box-shadow: var(--glass-floating-shadow);
   -webkit-backdrop-filter: var(--glass-popup-blur);
   backdrop-filter: var(--glass-popup-blur);
+}
+[data-slot='dialog-content'],
+[data-slot='alert-dialog-content'] {
+  border-radius: 18px;
 }
 [data-slot='command'] {
   background: transparent;
@@ -168,10 +182,13 @@ body {
 /* 控件保留原尺寸与 Radix 状态；所有阴影都保留 Tailwind 焦点环。 */
 [data-slot='button'][data-variant='default'],
 [data-slot='button'][data-variant='destructive'] {
+  background-image: linear-gradient(oklch(1 0 0 / 10%), oklch(0 0 0 / 5%));
   box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 24%),
-    inset 0 -1px 0 oklch(0 0 0 / 20%),
+    inset 0 1px 0 oklch(1 0 0 / 32%),
+    inset 0 0 0 1px oklch(1 0 0 / 12%),
+    inset 0 -1px 0 oklch(0 0 0 / 24%),
     0 2px 3px var(--glass-contact),
+    0 5px 8px -5px var(--glass-shade),
     var(--tw-ring-shadow, 0 0 #0000);
 }
 [data-slot='button'][data-variant='outline'],
@@ -192,6 +209,8 @@ body {
   background: var(--glass-field);
   box-shadow:
     inset 0 1px 0 var(--glass-rim),
+    inset 0 1px 2px oklch(0.3 0.025 265 / 6%),
+    0 1px 0 oklch(1 0 0 / 65%),
     var(--tw-ring-shadow, 0 0 #0000);
 }
 :is(
@@ -216,7 +235,8 @@ body {
 }
 [data-slot='tabs-list'][data-variant='default'] {
   box-shadow:
-    inset 0 1px 2px var(--glass-contact),
+    inset 0 1px 3px oklch(0.3 0.025 265 / 18%),
+    inset 0 0 0 1px oklch(0.38 0.025 265 / 7%),
     inset 0 -1px 0 var(--glass-rim);
 }
 [data-slot='tabs-list'][data-variant='default'] [data-slot='tabs-trigger'][data-state='active'] {
@@ -240,8 +260,19 @@ body {
     var(--tw-ring-shadow, 0 0 #0000);
 }
 [data-slot='switch-thumb'] {
-  background: oklch(0.995 0 0);
-  box-shadow: 0 1px 3px oklch(0.25 0.025 265 / 28%);
+  background: linear-gradient(oklch(0.995 0 0), oklch(0.94 0.005 265));
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim),
+    0 1px 3px oklch(0.25 0.025 265 / 28%);
+}
+/* 进度槽仅增加凹面高光，保留资源告警与任务状态原有的语义颜色。 */
+[data-slot='progress'] {
+  box-shadow:
+    inset 0 1px 2px var(--glass-contact),
+    0 1px 0 var(--glass-rim);
+}
+[data-slot='progress-indicator'] {
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 20%);
 }
 [data-slot='sidebar-menu-button'][data-active='true'],
 [data-slot='sidebar-menu-sub-button'][data-active='true'],
@@ -283,6 +314,17 @@ body {
   }
   body {
     background-image: none;
+  }
+  [data-slot='card'],
+  [data-slot='data-table-surface'],
+  [data-slot='popover-content'],
+  [data-slot='select-content'],
+  [data-slot='dropdown-menu-content'],
+  [data-slot='dropdown-menu-sub-content'],
+  [data-slot='dialog-content'],
+  [data-slot='alert-dialog-content'],
+  [data-slot='sheet-content'] {
+    border-color: ButtonBorder;
   }
   .commit-option.selected {
     outline: 2px solid Highlight;
