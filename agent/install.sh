@@ -51,7 +51,7 @@ tar -xzf "$temporary_directory/bundle.tar.gz" --no-same-owner -C "$temporary_dir
 docker build -t cmr-agent:local "$temporary_directory/bundle"
 printf '%s' "$registration_token" > "$agent_directory/registration-token"
 chmod 600 "$agent_directory/registration-token"
-docker run -d --name cmr-agent --restart unless-stopped --memory 256m --memory-swap 384m --cpus 0.25 --pids-limit 128 \
+docker run -d --name cmr-agent --restart unless-stopped --memory 256m --memory-swap 384m --cpus 0.5 --pids-limit 128 \
   --label io.cmr.component=agent \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
   --mount "type=bind,src=$agent_directory,dst=$agent_directory" \

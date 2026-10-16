@@ -20,7 +20,7 @@ export async function handleAgentRequest(req, res, url, { deployment, body, json
   }
   const task = new RegExp(`^/tasks/${id}/(source|events)$`).exec(route);
   if (task?.[2] === 'events' && req.method === 'POST') { json(res, 200, await deployment.events(serverId, task[1], await body(req))); return true; }
-  if (task?.[2] === 'source' && req.method === 'GET') {
+  if (task?.[2] === 'source' && ['GET', 'HEAD'].includes(req.method)) {
     const selected = deployment.source(serverId, task[1], url.searchParams.get('role') || 'selected');
     const archive = selected.archiveId ? await deployment.archives.verify(selected) : selected;
     const file = await open(archive.file, 'r');
@@ -28,7 +28,8 @@ export async function handleAgentRequest(req, res, url, { deployment, body, json
       deployment.authenticate(token);
       res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': archive.size,
         'Content-Disposition': `attachment; filename="source-${archive.revision.slice(0, 12)}.zip"`, 'X-Source-Revision': archive.revision, 'X-Archive-SHA256': archive.sha256 });
-      await pipeline(file.createReadStream(), res);
+      if (req.method === 'HEAD') res.end();
+      else await pipeline(file.createReadStream(), res);
     } finally { await file.close().catch(() => {}); }
     return true;
   }

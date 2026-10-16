@@ -491,7 +491,12 @@ export class DeploymentService extends EventEmitter {
     let task = await this.claim(serverId); if (task || signal?.aborted || this.closing) return task;
     await new Promise(resolve => {
       const finish = () => { clearTimeout(timer); this.off('update', listener); this.off('shutdown', finish); signal?.removeEventListener('abort', finish); resolve(); };
-      const listener = update => { if (update.type !== 'heartbeat') finish(); };
+      const listener = update => {
+        if (update.type !== 'task') return;
+        const changed = this.data.tasks.find(item => item.id === update.id);
+        // 配置保存和源码准备尚不可领取，提前唤醒只会让 Agent 进入空轮询退避。
+        if (changed?.serverId === serverId && (changed.status === 'queued' || terminal.has(changed.status))) finish();
+      };
       const timer = setTimeout(finish, milliseconds); this.on('update', listener); this.once('shutdown', finish); signal?.addEventListener('abort', finish, { once: true });
       if (this.closing || signal?.aborted) finish();
     });

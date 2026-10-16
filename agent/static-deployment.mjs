@@ -3,7 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertManaged, identifier, normalizeConfig, safeChild } from './config.mjs';
 import { readJson, writeJson } from './state.mjs';
-import { extractZip } from './archive.mjs';
 import { copyStaticSite } from './static-site.mjs';
 
 const terminal = status => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(status);
@@ -64,10 +63,7 @@ export class StaticDeployment {
     return release;
   }
   async build(task, config) {
-    const work = this.owner.taskRoot(task); await mkdir(work, { recursive: true, mode: 0o700 });
-    const zip = path.join(work, 'source.zip'), source = path.join(work, 'source');
-    await this.event(task, 'downloading', '正在下载固定提交的前端源码');
-    await this.owner.client.download(task, zip); await extractZip(zip, source); await this.owner.makeSourceWritable(source);
+    const work = this.owner.taskRoot(task), source = await this.owner.prepareSource(task);
     const project = config.module ? safeChild(source, ...config.module.split('/')) : source;
     await lstat(path.join(project, 'package.json'));
     const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'));

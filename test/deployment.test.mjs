@@ -42,6 +42,29 @@ async function ready(f, targetId, action = 'deploy', extra = {}) {
 }
 function release(task) { return { id: task.id, image: `cmr/${task.targetId}:${task.id}`, revision: task.revision, config: task.config }; }
 
+test('任务长轮询等待所属节点源码就绪，不被配置保存和其他节点更新提前唤醒', async t => {
+  const f = await fixture(t), records = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  const other = await targetFixture(f), otherTask = await ready(f, other.target.id);
+  const build = f.fake.build.bind(f.fake);
+  let continueBuild;
+  const gate = new Promise(resolve => { continueBuild = resolve; });
+  f.fake.build = async (...args) => { await gate; return build(...args); };
+  let resolved = false;
+  const waiting = f.deployment.waitForTask(records.agent.serverId, 2000).then(value => { resolved = true; return value; });
+  while (!f.deployment.listenerCount('update')) await new Promise(resolve => setTimeout(resolve, 1));
+  f.deployment.changed('target', records.target.id);
+  f.deployment.changed('task', otherTask.id);
+  const task = await f.deployment.createTask({ targetId: records.target.id, action: 'deploy' });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(resolved, false);
+    continueBuild();
+    assert.equal((await waiting)?.id, task.id, JSON.stringify(f.deployment.data.tasks));
+    assert.equal(f.deployment.listenerCount('update'), 0);
+  } finally { continueBuild(); await f.deployment.preparations.get(task.id); }
+});
+
 test('中心保留所有成功源码，清理保护当前版本与基线，共享包按引用释放', async t => {
   const f = await fixture(t), records = await targetFixture(f), versions = [];
   t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });

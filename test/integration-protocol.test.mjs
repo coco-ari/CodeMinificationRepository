@@ -136,6 +136,9 @@ test('两个真实 HTTP Agent 只能领取自己的任务，空节点不操作�
   const taskA = await f.task(first); const taskB = await f.task(second);
   const claimed = (await one.client.post('claim')).task; assert.equal(claimed.id, taskA.id);
   const invalid = await fetch(`${f.url}/api/agent/v1/tasks/${taskA.id}/source`, { headers: { authorization: `Bearer ${two.identity.token}` } }); assert.equal(invalid.status, 403);
+  const invalidHead = await fetch(`${f.url}/api/agent/v1/tasks/${taskA.id}/source`, { method: 'HEAD', headers: { authorization: `Bearer ${two.identity.token}` } }); assert.equal(invalidHead.status, 403);
+  const validHead = await fetch(`${f.url}/api/agent/v1/tasks/${taskA.id}/source`, { method: 'HEAD', headers: { authorization: `Bearer ${one.identity.token}` } });
+  assert.equal(validHead.status, 200); assert.equal(validHead.headers.get('x-archive-sha256'), claimed.source.sha256); assert.equal(await validHead.text(), '');
   await Promise.all([one.tick(), two.tick()]);
   assert.equal((await f.request(`/api/deploy/tasks/${taskA.id}`)).task.status, 'succeeded'); assert.equal((await f.request(`/api/deploy/tasks/${taskB.id}`)).task.status, 'succeeded');
   assert.equal((await observer.client.post('claim')).task,null);

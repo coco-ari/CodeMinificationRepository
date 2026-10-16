@@ -12,7 +12,7 @@ import { acquireAgentLock } from './lock.mjs';
 export class AgentRunner {
   constructor({ root = '/opt/cmr-agent', centerUrl, registrationToken = null, registrationTokenFile = null, allowHttpTest = false, docker = new Docker(), client = null, heartbeatMs = 10000, retryMs = 5000, procRoot = '/host/proc', logger = console } = {}) {
     this.root = path.resolve(root); this.centerUrl = centerUrl; this.registrationToken = registrationToken; this.registrationTokenFile = registrationTokenFile;
-    this.client = client || new CenterClient(centerUrl, { allowHttpTest }); this.docker = docker; this.heartbeatMs = heartbeatMs; this.retryMs = retryMs; this.logger = logger;
+    this.client = client || new CenterClient(centerUrl, { allowHttpTest, cacheDirectory: path.join(this.root, 'source-cache') }); this.docker = docker; this.heartbeatMs = heartbeatMs; this.retryMs = retryMs; this.logger = logger;
     this.journal = new TaskJournal(this.root); this.monitor = new Monitor({ docker, root: this.root, procRoot });
     this.executor = new DeploymentExecutor({ root: this.root, identity: () => this.identity, journal: this.journal, client: this.client, docker });
     this.stopped = false; this.activeTaskId = null; this.flushing = null;
@@ -90,11 +90,14 @@ export class AgentRunner {
       await this.heartbeat(); await this.executor.execute(task);
     } finally { this.activeTaskId = null; }
     await this.flushEvents();
+    return true;
   }
   async loop(label, action, interval) {
     while (!this.stopped) {
-      try { await action(); } catch (error) { this.logger.warn(`${label}暂不可用：${String(error.message).slice(0, 500)}`); }
-      if (!this.stopped) await sleep(interval);
+      let completed = false;
+      try { completed = await action() === true; } catch (error) { this.logger.warn(`${label}暂不可用：${String(error.message).slice(0, 500)}`); }
+      // 已完成任务立即领取下一项；空闲和失败仍退避，保持每台服务器串行执行。
+      if (!this.stopped && !completed) await sleep(interval);
     }
   }
   async run() {

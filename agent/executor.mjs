@@ -148,11 +148,18 @@ export class DeploymentExecutor {
     const rebuilt = await backend.build(baselineTask, normalizeConfig(previous.config));
     return { ...rebuilt, restoredFromReleaseId: previous.id, recoveryMethod: 'rebuild' };
   }
-  async build(task, config) {
+  async prepareSource(task) {
     const root = this.taskRoot(task); await mkdir(root, { recursive: true, mode: 0o700 });
     const zip = safeChild(root, 'source.zip'), source = safeChild(root, 'source');
-    await this.event(task, 'downloading', '正在下载固定版本的完整源码 ZIP');
-    await this.client.download(task, zip); await extractZip(zip, source); await this.makeSourceWritable(source);
+    await this.event(task, 'downloading', '正在准备固定版本的完整源码 ZIP');
+    await this.client.download(task, zip, 64 * 1024 * 1024, info => this.event(task, 'downloading', `${info.cached ? '已复用并校验本机源码包' : '源码包下载并校验完成'}：${info.size} 字节，耗时 ${(info.durationMs / 1000).toFixed(2)} 秒`));
+    const started = performance.now();
+    await extractZip(zip, source); await this.makeSourceWritable(source);
+    await this.event(task, 'downloading', `源码安全解压与权限准备完成，耗时 ${((performance.now() - started) / 1000).toFixed(2)} 秒`);
+    return source;
+  }
+  async build(task, config) {
+    const root = this.taskRoot(task), source = await this.prepareSource(task);
     await lstat(safeChild(source, 'pom.xml'));
     if (config.module) await lstat(safeChild(source, ...config.module.split('/'), 'pom.xml')).catch(() => { throw new Error(`所选提交中不存在 Maven 模块目录：${config.module}`); });
     await this.event(task, 'building', '正在编译目标模块及公共依赖');

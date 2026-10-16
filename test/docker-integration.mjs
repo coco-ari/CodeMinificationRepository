@@ -123,6 +123,7 @@ try {
   const update = { environmentId: environment.id, serviceId: service.id, serverId: first.server.id, mode: 'managed', config: { ...config, args: ['--unhealthy'], health: { ...config.health, timeoutSeconds: 12 } } };
   await api(`${workspacePath}/targets/${target.id}`, update, 'PUT');
   const bad = await publish(); assert.equal(bad.status, 'rolled_back');
+  assert.ok((await api(`/api/deploy/tasks/${bad.id}`)).logs.some(event => event.message?.includes('已复用并校验本机源码包')), 'Agent 重启后仍应复用已校验源码包');
   assert.equal(JSON.parse(await docker(['inspect', target.containerName]))[0].Config.Image, good.result.release.image);
   const rollback = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'rollback', releaseId: good.result.release.id })).task.id); assert.equal(rollback.status, 'succeeded');
   await api(`${workspacePath}/targets/${target.id}`, { ...update, config }, 'PUT');
