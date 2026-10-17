@@ -733,6 +733,11 @@ try {
   await screenshot('console-services-multiple-desktop.png')
   await clickText('发布', `[data-target-actions="${firstTarget.id}"]`)
   await visible('#release-branch')
+  assert.equal(await evaluate(`document.querySelector('#restart-current-version').disabled`), true)
+  assert.match(
+    await evaluate(`document.querySelector('#restart-disabled-reason').textContent`),
+    /尚无成功发布版本/,
+  )
   // 组合触发器保留交互标记与材质标记，浮层关闭后仍能用键盘继续操作。
   assert.equal(await evaluate(`document.querySelector('#release-branch').dataset.ui`), 'button')
   await click('#release-branch')
@@ -1072,8 +1077,79 @@ try {
   await service.store.change((state) => {
     state.deployments.releases = state.deployments.releases.filter((r) => !fillerIds.includes(r.id))
   })
-  const restart = await publish('restart')
+  // 从工作台显式入口重启当前版本，历史选择与服务器切换不能改变操作含义。
+  await go('release', `?environment=${firstTarget.environmentId}&target=${firstTarget.id}`)
+  await visible('#restart-current-version')
+  assert.equal(await evaluate(`document.querySelector('#restart-current-version').disabled`), false)
+  await clickText('已发布版本')
+  await visible(`[data-release-option="${next.id}"]`)
+  await click(`[data-release-option="${next.id}"]`)
+  const beforeRestart = deployment.data.tasks.length
+  await click('#restart-current-version')
+  await until(
+    () =>
+      evaluate(
+        `location.hash.includes('action=restart') && document.querySelector('#confirm-release')?.textContent.includes('重启')`,
+      ),
+    '进入重启确认',
+  )
+  await choose('[aria-label="发布服务器"]', '测试服务器 B')
+  await until(
+    () =>
+      evaluate(
+        `location.hash.includes('target=${secondTarget.id}') && location.hash.includes('action=restart') && document.querySelector('#confirm-release')?.disabled`,
+      ),
+    '未部署位置不能重启',
+  )
+  assert.match(
+    await evaluate(`document.querySelector('#restart-disabled-reason').textContent`),
+    /尚无成功发布版本/,
+  )
+  await choose('[aria-label="发布服务器"]', '测试服务器 A')
+  await until(
+    () =>
+      evaluate(
+        `location.hash.includes('action=restart') && !document.querySelector('#confirm-release').disabled`,
+      ),
+    '切回已部署位置',
+  )
+  await click('#confirm-release')
+  await visible('[role=alertdialog]')
+  assert.match(
+    await evaluate(`document.querySelector('[role=alertdialog]').textContent`),
+    /确认重启.*测试服务器 A/s,
+  )
+  assert.ok(
+    (await evaluate(`document.querySelector('[data-confirmation-details]').textContent`)).includes(
+      task.revision,
+    ),
+  )
+  assert.ok(
+    !(await evaluate(`document.querySelector('[data-confirmation-details]').textContent`)).includes(
+      next.revision,
+    ),
+  )
+  await clickText('取消', '[role=alertdialog]')
+  assert.equal(deployment.data.tasks.length, beforeRestart, '取消确认不创建重启任务')
+  await click('#confirm-release')
+  await visible('[role=alertdialog]')
+  await click('[data-confirm-action]')
+  await visible('#deploy-task-logs')
+  await until(() => deployment.data.tasks.some((t) => t.status === 'queued'), '重启任务已排队')
+  const restart = (await agentRequest('claim', {}, firstAgent.token)).task
   assert.equal(restart.action, 'restart')
+  assert.equal(restart.targetId, firstTarget.id)
+  assert.equal(restart.revision, rollback.release.revision)
+  assert.deepEqual(restart.config, rollback.release.config)
+  await go('release', `?environment=${firstTarget.environmentId}&target=${firstTarget.id}`)
+  await visible('#restart-current-version')
+  assert.equal(await evaluate(`document.querySelector('#restart-current-version').disabled`), true)
+  assert.match(
+    await evaluate(`document.querySelector('#restart-disabled-reason').textContent`),
+    /任务正在执行/,
+  )
+  await go('tasks', `?environment=${firstTarget.environmentId}&task=${restart.id}`)
+  await visible('#deploy-task-logs')
   await send(restart, 1, 'verifying', '重启健康检查通过', 'succeeded', {
     release: rollback.release,
   })
@@ -1172,6 +1248,11 @@ try {
   assert.deepEqual(staticTarget.config.buildArgs, ['--mode', 'test'])
   await go('release', `?environment=${staticTarget.environmentId}&target=${staticTarget.id}`)
   await visible('#confirm-release')
+  assert.equal(
+    await evaluate(`!!document.querySelector('#restart-current-version')`),
+    false,
+    '静态站点不展示重启入口',
+  )
   await until(
     () => evaluate(`!document.querySelector('#confirm-release').disabled`),
     '前端发布准备',
@@ -1937,6 +2018,27 @@ try {
       () => evaluate(`document.activeElement.id === 'confirm-release'`),
       '关闭回退确认后焦点返回操作按钮',
     )
+    if ([390, 1280].includes(width)) {
+      await click('#restart-current-version')
+      await until(
+        () =>
+          evaluate(
+            `document.querySelector('#confirm-release')?.textContent.includes('重启') && !document.querySelector('#confirm-release').disabled`,
+          ),
+        '重启工作台就绪',
+      )
+      await screenshot(`ux-restart-workbench-${width}.png`)
+      await click('#confirm-release')
+      await visible('[role=alertdialog]')
+      assert.ok(
+        await evaluate(
+          `document.documentElement.scrollWidth <= innerWidth && document.querySelector('[role=alertdialog]').scrollWidth <= document.querySelector('[role=alertdialog]').clientWidth+1`,
+        ),
+        `重启确认在 ${width}px 不溢出`,
+      )
+      await screenshot(`ux-restart-confirmation-${width}.png`)
+      await clickText('取消', '[role=alertdialog]')
+    }
     await go('tasks', `?environment=${firstTarget.environmentId}&task=${pinned.id}`)
     await visible('#deploy-task-logs')
     await clickText('完整日志', '#task-workbench')
@@ -1992,6 +2094,13 @@ try {
         `(${query(`[data-target-id="${firstTarget.id}"]`)}).textContent.includes('状态待确认')`,
       ),
     '失联状态',
+  )
+  await go('release', `?environment=${firstTarget.environmentId}&target=${firstTarget.id}`)
+  await visible('#restart-current-version')
+  assert.equal(await evaluate(`document.querySelector('#restart-current-version').disabled`), true)
+  assert.match(
+    await evaluate(`document.querySelector('#restart-disabled-reason').textContent`),
+    /服务器离线/,
   )
   await go('overview')
   await visible('[data-overview=\"repositories\"]')
