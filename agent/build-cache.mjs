@@ -30,7 +30,8 @@ export class BuildCache {
   async usage() {
     // buildx 的格式化容量可能带单位；专用 BuildKit 返回原始字节数，避免额度取整误判。
     const result = await this.docker.run(['exec', `buildx_buildkit_${this.name}0`, 'buildctl', 'du', '--format', '{{json .}}']);
-    const rows = JSON.parse(result.output);
+    // 全新构建器的空缓存会返回 null，与空数组同样表示零占用。
+    const rows = JSON.parse(result.output) ?? [];
     if (!Array.isArray(rows)) throw new Error('构建缓存用量返回格式无效');
     let bytes = 0;
     for (const row of rows) {

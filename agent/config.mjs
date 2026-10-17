@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export const VERSION = '1.5.0';
+export const VERSION = '1.5.1';
 export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
