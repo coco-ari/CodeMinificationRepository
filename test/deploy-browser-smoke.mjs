@@ -344,6 +344,8 @@ try {
       windowsVirtualKeyCode: 27,
     })
     await until(() => evaluate(`!(${query(selector)})`), '关闭浮层')
+    // 浮层卸载后由 Radix 异步恢复焦点，不能在回调前断言焦点位置。
+    await until(() => evaluate('document.activeElement !== document.body'), '浮层关闭后恢复焦点')
   }
   const artifactDirectory = path.resolve('.test-artifacts')
   await mkdir(artifactDirectory, { recursive: true })

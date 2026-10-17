@@ -229,10 +229,7 @@
   min-width: 0;
   max-width: 100%;
   height: 26px;
-  padding: 0;
-  border-color: transparent;
-  box-shadow: none;
-  background: transparent;
+  padding: 0 6px;
   font-size: 12px;
   gap: 4px;
 }
@@ -370,9 +367,8 @@
   font-size: 11px;
 }
 .tile-commit.commit-button {
-  height: 22px;
-  padding: 0;
-  border-radius: 3px;
+  height: 26px;
+  padding: 0 5px;
   font-weight: 400;
 }
 .tile-commit .commit-sha {
@@ -416,7 +412,7 @@
 .tile-pagination {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
 }
 .tile-footer-action {
   height: 30px;
@@ -475,8 +471,8 @@
   }
 }
 .commit-button {
-  height: 24px;
-  padding: 0;
+  height: 28px;
+  padding: 2px 6px;
   gap: 5px;
   min-width: 0;
   color: var(--muted-foreground);
@@ -484,6 +480,7 @@
 }
 .commit-summary {
   height: auto;
+  padding: 6px 8px;
   width: 100%;
   max-width: 24rem;
   align-items: flex-start;

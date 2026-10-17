@@ -14,7 +14,7 @@ export function SearchField({ label, placeholder, value, onChange, disabled = fa
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="pl-9 pr-10 [&::-webkit-search-cancel-button]:appearance-none"
+        className="pl-9 pr-12 [&::-webkit-search-cancel-button]:appearance-none"
       />
       {value && (
         <Button

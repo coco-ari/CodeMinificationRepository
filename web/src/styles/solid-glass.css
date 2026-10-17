@@ -41,6 +41,8 @@
   --glass-canvas: oklch(0.93 0.008 265);
   --glass-header: oklch(0.956 0.006 265);
   --glass-field: oklch(0.985 0.004 265);
+  --glass-button-quiet: oklch(0.94 0.012 265);
+  --glass-button-border: oklch(0.55 0.02 265 / 55%);
   --glass-solid: oklch(0.968 0.008 265);
   --glass-rim: oklch(1 0 0 / 96%);
   --glass-inner: oklch(1 0 0 / 48%);
@@ -237,7 +239,7 @@ body {
 }
 /* 关闭按钮预留独立空间，避免长标题与圆角点击区域重叠。 */
 [data-slot='dialog-content']:has(> [data-slot='dialog-close']) > [data-slot='dialog-header'] {
-  padding-inline-end: 2rem;
+  padding-inline-end: 2.5rem;
 }
 [data-ui='sheet']:has(> [data-slot='sheet-close']) > [data-slot='sheet-header']:not(.sr-only) {
   padding-inline-end: 3rem;
@@ -263,22 +265,55 @@ body {
 }
 [data-ui='button'][data-variant='outline'],
 [data-ui='button'][data-variant='secondary'] {
+  border: 1px solid var(--glass-button-border);
   box-shadow: var(--glass-control-shadow), var(--tw-ring-shadow, 0 0 #0000);
 }
 [data-ui='button'][data-variant='outline'] {
   background: var(--glass-field);
 }
+/* 次要操作始终显示底色与轮廓，触屏用户无需悬停即可辨认按钮。 */
+[data-ui='button'][data-variant='ghost'] {
+  background: var(--glass-button-quiet);
+  border: 1px solid var(--glass-button-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim),
+    var(--tw-ring-shadow, 0 0 #0000);
+}
+[data-ui='button'][data-variant='link'] {
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklch, currentColor 65%, transparent);
+  text-underline-offset: 3px;
+}
+[data-ui='button']:not(:disabled):not([aria-disabled='true']) {
+  cursor: pointer;
+}
+[data-ui='button']:is(
+    [data-variant='outline'],
+    [data-variant='secondary'],
+    [data-variant='ghost']
+  ):is(:active, [data-state='open'], [aria-pressed='true']):not(:disabled) {
+  background: var(--accent);
+  border-color: var(--ring);
+  box-shadow:
+    inset 0 1px 3px var(--glass-contact),
+    var(--tw-ring-shadow, 0 0 #0000);
+}
 @media (hover: hover) {
-  [data-ui='button'][data-variant='outline']:not(:disabled):hover {
+  [data-ui='button']:is(
+      [data-variant='outline'],
+      [data-variant='secondary'],
+      [data-variant='ghost']
+    ):not(:disabled):hover {
     background: var(--accent);
+    border-color: var(--ring);
   }
 }
-/* 首页的小型选择器保持轻量，普通选择器与搜索型选择器采用相同的输入面。 */
+/* 首页选择器保持紧凑，同时保留与普通控件一致的可见边界。 */
 [data-ui='button'].tile-host-select {
-  background: transparent;
-  border-color: transparent;
+  background: var(--glass-field);
+  border-color: var(--glass-button-border);
   border-radius: var(--glass-radius-compact);
-  box-shadow: none;
+  box-shadow: inset 0 1px 0 var(--glass-rim);
 }
 .tile-environments [data-slot='tabs-list'] {
   border-radius: var(--glass-radius-item);
@@ -372,11 +407,21 @@ body {
   border-radius: var(--glass-radius-inset);
 }
 .commit-option.selected {
-  border-color: transparent;
+  border-color: var(--ring);
 }
 
 /* 触摸设备关闭常驻面板的模糊，浮层仍有高不透明度；高对比度模式使用系统配色。 */
 @media (pointer: coarse) {
+  [data-ui='button']:not([data-variant='link']):not(.commit-button):not(.tile-host-select) {
+    min-height: 40px;
+  }
+  [data-ui='button'][data-size^='icon'] {
+    min-width: 40px;
+  }
+  [data-slot='input'],
+  [data-slot='select-trigger'] {
+    min-height: 40px;
+  }
   [data-slot='card'],
   [data-slot='sidebar-inner'],
   .console-header {
@@ -396,6 +441,8 @@ body {
     --glass-canvas: Canvas;
     --glass-header: Canvas;
     --glass-field: Canvas;
+    --glass-button-quiet: ButtonFace;
+    --glass-button-border: ButtonBorder;
     --glass-solid: Canvas;
     --glass-blur: none;
     --glass-popup-blur: none;

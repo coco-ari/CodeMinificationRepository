@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -26,6 +27,7 @@ const gib = (bytes) =>
 
 export function StoragePolicy({ server, editable = true }) {
   const { request, refresh, notify, find } = useConsole()
+  const triggerRef = useRef(null)
   const [open, setOpen] = useState(false)
   const [retained, setRetained] = useState(2)
   const [cache, setCache] = useState(2)
@@ -65,7 +67,14 @@ export function StoragePolicy({ server, editable = true }) {
           保留 {policy.retainedVersions} 个版本 · 构建缓存 {policy.buildCacheGiB} GiB
         </span>
         {editable && !server.revoked ? (
-          <Button variant="ghost" size="sm" onClick={edit}>
+          <Button
+            ref={triggerRef}
+            variant="outline"
+            size="sm"
+            onClick={edit}
+            aria-label="编辑存储策略"
+          >
+            <Settings2 />
             存储策略
           </Button>
         ) : null}
@@ -80,7 +89,13 @@ export function StoragePolicy({ server, editable = true }) {
           if (!saving) setOpen(next)
         }}
       >
-        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+        <SheetContent
+          className="w-full overflow-y-auto sm:max-w-lg"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            triggerRef.current?.focus()
+          }}
+        >
           <SheetHeader>
             <SheetTitle>存储策略</SheetTitle>
             <SheetDescription>{server.name} · 对这台服务器的所有部署位置生效</SheetDescription>
