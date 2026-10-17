@@ -532,3 +532,33 @@ test('HTTP 管理接口沿用登录与 CSRF，Agent 来源文件严格隔离', a
   assert.equal((await request('/api/deploy/overview', 'GET', null, { Authorization: `Bearer ${first.agent.token}` })).status, 401);
   assert.equal((await request('/api/agent/v1/heartbeat', 'POST', { metrics: {} }, auth)).status, 401);
 });
+
+test('固定别名独立于历史配置，唯一且不可变，任务下发需要 Agent 支持', async t => {
+  const f = await fixture(t), a = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  const binding = { network: 'test-shared', alias: 'project-test-api' };
+  const input = { serverId: a.target.serverId, serviceId: a.target.serviceId, environmentId: a.target.environmentId, config: {} };
+  const first = await ready(f, a.target.id); await f.deployment.claim(a.agent.serverId);
+  await f.deployment.events(a.agent.serverId, first.id, { seq: 1, stage: 'succeeded', status: 'succeeded', result: { release: release(first) } });
+  const oldKey = f.deployment.configKey(a.target.id);
+  await f.deployment.saveEntity('targets', { ...input, networkIdentity: binding }, a.target.id);
+  assert.notEqual(f.deployment.configKey(a.target.id), oldKey);
+  await assert.rejects(f.deployment.createTask({ targetId: a.target.id, action: 'restart' }), /升级目标 Agent/);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['fixed-network-alias-v1'] });
+  const restart = await ready(f, a.target.id, 'restart');
+  assert.deepEqual(restart.networkIdentity, binding);
+  assert.deepEqual(restart.config, first.config);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: [] });
+  assert.equal(await f.deployment.claim(a.agent.serverId), null);
+  assert.equal(f.deployment.data.tasks.find(task => task.id === restart.id).status, 'interrupted');
+  await assert.rejects(f.deployment.saveEntity('targets', { ...input, networkIdentity: null }, a.target.id), /不能更改/);
+  await assert.rejects(f.deployment.saveEntity('targets', { ...input, networkIdentity: { ...binding, alias: 'other-api' } }, a.target.id), /不能更改/);
+  const preserved = await f.deployment.saveEntity('targets', input, a.target.id);
+  assert.deepEqual(preserved.networkIdentity, binding);
+  const otherService = await f.deployment.saveEntity('services', { applicationId: a.application.id, name: '另一服务', module: 'other' });
+  await assert.rejects(f.deployment.saveEntity('targets', { ...input, serviceId: otherService.id, networkIdentity: binding }), /已被其他部署位置使用/);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['fixed-network-alias-v1'] });
+  const rollback = await ready(f, a.target.id, 'rollback', { releaseId: first.id });
+  assert.deepEqual(rollback.networkIdentity, binding);
+  assert.deepEqual(rollback.config, first.config);
+});

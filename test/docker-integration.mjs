@@ -121,7 +121,17 @@ try {
   const inspected = JSON.parse(await docker(['inspect', target.containerName]))[0]; assert.equal(inspected.State.Health.Status, 'healthy');
   assert.deepEqual((await api('/api/deploy/overview')).servers.find(s=>s.id===second.server.id).containers, []);
   scenarios.push({ name: '两个 Agent 接入、空节点隔离和真实健康状态', passed: true });
+  const networkIdentity = { network, alias: `demo-${runId}-api` };
+  await api(`${workspacePath}/targets/${target.id}`, { environmentId: environment.id, serviceId: service.id, serverId: first.server.id, config, networkIdentity }, 'PUT');
+  async function verifyAlias() {
+    const running = await inspectContainer(target.containerName);
+    assert.ok(running.NetworkSettings.Networks[network].Aliases.includes(networkIdentity.alias));
+    const response = await docker(['exec', agents[1], 'node', '-e', 'fetch(process.argv[1]).then(async r=>{if(!r.ok)process.exit(1);console.log(await r.text())}).catch(()=>process.exit(1))', `http://${networkIdentity.alias}:18081/health`]);
+    assert.ok(response.includes('cmr-demo-ready'));
+  }
   const restart = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'restart' })).task.id); assert.equal(restart.status, 'succeeded');
+  assert.equal(restart.result.release.id, good.id);
+  await verifyAlias();
   await docker(['restart', agents[0]]);
   await until(async () => JSON.parse(await docker(['inspect', agents[0]]))[0].State.Running, 'Agent 重启');
   const update = { environmentId: environment.id, serviceId: service.id, serverId: first.server.id, mode: 'managed', config: { ...config, args: ['--unhealthy'], health: { ...config.health, timeoutSeconds: 12 } } };
@@ -130,6 +140,8 @@ try {
   assert.ok((await api(`/api/deploy/tasks/${bad.id}`)).logs.some(event => event.message?.includes('已复用并校验本机源码包')), 'Agent 重启后仍应复用已校验源码包');
   assert.equal(JSON.parse(await docker(['inspect', target.containerName]))[0].Config.Image, good.result.release.image);
   const rollback = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'rollback', releaseId: good.result.release.id })).task.id); assert.equal(rollback.status, 'succeeded');
+  await verifyAlias();
+  scenarios.push({ name: '固定网络别名通过重启应用、历史回退保留，另一 Agent 可经 DNS 调用', passed: true });
   await api(`${workspacePath}/targets/${target.id}`, { ...update, config }, 'PUT');
   archive = zip({ ...files, 'src/main/java/com/cmr/demo/Main.java': Buffer.from('这不是可编译的 Java 代码') }); revision = 'b'.repeat(40); await writeFile(archiveFile, archive);
   const failed = await publish(); assert.equal(failed.status, 'failed');

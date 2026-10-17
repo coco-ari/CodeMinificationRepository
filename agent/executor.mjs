@@ -2,7 +2,7 @@ import { mkdir, writeFile, readdir, lstat, realpath, copyFile, chown, chmod, rm 
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { identifier, safeChild, normalizeConfig, imageName, managedName, releaseImage, labels, owns, assertManaged } from './config.mjs';
+import { identifier, safeChild, normalizeConfig, networkIdentity, imageName, managedName, releaseImage, labels, owns, assertManaged } from './config.mjs';
 import { readJson, writeJson } from './state.mjs';
 import { extractZip } from './archive.mjs';
 import { StaticDeployment } from './static-deployment.mjs';
@@ -14,17 +14,21 @@ const directory = path.dirname(fileURLToPath(import.meta.url));
 export const terminal = status => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(status);
 export function composeFor(identity, task, release) {
   const config = normalizeConfig(release.config), project = managedName(task.targetId), resourceLabels = labels(identity.serverId, task.targetId, artifactId(release));
-  const networkNames = config.networks.length ? config.networks : ['default'];
+  // 网络身份属于部署位置，回退历史配置时也必须保留。
+  const binding = networkIdentity(task.networkIdentity);
+  const externalNetworks = [...new Set([...config.networks, ...(binding ? [binding.network] : [])])];
+  const networkNames = externalNetworks.length ? externalNetworks : ['default'];
   return { name: project, services: { app: {
     container_name: project, image: release.image, restart: 'unless-stopped', user: '1000:1000', init: true,
     stop_grace_period: '45s', mem_limit: `${config.runtime.memoryMb}m`, memswap_limit: `${Math.round(config.runtime.memoryMb * 1.5)}m`, cpus: config.runtime.cpus, pids_limit: 256,
     labels: resourceLabels, cap_drop: ['ALL'], security_opt: ['no-new-privileges:true'],
-    ports: config.ports.map(p => `${p.host}:${p.hostPort}:${p.containerPort}`), networks: networkNames,
+    ports: config.ports.map(p => `${p.host}:${p.hostPort}:${p.containerPort}`),
+    networks: binding ? Object.fromEntries(networkNames.map(n => [n, n === binding.network ? { aliases: [binding.alias] } : {}])) : networkNames,
     volumes: config.volumes.map(v => `${v.name}:${v.mountPath}`),
     logging: { driver: 'json-file', options: { 'max-size': '10m', 'max-file': '3' } },
     healthcheck: { test: ['CMD', 'java', '-Xms8m', '-Xmx32m', '-cp', '/cmr', 'HealthProbe', String(config.health.port), config.health.path, String(config.health.status), config.health.bodyIncludes],
       interval: `${config.health.intervalSeconds}s`, timeout: '7s', retries: Math.ceil(config.health.timeoutSeconds / config.health.intervalSeconds), start_period: '10s' },
-  } }, networks: config.networks.length ? Object.fromEntries(config.networks.map(n => [n, { external: true, name: n }])) : { default: { name: `${project}-network`, labels: labels(identity.serverId, task.targetId) } },
+  } }, networks: externalNetworks.length ? Object.fromEntries(externalNetworks.map(n => [n, { external: true, name: n }])) : { default: { name: `${project}-network`, labels: labels(identity.serverId, task.targetId) } },
   volumes: Object.fromEntries(config.volumes.map(v => [v.name, { name: `${project}-${v.name}`, labels: labels(identity.serverId, task.targetId) }])) };
 }
 
@@ -50,10 +54,27 @@ export class DeploymentExecutor {
   }
   async preflight(task, config) {
     assertManaged(this.getIdentity(), task);
-    await this.requireOwned(task);
+    const current = await this.requireOwned(task), binding = networkIdentity(task.networkIdentity);
     for (const volume of config.volumes) await this.requireOwned(task, `${managedName(task.targetId)}-${volume.name}`, 'volume');
-    if (!config.networks.length) await this.requireOwned(task, `${managedName(task.targetId)}-network`, 'network');
-    for (const network of config.networks) if (!await this.docker.inspect(network, 'network')) throw new Error(`部署网络不存在：${network}`);
+    if (!config.networks.length && !binding) await this.requireOwned(task, `${managedName(task.targetId)}-network`, 'network');
+    for (const network of new Set([...config.networks, ...(binding ? [binding.network] : [])])) {
+      const resource = await this.docker.inspect(network, 'network');
+      if (!resource) throw new Error(`部署网络不存在：${network}`);
+      if (network !== binding?.network) continue;
+      for (const id of Object.keys(resource.Containers || {})) {
+        if (id === current?.Id) continue;
+        const peer = await this.docker.inspect(id);
+        const endpoint = peer?.NetworkSettings?.Networks?.[network];
+        if (peer && [peer.Name?.replace(/^\//, ''), ...(endpoint?.Aliases || []), ...(endpoint?.DNSNames || [])].includes(binding.alias)) throw new Error(`固定网络别名已被其他容器占用：${binding.alias}`);
+      }
+    }
+  }
+  async restart(task, release) {
+    const current = await this.requireOwned(task), binding = networkIdentity(task.networkIdentity);
+    if (binding && !current?.NetworkSettings?.Networks?.[binding.network]?.Aliases?.includes(binding.alias)) {
+      await this.event(task, 'deploying', '正在应用固定网络别名，使用已部署配置重建当前容器');
+      await this.activate(task, release);
+    } else await this.mutation(task, ['restart', '--time', '45', managedName(task.targetId)], { timeoutMs: 90000 });
   }
   async mountDirectory(directoryPath) {
     await mkdir(directoryPath, { recursive: true, mode: 0o755 });
@@ -281,7 +302,7 @@ export class DeploymentExecutor {
       await this.journal.update(task.id, { release });
       await this.event(task, 'deploying', task.action === 'restart' ? '正在重启当前平台容器' : '正在更新当前部署目标');
       deploying = true;
-      if (task.action === 'restart') { await this.requireOwned(task); await this.mutation(task, ['restart', '--time', '45', managedName(task.targetId)], { timeoutMs: 90000 }); }
+      if (task.action === 'restart') await this.restart(task, release);
       else await this.activate(task, release);
       await this.event(task, 'verifying', '正在等待业务健康检查通过'); await this.health(task, release); await this.finish(task, release, previous);
     } catch (error) {

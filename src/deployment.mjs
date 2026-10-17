@@ -8,6 +8,7 @@ import { migrateWorkspaces, sourceSnapshot } from './workspaces.mjs';
 import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
 import { DEFAULT_STORAGE_POLICY, storagePolicy, artifactId } from '../agent/storage-policy.mjs';
+import { networkIdentity } from '../agent/config.mjs';
 
 const now = () => new Date().toISOString();
 const terminal = new Set(['succeeded', 'failed', 'rolled_back', 'interrupted']);
@@ -334,8 +335,13 @@ export class DeploymentService extends EventEmitter {
         if (id && ['serverId', 'environmentId', 'serviceId'].some(key => item[key] !== input[key])) fail('不能改变已有目标的归属，请新建隔离目标');
         if (data.targets.some(target => !target.retiredAt && target.id !== id && target.environmentId === environment.id && target.serviceId === service.id && target.serverId === server.id)) fail('该服务在此服务器已存在部署目标');
         if (input.containerName) fail('平台目标不能指定外部容器名称');
+        let binding;
+        try { binding = networkIdentity(input.networkIdentity === undefined ? item.networkIdentity : input.networkIdentity); } catch (error) { fail(error.message); }
+        if (binding && service.kind === 'static') fail('静态站点无需固定容器网络别名');
+        if (item.networkIdentity && JSON.stringify(binding) !== JSON.stringify(networkIdentity(item.networkIdentity))) fail('固定网络别名不能更改或移除，请为不同网络身份新建部署位置');
+        if (binding && data.targets.some(target => !target.retiredAt && target.id !== item.id && target.serverId === server.id && target.networkIdentity?.network === binding.network && target.networkIdentity?.alias === binding.alias)) fail('该服务器网络中的固定别名已被其他部署位置使用');
         fields = { environmentId: environment.id, serviceId: service.id, serverId: server.id, applicationId: environment.applicationId, mode: 'managed', containerName: service.kind === 'static' ? null : `cmr-${item.id}`,
-          config: validateConfig(input.config, service.module, service.kind || 'java'), owner: 'platform' };
+          config: validateConfig(input.config, service.module, service.kind || 'java'), networkIdentity: binding, owner: 'platform' };
       }
       Object.assign(item, fields, { updatedAt: now() });
       if (!id) {
@@ -358,7 +364,7 @@ export class DeploymentService extends EventEmitter {
   configKey(targetId) {
     const target = find(this.data.targets, targetId), service = find(this.data.services, target.serviceId);
     const source = this.data.environmentSources.find(item => item.environmentId === target.environmentId && item.serviceId === target.serviceId);
-    return digest(JSON.stringify([validateConfig(target.config, service.module, service.kind || 'java'), source?.sourceProjectId]));
+    return digest(JSON.stringify([validateConfig(target.config, service.module, service.kind || 'java'), source?.sourceProjectId, target.networkIdentity || null]));
   }
   async createTask(input) {
     if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
@@ -395,6 +401,7 @@ export class DeploymentService extends EventEmitter {
       if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
       const data = state.deployments; const target = this.ensureManaged(data, input.targetId); const environment = find(data.environments, target.environmentId); const service = find(data.services, target.serviceId);
       const previousRequest = duplicate(data); if (previousRequest) return structuredClone(previousRequest);
+      if (target.networkIdentity && !find(data.servers, target.serverId).capabilities?.includes('fixed-network-alias-v1')) throw new HttpError(409, '请先升级目标 Agent，使其支持固定网络别名');
       if (service.kind === 'static' && !find(data.servers, target.serverId).capabilities?.includes('static-site-v1')) throw new HttpError(409, '请先升级目标服务器 Agent，使其支持静态站点发布');
       if (service.kind === 'static' && input.action === 'restart') throw new HttpError(400, '静态站点无需重启共用 Nginx，请使用发布或回退');
       if (service.kind === 'static' && input.action === 'deploy' && !target.config.health?.url) throw new HttpError(400, '请先配置站点访问地址，并将已有 Nginx 指向该目标的发布目录');
@@ -419,6 +426,7 @@ export class DeploymentService extends EventEmitter {
       if (input.action === 'rollback' && archived && input.requestId && !supportsRecovery) throw new HttpError(409, '请先升级目标 Agent 以支持源码档案恢复；旧客户端仍可使用原本机缓存恢复接口');
       const task = { id: taskId, targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: input.action === 'deploy' ? 'preparing' : 'queued', stage: 'queued',
         detailedAgentStages: find(data.servers, target.serverId).capabilities?.includes('delivery-telemetry-v1') || false,
+        networkIdentity: structuredClone(target.networkIdentity || null),
         createdAt: now(), updatedAt: now(), config: release ? structuredClone(release.config) : validateConfig(target.config, service.module, service.kind || 'java'),
         sourceProjectId: sourceProject.id, sourceSnapshot: snapshot, source: archived ? { ...archived, url: `/api/agent/v1/tasks/${taskId}/source` } : null,
         sourceArchiveId: archived?.archiveId, revision: release?.revision || input.revision, commitSubject: release?.commitSubject || selectedCommit?.subject,
@@ -493,6 +501,9 @@ export class DeploymentService extends EventEmitter {
       const next = data.tasks.find(task => task.serverId === serverId && ['preparing', 'queued'].includes(task.status));
       if (!next || next.status !== 'queued') return null;
       const target = this.ensureManaged(data, next.targetId);
+      if (next.networkIdentity && !server.capabilities?.includes('fixed-network-alias-v1')) {
+        Object.assign(next, { status: 'interrupted', stage: 'interrupted', error: 'Agent 不支持固定网络别名，请升级后重新创建任务', finishedAt: now() }); transition(next, 'interrupted', true); interruptedId = next.id; return null;
+      }
       if (next.config?.kind === 'static' && !server.capabilities?.includes('static-site-v1')) {
         transition(next, 'interrupted', true);
         Object.assign(next, { status: 'interrupted', stage: 'interrupted', finishedAt: now(), updatedAt: now(), error: '当前 Agent 不支持静态站点发布，请升级后重试' });

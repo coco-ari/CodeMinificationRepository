@@ -89,6 +89,13 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
         if (!serviceId) throw new Error('请先配置该环境的服务源码')
         if (!serverId) throw new Error('请先绑定服务器')
         const body = { environmentId: env, serviceId, serverId }
+        if (!isStatic) {
+          body.networkIdentity =
+            item?.networkIdentity ||
+            (input.fixedNetwork || input.fixedAlias
+              ? { network: input.fixedNetwork?.trim(), alias: input.fixedAlias?.trim() }
+              : null)
+        }
         const ports = JSON.parse(input.ports || '[]').map((port) => ({
           ...port,
           hostPort: Number(port.hostPort),
@@ -397,6 +404,22 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
               </Advanced>
             </Section>
             <Section title="网络与存储">
+              <Grid>
+                <Field
+                  name="fixedNetwork"
+                  label="固定别名所在网络"
+                  defaultValue={item?.networkIdentity?.network || ''}
+                  disabled={!!item?.networkIdentity}
+                  hint="填写服务器上已存在的共享 Docker 网络。"
+                />
+                <Field
+                  name="fixedAlias"
+                  label="服务固定网络别名"
+                  defaultValue={item?.networkIdentity?.alias || ''}
+                  disabled={!!item?.networkIdentity}
+                  hint="例如 solstandard-test-api；保存后固定，发布或重启生效，回退时保留。"
+                />
+              </Grid>
               <MappingRows
                 name="ports"
                 title="端口映射"

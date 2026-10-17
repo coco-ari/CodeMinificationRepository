@@ -104,7 +104,23 @@ export function Configuration({ target }) {
                 '端口映射',
                 config.ports?.map((p) => `${p.host}:${p.hostPort}:${p.containerPort}`).join('\n'),
               ],
-              ['Docker 网络', config.networks?.join('\n') || '平台自动创建目标网络'],
+              [
+                'Docker 网络',
+                [
+                  ...new Set([
+                    ...(config.networks || []),
+                    ...(target.networkIdentity ? [target.networkIdentity.network] : []),
+                  ]),
+                ].join('\n') || '平台自动创建目标网络',
+              ],
+              ...(target.networkIdentity
+                ? [
+                    [
+                      '部署位置固定别名',
+                      `${target.networkIdentity.alias}（${target.networkIdentity.network}，发布与回退保留）`,
+                    ],
+                  ]
+                : []),
               ['数据卷', config.volumes?.map((v) => `${v.name} → ${v.mountPath}`).join('\n')],
             ],
           ],

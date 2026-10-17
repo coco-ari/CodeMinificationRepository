@@ -60,7 +60,7 @@ class FakeDocker {
     if (args[0] === 'compose' && args.includes('up')) {
       const compose = JSON.parse(await readFile(args[args.indexOf('-f') + 1], 'utf8')), app = compose.services.app;
       const bad = app.image.endsWith(`:${this.unhealthyTask}`);
-      this.containers.set(app.container_name, { Id: app.image, Config: { Image: app.image, Labels: app.labels }, State: { Running: !bad, Status: bad ? 'exited' : 'running', Health: { Status: bad ? 'unhealthy' : 'healthy' }, StartedAt: new Date().toISOString() }, RestartCount: 0 });
+      this.containers.set(app.container_name, { Id: app.image, Config: { Image: app.image, Labels: app.labels }, NetworkSettings: { Networks: Object.fromEntries(Object.entries(app.networks).map(([name, value]) => [name, { Aliases: value.aliases || [] }])) }, State: { Running: !bad, Status: bad ? 'exited' : 'running', Health: { Status: bad ? 'unhealthy' : 'healthy' }, StartedAt: new Date().toISOString() }, RestartCount: 0 });
       await options.onOutput?.('容器更新完成\n');
     }
     if (args[0] === 'rm') this.containers.delete(args.at(-1));
@@ -541,4 +541,34 @@ test('心跳上报上一成功请求的实测往返耗时，首次和失败时�
   runner.identity=identity(); runner.monitor={metrics:async()=>({cpuPercent:1}),containers:async()=>[]};
   await runner.heartbeat(); await runner.heartbeat();
   assert.equal(reports[0].metrics.centerRttMs,undefined);assert.ok(Number.isFinite(reports[1].metrics.centerRttMs));assert.ok(reports[1].metrics.centerRttMs>=0);
+});
+
+test('固定网络别名在重启及历史回退中保留，不覆盖历史配置或添加重启版本', async t => {
+  const f = await fixture(t), binding = { network: 'test-shared', alias: 'project-test-api' };
+  await f.executor.execute(task('initial'));
+  const previous = await f.executor.current(task());
+  f.docker.other.set(binding.network, { Containers: {} });
+  const restart = task('restart-alias', { action: 'restart', networkIdentity: binding, release: previous, config: previous.config });
+  await f.executor.execute(restart);
+  assert.equal((await f.journal.get(restart.id)).status, 'succeeded');
+  assert.equal((await f.executor.current(restart)).id, previous.id);
+  assert.deepEqual(f.docker.containers.get(managedName(restart.targetId)).NetworkSettings.Networks[binding.network].Aliases, [binding.alias]);
+  assert.equal(f.docker.calls.filter(args => args[0] === 'restart').length, 0);
+  await f.executor.execute({ ...restart, id: 'restart-again' });
+  assert.equal(f.docker.calls.filter(args => args[0] === 'restart').length, 1);
+  const rollback = task('rollback-alias', { action: 'rollback', networkIdentity: binding, release: previous });
+  await f.executor.execute(rollback);
+  assert.equal((await f.journal.get(rollback.id)).status, 'succeeded');
+  const manifest = composeFor(f.identity, rollback, previous);
+  assert.deepEqual(manifest.services.app.networks[binding.network].aliases, [binding.alias]);
+  assert.deepEqual(previous.config.networks, []);
+  assert.equal(manifest.networks[binding.network].external, true);
+});
+
+test('固定别名冲突在切换前拒绝，不操作占用别名的中间件', async t => {
+  const f = await fixture(t), binding = { network: 'test-shared', alias: 'project-test-api' };
+  f.docker.other.set(binding.network, { Containers: { middleware: {} } });
+  f.docker.containers.set('middleware', { Name: '/mysql', NetworkSettings: { Networks: { [binding.network]: { Aliases: [binding.alias] } } } });
+  await assert.rejects(f.executor.preflight(task('conflict', { networkIdentity: binding }), config()), /别名已被其他容器占用/);
+  assert.equal(f.docker.calls.some(args => ['compose', 'restart', 'rm', 'network'].includes(args[0])), false);
 });

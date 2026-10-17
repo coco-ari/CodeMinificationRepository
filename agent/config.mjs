@@ -1,7 +1,7 @@
 import path from 'node:path';
 
-export const VERSION = '1.5.1';
-export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1'];
+export const VERSION = '1.6.0';
+export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1', 'fixed-network-alias-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
   if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error(`${label}无效`);
@@ -31,6 +31,14 @@ function strings(value = [], max = 50) {
 export function imageName(value) {
   if (typeof value !== 'string' || value.length > 200 || !/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$/.test(value)) throw new Error('镜像名称无效');
   return value;
+}
+export function networkIdentity(value) {
+  if (value == null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)
+    || typeof value.network !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(value.network)
+    || typeof value.alias !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value.alias)
+    || ['app', 'localhost', 'host', 'none', 'bridge'].includes(value.alias) || value.alias.startsWith('cmr-')) throw new Error('固定网络和别名无效，请使用独立的项目、环境和服务名称');
+  return { network: value.network, alias: value.alias };
 }
 export function normalizeConfig(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('部署配置无效');

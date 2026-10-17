@@ -467,7 +467,7 @@ try {
   const firstAgent = await agentRequest('register', {
     registrationToken: token,
     version: '1.3.0-browser',
-    capabilities: ['static-site-v1', 'source-archive-recovery-v1'],
+    capabilities: ['static-site-v1', 'source-archive-recovery-v1', 'fixed-network-alias-v1'],
   })
   await close()
   await click('#create-button')
@@ -480,7 +480,7 @@ try {
   const secondAgent = await agentRequest('register', {
     registrationToken: secondToken,
     version: '1.3.0-browser',
-    capabilities: ['static-site-v1', 'source-archive-recovery-v1'],
+    capabilities: ['static-site-v1', 'source-archive-recovery-v1', 'fixed-network-alias-v1'],
   })
   await close()
   const metrics = {
@@ -605,6 +605,8 @@ try {
     await evaluate(`document.querySelector('#deploy-healthStatus').getClientRects().length`),
     0,
   )
+  await fill('#deploy-fixedNetwork', 'test-shared')
+  await fill('#deploy-fixedAlias', 'project-test-api')
   await fill('#deploy-healthPath', '/api/health')
   assert.match(
     await evaluate(`document.querySelector('#health-check-preview').textContent`),
@@ -631,6 +633,10 @@ try {
   const firstTarget = deployment.data.targets.find((t) => t.serviceId === apiService.id)
   assert.equal(firstTarget.config.ports[0].hostPort, 18101)
   assert.equal(firstTarget.config.runtime.memoryMb, 512)
+  assert.deepEqual(firstTarget.networkIdentity, {
+    network: 'test-shared',
+    alias: 'project-test-api',
+  })
   assert.deepEqual(firstTarget.config.volumes, [{ name: 'logs', mountPath: '/app/logs' }])
   assert.equal(deployment.data.tasks.length, 0)
   await go('setup', `?environment=${firstTarget.environmentId}&service=${apiService.id}&step=3`)
