@@ -2,6 +2,7 @@ import { TextTooltip } from './text-tooltip'
 import { useMemo, useState } from 'react'
 import {
   ArrowRight,
+  ArrowUpRight,
   Check,
   ChevronDown,
   ChevronRight,
@@ -78,7 +79,7 @@ export function TargetActions({ target, service }) {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="ghost"
+            variant="outline"
             size="icon"
             className="size-8"
             aria-label={`${service.name} · 更多操作`}
@@ -166,7 +167,8 @@ export function ServiceList({ compact = false, serverId }) {
         className="h-auto max-w-full justify-start p-0 text-left font-medium"
         onClick={() => go(service)}
       >
-        <span className="break-words whitespace-normal">{service.name}</span>
+        <span className="min-w-0 break-words whitespace-normal">{service.name}</span>
+        <ArrowUpRight className="size-3.5 text-muted-foreground" />
       </Button>
       <p className="mt-1 truncate text-xs text-muted-foreground">
         {service.kind === 'static' ? '静态站点' : 'Java'} · {service.module}
@@ -229,6 +231,7 @@ export function ServiceList({ compact = false, serverId }) {
           onClick={() => navigate('tasks', service.active.id)}
         >
           {stageLabel(service.active.stage)} · 查看进度
+          <ArrowRight className="size-3.5" />
         </Button>
       )}
     </div>
@@ -275,7 +278,7 @@ export function ServiceList({ compact = false, serverId }) {
           </div>
         ))}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           onClick={() => {
             location.hash = routeUrl('setup', scope, environmentId, null, {
@@ -350,7 +353,7 @@ export function ServiceList({ compact = false, serverId }) {
       {compact && (
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">当前环境的服务</h2>
-          <Button variant="ghost" size="sm" onClick={() => navigate('services')}>
+          <Button variant="outline" size="sm" onClick={() => navigate('services')}>
             管理服务 <ArrowRight />
           </Button>
         </div>
@@ -472,7 +475,7 @@ export function Environments() {
         编辑
       </Button>
       <Button
-        variant="ghost"
+        variant="outline"
         size="sm"
         className="text-destructive hover:text-destructive"
         onClick={() =>
@@ -567,7 +570,7 @@ export function ServiceSetup() {
         <h1 id="page-title" className="text-xl font-semibold">
           {service ? `配置 ${service.name}` : '新增服务'}
         </h1>
-        <Button variant="ghost" onClick={() => navigateSafely(close)}>
+        <Button variant="outline" onClick={() => navigateSafely(close)}>
           稍后继续
         </Button>
       </div>

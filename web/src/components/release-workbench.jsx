@@ -439,13 +439,13 @@ export function ConfigurationPage({ selectedTarget }) {
                   )}
                   {r.archiveStatus === 'available' ? (
                     <>
-                      <Button variant="ghost" size="sm" asChild>
+                      <Button variant="outline" size="sm" asChild>
                         <a href={`${endpoint}/releases/${r.id}/source`}>下载源码</a>
                       </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="icon-sm"
                             aria-label={`版本 ${short(r.revision)} · 更多操作`}
                           >
@@ -530,7 +530,7 @@ export function ConfigurationPage({ selectedTarget }) {
                     : ''}
                 </span>
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => navigate('tasks', t.id, target.environmentId)}
                 >
                   查看日志 <ArrowRight />
@@ -1592,7 +1592,7 @@ export function TaskWorkbench({ id }) {
             </Action>
           ) : (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               aria-pressed={!selected}
               onClick={() => setSelected(null)}

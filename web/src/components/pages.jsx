@@ -43,7 +43,7 @@ export function Overview() {
         <Card data-overview="repositories">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>代码仓库</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate('projects')}>
+            <Button variant="outline" size="sm" onClick={() => navigate('projects')}>
               管理 <ArrowUpRight />
             </Button>
           </CardHeader>
@@ -66,7 +66,7 @@ export function Overview() {
         <Card data-overview="servers">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>服务器</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => navigate('servers')}>
+            <Button variant="outline" size="sm" onClick={() => navigate('servers')}>
               管理 <ArrowUpRight />
             </Button>
           </CardHeader>
@@ -132,7 +132,7 @@ function RepositoryActions({ repo }) {
     <>
       <div className="card-actions repository-actions">
         <Action
-          variant="ghost"
+          variant="outline"
           size="sm"
           aria-label="刷新仓库信息"
           disabled={!repo.enabled || ['syncing', 'queued'].includes(repo.status)}
@@ -149,7 +149,7 @@ function RepositoryActions({ repo }) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon-sm"
               aria-label={`${repo.name} 更多操作`}
               data-repository-menu
@@ -226,7 +226,8 @@ export function Repositories() {
         className="repo-name font-medium"
         onClick={() => open('repository', repo)}
       >
-        {repo.name}
+        <span className="min-w-0 break-words whitespace-normal">{repo.name}</span>
+        <Settings2 className="size-3.5 text-muted-foreground" />
       </Button>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -361,7 +362,7 @@ export function Servers() {
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="icon"
                         className="size-8"
                         aria-label={server.name + ' · 更多操作'}
@@ -563,7 +564,7 @@ export function Credentials() {
                 编辑
               </Button>
               <Button
-                variant="ghost"
+                variant="outline"
                 className="text-destructive hover:text-destructive"
                 onClick={() =>
                   confirm(

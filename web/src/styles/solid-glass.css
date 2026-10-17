@@ -41,7 +41,6 @@
   --glass-canvas: oklch(0.93 0.008 265);
   --glass-header: oklch(0.956 0.006 265);
   --glass-field: oklch(0.985 0.004 265);
-  --glass-button-quiet: oklch(0.94 0.012 265);
   --glass-button-border: oklch(0.55 0.02 265 / 55%);
   --glass-solid: oklch(0.968 0.008 265);
   --glass-rim: oklch(1 0 0 / 96%);
@@ -271,39 +270,30 @@ body {
 [data-ui='button'][data-variant='outline'] {
   background: var(--glass-field);
 }
-/* 次要操作始终显示底色与轮廓，触屏用户无需悬停即可辨认按钮。 */
-[data-ui='button'][data-variant='ghost'] {
-  background: var(--glass-button-quiet);
-  border: 1px solid var(--glass-button-border);
-  box-shadow:
-    inset 0 1px 0 var(--glass-rim),
-    var(--tw-ring-shadow, 0 0 #0000);
-}
-[data-ui='button'][data-variant='link'] {
-  text-decoration-line: underline;
-  text-decoration-color: color-mix(in oklch, currentColor 65%, transparent);
-  text-underline-offset: 3px;
-}
+/* 独立操作使用 outline；辅助图标与文字入口保留轻量外观和清晰焦点。 */
 [data-ui='button']:not(:disabled):not([aria-disabled='true']) {
   cursor: pointer;
 }
-[data-ui='button']:is(
-    [data-variant='outline'],
-    [data-variant='secondary'],
-    [data-variant='ghost']
-  ):is(:active, [data-state='open'], [aria-pressed='true']):not(:disabled) {
+[data-ui='button']:is([data-variant='outline'], [data-variant='secondary']):is(
+    :active,
+    [data-state='open'],
+    [aria-pressed='true']
+  ):not(:disabled) {
   background: var(--accent);
   border-color: var(--ring);
   box-shadow:
     inset 0 1px 3px var(--glass-contact),
     var(--tw-ring-shadow, 0 0 #0000);
 }
+[data-ui='button'][data-variant='ghost']:is(
+    :active,
+    [data-state='open'],
+    [aria-pressed='true']
+  ):not(:disabled) {
+  background: var(--accent);
+}
 @media (hover: hover) {
-  [data-ui='button']:is(
-      [data-variant='outline'],
-      [data-variant='secondary'],
-      [data-variant='ghost']
-    ):not(:disabled):hover {
+  [data-ui='button']:is([data-variant='outline'], [data-variant='secondary']):not(:disabled):hover {
     background: var(--accent);
     border-color: var(--ring);
   }
@@ -407,7 +397,7 @@ body {
   border-radius: var(--glass-radius-inset);
 }
 .commit-option.selected {
-  border-color: var(--ring);
+  border-color: var(--border);
 }
 
 /* 触摸设备关闭常驻面板的模糊，浮层仍有高不透明度；高对比度模式使用系统配色。 */
@@ -441,7 +431,6 @@ body {
     --glass-canvas: Canvas;
     --glass-header: Canvas;
     --glass-field: Canvas;
-    --glass-button-quiet: ButtonFace;
     --glass-button-border: ButtonBorder;
     --glass-solid: Canvas;
     --glass-blur: none;

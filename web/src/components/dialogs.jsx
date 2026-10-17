@@ -194,7 +194,7 @@ function RepositoryForm({ item, onClose }) {
           <Button
             id="repository-add-credential"
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
             onClick={() => setAdding(true)}
           >

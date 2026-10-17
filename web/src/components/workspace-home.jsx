@@ -3,6 +3,7 @@ import {
   Plus,
   GitBranch,
   GitCommitHorizontal,
+  Copy,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -70,8 +71,9 @@ export function Commit({ value, subject, summary = false, compact = false }) {
             </span>
           )}
           <span className="inline-flex items-center gap-1.5">
-            <GitCommitHorizontal className="size-3.5 shrink-0" />
+            {!compact && <GitCommitHorizontal className="size-3.5 shrink-0" />}
             <code className="commit-sha">{value.slice(0, compact ? 14 : 10)}</code>
+            <Copy className="commit-copy-icon size-3.5 shrink-0" aria-hidden="true" />
           </span>
         </Action>
       </TooltipTrigger>
@@ -208,6 +210,7 @@ function ServiceVersion({ row, onDetails }) {
           >
             <GitBranch />
             <span className="truncate">{branch || '分支待识别'}</span>
+            <ChevronRight className="entry-arrow" />
           </Button>
         </TooltipTrigger>
         <TooltipContent className="max-w-80 space-y-1">
@@ -228,6 +231,7 @@ function ServiceVersion({ row, onDetails }) {
       ) : version.kind === 'mixed' ? (
         <Button variant="link" className="tile-version-detail" onClick={onDetails}>
           版本不同
+          <ChevronRight className="size-3 entry-arrow" />
         </Button>
       ) : (
         <span className="tile-version-unknown">{row.targets.length ? '版本待识别' : '—'}</span>
@@ -505,6 +509,7 @@ export function ProjectTile({ project }) {
                         onClick={() => go('service', { serviceId: row.id })}
                       >
                         <span className="truncate">{row.name}</span>
+                        <ArrowUpRight className="size-3 text-muted-foreground" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>{row.name}</TooltipContent>
@@ -541,7 +546,7 @@ export function ProjectTile({ project }) {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="icon-sm"
                 className="tile-footer-action tile-add-service"
                 aria-label={`为${project.name}新增服务`}

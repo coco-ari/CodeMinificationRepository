@@ -186,7 +186,7 @@ export function DataTable({
         {filtered.length > initialPageSize && (
           <div className="flex items-center gap-2">
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon"
               className="size-8"
               aria-label="上一页"
@@ -199,7 +199,7 @@ export function DataTable({
               第 {pagination.pageIndex + 1} / {Math.max(1, table.getPageCount())} 页
             </span>
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon"
               className="size-8"
               aria-label="下一页"
