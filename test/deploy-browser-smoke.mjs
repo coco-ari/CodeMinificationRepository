@@ -1067,8 +1067,15 @@ try {
   )
   const rollback = (await agentRequest('claim', {}, firstAgent.token)).task
   assert.equal(rollback.release.id, task.id)
+  const restoredRelease = {
+    ...rollback.release,
+    id: rollback.id,
+    artifactId: rollback.release.artifactId || rollback.release.id,
+    restoredFromReleaseId: rollback.release.id,
+    recoveryMethod: 'cache',
+  }
   await send(rollback, 1, 'verifying', '回退健康检查通过', 'succeeded', {
-    release: rollback.release,
+    release: restoredRelease,
   })
   await until(
     () => evaluate(`document.querySelector('#deploy-task-info').textContent.includes('回退成功')`),
@@ -1151,7 +1158,7 @@ try {
   await go('tasks', `?environment=${firstTarget.environmentId}&task=${restart.id}`)
   await visible('#deploy-task-logs')
   await send(restart, 1, 'verifying', '重启健康检查通过', 'succeeded', {
-    release: rollback.release,
+    release: restoredRelease,
   })
   await until(
     () => evaluate(`document.querySelector('#deploy-task-info').textContent.includes('重启成功')`),
@@ -2112,6 +2119,33 @@ try {
 
   // 全局撤销记录可以删除，项目解绑不影响共享服务器身份。
   await click('[data-view=system-servers]')
+  await visible(`[data-server-id="${firstAgent.serverId}"]`)
+  await clickText('存储策略', `[data-server-id="${firstAgent.serverId}"]`)
+  await visible('#storage-retained')
+  await fill('#storage-retained', '3')
+  await fill('#storage-cache', '1')
+  await clickText('保存并下发', '[data-ui=sheet]')
+  await until(
+    () =>
+      deployment.data.servers.find((s) => s.id === firstAgent.serverId).storagePolicy
+        ?.retainedVersions === 3,
+    '存储策略保存',
+  )
+  for (const width of [390, 768, 1280, 1920]) {
+    await command('Emulation.setDeviceMetricsOverride', {
+      width,
+      height: 1000,
+      deviceScaleFactor: 1,
+      mobile: false,
+    })
+    await clickText('存储策略', `[data-server-id="${firstAgent.serverId}"]`)
+    await visible('#storage-retained')
+    assert.equal(await evaluate('document.querySelector("#storage-retained").value'), '3')
+    await animationsSettled()
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), true)
+    await screenshot(`storage-policy-${width}.png`)
+    await dismissPopup('[data-ui=sheet]')
+  }
   const disposable = await deployment.createServer({ name: '临时验收待删除' })
   await deployment.revokeServer(disposable.server.id)
   await visible(`[data-server-id="${disposable.server.id}"]`)

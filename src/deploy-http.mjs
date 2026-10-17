@@ -41,6 +41,8 @@ export async function handleDeployRequest(req, res, url, { deployment, body, jso
   const route = url.pathname.slice('/api/deploy'.length);
   if (route === '/overview' && req.method === 'GET') { json(res, 200, deployment.overview()); return true; }
   if (route === '/servers' && req.method === 'POST') { json(res, 201, await deployment.createServer(await body(req))); return true; }
+  const storage = new RegExp(`^/servers/${id}/storage-policy$`).exec(route);
+  if (storage && req.method === 'PUT') { json(res, 200, await deployment.saveStoragePolicy(storage[1], await body(req))); return true; }
   const revoke = new RegExp(`^/servers/${id}/revoke$`).exec(route);
   if (revoke && req.method === 'POST') { await deployment.revokeServer(revoke[1]); json(res, 200, { ok: true }); return true; }
   const server = new RegExp(`^/servers/${id}$`).exec(route);

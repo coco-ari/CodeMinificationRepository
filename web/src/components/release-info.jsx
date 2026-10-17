@@ -5,6 +5,7 @@ import {
   AccordionContent,
 } from '@/components/ui/accordion'
 import { Commit } from './workspace-home'
+import { Badge } from '@/components/ui/badge'
 import { date, short } from '@/lib/console'
 
 export function archiveLabel(release) {
@@ -30,11 +31,15 @@ export function ReleaseInfo({ release, selectable = false, badge }) {
           <Commit value={release.revision} subject={release.commitSubject} summary />
         )}
         {badge}
+        {release.action === 'rollback' && <Badge variant="outline">恢复版本</Badge>}
       </span>
       <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
         {selectable && <code>{short(release.revision)}</code>}
         <span className="break-all">{release.sourceSnapshot?.branch || '历史分支未记录'}</span>
         <span>发布于 {date(release.createdAt)}</span>
+        {release.recoveryMethod && (
+          <span>{release.recoveryMethod === 'cache' ? '复用本机产物' : '中心源码重建'}</span>
+        )}
       </span>
       <span className="mt-1 block text-xs font-normal text-muted-foreground">
         {archiveLabel(release)}

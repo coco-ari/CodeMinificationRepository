@@ -40,6 +40,11 @@ class FakeDocker {
   async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); if (kind === 'image' && /^(maven:|node:|eclipse-temurin:|sha256:)/.test(name)) return { Id: `sha256:${'c'.repeat(64)}` }; return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
   async run(args, options = {}) {
     this.calls.push([...args]);
+    if (args[0] === 'exec' && args.includes('buildctl')) return { code: 0, output: '[]' };
+    if (args[0] === '--config' && args[2] === 'buildx') {
+      args = args.slice(3);
+      if (args[0] === 'inspect') return { code: 0, output: `Name: ${args[1]}\nDriver: docker-container\nEndpoint: unix:///var/run/docker.sock\n` };
+    }
     if (args[0] === 'history') return { code: 0, output: JSON.stringify({ CreatedBy: 'RUN install java runtime' }) + '\n' };
     if (args[0] === 'run') {
       const mount = args.filter((_, i) => args[i - 1] === '--mount').find(v => v.includes('dst=/workspace'));
@@ -116,7 +121,8 @@ test('前端通过共用站点目录发布、单独回退，不创建或重启 W
   assert.equal((await f.journal.get('static-2')).status, 'succeeded');
   await f.executor.execute(f.staticTask('static-rollback', { action: 'rollback', release: first }));
   assert.equal((await f.journal.get('static-rollback')).status, 'succeeded');
-  assert.equal((await f.executor.current(f.staticTask('unused'))).id, first.id);
+  assert.equal((await f.executor.current(f.staticTask('unused'))).id, 'static-rollback');
+  assert.equal((await f.executor.current(f.staticTask('unused'))).artifactId, first.id);
   assert.equal(f.docker.containers.get('shared-nginx'), shared);
   assert.equal(f.docker.calls.some(args => ['compose', 'build', 'restart'].includes(args[0])), false);
   for (const args of f.docker.calls.filter(args => args[0] === 'run')) {
@@ -268,7 +274,7 @@ test('完整发布与手动回退、重启使用目标专属资源，重复任�
   const calls = docker.calls.length; await executor.execute(task()); assert.equal(docker.calls.length, calls);
   await executor.execute(task('task-2')); assert.equal((await journal.get('task-2')).status, 'succeeded');
   await executor.execute(task('rollback-1', { action: 'rollback', release: release1 }));
-  assert.equal((await journal.get('rollback-1')).status, 'succeeded'); assert.equal((await executor.current(task())).id, 'task-1');
+  assert.equal((await journal.get('rollback-1')).status, 'succeeded'); assert.equal((await executor.current(task())).id, 'rollback-1');
   await executor.execute(task('restart-1', { action: 'restart' })); assert.equal((await journal.get('restart-1')).status, 'succeeded');
   assert.equal(docker.containers.get('jenkins-service'), jenkins);
   const builds = docker.calls.filter(c => c[0] === 'run'); assert.ok(builds.length > 0);
@@ -303,7 +309,8 @@ test('Java 历史镜像清理后使用原源码和历史配置重建，不覆盖
   assert.equal(result.result.release.restoredFromReleaseId, original.id);
   assert.equal(result.result.release.config.profile, original.config.profile);
   assert.equal(result.result.recoveryMethod, 'rebuild');
-  assert.equal((await readJson(path.join(f.root, 'targets', 'target-1', 'releases', 'original.json'))).image, original.image);
+  assert.equal(await readJson(path.join(f.root, 'targets', 'target-1', 'releases', 'original.json')), null);
+  assert.equal((await f.journal.get('original')).result.release.image, original.image);
   assert.notEqual(result.result.release.image, original.image);
   const count = f.docker.calls.length; await f.executor.execute(restore); assert.equal(f.docker.calls.length, count);
 });
@@ -371,13 +378,79 @@ test('中断部署只核验既有容器，中断构建只终止自身构建容�
   assert.equal(docker.containers.has('cmr-build-interrupted-build-maven'), false);
 });
 
-test('历史保留最近五个成功版本，不清理外部镜像和数据卷', async t => {
+test('历史默认保留最近两个成功节点，不清理外部镜像和数据卷', async t => {
   const { executor, docker, journal, root } = await fixture(t);
   docker.images.set('jenkins/app:old', { Config: { Labels: {} } });
   for (let i = 1; i <= 7; i++) { await executor.execute(task(`release-${i}`)); assert.equal((await journal.get(`release-${i}`)).status, 'succeeded'); }
-  const files = await readdir(path.join(root, 'targets', 'target-1', 'releases')); assert.equal(files.length, 5);
+  const files = await readdir(path.join(root, 'targets', 'target-1', 'releases')); assert.equal(files.length, 2);
   assert.equal(docker.images.has('jenkins/app:old'), true);
   assert.equal(docker.calls.some(c => c.includes('prune') || (c[0] === 'volume' && c[1] === 'rm')), false);
+});
+
+test('成功链按回退操作顺序保留，重启和失败不挤掉节点，旧产物从源码重建', async t => {
+  const f = await fixture(t), versions = {};
+  for (const id of ['a', 'b', 'c']) { await f.executor.execute(task(id)); versions[id] = (await f.journal.get(id)).result.release; }
+  assert.deepEqual([...f.docker.images.keys()].sort(), ['cmr/target-1:b', 'cmr/target-1:c']);
+  await f.executor.execute(task('restore-b', { action: 'rollback', release: versions.b }));
+  assert.equal((await f.journal.get('restore-b')).result.recoveryMethod, 'cache');
+  assert.deepEqual((await f.executor.localReleases(task())).map(r => r.id).sort(), ['c', 'restore-b']);
+  await f.executor.execute(task('restart-b', { action: 'restart' }));
+  f.docker.unhealthyTask = 'failed'; await f.executor.execute(task('failed'));
+  assert.equal((await f.journal.get('failed')).status, 'rolled_back');
+  assert.deepEqual((await f.executor.localReleases(task())).map(r => r.id).sort(), ['c', 'restore-b']);
+  await f.executor.execute(task('restore-a', { action: 'rollback', release: versions.a, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-a' } }));
+  assert.equal((await f.journal.get('restore-a')).result.recoveryMethod, 'rebuild');
+  assert.deepEqual((await f.executor.localReleases(task())).map(r => r.id).sort(), ['restore-a', 'restore-b']);
+  assert.deepEqual([...f.docker.images.keys()].sort(), ['cmr/target-1:b', 'cmr/target-1:restore-a']);
+});
+
+test('前端缓存回退生成新节点并共享目录，超过保留范围的目录被回收', async t => {
+  const f = await staticFixture(t), versions = {};
+  for (const id of ['a', 'b', 'c']) { await f.executor.execute(f.staticTask(id)); versions[id] = (await f.journal.get(id)).result.release; }
+  const files = () => readdir(path.join(f.publicRoot, 'target-1', 'releases'));
+  assert.deepEqual((await files()).sort(), ['b', 'c']);
+  await f.executor.execute(f.staticTask('restore-b', { action: 'rollback', release: versions.b }));
+  assert.equal((await f.journal.get('restore-b')).result.release.artifactId, 'b');
+  assert.deepEqual((await files()).sort(), ['b', 'c']);
+  await f.executor.execute(f.staticTask('restore-a', { action: 'rollback', release: versions.a, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-a' } }));
+  assert.equal((await f.journal.get('restore-a')).result.recoveryMethod, 'rebuild');
+  assert.deepEqual((await files()).sort(), ['b', 'restore-a']);
+});
+
+test('成功结果写入中断不会提前清理旧节点，失败恢复后链条保持不变', async t => {
+  const f = await fixture(t);
+  await f.executor.execute(task('before-a')); await f.executor.execute(task('before-b'));
+  const emit = f.journal.emit.bind(f.journal); let failed = false;
+  f.journal.emit = async (id, event) => {
+    if (id === 'uncommitted' && event.status === 'succeeded' && !failed) { failed = true; throw new Error('模拟成功结果写入中断'); }
+    return emit(id, event);
+  };
+  await f.executor.execute(task('uncommitted'));
+  assert.equal((await f.journal.get('uncommitted')).status, 'rolled_back');
+  assert.deepEqual((await readJson(path.join(f.root, 'targets/target-1/chain.json'))).map(value => value.releaseId), ['before-a', 'before-b']);
+  assert.ok(f.docker.images.has(releaseImage('target-1', 'before-a')));
+  assert.ok(f.docker.images.has(releaseImage('target-1', 'before-b')));
+});
+
+test('中心策略在空闲时应用，任务执行时不清理，失败可重试且不伪报达标', async t => {
+  const f = await fixture(t); f.identity.storagePolicy = { revision: 1, retainedVersions: 5, buildCacheGiB: 2 };
+  for (let i = 1; i <= 5; i++) await f.executor.execute(task(`v${i}`));
+  const runner = new AgentRunner({ root: f.root, centerUrl: 'https://center.example', docker: f.docker });
+  runner.identity = f.identity; runner.executor = f.executor;
+  runner.identity.storagePolicy = { revision: 2, retainedVersions: 2, buildCacheGiB: 1 };
+  runner.activeTaskId = 'busy'; await runner.maintain();
+  assert.equal((await f.executor.localReleases(task())).length, 5);
+  runner.activeTaskId = null;
+  const run = f.docker.run.bind(f.docker); let failRemoval = true;
+  f.docker.run = (args, options) => { if (failRemoval && args[0] === 'image' && args[1] === 'rm') throw new Error('镜像被占用'); return run(args, options); };
+  await runner.maintain(); assert.equal(runner.storageStatus.state, 'failed');
+  assert.equal((await f.executor.localReleases(task())).length, 5);
+  failRemoval = false; runner.maintenanceDue = true; await runner.maintain();
+  assert.equal(runner.storageStatus.state, 'applied', JSON.stringify(runner.storageStatus)); assert.equal(runner.storageStatus.revision, 2);
+  assert.equal((await f.executor.localReleases(task())).length, 2);
+  assert.ok(f.docker.calls.some(args => args.includes('prune') && args.includes('cmr-server-1') && args.includes(String(1024 ** 3))));
+  assert.equal(f.docker.calls.some(args => args[0] === 'system' || args[0] === 'builder'), false);
+  assert.equal((await readJson(path.join(f.root, 'storage-status.json'))).state, 'applied');
 });
 
 test('持久事件序号并发安全，网络中断后补报不会重复执行', async t => {

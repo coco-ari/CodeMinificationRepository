@@ -110,6 +110,10 @@ try {
     await docker(['exec', name, 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; const root=process.argv[1]; await fs.chmod(root, 0o755); await fs.writeFile(root+"/.cmr-static-root", root, {mode:0o644});', `${directory}-static`]);
   }
   await until(async () => (await api('/api/deploy/overview')).servers.every(server => server.online), '两个 Agent 注册', 90000);
+  await api(`/api/deploy/servers/${first.server.id}/storage-policy`, { retainedVersions: 2, buildCacheGiB: 1 }, 'PUT');
+  async function localVersions(deploymentTarget) {
+    return JSON.parse(await docker(['exec', agents[0], 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; const root=process.argv[1]; const names=await fs.readdir(root); const values=await Promise.all(names.filter(n=>n.endsWith(".json")).map(n=>fs.readFile(root+"/"+n,"utf8").then(JSON.parse))); console.log(JSON.stringify(values));', `${workRoot}/agent-0/targets/${deploymentTarget.id}/releases`]));
+  }
   await assert.rejects(api(`${workspacePath}/targets`, { environmentId: environment.id, serviceId: service.id, serverId: second.server.id, mode: 'observe', containerName: target.containerName, config }), { status: 400 });
   const publish = async () => waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'deploy' })).task.id);
   const good = await publish(); assert.equal(good.status, 'succeeded');
@@ -208,6 +212,15 @@ try {
   await application.service.setEnabled(source.id, true);
   await api(`${workspacePath}/services/${service.id}`, { name: service.name, module: '.', kind: 'java' }, 'PUT');
   scenarios.push({ name: '历史 Java 镜像删除、仓库停用及当前模块改变后按中心原 ZIP 与历史配置重建', passed: true, taskId: rebuiltJava.id });
+  const cacheJava = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'rollback', releaseId: queuedA.id })).task.id);
+  assert.equal(cacheJava.status, 'succeeded'); assert.equal(cacheJava.result.release.id, cacheJava.id); assert.equal(cacheJava.result.release.recoveryMethod, 'cache');
+  const olderJava = await waitTask((await api(`${workspacePath}/tasks`, { targetId: target.id, action: 'rollback', releaseId: good.id })).task.id);
+  assert.equal(olderJava.status, 'succeeded'); assert.equal(olderJava.result.release.recoveryMethod, 'rebuild');
+  assert.deepEqual((await localVersions(target)).map(value => value.id).sort(), [cacheJava.id, olderJava.id].sort());
+  assert.equal((await docker(['image', 'ls', '-q', '--filter', `label=io.cmr.target=${target.id}`])).split(/\s+/).filter(Boolean).length, 2);
+  const javaHistory = application.deployment.data.releases.filter(value => value.targetId === target.id);
+  assert.ok(javaHistory.length > 5); assert.ok(javaHistory.every(value => application.deployment.archives.status(value) === 'available'));
+  scenarios.push({ name: 'Java 回退产生新节点，只保留发布链末尾两份产物，超过五个中心版本仍可恢复', passed: true });
   // 一个已有 Nginx 同时提供静态页面和 Java API；发布不重建或重启该 Nginx。
   const nginx = `${network}-nginx`, publicRoot = `${workRoot}/agent-0-static`;
   const frontendService = await api(`${workspacePath}/services`, { name: '演示前端', kind: 'static', module: '.' });
@@ -261,6 +274,34 @@ try {
   assert.equal(await readSite('__cmr_release.txt'), rebuiltStatic.id); assert.match(await readSite(), /static-ready v2/);
   await application.service.setEnabled(source.id, true);
   scenarios.push({ name: '静态历史目录删除、远端停用及当前健康配置改变后按历史源码重建，原发布记录不变', passed: true, taskId: rebuiltStatic.id });
+  await api(`${workspacePath}/targets/${frontend.id}`, frontendInput, 'PUT');
+  await frontendSource('v3'); const frontendV3 = await publishFrontend(); assert.equal(frontendV3.status, 'succeeded');
+  await frontendSource('v4'); assert.equal((await publishFrontend()).status, 'succeeded');
+  const cachedStatic = await waitTask((await api(`${workspacePath}/tasks`, { targetId: frontend.id, action: 'rollback', releaseId: frontendV3.id })).task.id);
+  assert.equal(cachedStatic.status, 'succeeded'); assert.equal(cachedStatic.result.release.recoveryMethod, 'cache');
+  const olderStatic = await waitTask((await api(`${workspacePath}/tasks`, { targetId: frontend.id, action: 'rollback', releaseId: frontendV1.id })).task.id);
+  assert.equal(olderStatic.status, 'succeeded'); assert.equal(olderStatic.result.release.recoveryMethod, 'rebuild');
+  assert.deepEqual((await localVersions(frontend)).map(value => value.id).sort(), [cachedStatic.id, olderStatic.id].sort());
+  const staticArtifacts = JSON.parse(await docker(['exec', agents[0], 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; console.log(JSON.stringify(await fs.readdir(process.argv[1])));', `${publicRoot}/${frontend.id}/releases`]));
+  assert.deepEqual(staticArtifacts.sort(), [frontendV3.id, olderStatic.id].sort());
+  await until(async () => {
+    const servers = (await api('/api/deploy/overview')).servers, server = servers.find(value => value.id === first.server.id);
+    assert.equal(servers.find(value => value.id === second.server.id).storagePolicy.buildCacheGiB, 2);
+    return server.storageState === 'applied' && server.storageStatus.targets.length === 3 && server.storageStatus.cache.bytes <= 1024 ** 3;
+  }, '服务器独立策略执行与缓存容量上报', 120000);
+  scenarios.push({ name: '静态回退缓存与重建均新增节点，严格保留最后两个节点，中心下发缓存额度并收到执行回执', passed: true });
+  // 在本次隔离 Builder 中制造超过 1 GiB 的缓存，验证实际回收而非仅校验命令参数。
+  const quota = JSON.parse(await docker(['exec', agents[0], 'node', '--input-type=module', '-e', `
+    import fs from 'node:fs/promises'; import {BuildCache} from '/agent/build-cache.mjs'; import {Docker} from '/agent/docker.mjs';
+    const root=process.argv[1], identity=JSON.parse(await fs.readFile(root+'/identity.json','utf8'));
+    const cache=new BuildCache({root,docker:new Docker(),identity:()=>identity}), context=root+'/quota-verification';
+    await fs.mkdir(context,{recursive:true}); await fs.writeFile(context+'/Dockerfile','FROM scratch\\nCOPY payload /payload\\n');
+    const file=await fs.open(context+'/payload','w'); await file.truncate(1153433600); await file.close();
+    await cache.ensure(); await cache.run(['build','--builder',cache.name,'--output','type=cacheonly',context]);
+    const report=await cache.prune({buildCacheGiB:1}); await fs.rm(context,{recursive:true,force:true}); console.log(JSON.stringify(report));
+  `, `${workRoot}/agent-0`]));
+  assert.ok(quota.beforeBytes > 1024 ** 3); assert.ok(quota.bytes <= 1024 ** 3); assert.ok(quota.reclaimedBytes > 0);
+  scenarios.push({ name: '平台专用构建缓存实际超额后回收到 1 GiB 内', passed: true, cache: quota });
   const nginxAfter = await inspectContainer(nginx), backendAfter = await inspectContainer(otherTarget.containerName);
   assert.equal(nginxAfter.Id, nginxBefore.Id); assert.equal(nginxAfter.State.StartedAt, nginxBefore.State.StartedAt); assert.equal(nginxAfter.RestartCount, nginxBefore.RestartCount);
   assert.equal(backendAfter.Id, backendBefore.Id); assert.equal(backendAfter.State.StartedAt, backendBefore.State.StartedAt);
@@ -273,7 +314,12 @@ try {
   for (const name of agents) {
     await writeFile(path.join(artifactDirectory, `${name}.log`), await docker(['logs', name], true));
     const found = await docker(['inspect', '--format', '{{index .Config.Labels "io.cmr.integration"}}', name], true);
-    if (found === runId) await docker(['rm', '-f', name], true);
+    if (found === runId) {
+      const directory = `${workRoot}/agent-${agents.indexOf(name)}`;
+      const serverId = await docker(['exec', name, 'node', '--input-type=module', '-e', 'import fs from "node:fs/promises"; console.log(JSON.parse(await fs.readFile(process.argv[1],"utf8")).serverId);', `${directory}/identity.json`], true);
+      if (/^[a-f0-9-]{36}$/.test(serverId)) await docker(['exec', name, 'docker', '--config', `${directory}/docker-config`, 'buildx', 'rm', `cmr-${serverId}`], true);
+      await docker(['rm', '-f', name], true);
+    }
   }
   for (const name of fixtures) {
     await writeFile(path.join(artifactDirectory, `${name}.log`), await docker(['logs', name], true));
@@ -282,6 +328,8 @@ try {
   for (const target of targets) {
     const resources = await docker(['ps', '-aq', '--filter', `label=io.cmr.target=${target.id}`], true);
     for (const id of resources.split(/\s+/).filter(Boolean)) await docker(['rm', '-f', id], true);
+    const images = await docker(['image', 'ls', '-q', '--filter', `label=io.cmr.target=${target.id}`], true);
+    for (const id of new Set(images.split(/\s+/).filter(Boolean))) await docker(['image', 'rm', id], true);
     await docker(['network', 'rm', `cmr-${target.id}-network`], true);
   }
   if (process.env.CMR_IT_CONTROLLER_CONTAINER) await docker(['network', 'disconnect', network, process.env.CMR_IT_CONTROLLER_CONTAINER], true);

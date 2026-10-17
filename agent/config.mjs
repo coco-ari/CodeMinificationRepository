@@ -1,7 +1,7 @@
 import path from 'node:path';
 
-export const VERSION = '1.4.2';
-export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1'];
+export const VERSION = '1.5.0';
+export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
   if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error(`${label}无效`);
@@ -96,6 +96,6 @@ export function assertManaged(identity, task) {
   const target = identity.targets?.find(t => t.id === task.targetId);
   if (identity.mode !== 'managed' || !target || target.mode !== 'managed' || (task.serverId && task.serverId !== identity.serverId)
     || target.retiredAt || (target.serverId && target.serverId !== identity.serverId)) throw new Error('目标不属于平台，禁止发布、重启、回退和清理');
-  if (!['deploy', 'restart', 'rollback'].includes(task.action)) throw new Error('任务操作无效');
+  if (!['deploy', 'restart', 'rollback', 'cleanup'].includes(task.action)) throw new Error('任务操作无效');
   return target;
 }

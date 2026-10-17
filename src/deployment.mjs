@@ -7,6 +7,7 @@ import { SourceArchives } from './source-archives.mjs';
 import { migrateWorkspaces, sourceSnapshot } from './workspaces.mjs';
 import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
+import { DEFAULT_STORAGE_POLICY, storagePolicy, artifactId } from '../agent/storage-policy.mjs';
 
 const now = () => new Date().toISOString();
 const terminal = new Set(['succeeded', 'failed', 'rolled_back', 'interrupted']);
@@ -51,7 +52,10 @@ function agentEventTime(task, timestamp, receivedAt) {
 }
 function safeServer(server) {
   const { tokenHash, registrationHash, registrationExpiresAt, ...safe } = server;
-  return { ...safe, online: !server.revoked && !!server.lastSeenAt && Date.now() - Date.parse(server.lastSeenAt) <= 60000 };
+  const policy = storagePolicy(server.storagePolicy);
+  const storageState = !server.capabilities?.includes('storage-policy-v1') ? 'unsupported'
+    : server.storageStatus?.revision === policy.revision ? server.storageStatus.state : server.activeTaskId ? 'waiting' : 'pending';
+  return { ...safe, storagePolicy: policy, storageState, online: !server.revoked && !!server.lastSeenAt && Date.now() - Date.parse(server.lastSeenAt) <= 60000 };
 }
 
 export function validateConfig(input = {}, module = '.', kind = input?.kind || 'java') {
@@ -249,16 +253,36 @@ export class DeploymentService extends EventEmitter {
     if (!server) throw new HttpError(401, 'Agent 凭据无效或已撤销');
     return server.id;
   }
-  assignment(serverId) { find(this.data.servers, serverId, '服务器'); return { mode: 'managed', targets: this.overview().targets.filter(target => target.serverId === serverId) }; }
+  assignment(serverId) { const server = find(this.data.servers, serverId, '服务器'); return { mode: 'managed', storagePolicy: storagePolicy(server.storagePolicy), targets: this.overview().targets.filter(target => target.serverId === serverId) }; }
+  async saveStoragePolicy(serverId, input) {
+    let next;
+    try { next = storagePolicy({ ...input, revision: 1 }); } catch (error) { fail(error.message); }
+    await this.store.change(state => {
+      const server = find(state.deployments.servers, serverId, '服务器');
+      if (server.revoked) throw new HttpError(409, '服务器接入已撤销');
+      server.storagePolicy = { ...next, revision: (server.storagePolicy?.revision || DEFAULT_STORAGE_POLICY.revision) + 1 };
+      state.events.unshift({ id: randomUUID(), projectId: null, action: 'server-storage-policy', serverId, at: now(), message: `更新 ${server.name} 存储策略：保留 ${next.retainedVersions} 个成功节点，平台 Docker 构建缓存 ${next.buildCacheGiB} GiB` });
+      state.events = state.events.slice(0, 100);
+    });
+    this.changed('server', serverId); return safeServer(find(this.data.servers, serverId));
+  }
   async heartbeat(serverId, input) {
     if (input.metrics !== undefined && (!input.metrics || typeof input.metrics !== 'object' || Array.isArray(input.metrics))) fail('主机指标格式错误');
     const containers = list(input.containers, 500, '容器状态');
     const version = input.version === undefined ? undefined : requireText(input.version, 'Agent 版本', 80);
+    const storageStatus = input.storageStatus;
+    if (storageStatus != null && (typeof storageStatus !== 'object' || Array.isArray(storageStatus) || JSON.stringify(storageStatus).length > 65536 || !Number.isSafeInteger(storageStatus.revision) || storageStatus.revision < 1 || !['applying', 'applied', 'failed'].includes(storageStatus.state))) fail('存储策略执行状态无效');
+    if (storageStatus != null) {
+      if (storageStatus.errors !== undefined && (!Array.isArray(storageStatus.errors) || storageStatus.errors.length > 500 || storageStatus.errors.some(error => typeof error !== 'string' || error.length > 1000))) fail('清理错误报告无效');
+      if (storageStatus.targets !== undefined && (!Array.isArray(storageStatus.targets) || storageStatus.targets.length > 2000 || storageStatus.targets.some(target => !target || typeof target.targetId !== 'string' || !Number.isSafeInteger(target.retainedNodes) || target.retainedNodes < 0))) fail('本机版本用量无效');
+      if (storageStatus.cache !== undefined && (!storageStatus.cache || typeof storageStatus.cache !== 'object' || ['bytes', 'limitBytes', 'reclaimedBytes'].some(key => !Number.isSafeInteger(storageStatus.cache[key]) || storageStatus.cache[key] < 0))) fail('构建缓存用量无效');
+    }
     await this.store.change(state => {
       const server = find(state.deployments.servers, serverId, '服务器');
       if (server.revoked) throw new HttpError(401, 'Agent 已撤销');
       Object.assign(server, { lastSeenAt: now(), metrics: input.metrics || null, activeTaskId: input.activeTaskId || null });
       if (version !== undefined) server.version = version;
+      if (storageStatus != null) server.storageStatus = structuredClone(storageStatus);
       if (input.capabilities !== undefined || version !== undefined) server.capabilities = capabilities(input.capabilities);
       const targets = state.deployments.targets.filter(target => target.serverId === serverId && target.mode === 'managed' && !target.retiredAt);
       server.containers = containers.filter(container => container && targets.some(target => container.targetId === target.id)).map(container => structuredClone(container));
@@ -540,7 +564,7 @@ export class DeploymentService extends EventEmitter {
           && (prior.kind === 'static' ? baseline.artifact === `static/${target.id}/${baseline.id}` : baseline.image === `cmr/${target.id}:${baseline.id}`);
         if (!valid) fail('恢复基线与任务授权不一致');
         if (!data.releases.some(item => item.id === baseline.id)) data.releases.push({ ...structuredClone(prior), id: baseline.id, image: baseline.image, artifact: baseline.artifact,
-          restoredFromReleaseId: prior.id, buildSnapshot: baseline.buildSnapshot || prior.buildSnapshot, createdAt: now(), available: true });
+          artifactId: baseline.id, internalBaseline: true, restoredFromReleaseId: prior.id, buildSnapshot: baseline.buildSnapshot || prior.buildSnapshot, createdAt: now(), available: true });
         task.recoveryBaselineId = baseline.id;
       }
       const release = result?.release;
@@ -551,13 +575,17 @@ export class DeploymentService extends EventEmitter {
         for (const key of ['packageManager', 'packageManagerVersion', 'mavenVersion', 'nodeVersion']) if (snapshot[key] !== undefined && (typeof snapshot[key] !== 'string' || snapshot[key].length > 200 || /[\x00-\x1f]/.test(snapshot[key]))) fail('实际构建工具版本无效');
       }
       if (release) {
+        const ownedArtifactId = artifactId(release);
         const validArtifact = task.config.kind === 'static'
-          ? release.kind === 'static' && release.artifact === `static/${target.id}/${release.id}`
-          : release.image === `cmr/${target.id}:${release.id}`;
+          ? release.kind === 'static' && release.artifact === `static/${target.id}/${ownedArtifactId}`
+          : release.image === `cmr/${target.id}:${ownedArtifactId}`;
         if (typeof release.id !== 'string' || !/^[a-f0-9-]{36}$/.test(release.id) || !validArtifact) fail('发布版本不属于平台目标');
-        if (task.action === 'deploy' && status === 'succeeded' && (release.id !== task.id || release.revision !== task.revision)) fail('发布版本与任务源码不一致');
+        if (task.action === 'deploy' && status === 'succeeded' && (release.id !== task.id || ownedArtifactId !== task.id || release.revision !== task.revision)) fail('发布版本与任务源码不一致');
         const rebuilt = task.action === 'rollback' && task.recoveryAllowed && task.sourceArchiveId && release.id === task.id && release.revision === task.release?.revision && release.restoredFromReleaseId === task.release?.id;
-        if (task.action !== 'deploy' && status === 'succeeded' && !rebuilt && !data.releases.some(existing => existing.targetId === target.id && existing.id === release.id && existing.id === task.release?.id)) fail('目标历史版本不存在');
+        const cached = task.action === 'rollback' && release.id === task.id && release.restoredFromReleaseId === task.release?.id && ownedArtifactId === artifactId(task.release)
+          && release.image === task.release.image && release.artifact === task.release.artifact && release.recoveryMethod === 'cache';
+        if (rebuilt && !cached && ownedArtifactId !== task.id) fail('重建产物标识与任务不一致');
+        if (task.action !== 'deploy' && status === 'succeeded' && !rebuilt && !cached && !(task.action === 'restart' && release.id === task.release?.id && ownedArtifactId === artifactId(task.release))) fail('目标历史版本不存在');
         if (task.action === 'rollback' && status === 'succeeded' && release.revision !== task.release?.revision) fail('回退版本与历史源码不一致');
       }
       if (status === 'succeeded' && !release) fail('成功任务必须包含实际运行版本');
@@ -571,15 +599,17 @@ export class DeploymentService extends EventEmitter {
       if (terminal.has(status)) {
         task.finishedAt = timing.at; task.resultReceivedAt = timing.receivedAt; task.result = result || {}; if (status !== 'succeeded') task.error = input.message || '任务执行失败';
         if (release && status === 'succeeded') {
-          const saved = { id: release.id, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision,
+          const saved = { id: release.id, artifactId: artifactId(release), action: task.action, recoveryMethod: release.recoveryMethod, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision,
             commitSubject: task.commitSubject, config: structuredClone(task.config), targetId: target.id, applicationId: target.applicationId,
             sourceSnapshot: task.sourceSnapshot, sourceArchiveId: task.sourceArchiveId,
             buildSnapshot: release.buildSnapshot || task.release?.buildSnapshot,
             ...(release.id === task.id && task.action === 'rollback' ? { restoredFromReleaseId: task.release.id } : {}), createdAt: timing.at, available: true };
           if (!data.releases.some(existing => existing.id === saved.id && existing.targetId === target.id)) data.releases.push(saved);
           target.currentRelease = structuredClone(data.releases.find(existing => existing.id === saved.id && existing.targetId === target.id));
-          target.rollbackBaselineId = task.recoveryBaselineId || task.previousRelease?.id || null;
-          target.lastDeployedAt = timing.at;
+          if (task.action !== 'restart') {
+            target.rollbackBaselineId = task.recoveryBaselineId || task.previousRelease?.id || null;
+            target.lastDeployedAt = timing.at;
+          }
         }
         const rollbackRelease = result?.rollback?.release;
         if (status === 'rolled_back' && rollbackRelease) {
@@ -607,7 +637,7 @@ export class DeploymentService extends EventEmitter {
     for (let seq = after + 1; seq <= Math.min(task.lastSeq, after + 500); seq++) logs.push(JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'logs', `${seq}.json`), 'utf8')));
     return { task, logs, nextSeq: (logs.at(-1)?.seq ?? after) + 1 };
   }
-  releases(targetId) { find(this.data.targets, targetId, '部署目标'); return this.data.releases.filter(release => release.targetId === targetId).slice().reverse().map(release => ({ ...release, archiveStatus: this.archives.status(release), archiveProtected: this.archives.protected(this.data, release), current: release.id === find(this.data.targets, targetId).currentRelease?.id })); }
+  releases(targetId) { find(this.data.targets, targetId, '部署目标'); return this.data.releases.filter(release => release.targetId === targetId && !release.internalBaseline).slice().reverse().map(release => ({ ...release, archiveStatus: this.archives.status(release), archiveProtected: this.archives.protected(this.data, release), current: release.id === find(this.data.targets, targetId).currentRelease?.id })); }
   releasePage(targetId, offset = 0, limit = 20) {
     offset = integer(offset, 0, 0, 1000000000, '分页起点'); limit = integer(limit, 20, 1, 100, '分页条数');
     const releases = this.releases(targetId); return { releases: releases.slice(offset, offset + limit), total: releases.length, offset, nextOffset: offset + limit < releases.length ? offset + limit : null };

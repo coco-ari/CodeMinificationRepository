@@ -22,7 +22,12 @@ class ProtocolDocker {
   constructor() { this.calls = []; this.containers = new Map(); this.images = new Map(); this.other = new Map(); this.unhealthyTask = null; this.beforeMaven = null; this.failCompile = false; }
   async inspect(name, kind = 'container') { this.calls.push(['inspect', kind, name]); if (kind === 'image' && /^(maven:|eclipse-temurin:|sha256:)/.test(name)) return { Id: `sha256:${'c'.repeat(64)}` }; return (kind === 'container' ? this.containers : kind === 'image' ? this.images : this.other).get(name) || null; }
   async run(args, options = {}) {
+    if (args[0] === 'exec' && args.includes('buildctl')) return { code: 0, output: '[]' };
     this.calls.push([...args]);
+    if (args[0] === '--config' && args[2] === 'buildx') {
+      args = args.slice(3);
+      if (args[0] === 'inspect') return { code: 0, output: `Name: ${args[1]}\nDriver: docker-container\nEndpoint: unix:///var/run/docker.sock\n` };
+    }
     if (args[0] === 'history') return { code: 0, output: JSON.stringify({ CreatedBy: 'RUN install java runtime' }) + '\n' };
     if (args[0] === 'run') {
       const mount = args.filter((_, index) => args[index - 1] === '--mount').find(value => value.includes('dst=/workspace'));
@@ -112,7 +117,7 @@ test('真实 HTTP 中心与 Agent 注册、下载、发布、日志补报、失�
   detail = await f.request(`/api/deploy/tasks/${bad.id}`); assert.equal(detail.task.status, 'rolled_back'); assert.equal(detail.task.result.rollback.release.id, second.id);
   const rollback = await f.task(target, 'rollback', { releaseId: first.id }); await runner.tick(); assert.equal((await f.request(`/api/deploy/tasks/${rollback.id}`)).task.status, 'succeeded');
   const restart = await f.task(target, 'restart'); await runner.tick(); assert.equal((await f.request(`/api/deploy/tasks/${restart.id}`)).task.status, 'succeeded');
-  assert.equal(f.app.deployment.overview().targets[0].currentRelease.id, first.id); assert.equal(f.docker.containers.get('jenkins-service'), jenkins);
+  assert.equal(f.app.deployment.overview().targets[0].currentRelease.id, rollback.id); assert.equal(f.docker.containers.get('jenkins-service'), jenkins);
   const before = f.docker.calls.length; await runner.executor.execute(first); await runner.flushEvents(); assert.equal(f.docker.calls.length, before);
 });
 

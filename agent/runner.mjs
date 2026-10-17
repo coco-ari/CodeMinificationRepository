@@ -8,6 +8,7 @@ import { CenterClient } from './client.mjs';
 import { DeploymentExecutor, terminal } from './executor.mjs';
 import { Monitor } from './monitor.mjs';
 import { acquireAgentLock } from './lock.mjs';
+import { storagePolicy } from './storage-policy.mjs';
 
 export class AgentRunner {
   constructor({ root = '/opt/cmr-agent', centerUrl, registrationToken = null, registrationTokenFile = null, allowHttpTest = false, docker = new Docker(), client = null, heartbeatMs = 10000, retryMs = 5000, procRoot = '/host/proc', logger = console } = {}) {
@@ -43,6 +44,7 @@ export class AgentRunner {
     await this.docker.run(['version', '--format', '{{.Server.Version}}'], { timeoutMs: 15000 });
     await this.docker.run(['compose', 'version', '--short'], { timeoutMs: 15000 });
     await this.journal.repair();
+    this.storageStatus = await readJson(path.join(this.root, 'storage-status.json'));
     return this.identity;
     } catch (error) { await this.lock.release(); throw error; }
   }
@@ -51,10 +53,12 @@ export class AgentRunner {
     const [metrics, containers] = await Promise.all([this.monitor.metrics(), this.monitor.containers(this.identity)]);
     if (Number.isFinite(this.centerRttMs)) metrics.centerRttMs = this.centerRttMs;
     const started = performance.now();
-    const response = await this.client.post('heartbeat', { version: VERSION, capabilities: CAPABILITIES, metrics, containers, activeTaskId: this.activeTaskId });
+    const response = await this.client.post('heartbeat', { version: VERSION, capabilities: CAPABILITIES, metrics, containers, activeTaskId: this.activeTaskId, storageStatus: this.storageStatus });
     this.centerRttMs = Math.max(0, Math.round(performance.now() - started));
     if (response.mode !== 'managed' || !Array.isArray(response.targets)) throw new Error('中心心跳响应无效');
-    this.identity.mode = response.mode; this.identity.targets = response.targets; await this.saveIdentity();
+    this.identity.mode = response.mode; this.identity.targets = response.targets;
+    this.identity.storagePolicy = storagePolicy(response.storagePolicy);
+    await this.saveIdentity();
   }
   async flushEvents() {
     if (this.flushing) return this.flushing;
@@ -78,7 +82,10 @@ export class AgentRunner {
     }
   }
   async tick() {
-    if (this.activeTaskId) return;
+    if (this.activeTaskId || this.ticking) return;
+    this.ticking = true;
+    try {
+    await this.maintain();
     await this.flushEvents();
     const response = await this.client.post('claim', {}, 35000), task = response.task;
     if (!task) return;
@@ -89,8 +96,43 @@ export class AgentRunner {
       // 领取后刷新目标白名单，避免刚创建的目标尚未出现在上一轮心跳中。
       await this.heartbeat(); await this.executor.execute(task);
     } finally { this.activeTaskId = null; }
+    this.maintenanceDue = true;
     await this.flushEvents();
+    await this.maintain();
     return true;
+    } finally { this.ticking = false; }
+  }
+  async maintain() {
+    if (this.activeTaskId || this.maintaining) return;
+    const policy = storagePolicy(this.identity.storagePolicy);
+    if (!this.maintenanceDue && this.storageStatus?.revision === policy.revision && Date.now() - Date.parse(this.storageStatus.checkedAt || 0) < (this.storageStatus.state === 'applied' ? 3600000 : 60000)) return;
+    if ((await this.journal.list()).some(record => !terminal(record.status))) return;
+    this.maintaining = true; this.maintenanceDue = false;
+    const report = { revision: policy.revision, state: 'applying', startedAt: new Date().toISOString(), targets: [], errors: [] };
+    this.storageStatus = report;
+    try {
+      for (const target of this.identity.targets) {
+        const task = { id: 'storage-maintenance', action: 'cleanup', targetId: target.id, serverId: this.identity.serverId, retentionCount: policy.retainedVersions };
+        try {
+          const current = await this.executor.current(task);
+          if (!current) continue;
+          const previous = current.previousId ? await readJson(path.join(this.executor.targetRoot(task), 'releases', `${identifier(current.previousId)}.json`)) : null;
+          const backend = current.kind === 'static' ? this.executor.static : this.executor;
+          report.targets.push(await backend.cleanup(task, current, previous));
+        } catch (error) {
+          report.errors.push(`${target.id}: ${String(error.message).slice(0, 500)}`);
+          const releases = await this.executor.localReleases(task).catch(() => null);
+          if (releases) report.targets.push({ targetId: target.id, retainedNodes: releases.length });
+        }
+      }
+      try {
+        report.cache = await this.executor.buildCache.prune(policy);
+        if (!report.cache.withinLimit) report.errors.push('平台构建缓存仍超出额度，等待可回收资源释放后重试');
+      } catch (error) { report.errors.push(`构建缓存：${String(error.message).slice(0, 500)}`); }
+      report.state = report.errors.length ? 'failed' : 'applied';
+      report.checkedAt = new Date().toISOString();
+      await writeJson(path.join(this.root, 'storage-status.json'), report);
+    } finally { this.maintaining = false; }
   }
   async loop(label, action, interval) {
     while (!this.stopped) {

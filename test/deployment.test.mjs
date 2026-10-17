@@ -41,6 +41,21 @@ async function ready(f, targetId, action = 'deploy', extra = {}) {
   return f.deployment.data.tasks.find(item => item.id === task.id);
 }
 function release(task) { return { id: task.id, image: `cmr/${task.targetId}:${task.id}`, revision: task.revision, config: task.config }; }
+function restored(task, original) { return { ...original, id: task.id, artifactId: original.artifactId || original.id, restoredFromReleaseId: original.id, recoveryMethod: 'cache' }; }
+
+test('服务器存储策略独立下发，校验范围，旧回报不能伪装新策略已应用', async t => {
+  const f = await fixture(t), a = await targetFixture(f), b = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  for (const invalid of [{ retainedVersions: 1, buildCacheGiB: 2 }, { retainedVersions: 2, buildCacheGiB: 0 }, { retainedVersions: 2.5, buildCacheGiB: 2 }]) await assert.rejects(f.deployment.saveStoragePolicy(a.agent.serverId, invalid), { status: 400 });
+  await f.deployment.saveStoragePolicy(a.agent.serverId, { retainedVersions: 3, buildCacheGiB: 1 });
+  assert.equal(f.deployment.assignment(a.agent.serverId).storagePolicy.retainedVersions, 3);
+  assert.equal(f.deployment.assignment(b.agent.serverId).storagePolicy.retainedVersions, 2);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['storage-policy-v1'], storageStatus: { revision: 1, state: 'applied' } });
+  assert.equal(f.deployment.overview().servers.find(s => s.id === a.agent.serverId).storageState, 'pending');
+  await f.deployment.heartbeat(a.agent.serverId, { storageStatus: { revision: 2, state: 'applied', checkedAt: new Date().toISOString() } });
+  assert.equal(f.deployment.overview().servers.find(s => s.id === a.agent.serverId).storageState, 'applied');
+  assert.ok(f.repository.store.state.events.some(e => e.action === 'server-storage-policy'));
+});
 
 test('任务长轮询等待所属节点源码就绪，不被配置保存和其他节点更新提前唤醒', async t => {
   const f = await fixture(t), records = await targetFixture(f);
@@ -150,7 +165,7 @@ test('提交说明固定到源码版本，忽略 Agent 伪造值并随回退恢�
   await f.deployment.events(records.agent.serverId, second.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(second) } });
   assert.equal(f.deployment.data.targets[0].currentRelease.commitSubject, '修复登录超时');
   const rollback = await ready(f, records.target.id, 'rollback', { releaseId: first.id }); await f.deployment.claim(records.agent.serverId);
-  await f.deployment.events(records.agent.serverId, rollback.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: release(first) } });
+  await f.deployment.events(records.agent.serverId, rollback.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: restored(rollback, release(first)) } });
   assert.equal(f.deployment.data.targets[0].currentRelease.commitSubject, '修复设备连接');
   await f.deployment.close(); await f.repository.store.close();
 });
@@ -197,8 +212,8 @@ test('前端目标按服务类型固定配置，旧 Agent 拒绝任务，版本�
   const second = await ready(f, target.id); await f.deployment.claim(base.agent.serverId);
   await f.deployment.events(base.agent.serverId, second.id, { seq: 1, stage: 'verifying', status: 'rolled_back', result: { release: artifact, rollback: { status: 'succeeded', release: artifact } } });
   const rollback = await ready(f, target.id, 'rollback', { releaseId: first.id }); await f.deployment.claim(base.agent.serverId);
-  await f.deployment.events(base.agent.serverId, rollback.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: artifact } });
-  assert.equal(f.deployment.data.targets.find(item => item.id === target.id).currentRelease.id, first.id);
+  await f.deployment.events(base.agent.serverId, rollback.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: restored(rollback, artifact) } });
+  assert.equal(f.deployment.data.targets.find(item => item.id === target.id).currentRelease.id, rollback.id);
   assert.equal(base.target.currentRelease, undefined);
   const queued = await ready(f, target.id), updates = [];
   f.deployment.on('update', value => updates.push(value));
@@ -436,8 +451,14 @@ test('成功版本、失败回退和手动回退具有独立结果且保留来�
   await f.deployment.events(records.agent.serverId, second.id, { seq: 1, stage: 'rolled_back', message: '健康检查失败，已回退', result: { rollback: { status: 'succeeded', release: release(first) } } });
   assert.equal(f.deployment.overview().targets[0].currentRelease.id, first.id); assert.equal(f.deployment.releases(records.target.id).length, 1);
   const rollback = await ready(f, records.target.id, 'rollback', { releaseId: first.id }); await f.deployment.claim(records.agent.serverId);
-  await f.deployment.events(records.agent.serverId, rollback.id, { seq: 1, stage: 'succeeded', result: { release: release(first) } });
-  assert.equal(f.deployment.overview().targets[0].currentRelease.id, first.id);
+  await f.deployment.events(records.agent.serverId, rollback.id, { seq: 1, stage: 'succeeded', result: { release: restored(rollback, release(first)) } });
+  assert.equal(f.deployment.overview().targets[0].currentRelease.id, rollback.id);
+  assert.equal(f.deployment.releases(records.target.id)[0].restoredFromReleaseId, first.id);
+  assert.equal(f.deployment.releases(records.target.id).length, 2);
+  const restart = await ready(f, records.target.id, 'restart'); await f.deployment.claim(records.agent.serverId);
+  await f.deployment.events(records.agent.serverId, restart.id, { seq: 1, stage: 'succeeded', result: { release: f.deployment.overview().targets[0].currentRelease } });
+  assert.equal(f.deployment.releases(records.target.id).length, 2);
+  assert.equal(f.deployment.overview().targets[0].rollbackBaselineId, first.id);
   await assert.rejects(f.deployment.events(records.agent.serverId, rollback.id, { seq: 2, stage: 'building' }), { status: 409 });
 });
 

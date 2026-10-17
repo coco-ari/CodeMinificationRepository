@@ -7,11 +7,13 @@ import { readJson, writeJson } from './state.mjs';
 import { extractZip } from './archive.mjs';
 import { StaticDeployment } from './static-deployment.mjs';
 import { checkRuntimeBase } from './image-policy.mjs';
+import { artifactId, storagePolicy } from './storage-policy.mjs';
+import { BuildCache } from './build-cache.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 export const terminal = status => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(status);
 export function composeFor(identity, task, release) {
-  const config = normalizeConfig(release.config), project = managedName(task.targetId), resourceLabels = labels(identity.serverId, task.targetId, release.id);
+  const config = normalizeConfig(release.config), project = managedName(task.targetId), resourceLabels = labels(identity.serverId, task.targetId, artifactId(release));
   const networkNames = config.networks.length ? config.networks : ['default'];
   return { name: project, services: { app: {
     container_name: project, image: release.image, restart: 'unless-stopped', user: '1000:1000', init: true,
@@ -30,6 +32,7 @@ export class DeploymentExecutor {
   constructor({ root, identity, journal, client, docker, sleepFn = sleep }) {
     this.root = root; this.identity = identity; this.journal = journal; this.client = client; this.docker = docker; this.sleep = sleepFn;
     this.static = new StaticDeployment(this);
+    this.buildCache = new BuildCache({ root, docker, identity: () => this.getIdentity() });
   }
   getIdentity() { return typeof this.identity === 'function' ? this.identity() : this.identity; }
   targetRoot(task) { return safeChild(this.root, 'targets', identifier(task.targetId)); }
@@ -119,14 +122,15 @@ export class DeploymentExecutor {
   }
   async recoverRelease(task, requested, backend = this) {
     if (!requested?.id) throw new Error('必须指定需要回退的成功版本');
-    const local = await readJson(safeChild(this.targetRoot(task), 'releases', `${identifier(requested.id)}.json`));
-    const agrees = local && local.id === requested.id && local.image === requested.image && local.artifact === requested.artifact && local.revision === requested.revision && JSON.stringify(normalizeConfig(local.config)) === JSON.stringify(normalizeConfig(requested.config))
+    const candidates = await this.localReleases(task);
+    const local = candidates.find(item => artifactId(item) === artifactId(requested));
+    const agrees = local && local.image === requested.image && local.artifact === requested.artifact && local.revision === requested.revision && JSON.stringify(normalizeConfig(local.config)) === JSON.stringify(normalizeConfig(requested.config))
       && (!local.sourceSha256 || !task.source || local.sourceSha256 === task.source.sha256);
     if (agrees) {
       try {
         await backend.requireRelease(task, local);
         await this.event(task, 'building', '已核验历史产物，直接恢复本机缓存');
-        return { ...local, recoveryMethod: 'cache' };
+        return { ...local, id: task.id, artifactId: artifactId(local), createdAt: new Date().toISOString(), restoredFromReleaseId: requested.id, recoveryMethod: 'cache' };
       } catch (error) {
         // 只把明确的产物缺失作为重建条件，归属错误和 Docker 连接错误继续中止。
         if (error.code !== 'ENOENT' && !/历史镜像不存在|静态版本文件缺失/.test(error.message)) throw error;
@@ -146,7 +150,7 @@ export class DeploymentExecutor {
     await this.journal.update(task.id, { baselineTask });
     await this.event(task, 'building', '正在从中心源码准备当前版本的失败恢复基线');
     const rebuilt = await backend.build(baselineTask, normalizeConfig(previous.config));
-    return { ...rebuilt, restoredFromReleaseId: previous.id, recoveryMethod: 'rebuild' };
+    return { ...rebuilt, restoredFromReleaseId: previous.id, baselineForReleaseId: previous.id, recoveryMethod: 'rebuild' };
   }
   async prepareSource(task) {
     const root = this.taskRoot(task); await mkdir(root, { recursive: true, mode: 0o700 });
@@ -182,15 +186,16 @@ export class DeploymentExecutor {
     const release = { id: task.id, image: releaseImage(task.targetId, task.id), revision: task.source.revision, config: normalizeConfig(task.config), sourceSha256: task.source.sha256, buildSnapshot: resolved.snapshot, createdAt: new Date().toISOString() };
     await this.requireOwned(task, release.image, 'image');
     const labelArgs = Object.entries(labels(this.getIdentity().serverId, task.targetId, task.id)).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
-    await this.mutation(task, ['build', ...labelArgs, '-t', release.image, imageRoot], { onOutput: text => this.output(task, 'image', text) });
+    assertManaged(this.getIdentity(), task);
+    await this.buildCache.build([...labelArgs, '-t', release.image, imageRoot], { onOutput: text => this.output(task, 'image', text) });
     return release;
   }
   async requireRelease(task, release) {
-    if (!release || release.image !== releaseImage(task.targetId, release.id)) throw new Error('发布版本不属于当前部署目标');
+    if (!release || release.image !== releaseImage(task.targetId, artifactId(release))) throw new Error('发布版本不属于当前部署目标');
     normalizeConfig(release.config);
     const image = await this.requireOwned(task, release.image, 'image');
     if (!image) throw new Error('需要的历史镜像不存在');
-    if (image.Config?.Labels?.['io.cmr.task'] !== release.id) throw new Error('历史镜像的版本归属不匹配');
+    if (image.Config?.Labels?.['io.cmr.task'] !== artifactId(release)) throw new Error('历史镜像的版本归属不匹配');
     return release;
   }
   async activate(task, release) {
@@ -213,14 +218,22 @@ export class DeploymentExecutor {
   async saveRelease(task, release, previous) {
     if (previous) await writeJson(safeChild(this.targetRoot(task), 'releases', `${identifier(previous.id)}.json`), previous);
     await writeJson(safeChild(this.targetRoot(task), 'releases', `${identifier(release.id)}.json`), release);
-    await writeJson(safeChild(this.targetRoot(task), 'current.json'), { ...release, previousId: previous?.id ?? null });
+    await writeJson(safeChild(this.targetRoot(task), 'current.json'), { ...release, previousId: previous?.id ?? release.previousId ?? null });
+    const file = safeChild(this.targetRoot(task), 'chain.json'), chain = await readJson(file, []);
+    for (const value of [release, previous].filter(value => value?.baselineForReleaseId)) {
+      for (const node of chain) if (node.releaseId === value.baselineForReleaseId) node.releaseId = value.id;
+    }
+    if (chain.length) await writeJson(file, chain);
   }
   async finish(task, release, previous) {
-    await this.saveRelease(task, release, previous);
-    try { await this.cleanup(task, release, previous); } catch (error) { await this.event(task, 'verifying', `发布已成功，历史清理延后：${error.message}`); }
+    if (task.action !== 'restart') await this.saveRelease(task, release, previous);
+    await this.recordSuccess(task, release);
     await this.event(task, 'verifying', '部署成功，业务健康检查通过', { status: 'succeeded', result: { release, baseline: previous, recoveryMethod: release.recoveryMethod } });
+    // 成功结果落盘后再回收旧产物；失败由空闲维护重试并通过存储状态上报。
+    await this.cleanup(task, release, previous).catch(() => {});
   }
   async rollbackFailure(task, error, previous) {
+    await this.removeUncommittedNode(task);
     const message = String(error.message || error).slice(0, 3000);
     if (!previous) {
       let cleanupError;
@@ -243,6 +256,7 @@ export class DeploymentExecutor {
     }
   }
   async execute(task) {
+    if (!['deploy', 'restart', 'rollback'].includes(task.action)) throw new Error('任务操作无效');
     if (task.config?.kind === 'static') return this.static.execute(task);
     const existing = await this.journal.get(task.id); if (existing) { if (terminal(existing.status)) return; return this.recover(existing); }
     await this.journal.create(task);
@@ -323,17 +337,50 @@ export class DeploymentExecutor {
     // 仅移除本任务私有的构建产物，保留日志、版本记录和恢复需要的 Compose 文件。
     for (const name of ['source.zip', 'source', 'image']) await rm(safeChild(this.taskRoot(task), name), { recursive: true, force: true });
   }
+  async localReleases(task) {
+    const root = safeChild(this.targetRoot(task), 'releases');
+    const names = await readdir(root).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+    return (await Promise.all(names.filter(name => name.endsWith('.json')).map(name => readJson(safeChild(root, name))))).filter(Boolean);
+  }
+  async recordSuccess(task, release) {
+    if (!['deploy', 'rollback'].includes(task.action)) return;
+    const file = safeChild(this.targetRoot(task), 'chain.json');
+    const chain = await readJson(file, []);
+    if (!chain.some(node => node.taskId === task.id)) {
+      chain.push({ taskId: task.id, releaseId: release.id });
+      await writeJson(file, chain);
+    }
+  }
+  async removeUncommittedNode(task) {
+    if (!['deploy', 'rollback'].includes(task.action)) return;
+    const file = safeChild(this.targetRoot(task), 'chain.json'), chain = await readJson(file, []);
+    if (chain.some(node => node.taskId === task.id)) await writeJson(file, chain.filter(node => node.taskId !== task.id));
+  }
+  async retained(task, current, previous) {
+    const chain = await readJson(safeChild(this.targetRoot(task), 'chain.json'), []);
+    const count = task.retentionCount ?? storagePolicy(this.getIdentity().storagePolicy).retainedVersions;
+    // 当前指针先落盘、成功节点随后落盘；中断恢复完成前禁止进行空闲清理。
+    const ids = new Set(chain.slice(-count).map(node => node.releaseId));
+    if (current) ids.add(current.id);
+    if (chain.length < 2 && previous) ids.add(previous.id);
+    return ids;
+  }
   async cleanup(task, current, previous) {
     assertManaged(this.getIdentity(), task);
     const root = safeChild(this.targetRoot(task), 'releases');
-    const releases = (await Promise.all((await readdir(root)).filter(n => n.endsWith('.json')).map(n => readJson(safeChild(root, n))))).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-    const keep = new Set([...releases.slice(0, 5).map(r => r.id), current.id, previous?.id].filter(Boolean));
+    const releases = await this.localReleases(task), keep = await this.retained(task, current, previous);
+    const protectedArtifacts = new Set(releases.filter(release => keep.has(release.id)).map(artifactId));
+    if (current) protectedArtifacts.add(artifactId(current));
+    let removed = 0;
     for (const release of releases) {
       if (keep.has(release.id)) continue;
-      if (release.image !== releaseImage(task.targetId, release.id)) throw new Error('拒绝清理不属于目标的历史镜像');
-      const image = await this.requireOwned(task, release.image, 'image');
-      const result = image ? await this.mutation(task, ['image', 'rm', release.image], { allowFailure: true, timeoutMs: 30000 }) : { code: 0 };
-      if (result.code === 0) await rm(safeChild(root, `${identifier(release.id)}.json`));
+      if (release.image !== releaseImage(task.targetId, artifactId(release))) throw new Error('拒绝清理不属于目标的历史镜像');
+      if (!protectedArtifacts.has(artifactId(release))) {
+        const image = await this.requireOwned(task, release.image, 'image');
+        if (image) await this.mutation(task, ['image', 'rm', release.image], { timeoutMs: 30000 });
+      }
+      await rm(safeChild(root, `${identifier(release.id)}.json`)); removed++;
     }
+    return { targetId: task.targetId, retainedNodes: (await this.localReleases(task)).length, removedNodes: removed };
   }
 }

@@ -1,6 +1,7 @@
 import { ServiceList, OnboardingChecklist } from './service-pages'
 import { DataTable } from './data-table'
 import { HostResources } from './workspace-home'
+import { StoragePolicy } from './storage-policy'
 import { useState } from 'react'
 import { ArrowUpRight, Server, Settings2, RefreshCw, MoreHorizontal, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -400,6 +401,7 @@ export function Servers() {
             </CardHeader>
             <CardContent className="space-y-4">
               <HostResources server={server} showConnection={false} />
+              <StoragePolicy server={server} editable={!scope} />
               <div className="flex flex-wrap justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
                 <span>Agent {server.version || '等待接入'}</span>
                 <span>最近采集：{date(server.lastSeenAt)}</span>
