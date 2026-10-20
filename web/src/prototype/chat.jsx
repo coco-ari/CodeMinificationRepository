@@ -77,7 +77,7 @@ const itemContent = (item) =>
 
 function deviceAccessIssue(project) {
   const plugin = project.config?.plugins?.cabinet
-  if (!plugin?.enabled) return '设备路由插件未启用。请在资料与配置中启用插件并应用配置。'
+  if (!plugin?.enabled) return '机柜迁移插件未启用。请在资料与配置中启用插件并应用配置。'
   const resources = project.config?.resources || []
   const dependencies = [
     { id: plugin.databaseId, label: '数据库', matches: /mysql|database/i },
@@ -86,7 +86,7 @@ function deviceAccessIssue(project) {
   for (const dependency of dependencies) {
     const resource = resources.find((item) => item.id === dependency.id)
     if (!resource || !dependency.matches.test(resource.type)) {
-      return `设备路由的${dependency.label}引用无效。请在插件配置中选择有效资源并应用。`
+      return `机柜迁移的${dependency.label}引用无效。请在插件配置中选择有效资源并应用。`
     }
     if (!(project.connectionStates?.[resource.id] ?? resource.connected)) {
       return `${resource.name} 尚未连接。请在 MCP 与连接中连接该资源后发起新一轮查询。`
@@ -122,7 +122,7 @@ function makeResponse(question, project, scope, deviceId, references) {
     const result = devices.length
       ? `示例中共 ${devices.length} 台设备，${devices.length - offline.length} 台在线，${offline.length} 台离线。${offline.length ? `\n离线设备：${offline.map((item) => `${item.id}（最近心跳 ${item.heartbeat}）`).join('、')}。` : ''}`
       : `没有找到设备 ${deviceId} 的示例记录，请核对编号后重新查询。`
-    return `已完成${scope === 'specific' ? `设备 ${deviceId}` : '全部设备'}的模拟巡检。\n\n结论\n${result}\n本次读取的是项目中的预设示例数据，没有连接真实设备或数据库。\n\n建议关注\n• 对照最近心跳与设备分组，检查离线设备的接入日志。\n• 设备路由引用资料区的环境和数据库配置，避免重复维护。\n• 上线前在 MCP 与连接中验证连通性，再执行正式巡检。\n\n本轮使用配置 v${project.configVersion || 1}，参考 ${quoted}。我已将过程和建议整理为可保存的报告。`
+    return `已完成${scope === 'specific' ? `设备 ${deviceId}` : '全部设备'}的模拟巡检。\n\n结论\n${result}\n本次读取的是项目中的预设示例数据，没有连接真实设备或数据库。\n\n建议关注\n• 对照最近心跳与设备分组，检查离线设备的接入日志。\n• 机柜迁移引用资料区的环境和数据库配置，避免重复维护。\n• 上线前在 MCP 与连接中验证连通性，再执行正式巡检。\n\n本轮使用配置 v${project.configVersion || 1}，参考 ${quoted}。我已将过程和建议整理为可保存的报告。`
   }
   if (/部署|发布|上线/.test(question)) {
     return `可以按以下顺序检查 ${project.name} 的发布准备情况。\n\n1. 在资料与配置中确认当前环境、仓库分支和配置版本。\n2. 选择明确的源码快照，检查来源提交与处理状态。\n3. 核对服务构建命令、端口及健康检查路径。\n4. 在服务与部署中发起模拟发布，并查看阶段与日志。\n\nAI 资料使用脱敏产物；部署应引用原始源码快照。已经运行的任务继续使用创建时的配置版本。\n\n依据：${quoted}。\n\n以上为基于模拟资料的演示建议；未执行发布或连接服务器。`

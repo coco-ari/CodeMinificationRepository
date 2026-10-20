@@ -6,7 +6,7 @@ const STORAGE_KEY = 'autoops:interactive-prototype:v1'
 const PrototypeContext = createContext(null)
 
 export const pluginCatalog = [
-  { id: 'cabinet', name: '设备路由', description: '设备分组、接入路由与二维码管理', icon: Network },
+  { id: 'cabinet', name: '机柜迁移', description: '设备分组、接入路由与二维码管理', icon: Network },
   { id: 'api', name: '接口调试', description: '复用项目环境，组织接口调试用例', icon: Braces },
   { id: 'logs', name: '日志分析', description: '关联服务器日志，生成排查报告', icon: FileSearch },
 ]
@@ -65,7 +65,7 @@ function makeProject(id, name) {
     plugins: {
       cabinet: {
         enabled: true,
-        name: '设备路由',
+        name: '机柜迁移',
         databaseId: 'mysql-test',
         serviceId: 'gateway',
         group: name,
@@ -313,8 +313,17 @@ function readState() {
       saved.projects?.sol?.config &&
       saved.projects?.demo?.config &&
       saved.projects[saved.projectId]
-    )
+    ) {
+      // 同步旧默认名称，保留自定义名称及尚未应用的配置草稿。
+      for (const project of Object.values(saved.projects)) {
+        for (const config of [project.config, project.draft]) {
+          if (config?.plugins?.cabinet?.name === '设备路由') {
+            config.plugins.cabinet.name = '机柜迁移'
+          }
+        }
+      }
       return saved
+    }
   } catch {}
   return seed()
 }
@@ -410,7 +419,7 @@ export function PrototypeProvider({ children }) {
         ) ||
         !draft.resources.some((r) => r.id === cabinet.serviceId && /server|service/i.test(r.type)))
     ) {
-      toast.error('请补全设备路由配置，并选择有效的数据库与接入服务')
+      toast.error('请补全机柜迁移配置，并选择有效的数据库与接入服务')
       return false
     }
     if (draft.plugins.api.enabled && !/^https?:\/\/\S+$/.test(draft.plugins.api.baseUrl || '')) {

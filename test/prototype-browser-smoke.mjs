@@ -430,7 +430,7 @@ try {
   await until(async () => (await project()).connectionStates?.['mysql-test'] === true, '数据库恢复')
 
   await route('#/materials/plugins/cabinet')
-  await click('[aria-label="停用设备路由"]')
+  await click('[aria-label="停用机柜迁移"]')
   await clickText('应用配置')
   await until(
     async () => (await project()).config.plugins.cabinet.enabled === false,
@@ -445,7 +445,7 @@ try {
   }, '停用插件后查询阻断')
   assert.ok((await project()).conversations[0].messages.at(-1).content.includes('插件未启用'))
   await route('#/materials/plugins/cabinet')
-  await click('[aria-label="启用设备路由"]')
+  await click('[aria-label="启用机柜迁移"]')
   await clickText('应用配置')
   await until(async () => (await project()).config.plugins.cabinet.enabled === true, '恢复设备插件')
   checks.push('MCP 断开状态跨页持久化，以及依赖断开、插件停用后的 Agent 查询阻断')
