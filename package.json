@@ -17,6 +17,8 @@
     "test:docker": "node test/docker-integration.mjs",
     "check": "node scripts/check.mjs && tsc --noEmit",
     "dev:ui": "vite --host 127.0.0.1",
+    "dev:prototype": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "test:prototype": "node test/prototype-browser-smoke.mjs",
     "build:ui": "tsc --noEmit && vite build",
     "build": "pnpm run build:ui && node scripts/bundle-agent.mjs",
     "pretest": "pnpm run build:ui",

@@ -222,11 +222,9 @@ function Auth({ session, onSuccess }) {
             <CardTitle className="text-xl">
               {session.initialized ? '登录工作台' : '创建管理账号'}
             </CardTitle>
-            <CardDescription>
-              {session.initialized
-                ? '进入项目空间，管理每一次交付。'
-                : '输入中心的初始化口令，设置管理员账号。'}
-            </CardDescription>
+            {!session.initialized && (
+              <CardDescription>输入中心的初始化口令，设置管理员账号。</CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             <form
@@ -593,13 +591,13 @@ function Console({ route, session, reloadSession }) {
                     )}
                     <BreadcrumbItem>
                       <BreadcrumbPage>
-                        {route.taskId ? '发布详情' : pageNames[route.view][0]}
+                        {route.taskId ? '发布详情' : pageNames[route.view]}
                       </BreadcrumbPage>
                     </BreadcrumbItem>
                   </>
                 ) : (
                   <BreadcrumbItem>
-                    <BreadcrumbPage>{pageNames[route.view][0]}</BreadcrumbPage>
+                    <BreadcrumbPage>{pageNames[route.view]}</BreadcrumbPage>
                   </BreadcrumbItem>
                 )}
               </BreadcrumbList>
@@ -634,7 +632,7 @@ function Console({ route, session, reloadSession }) {
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <h1 id="page-title" className="text-xl font-semibold tracking-tight">
-                      {pageNames[route.view][0]}
+                      {pageNames[route.view]}
                     </h1>
                   </div>
                   <div className="ml-auto flex flex-wrap justify-end gap-2">

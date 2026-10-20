@@ -283,7 +283,6 @@ function BindingForm({ onClose }) {
   return (
     <FormDialog
       title="绑定已接入服务器"
-      description="复用现有 Agent，无需重复安装。"
       onClose={onClose}
       submitLabel="绑定服务器"
       onSubmit={async (input) => {
@@ -373,7 +372,7 @@ export function Dialogs({ value, onClose }) {
     return (
       <FormDialog
         title={item ? '编辑项目' : '创建项目'}
-        description="在项目内管理仓库、服务器、环境和服务。新项目默认创建测试、生产两个环境。"
+        description="新项目默认创建测试、生产两个环境。"
         onClose={onClose}
         submitLabel="保存项目"
         onSubmit={async (input) => {

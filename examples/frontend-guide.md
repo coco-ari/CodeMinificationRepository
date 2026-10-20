@@ -40,6 +40,12 @@ pnpm run test:deploy-browser
 
 新增组件使用 `pnpm dlx shadcn@latest add <component>`。核对组件 import 指向 `@/lib/utils`，不要引入重复的样式工具。提交源码与锁文件，随后运行 `pnpm format:ui` 和检查。保留组件的键盘操作、焦点管理与 ARIA 语义；共享表单在关闭时将焦点返回触发控件，秘密字段随弹窗卸载清除。
 
+## 标题与文案
+
+页面、模块及卡片标题采用单层标题，不在下方添加功能介绍、宣传口号、泛化引导等说明性副标题。例如“连接项目知识，让每一次问答都有依据”“选择 Agent，开始探索项目”均应删除。统一标题组件只保留标题和操作区，不提供说明性副标题入口；清理文案时同时移除空容器和多余间距。
+
+实际任务状态、版本、环境、资料更新时间等业务信息按其语义展示。必要的表单帮助、错误提示、空态操作指引和弹窗无障碍描述仍应保留，不通过全局隐藏段落或 `CardDescription` 的方式处理。此约定适用于正式控制台和原型页面。
+
 ## Solid Glass 材质规范
 
 后续 UI 修改以 [Solid Glass](https://github.com/deeplethe/solid-glass) 为浅色材质参考，通过本仓库 `web/src/styles/solid-glass.css` 适配 Radix。保留 shadcn/ui 组件、现有布局和业务行为，不直接复制上游针对其他组件状态的选择器。上游 MIT 许可保存在 `web/public/third-party/solid-glass-LICENSE.txt`。

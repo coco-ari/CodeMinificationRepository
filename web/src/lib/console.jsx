@@ -2,22 +2,22 @@ import { createContext, useContext } from 'react'
 export const ConsoleContext = createContext(null)
 export const useConsole = () => useContext(ConsoleContext)
 export const pageNames = {
-  home: ['项目', '从一个项目开始，组织每一次交付。'],
-  overview: ['项目概览', '源码、环境和服务发布，尽在当前项目。'],
-  projects: ['代码仓库', '独立管理仓库配置与下载入口。'],
-  servers: ['项目服务器', '绑定已接入服务器，或安装 Agent 接入新服务器。'],
-  applications: ['环境与服务', '为每个环境中的服务配置仓库和发布分支。'],
-  services: ['服务与部署', '配置服务、选择部署位置并发布。'],
-  environments: ['环境管理', '独立管理项目环境。'],
-  service: ['服务详情', ''],
-  setup: ['配置服务', ''],
-  deployments: ['部署发布', '独立发布每个服务，掌握版本与运行状态。'],
-  release: ['发布工作台', ''],
-  configuration: ['服务配置', ''],
-  tasks: ['发布记录', '跟踪发布进度、查看日志和回退结果。'],
-  'system-servers': ['服务器管理', '管理全部服务器与 Agent 接入。'],
-  credentials: ['共享 Gitee 凭证', '复用仓库访问凭证，密码加密保存。'],
-  activity: ['操作记录', '查看管理操作和源码同步记录。'],
+  home: '项目',
+  overview: '项目概览',
+  projects: '代码仓库',
+  servers: '项目服务器',
+  applications: '环境与服务',
+  services: '服务与部署',
+  environments: '环境管理',
+  service: '服务详情',
+  setup: '配置服务',
+  deployments: '部署发布',
+  release: '发布工作台',
+  configuration: '服务配置',
+  tasks: '发布记录',
+  'system-servers': '服务器管理',
+  credentials: '共享 Gitee 凭证',
+  activity: '操作记录',
 }
 export function parseRoute() {
   const [path, query = ''] = (location.hash.slice(1) || '/projects').split('?')

@@ -25,6 +25,15 @@ export default defineConfig({
   ],
   optimizeDeps: { exclude: ['sonner'] },
   resolve: { alias: { '@': fileURLToPath(new URL('./web/src', import.meta.url)) } },
-  build: { outDir: '../dist/web', emptyOutDir: true },
+  build: {
+    outDir: '../dist/web',
+    emptyOutDir: true,
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL('./web/index.html', import.meta.url)),
+        prototype: fileURLToPath(new URL('./web/prototype.html', import.meta.url)),
+      },
+    },
+  },
   server: { proxy: { '/api': 'http://127.0.0.1:8080', '/install': 'http://127.0.0.1:8080' } },
 })

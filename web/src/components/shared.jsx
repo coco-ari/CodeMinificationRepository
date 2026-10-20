@@ -394,7 +394,7 @@ export function FormDialog({
             >
               {layout === 'embedded' ? context.formStepTitle : title}
             </Heading>
-            <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+            {description && <p className="mt-2 text-sm text-muted-foreground">{description}</p>}
           </div>
           {layout !== 'embedded' && (
             <Button variant="outline" data-slot="dialog-close" onClick={close}>
@@ -416,6 +416,7 @@ export function FormDialog({
     >
       <DialogContent
         id={id}
+        {...(!description ? { 'aria-describedby': undefined } : {})}
         className={cn(
           'deploy-dialog max-h-[90dvh] overflow-y-auto',
           wide ? 'sm:max-w-4xl' : 'sm:max-w-lg',
@@ -429,7 +430,7 @@ export function FormDialog({
       >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description || '配置当前项目的交付资源。'}</DialogDescription>
+          {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
         {form}
       </DialogContent>
