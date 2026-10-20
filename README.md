@@ -4,6 +4,8 @@
 
 ## 项目工作台交互原型
 
+完整需求、模块设计、实现边界及跨电脑开发步骤见 [项目工作台设计与开发交接](examples/project-workbench-design.md)。当前工作台开发分支为 `feat/project-workbench-prototype`，尚未合并到 `main`。
+
 在仓库根目录运行 `pnpm install`、`pnpm dev:prototype`，然后打开 [交互原型](http://127.0.0.1:5173/prototype.html)。原型采用现有 Solid Glass 与 shadcn/ui，提供两个隔离的示例项目，配置、文档、产物和对话保存在当前浏览器中。左下角重置按钮可恢复初始数据。
 
 推荐按以下顺序体验：
