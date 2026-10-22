@@ -41,6 +41,8 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 import { useThreadRouteTarget } from "./useThreadRouteTarget";
+import { isAutoOpsHosted } from "../autoops/capabilities";
+import { useAutoOpsProjectId } from "../autoops/projectNavigation";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -387,6 +389,7 @@ export function useNewThreadHandler() {
 }
 
 export function useHandleNewThread() {
+  const autoOpsProjectId = useAutoOpsProjectId();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const routeTarget = useThreadRouteTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
@@ -403,7 +406,7 @@ export function useHandleNewThread() {
   const projects = useProjects();
   const handleNewThread = useNewThreadHandler();
   const [defaultProject] = orderItemsByPreferredIds({
-    items: projects,
+    items: isAutoOpsHosted() ? projects.filter((project) => project.id === autoOpsProjectId) : projects,
     preferredIds: projectOrder,
     getId: getProjectOrderKey,
     getPreferenceIds: (project) => [

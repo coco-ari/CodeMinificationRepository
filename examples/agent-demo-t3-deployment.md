@@ -4,7 +4,23 @@
 
 ## 独立验证：工作区部署发布（28887）
 
-2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/workspaces`，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
+2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在统一侧栏选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
+
+### 项目导航与独立页面（t3-project-areas-4，仅网页）
+
+按确认后的结构，将问答、工作区、部署发布改为项目下同级页面，统一侧栏顶部项目 Combobox；只有问答挂载原生紧凑会话列表，另外两页直接使用各自的满高目录/服务与详情分栏。工作区保留内部/外部与导入、脱敏、复核；源码包生成、下载、清单及相关任务移入独立部署页。复用 T3 `AppSidebarLayout`、`SettingsSidebarNav` 的原生导航模式、项目 Combobox、`WorkspacePageHeader` 和文件面板，不另加设计系统。项目切换与新建对话接入同一授权上下文，环境和已开始执行的绑定不变。
+
+项目与查看状态按用户和资源隔离。原生会话优先真实 shell/明细或草稿归属，归档阅读仍保留项目导航；最近聊天恢复排除归档/删除，并重新核对原生资源归属。无效、歧义项目不会回退其它项目。浏览器历史、刷新与“设置 → 返回”保留当前区域；工作区与发布记录通过固定版本双向跳转，来源生成意图只消费一次。离开页面不取消服务端任务，不重写既有对话或发布记录。
+
+定向导航逻辑 13/13、ChatView Compiler 回归 2/2、宿主/Web 类型、相关页面实际 Compiler 缓存及网页构建通过。最终 `.test-artifacts/project-areas/ui-keyboard/report.json` 14/14：真实授权项目 `p-autoops` / `p-cabinet` 的三区切换、原生未发送草稿、固定文件预览与任务恢复、前进后退、刷新、设置返回、来源交接 Dialog 与焦点、真实包/清单下载、无效项目无回退、外部部署 API 403，及浅深色、1440px、390px 触屏模拟、600px 短窗口。页面错误、被阻止业务写入及已有会话激活均为 0；没有发送模型请求、生成包或提交部署。仅一个已有内部版本，未造第二版本；归档/unlisted 明细身份有定向逻辑测试，没有激活用户历史做浏览器验收。实体手机、Windows、大数据量和运行中切页后的流式时序未测，不把保留原生逻辑当作这些场景已验收。
+
+首轮 `ui-first` 发现项目筛选向兼容层传入对象，修正为名称字符串；`ui-picker` 的测试误把带同名 ARIA 的 cmdk 容器当输入，改为准确的 combobox 控件。补齐 cmdk 原生隐藏 label 后，`ui-history` 通过主要联动但复现 Enter 被 cmdk 根节点截获；现在 Trigger 隔离原生 Enter/空格激活，不拦截输入区选项键盘流程。最终全套通过，早期报告保留。类型检查早期暴露宽泛查询 Schema 污染其它路由类型，已改为明确的带品牌项目 ID 与版本字段；非法显式值保留为空并拒绝，不丢弃后回退。
+
+运行程序仍为 `t3-deployment-validation-1`，网页为 `releases/t3-project-areas-4/dist/web`。本次仅网页与来源清单变化。最终增量归档 SHA-256 `37ca67bdcf0747f7955d8249fa60eb2f56ae790c1cdb06231efcfbfd48cddfcc`，基于保留的 `t3-project-areas-3`；完整清单 `9420a1a7f8ff3e61de990fb20d487421759c4b0db7cc4a441b9cdda9ed70b22e`，原生清单 `92de8fbb73e66b0e0bb99426cd121b547fc5212dadb4bbac6c9d4e953d9660f8`。3894 文件、59 链接及官方同版原生 2038 文件/21 包校验通过；实际 HTML SHA-256 `ed5d87bbb22566a58dfa14e41ffdc8762b4b5982df19826c525e4838d31311b2`。
+
+未主动重启 worker，但宿主在 23:50:39 出现一次 OOM，独立 worker 从 `194908` 自动恢复为 `202045`；不能宣称本轮始终无进程重启。最终网页切换及完整浏览器验收期间 `202045` 稳定，已有包与四个部署任务继续可读，站点 HTML 哈希仍为 `05cfb58e9c16ec826922bddbbb1240990f2b9fb024579cc5634532ff157c0545`。证据为 `static-switch.json` 与服务器对应日志。验收结束磁盘约 603 MiB（97%），测试机可用内存不足 100 MiB；没有清理共享数据或调整其他服务，大型及真实执行联测前应先解决容量。
+
+仅回退本轮页面组织时，空闲后恢复独立网关的 `/home/tao/autoops-deployment-validation/web-unit-before-project-areas-1.txt`，用户级 `daemon-reload` 并只重启独立网关，即回到 `t3-deployment-validation-2` 网页。各中间补丁也保存了对应配置恢复点；不要用旧库覆盖当前数据，不停止原 8787/18887 服务。保留原问答、工作区版本、发布记录和部署目录。
 
 第一轮复用现有部署中心的任务、配置快照、源码档案、Agent 协议、Docker 静态构建、Nginx 版本切换、健康检查和回退。新增的业务适配层把已发布内部工作区的固定 ZIP 接入旧引擎，不再重新获取仓库或读取当前工作目录。包身份包含项目、内部版本、仓库提交、包 ID 与 SHA-256；任务固定配置键和真实操作人，同一请求重试返回原任务。原问答 Agent 继续只读，不能从对话直接部署。
 
@@ -20,7 +36,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 | 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
 | 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
 | 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
-| 程序 / 网页 | `releases/t3-deployment-validation-1` / `releases/t3-deployment-validation-2/dist/web` |
+| 程序 / 网页 | `releases/t3-deployment-validation-1` / `releases/t3-project-areas-4/dist/web` |
 
 固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
 
@@ -49,7 +65,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 
 网页补丁切换时独立 worker PID `194908` 不变，实际 HTML SHA-256 为 `0998f150cabfe31716f504746cbb37dcdb55e7f8676ca70383163f2e50ccd551`。只撤回该网页补丁时，在独立网关空闲后恢复 `/home/tao/autoops-deployment-validation/web-unit-before-static2.txt` 对应用户服务配置，执行用户级 `daemon-reload` 并仅重启独立网关；不替换当前数据。停用整个验证环境须先等待部署任务空闲，再停止上述两个独立用户服务、系统级验证 Agent 与指定 Nginx 容器，保留数据和发布目录。不得停止原 8787/18887 服务，也不以旧数据库覆盖当前记录。
 
-验收结束磁盘可用约 664 MiB（97%）；未清理原有数据、镜像或备份。大型项目验证前需先扩容或另行确认可清理范围。
+首次部署链路验收时磁盘可用约 664 MiB（97%）；未清理原有数据、镜像或备份。后续项目导航验收的容量见上文，大型项目验证前需先扩容或另行确认可清理范围。
 
 ## 当前发布：项目搜索输入修复（t3-project-search-1，仅网页）
 

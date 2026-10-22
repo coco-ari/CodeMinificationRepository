@@ -56,6 +56,8 @@ import {
 } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
+import { isAutoOpsHosted } from "../autoops/capabilities";
+import { AutoOpsProjectRouteSync, ProjectAreaSidebar } from "../autoops/ProjectAreaNavigation";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
 
@@ -325,12 +327,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
+        <AutoOpsProjectRouteSync />
         <Sidebar
           side="left"
           collapsible="offcanvas"
           data-app-sidebar=""
           role="navigation"
-          aria-label={isOnSettings ? "设置" : "对话"}
+          aria-label={isOnSettings ? "设置" : isAutoOpsHosted() ? "项目导航" : "对话"}
           resizable={{
             maxWidth: sidebarMaximumWidth,
             minWidth: sidebarMinimumWidth,
@@ -347,7 +350,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
               <SidebarChromeHeader isElectron={isElectron} />
               <SettingsSidebarNav pathname={pathname} />
             </>
-          ) : legacySidebarEnabled ? (
+          ) : isAutoOpsHosted() && (pathname === "/workspaces" || pathname === "/deployments") ? (
+            <ProjectAreaSidebar />
+          ) : legacySidebarEnabled && !isAutoOpsHosted() ? (
             <LegacyThreadSidebar />
           ) : (
             <ThreadSidebar />

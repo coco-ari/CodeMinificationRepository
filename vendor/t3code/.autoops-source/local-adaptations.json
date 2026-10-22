@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T14:53:59.795450+00:00",
+  "generatedAt": "2026-10-22T15:53:59.009313+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -350,7 +350,7 @@
       "path": "apps/web/src/components/AppSidebarLayout.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "e5e5bb8296029c0136887b8d05e7ba79055430cccd9dfb6a40515221d1acd91d",
-      "localSha256": "07adf1714de71437d4f2baf58cd33343ffe8980761658b8744e9cfa0ad73d684"
+      "localSha256": "a35438ddbf0e456e6403a301fe64f4fe032e9f21acb1d4ef5b47c95705775522"
     },
     {
       "path": "apps/web/src/components/BranchToolbar.tsx",
@@ -542,7 +542,7 @@
       "path": "apps/web/src/components/Sidebar.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "c7e84c76bb16ff70db5c2cd298cae15ec0b85a9e593bbddbdd9f617ba7662318",
-      "localSha256": "8f61268ab16a8ff19274fc925503867b2e0c04a5d548b87f036a9e3330784a16"
+      "localSha256": "c682b67ab180ab3ec5aca2e6a50e51815fa614ccabac33a1cfec0a82c668e3df"
     },
     {
       "path": "apps/web/src/components/SlowRpcRequestToastCoordinator.tsx",
@@ -1862,7 +1862,7 @@
       "path": "apps/web/src/components/sidebar/SidebarChrome.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "d8dc3d7320d4505054006b309b068468e8644b163b92e673d8b1208b4abc2764",
-      "localSha256": "df93dd5cc264044beb37639d4573fe961672b2ad2406523004bf588ee45c450c"
+      "localSha256": "ea7cae668df6c71bc7c5f63e1bc784e2a0437bc4e632fb5a354bc81b4cc9f750"
     },
     {
       "path": "apps/web/src/components/sidebar/SidebarProviderUpdatePill.tsx",
@@ -1910,7 +1910,7 @@
       "path": "apps/web/src/components/sidebar/mainAppLocation.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "93e05aaa48632bae2451a504beb207b3ed31c72f295ad5b3841b8479138707ad",
-      "localSha256": "c6f0a8db11c83a6cb7032a81c499cf5552ca7861e1324e5647565a50cbf6a338"
+      "localSha256": "5670209debe9feb9aeb9bcc36cffe162bc205b764bd4dc8e1c3b4ad6f5f323ea"
     },
     {
       "path": "apps/web/src/components/sidebar/updateEverything.logic.ts",
@@ -2288,7 +2288,7 @@
       "path": "apps/web/src/hooks/useHandleNewThread.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "1ea6c11aaa707a5897b77a9632390973ac66638475b43a617341118d8e29999e",
-      "localSha256": "3eac71e92ea083cb332d880d9b365fdf46354817066cabdf5dad7a9be803d2e7"
+      "localSha256": "5c4c22667f1c29b48d1b43f341418639f3d97884b7dce04121479d329af79a04"
     },
     {
       "path": "apps/web/src/hooks/useLocalStorage.ts",
@@ -2444,7 +2444,7 @@
       "path": "apps/web/src/routeTree.gen.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "637927f06c042b65684a65855355d73683bbdabf0e5fb6ea7458e2648b2d6656",
-      "localSha256": "66082a2420e63d5be1d7af71caa2d83638c0fb6d93e81e92659f77ab4aabbd8b"
+      "localSha256": "290f4e94472770b2356f905ecfe1e7d373e5eb0a8f2b3966a24f1f0402db0019"
     },
     {
       "path": "apps/web/src/router.ts",
@@ -2462,7 +2462,7 @@
       "path": "apps/web/src/routes/_chat.index.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "cd8d5a267f2cd348309e17902532de03dda101df3eac352e831319946940e0a3",
-      "localSha256": "a655cc8d586d9297e08bc343deab69bf5afa5ec111aeca0fa6593d31f1543644"
+      "localSha256": "11234ca4d42ea30c49d32e4b5c37b1c8e5910540ece66404c7f9b45070872c7e"
     },
     {
       "path": "apps/web/src/routes/_chat.new.tsx",
@@ -2480,7 +2480,7 @@
       "path": "apps/web/src/routes/_chat.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "5d04e12b8af7fd80df0612539db79cbc079e3db61bdf3cb5baec4585186095f8",
-      "localSha256": "441844891609c4d2db066aced14c399fe84718b3aeb2085bea06c4c7dbadea66"
+      "localSha256": "430c957a5c6b220f50433c50e51b929facd017b68ea735ee71ac14572b6195bb"
     },
     {
       "path": "apps/web/src/routes/settings.providers.tsx",
@@ -2794,19 +2794,23 @@
     "apps/web/src/autoops/deployments.ts",
     "apps/web/src/autoops/hostConfig.test.ts",
     "apps/web/src/autoops/MaterialPreview.tsx",
+    "apps/web/src/autoops/projectNavigation.ts",
     "apps/web/src/autoops/capabilities.ts",
     "apps/web/src/autoops/legacyDrafts.test.ts",
     "apps/web/src/autoops/DeploymentsPanel.tsx",
     "apps/web/src/autoops/resources.test.ts",
     "apps/web/src/autoops/legacyDrafts.ts",
     "apps/web/src/autoops/planMaterials.ts",
+    "apps/web/src/autoops/ProjectAreaNavigation.tsx",
     "apps/web/src/autoops/LegacyDraftRecovery.tsx",
     "apps/web/src/autoops/clientSettings.ts",
+    "apps/web/src/autoops/DeploymentsPage.tsx",
     "apps/web/src/autoops/useThreadScope.ts",
     "apps/web/src/autoops/ThreadScopeControl.tsx",
     "apps/web/src/autoops/WorkspaceConversationLauncher.tsx",
     "apps/web/src/autoops/WorkspaceScopeControl.tsx",
     "apps/web/src/autoops/SkillsSettings.tsx",
+    "apps/web/src/autoops/projectNavigation.logic.ts",
     "apps/web/src/autoops/materialPreviewScope.ts",
     "apps/web/src/components/ChatMarkdown.autoops-csp.browser.test.tsx",
     "apps/web/src/components/ui/radix-number-field.tsx",
@@ -2829,6 +2833,7 @@
     "apps/web/src/components/files/ReadOnlyWorkspaceFiles.tsx",
     "apps/web/src/components/files/readOnlyFileSource.ts",
     "apps/web/src/hooks/useReducedMotion.ts",
+    "apps/web/src/routes/_chat.deployments.tsx",
     "apps/web/src/routes/_chat.workspaces.tsx",
     "apps/server/src/autoops/personalPreferences.ts",
     "apps/server/src/autoops/legacyImport.test.ts",

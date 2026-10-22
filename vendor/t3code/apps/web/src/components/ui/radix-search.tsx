@@ -188,6 +188,7 @@ function makeRoot(autocomplete: boolean) {
           eventRef.current = event.nativeEvent
         }}
         aria-label={props['aria-label']}
+        label={props['aria-label']}
       >
         {children}
       </Command>
@@ -264,7 +265,17 @@ function Trigger({ render, nativeButton: _nativeButton, ...props }: Props) {
   const context = React.use(Context)
   return renderWithPrimitive(
     context.inline ? Button : Popover.Trigger,
-    { ...props, disabled: props.disabled ?? context.disabled },
+    {
+      ...props,
+      disabled: props.disabled ?? context.disabled,
+      onKeyDown: (event: React.KeyboardEvent) => {
+        props.onKeyDown?.(event)
+        // The trigger is inside cmdk's root. Keep native button activation
+        // from becoming cmdk's Enter-to-select before the popup has opened.
+        if (!event.defaultPrevented && event.target === event.currentTarget &&
+          (event.key === 'Enter' || event.key === ' ')) event.stopPropagation()
+      },
+    },
     render,
     { open: context.open },
   )

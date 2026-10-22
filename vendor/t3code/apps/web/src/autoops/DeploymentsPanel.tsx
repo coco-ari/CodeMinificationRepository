@@ -1,3 +1,5 @@
+import { Link } from '@tanstack/react-router'
+import { ProjectId } from '@t3tools/contracts'
 import {
   useEffect,
   useId,
@@ -524,6 +526,23 @@ export function DeploymentsPanel({
                       '尚未发布'}
                   </span>
                   {activeTask ? <span>{deploymentStageLabel(activeTask.stage)}中</span> : null}
+                  {target.currentRelease?.sourceIdentity?.sourceVersionId ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      render={
+                        <Link
+                          to="/workspaces"
+                          search={{
+                            projectId: ProjectId.make(projectId),
+                            versionId: target.currentRelease.sourceIdentity.sourceVersionId,
+                          }}
+                        />
+                      }
+                    >
+                      查看工作区来源
+                    </Button>
+                  ) : null}
                 </div>
                 {!frontendPackages.length ? (
                   <p className="shrink-0 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
@@ -636,6 +655,23 @@ export function DeploymentsPanel({
                                 </span>
                               ) : null}
                             </span>
+                            {release.sourceIdentity?.sourceVersionId ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                render={
+                                  <Link
+                                    to="/workspaces"
+                                    search={{
+                                      projectId: ProjectId.make(projectId),
+                                      versionId: release.sourceIdentity.sourceVersionId,
+                                    }}
+                                  />
+                                }
+                              >
+                                查看来源
+                              </Button>
+                            ) : null}
                             <Button
                               size="sm"
                               variant="outline"
@@ -695,6 +731,7 @@ export function DeploymentsPanel({
       {target ? (
         <ReleaseDialog
           key={`${dialog}:${target.id}:${rollbackId}`}
+          projectId={projectId}
           open={dialog === 'deploy' || dialog === 'rollback'}
           onOpenChange={(open) => {
             if (!open && !busy) setDialog(null)
@@ -926,6 +963,21 @@ function DeploymentLogs({
             </div>
           ) : null}
           <TaskOutcome task={task} />
+          {task.sourceIdentity?.sourceVersionId ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="mt-1"
+              render={
+                <Link
+                  to="/workspaces"
+                  search={{ projectId: ProjectId.make(projectId), versionId: task.sourceIdentity.sourceVersionId }}
+                />
+              }
+            >
+              查看工作区来源
+            </Button>
+          ) : null}
         </div>
       ) : (
         <div className="flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
@@ -1373,7 +1425,8 @@ function TargetDialog({
               </CollapsiblePanel>
             </Collapsible>
             <p className="text-xs text-muted-foreground">
-              保存后，需由运维按目标 ID 配置已有 Nginx 的目录映射，并确认站点检查地址可访问。平台不会自动修改 Nginx。
+              保存后，需由运维按目标 ID 配置已有 Nginx
+              的目录映射，并确认站点检查地址可访问。平台不会自动修改 Nginx。
             </p>
             {error ? (
               <Alert variant="error" role="alert">
@@ -1404,6 +1457,7 @@ function TargetDialog({
 }
 
 function ReleaseDialog({
+  projectId,
   target: liveTarget,
   serverName,
   environmentName,
@@ -1416,6 +1470,7 @@ function ReleaseDialog({
   onSubmit,
   ...dialog
 }: DialogProps & {
+  projectId: string
   target: DeploymentTarget
   serverName: string
   environmentName: string
@@ -1498,6 +1553,18 @@ function ReleaseDialog({
                 {selectedPackage ? (
                   <div className="space-y-1 text-xs text-muted-foreground">
                     <p className="break-all">来源版本：{selectedPackage.sourceVersionId}</p>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      render={
+                        <Link
+                          to="/workspaces"
+                          search={{ projectId: ProjectId.make(projectId), versionId: selectedPackage.sourceVersionId }}
+                        />
+                      }
+                    >
+                      查看工作区来源
+                    </Button>
                     <p className="break-all font-mono">SHA-256：{zip?.sha256}</p>
                   </div>
                 ) : null}

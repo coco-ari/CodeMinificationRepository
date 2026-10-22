@@ -19,8 +19,11 @@ import {
   useThreadShells,
 } from "../state/entities";
 import { useEnvironments } from "../state/environments";
+import { isAutoOpsHosted } from "../autoops/capabilities";
+import { useAutoOpsProjectId } from "../autoops/projectNavigation";
 
 function ChatIndexRouteView() {
+  const selectedProjectId = useAutoOpsProjectId();
   const { authGateState } = Route.useRouteContext();
   const { environments, isReady } = useEnvironments();
 
@@ -29,10 +32,11 @@ function ChatIndexRouteView() {
     if (environments.length === 0) return <HostedEmptyState />;
   }
 
-  return <IndexDraftLanding />;
+  return <IndexDraftLanding key={isAutoOpsHosted() ? selectedProjectId : 'upstream'} />;
 }
 
 function IndexDraftLanding() {
+  const autoOpsProjectId = useAutoOpsProjectId();
   const projects = useProjects();
   const threads = useThreadShells();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
@@ -45,7 +49,7 @@ function IndexDraftLanding() {
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
 
   const mostRecentProject =
-    sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null;
+    sortScopedProjectsForSidebar(isAutoOpsHosted() ? projects.filter((project) => project.id === autoOpsProjectId) : projects, threads, "updated_at")[0] ?? null;
   const attempt = startState.retryRequest;
 
   useEffect(() => {
@@ -82,6 +86,7 @@ function IndexDraftLanding() {
     ) : null;
   }
   // A pending environment cannot prove the workspace is empty.
+  if (isAutoOpsHosted() && !autoOpsProjectId) return <SidebarInset className="h-dvh min-h-0 overflow-hidden"><WorkspacePageHeader><h1 className="text-sm font-medium">问答</h1></WorkspacePageHeader><Empty data-testid="project-unavailable"><EmptyHeader><EmptyTitle>项目不可用或无权访问</EmptyTitle></EmptyHeader></Empty></SidebarInset>;
   return bootstrapped ? <NoProjectsHero /> : null;
 }
 

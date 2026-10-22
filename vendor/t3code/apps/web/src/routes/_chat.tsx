@@ -31,6 +31,7 @@ import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { WorkspaceConversationLauncher } from '../autoops/WorkspaceConversationLauncher';
+import { isAutoOpsHosted } from '../autoops/capabilities';
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -125,7 +126,7 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
+        if (!isAutoOpsHosted() && !legacySidebarEnabled && projectGroupCount > 1) {
           openCommandPalette({ open: "new-thread-in" });
           return;
         }

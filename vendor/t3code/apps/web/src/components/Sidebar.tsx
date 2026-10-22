@@ -1,4 +1,6 @@
 import { autoOpsFeature, filterAutoOpsThreadMenu, isAutoOpsHosted, isAutoOpsLite } from "~/autoops/capabilities";
+import { ProjectAreaNavigation } from "~/autoops/ProjectAreaNavigation";
+import { useAutoOpsProjectId } from "~/autoops/projectNavigation";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
@@ -2807,6 +2809,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 });
 
 export default function Sidebar() {
+  const autoOpsProjectId = useAutoOpsProjectId();
   const {
     projects,
     serverConfigs,
@@ -2971,7 +2974,9 @@ export default function Sidebar() {
     clearSelection();
     setPersistedProjectScopeKey(key);
   };
-  const projectScopeKey = resolveSidebarProjectScopeKey({
+  const projectScopeKey = isAutoOpsHosted() ? (projectGroups.find((group) =>
+    group.memberProjectRefs.some((project) => project.projectId === autoOpsProjectId)
+  )?.projectKey ?? null) : resolveSidebarProjectScopeKey({
     groups: projectGroups,
     key: persistedProjectScopeKey,
     settings: projectGroupingSettings,
@@ -3003,8 +3008,9 @@ export default function Sidebar() {
     projectScopeKey === null
       ? null
       : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null);
-  const scopedProjectKeys =
-    scopedProjectGroup === null
+  const scopedProjectKeys = isAutoOpsHosted()
+    ? new Set(projects.filter((project) => project.id === autoOpsProjectId).map((project) => `${project.environmentId}:${project.id}`))
+    : scopedProjectGroup === null
       ? null
       : new Set(
           scopedProjectGroup.memberProjectRefs.map(
@@ -4641,6 +4647,13 @@ export default function Sidebar() {
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
 
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (isAutoOpsHosted()) {
+      const project = projects.find((entry) => entry.id === autoOpsProjectId);
+      if (!project) return;
+      if (isMobile) setOpenMobile(false);
+      void newThreadContext.handleNewThread(scopeProjectRef(project.environmentId, project.id));
+      return;
+    }
     if (shouldCreateNewThreadInCurrentProject(event?.shiftKey ?? false, projectGroups.length)) {
       if (isMobile) setOpenMobile(false);
       void startNewThreadFromContext({
@@ -4663,14 +4676,15 @@ export default function Sidebar() {
     <>
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
+      {isAutoOpsHosted() ? <ProjectAreaNavigation /> : null}
       <SidebarContent
-        className="min-h-full"
+        className={isAutoOpsHosted() ? "min-h-0" : "min-h-full"}
         fixedHeader={
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
               searchFieldRef={headerSearchRef}
               hasProjects={projectGroups.length > 0}
-              projectScope={
+              projectScope={isAutoOpsHosted() ? null :
                 <Combobox
                   items={projectScopeItems}
                   filteredItems={filteredProjectScopeItems}
@@ -4796,10 +4810,10 @@ export default function Sidebar() {
               }
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
-              newThreadDisabled={projects.length === 0}
+              newThreadDisabled={isAutoOpsHosted() ? !projects.some((project) => project.id === autoOpsProjectId) : projects.length === 0}
               newThreadShortcutLabel={newThreadShortcutLabel}
               newThreadInProjectShortcutLabel={newThreadInProjectShortcutLabel}
-              showNewThreadInProjectHint={projectGroups.length > 1}
+              showNewThreadInProjectHint={!isAutoOpsHosted() && projectGroups.length > 1}
               searchInputRef={threadSearchInputRef}
               searchQuery={threadSearchQuery}
               onSearchQueryChange={(value) => {
@@ -4812,7 +4826,7 @@ export default function Sidebar() {
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
             />
-            {isAutoOpsLite() && projectGroups.length > 0 ? <div
+            {isAutoOpsLite() && !isAutoOpsHosted() && projectGroups.length > 0 ? <div
               role="heading" aria-level={2} aria-label="对话项目范围" data-testid="sidebar-project-scope-label"
               className="min-w-0 truncate px-2.5 pt-2 pb-1 text-xs font-medium text-sidebar-muted-foreground/60"
             >{scopedProjectGroup?.displayName ?? (projectGroups.length === 1 ? projectGroups[0]?.displayName : "全部项目")}</div> : null}
