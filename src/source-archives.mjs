@@ -45,7 +45,13 @@ export class SourceArchives {
       const existing = this.store.state.deployments.sourceArchives.find(item => item.applicationId === task.applicationId && item.sha256 === actual.sha256);
       const record = { ...(existing || { id: randomUUID(), applicationId: task.applicationId, createdAt: stamp() }), ...actual, deletedAt: null, integrity: 'verified' };
       record.origins ||= [];
-      if (!record.origins.some(item => item.repositoryId === task.sourceProjectId && item.revision === archive.revision)) record.origins = [...record.origins, { repositoryId: task.sourceProjectId, repository: task.sourceSnapshot?.repository, revision: archive.revision }];
+      const origin = task.sourceKind === 'workspace-package'
+        ? { sourceKind: task.sourceKind, sourceIdentity: structuredClone(task.sourceIdentity), revision: archive.revision }
+        : { repositoryId: task.sourceProjectId, repository: task.sourceSnapshot?.repository, revision: archive.revision };
+      const knownOrigin = task.sourceKind === 'workspace-package'
+        ? record.origins.some(item => JSON.stringify(item) === JSON.stringify(origin))
+        : record.origins.some(item => item.repositoryId === task.sourceProjectId && item.revision === archive.revision);
+      if (!knownOrigin) record.origins = [...record.origins, origin];
       const destination = this.file(record); await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
       let valid = false;
       try { const saved = await checksum(destination); valid = saved.sha256 === actual.sha256 && saved.size === actual.size; } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -94,6 +100,11 @@ export class SourceArchives {
         if (task?.source?.revision && (!release.revision || release.revision === task.source.revision)) {
           release.revision ||= task.source.revision;
           release.sourceSnapshot ||= task.sourceSnapshot ? structuredClone(task.sourceSnapshot) : undefined;
+          if (task.sourceKind === 'workspace-package') {
+            release.sourceKind ||= task.sourceKind;
+            release.sourceIdentity ||= structuredClone(task.sourceIdentity);
+          }
+          if (task.actor) release.actor ||= structuredClone(task.actor);
           release.config ||= task.config ? structuredClone(task.config) : undefined;
           release.commitSubject ||= task.commitSubject || task.source.commitSubject;
           if (!release.sourceClearedAt && task.sourceArchiveId) release.sourceArchiveId ||= task.sourceArchiveId;

@@ -6,12 +6,12 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const destination = resolve(process.argv[2] || join(root, '.deployment/t3-release'))
 if (existsSync(destination)) throw new Error('发布目录已存在，请选择新的发布目录；不会覆盖')
 mkdirSync(destination, { recursive: true, mode: 0o700 })
-for (const path of ['agent-demo', 'agent/archive.mjs', 'agent/config.mjs', 'src/archive.mjs', 'src/security.mjs', 'dist/web', 'vendor/t3code/apps/server/dist', 'vendor/t3code/.autoops-source', 'vendor/t3code/LICENSE', 'vendor/t3code/package.json', 'vendor/t3code/pnpm-lock.yaml', 'vendor/t3code/pnpm-workspace.yaml', 'vendor/t3code/patches', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/start-t3-worker.mjs', 'scripts/t3-migrate-data.mjs', 'scripts/t3-recovery-data.mjs', 'scripts/t3-storage-audit.mjs', 'scripts/verify-t3-release.mjs']) {
+for (const path of ['agent-demo', 'agent', 'src', 'dist/web', 'vendor/t3code/apps/server/dist', 'vendor/t3code/.autoops-source', 'vendor/t3code/LICENSE', 'vendor/t3code/package.json', 'vendor/t3code/pnpm-lock.yaml', 'vendor/t3code/pnpm-workspace.yaml', 'vendor/t3code/patches', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/start-t3-worker.mjs', 'scripts/t3-migrate-data.mjs', 'scripts/t3-recovery-data.mjs', 'scripts/t3-storage-audit.mjs', 'scripts/verify-t3-release.mjs']) {
   cpSync(join(root, path), join(destination, path), { recursive: true, verbatimSymlinks: true, filter: (source) => !/\/(?:data|node_modules|\.DS_Store)(?:\/|$)/.test(relative(root, source)) })
 }
 // Preserve pnpm's real dependency graph, including duplicate versions. Only
 // dynamic business workers need root packages; UI and T3 are already bundled.
-const store = join(root, 'node_modules/.pnpm')
+const store = realpathSync(join(root, 'node_modules/.pnpm'))
 const targetStore = join(destination, 'node_modules/.pnpm')
 mkdirSync(targetStore, { recursive: true })
 const copied = new Set()

@@ -1,6 +1,55 @@
 # T3 模块运行、迁移与恢复
 
-实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。原 Demo 的 8787 入口已切换到本模块；当前发布证据见下一节，早期构建、数据迁移与恢复记录保留在历史章节。
+实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。原 Demo 的 8787 入口已切换到本模块；工作区部署使用下述独立验证入口，未替换原 Demo。早期构建、数据迁移与恢复记录保留在历史章节。
+
+## 独立验证：工作区部署发布（28887）
+
+2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/workspaces`，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
+
+第一轮复用现有部署中心的任务、配置快照、源码档案、Agent 协议、Docker 静态构建、Nginx 版本切换、健康检查和回退。新增的业务适配层把已发布内部工作区的固定 ZIP 接入旧引擎，不再重新获取仓库或读取当前工作目录。包身份包含项目、内部版本、仓库提交、包 ID 与 SHA-256；任务固定配置键和真实操作人，同一请求重试返回原任务。原问答 Agent 继续只读，不能从对话直接部署。
+
+UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、原生 Toggle/Menu/Dialog、主题变量及焦点恢复。服务发布与原“源码包”并列，保留 ZIP、清单下载和来源追溯。这里没有可逐页照搬的 T3 部署业务页面，因此组合原生工作区模块适配业务，不将其称为上游已有部署功能。新增服务只开放静态前端；不展示未闭环的后端部署、取消、配置编辑或服务器安装入口。管理员与授权环境在每个 API 请求中校验，不能靠隐藏入口代替授权。
+
+独立进程与数据：
+
+| 资源 | 配置 |
+| --- | --- |
+| 用户级网关 | `autoops-deployment-validation-web.service`，28887 |
+| 用户级 worker | `autoops-deployment-validation-worker.service`，28888 |
+| 原 Agent 协议入口 | worker 内的 loopback 28889，仅本轮同机验证 |
+| 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
+| 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
+| 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
+| 程序 / 网页 | `releases/t3-deployment-validation-1` / `releases/t3-deployment-validation-2/dist/web` |
+
+固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
+
+### 实际验证
+
+测试使用平台内置、具有独立 Git 历史的可构建前端示例，不是用户真实项目。固定 ZIP 为 `23cb9219-3db4-4b7f-8273-9a0041e5a0e2`，SHA-256 为 `10552987e3061076dc073bc771c99b7e48438a3e8f133d639a5afedf9324df02`。使用真实 Docker、Node 镜像与 Nginx，没有 fakeDocker；Docker Hub 拉取超时后使用仓库已有的 ECR 镜像方案，实际构建快照固定 `public.ecr.aws/docker/library/node@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53`、npm `11.19.1`。
+
+| 验证 | 结果 |
+| --- | --- |
+| 浏览器发起首次真实发布 | `6497ce98-573d-4806-b9a7-f625cb4d1973` 成功，实际站点标记匹配 |
+| 并发相同请求与再次构建 | 两次提交返回同一任务 `61bafc33-a77a-4c9c-bf15-0f5310fe436c`，发布成功 |
+| 手动回退 | `44d8394b-94af-45df-9a05-9b2b38c7a19a` 成功，恢复首次产物标记 |
+| 真实健康检查失败 | 仅对 `f01902da-264e-42bf-ae15-e79c63086653` 的健康查询返回 HTTP 503，任务为 `rolled_back`，恢复结果为 `succeeded` |
+| 恢复一致性 | 当前逻辑版本、站点产物标记及 HTML SHA-256 与故障前一致；故障注入已清除 |
+| 权限及配置负例 | 过期配置 409，外部账号 GET/POST 403，跨项目目标 GET/POST 404；拒绝请求不产生任务 |
+
+定向检查包含新固定包核心 8/8、业务适配 4/4、相关旧部署与静态执行器回归、宿主/Web/原生服务类型检查、实际 React Compiler 缓存检查及网页/服务端构建。保留原有 Effect suggestions、CSS/chunk 提示，未执行仓库全量测试。
+
+浏览器最终 `ui-verified/report.json` 8/8 通过：浅深色、1440px 桌面、390px 触屏模拟、600px 短窗口、原生菜单与确认弹窗、Escape 焦点恢复、刷新后的任务/移动详情恢复、真实日志内部滚动、ZIP 和清单下载、生产环境空态及外部权限。页面错误为 0，未发送模型请求、激活既有对话或进行业务写入。第一次真实发布另在 `ui-2` 中完成；最初测试错误地假设原生 Toggle 是 button、移动刷新后应返回列表，失败记录保留。实际发现并修复普通 HTTP 下缺少 `cookieStore` 的错误：API 可用时沿用原实现，否则回退至 shadcn 的 `document.cookie`，不使用测试 polyfill。
+
+本轮未在向上阅读时观察到新日志，`streamingReadPosition=false`，只验收已完成日志的滚动。新增目标通过 API 建立，浏览器未重复提交新增表单；没有验证 Windows 实机、实体手机、Node/其他后端、大包性能、高并发、生产切换、实际断电或远端 Agent 中断恢复。最终报告在 worktree 的 `.test-artifacts/deployment-validation/live/report.json`、`live/static-switch.json` 与 `ui-verified/report.json`；图片和临时产物不提交仓库。
+
+### 发布与恢复
+
+程序包基于保留的 `t3-project-search-1`，新增完整 `agent/` 与 `src/` 运行模块。运行版 `t3-deployment-validation-1` 的增量归档 SHA-256 为 `1e86a84d496415e1228ccd63ed24948b40bfd7dcba710e99b1a34f8dd7f77960`，完整清单为 `2da1475de45f9997e9d9f0ddec98d7fffee64be2a9310ed87097e0f11ac48184`。网页补丁版 `t3-deployment-validation-2` 仅更新网页与来源清单，增量归档为 `136f6b49b04cad4b7d6ab8ed68c60243761dbefaaa10daf9bfb40e8a28fbe398`，完整清单为 `68618b7755ac3cc2dab6794a252c8797a88d326bf3abaf292f254c296fa7eef9`，原生清单为 `924df531ffa15d5bbcd3e7a49d406cbd891b9b9e7f06c5e3736470e1cc9f59ac`。两版均校验 3889 文件、59 相对链接及原生依赖 2038 文件/21 包；增量包不能脱离保留的基础版本运行。
+
+网页补丁切换时独立 worker PID `194908` 不变，实际 HTML SHA-256 为 `0998f150cabfe31716f504746cbb37dcdb55e7f8676ca70383163f2e50ccd551`。只撤回该网页补丁时，在独立网关空闲后恢复 `/home/tao/autoops-deployment-validation/web-unit-before-static2.txt` 对应用户服务配置，执行用户级 `daemon-reload` 并仅重启独立网关；不替换当前数据。停用整个验证环境须先等待部署任务空闲，再停止上述两个独立用户服务、系统级验证 Agent 与指定 Nginx 容器，保留数据和发布目录。不得停止原 8787/18887 服务，也不以旧数据库覆盖当前记录。
+
+验收结束磁盘可用约 664 MiB（97%）；未清理原有数据、镜像或备份。大型项目验证前需先扩容或另行确认可清理范围。
 
 ## 当前发布：项目搜索输入修复（t3-project-search-1，仅网页）
 

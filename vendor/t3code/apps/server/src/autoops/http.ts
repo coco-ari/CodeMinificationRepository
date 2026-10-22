@@ -10,6 +10,8 @@ import { configuredBusinessArtifactStore } from "../../../../../../agent-demo/t3
 import { configuredBusinessResourceCatalog } from "../../../../../../agent-demo/t3-adapters/resources.mjs";
 import { configuredWorkspaceStore } from "../../../../../../agent-demo/t3-adapters/workspaces.mjs";
 import { handleWorkspaceRequest } from "../../../../../../agent-demo/t3-adapters/workspace-http.mjs";
+import { configuredDeploymentStore } from "../../../../../../agent-demo/t3-adapters/deployments.mjs";
+import { handleDeploymentRequest } from "../../../../../../agent-demo/t3-adapters/deployment-http.mjs";
 import { readImportedDrafts } from "../../../../../../agent-demo/t3-adapters/legacy-drafts.mjs";
 import { saveAuthorizedPlan } from "../../../../../../agent-demo/t3-adapters/plan-materials.mjs";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
@@ -74,7 +76,26 @@ export const layer = Layer.unwrap(Effect.sync(() => {
     }
     return HttpServerResponse.jsonUnsafe(result.body, {status:result.status, headers:{'cache-control':'private, no-store'}});
   }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))));
+  const deploymentRequest = Effect.gen(function* () {
+    const current = yield* principal;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    if (request.method !== 'GET') yield* Effect.try(() => access.requireCsrf(current, request.headers['x-demo-csrf']));
+    const input = request.method === 'GET' ? undefined : yield* request.json;
+    const result = yield* Effect.tryPromise(() => handleDeploymentRequest({
+      access, store: configuredDeploymentStore(), principal: current,
+      url: new URL(request.url, 'http://localhost'), method: request.method, input,
+    }));
+    return HttpServerResponse.jsonUnsafe(result.body, {
+      status: result.status, headers: { 'cache-control': 'private, no-store' },
+    });
+  }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))));
   return Layer.mergeAll(
+    HttpRouter.add('GET', '/autoops/projects/:projectId/deployments', deploymentRequest),
+    HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),
+    HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/targets', deploymentRequest),
+    HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/tasks', deploymentRequest),
+    HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/tasks/:taskId', deploymentRequest),
+    HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/targets/:targetId/releases', deploymentRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/tree', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/search', workspaceRequest),

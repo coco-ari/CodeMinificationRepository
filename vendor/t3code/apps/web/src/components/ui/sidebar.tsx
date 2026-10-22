@@ -125,12 +125,18 @@ function SidebarProvider({
       _setOpen(openState);
     }
 
-    await cookieStore.set({
-      expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
-      name: SIDEBAR_COOKIE_NAME,
-      path: "/",
-      value: String(openState),
-    });
+    if (typeof cookieStore !== "undefined") {
+      await cookieStore.set({
+        expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
+        name: SIDEBAR_COOKIE_NAME,
+        path: "/",
+        value: String(openState),
+      });
+    } else {
+      // The Cookie Store API is unavailable on ordinary HTTP origins. Keep
+      // shadcn's original cookie fallback for LAN and private-network clients.
+      document.cookie = `${SIDEBAR_COOKIE_NAME}=${String(openState)}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+    }
   };
 
   const toggleSidebar = () => {

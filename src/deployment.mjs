@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events';
-import { mkdir, copyFile, readFile, stat, rm } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, stat, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { sourceKey, archiveKey, validateRevision, validateBranch } from './archive.mjs';
-import { SourceArchives } from './source-archives.mjs';
+import { SourceArchives, checksum } from './source-archives.mjs';
 import { migrateWorkspaces, sourceSnapshot } from './workspaces.mjs';
 import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
@@ -32,6 +32,30 @@ function relative(value, label, allowGlob = false) {
 }
 function managedMode(value) { if (value !== undefined && value !== 'managed') fail('仅支持平台部署，不再提供监控模式'); return 'managed'; }
 function capabilities(value) { return [...new Set(list(value, 20, 'Agent 能力').map(item => requireText(item, 'Agent 能力', 80)))]; }
+function workspaceSourceIdentity(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail('工作区源码身份格式错误');
+  const identity = {};
+  for (const key of ['projectId', 'sourceVersionId', 'packageId']) {
+    const value = requireText(input[key], '工作区源码标识', 128);
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(value)) fail('工作区源码标识无效');
+    identity[key] = value;
+  }
+  if (!['frontend', 'backend'].includes(input.service)) fail('工作区源码服务无效');
+  if (typeof input.contentHash !== 'string' || !/^[a-f0-9]{64}$/.test(input.contentHash)) fail('工作区内容校验值无效');
+  const repositories = list(input.repositories, 32, '工作区仓库来源').map(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail('工作区仓库来源格式错误');
+    const repositoryPath = relative(entry.path, '工作区仓库目录');
+    validateRevision(entry.commit);
+    return { path: repositoryPath, commit: entry.commit };
+  }).sort((a, b) => a.path.localeCompare(b.path));
+  if (new Set(repositories.map(entry => entry.path)).size !== repositories.length) fail('工作区仓库目录重复');
+  return { ...identity, service: input.service, contentHash: input.contentHash, repositories };
+}
+function deploymentActor(input) {
+  if (input === undefined) return undefined;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail('发布操作人格式错误');
+  return { id: requireText(input.id, '发布操作人', 128), ...(input.displayName === undefined ? {} : { displayName: requireText(input.displayName, '发布操作人名称', 160) }) };
+}
 function transition(task, stage, done = false, occurredAt = now()) {
   task.stageHistory ||= [];
   const previous = task.stageHistory.at(-1);
@@ -366,6 +390,57 @@ export class DeploymentService extends EventEmitter {
     const source = this.data.environmentSources.find(item => item.environmentId === target.environmentId && item.serviceId === target.serviceId);
     return digest(JSON.stringify([validateConfig(target.config, service.module, service.kind || 'java'), source?.sourceProjectId, target.networkIdentity || null]));
   }
+  // 内部接口：调用方先校验用户、业务项目与工作区包权限；文件路径绝不来自浏览器。
+  async createTaskFromArchive(input, archive) {
+    if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
+    if (!input || typeof input !== 'object' || Array.isArray(input) || (input.action !== undefined && input.action !== 'deploy')) fail('仅支持工作区源码发布');
+    input = { ...input };
+    if (typeof input.requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(input.requestId)) fail('幂等请求标识无效');
+    if (typeof input.configKey !== 'string' || !/^[a-f0-9]{64}$/.test(input.configKey)) fail('发布配置校验值无效');
+    const sourceIdentity = workspaceSourceIdentity(input.sourceIdentity), actor = deploymentActor(input.actor);
+    if (!archive || typeof archive !== 'object' || Array.isArray(archive) || typeof archive.file !== 'string' || !path.isAbsolute(archive.file)) fail('工作区源码档案无效');
+    if (typeof archive.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(archive.sha256)) fail('源码包校验值无效');
+    integer(archive.size, undefined, 1, Number.MAX_SAFE_INTEGER, '源码包大小');
+    if (archive.size > 64 * 1024 * 1024) throw new HttpError(413, 'Agent 仅支持不超过 64 MiB 的源码 ZIP');
+    validateRevision(archive.revision);
+    const fixedArchive = { file: archive.file, sha256: archive.sha256, size: archive.size, revision: archive.revision,
+      ...(archive.commitSubject === undefined ? {} : { commitSubject: requireText(archive.commitSubject, '源码提交说明', 500) }) };
+    const requestFingerprint = digest(JSON.stringify(['workspace-package', input.targetId, input.configKey, sourceIdentity, fixedArchive.sha256, fixedArchive.size, fixedArchive.revision, fixedArchive.commitSubject || null, actor?.id || null]));
+    const duplicate = data => {
+      const existing = data.tasks.find(item => item.requestId === input.requestId);
+      if (existing && existing.requestFingerprint !== requestFingerprint) throw new HttpError(409, '同一请求标识不能用于不同发布参数');
+      return existing;
+    };
+    const repeated = duplicate(this.data); if (repeated) return structuredClone(repeated);
+    const info = await lstat(fixedArchive.file);
+    if (!info.isFile() || info.isSymbolicLink()) fail('源码档案必须是普通文件');
+    const actual = await checksum(fixedArchive.file);
+    if (actual.size !== fixedArchive.size || actual.sha256 !== fixedArchive.sha256) throw new HttpError(409, '源码包校验失败，未创建发布任务');
+    const taskId = randomUUID();
+    const task = await this.store.change(state => {
+      if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
+      const data = state.deployments, existing = duplicate(data); if (existing) return structuredClone(existing);
+      const target = this.ensureManaged(data, input.targetId), environment = find(data.environments, target.environmentId), service = find(data.services, target.serviceId), server = find(data.servers, target.serverId);
+      if (target.applicationId !== environment.applicationId || target.applicationId !== service.applicationId || !data.serverBindings.some(binding => binding.applicationId === target.applicationId && binding.serverId === server.id)) fail('部署目标的项目归属或服务器绑定无效');
+      if (input.configKey !== this.configKey(target.id)) throw new HttpError(409, '发布配置已变化，请刷新后重新确认');
+      if ((service.kind === 'static') !== (sourceIdentity.service === 'frontend')) fail('工作区部署包与服务类型不匹配');
+      if (target.networkIdentity && !server.capabilities?.includes('fixed-network-alias-v1')) throw new HttpError(409, '请先升级目标 Agent，使其支持固定网络别名');
+      if (service.kind === 'static' && !server.capabilities?.includes('static-site-v1')) throw new HttpError(409, '请先升级目标服务器 Agent，使其支持静态站点发布');
+      if (service.kind === 'static' && !target.config.health?.url) fail('请先配置站点访问地址，并将已有 Nginx 指向该目标的发布目录');
+      if (data.tasks.filter(item => !terminal.has(item.status)).length >= 200) throw new HttpError(503, '部署队列已满');
+      const current = { id: taskId, targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: 'deploy', status: 'preparing', stage: 'preparing',
+        sourceKind: 'workspace-package', sourceIdentity, ...(actor ? { actor } : {}),
+        detailedAgentStages: server.capabilities?.includes('delivery-telemetry-v1') || false,
+        networkIdentity: structuredClone(target.networkIdentity || null), createdAt: now(), updatedAt: now(),
+        config: validateConfig(target.config, service.module, service.kind || 'java'), sourceSnapshot: null, source: null,
+        revision: fixedArchive.revision, commitSubject: fixedArchive.commitSubject,
+        recoveryAllowed: !!server.capabilities?.includes('source-archive-recovery-v1'), requestId: input.requestId, requestFingerprint, lastSeq: 0 };
+      transition(current, 'preparing'); data.tasks.push(current); return structuredClone(current);
+    });
+    if (task.id === taskId) await this.startPrepare(task.id, fixedArchive);
+    this.changed('task', task.id, task.applicationId);
+    return structuredClone(find(this.data.tasks, task.id, '任务'));
+  }
   async createTask(input) {
     if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
     if (!['deploy', 'restart', 'rollback'].includes(input.action)) fail('操作类型无效');
@@ -429,6 +504,8 @@ export class DeploymentService extends EventEmitter {
         networkIdentity: structuredClone(target.networkIdentity || null),
         createdAt: now(), updatedAt: now(), config: release ? structuredClone(release.config) : validateConfig(target.config, service.module, service.kind || 'java'),
         sourceProjectId: sourceProject.id, sourceSnapshot: snapshot, source: archived ? { ...archived, url: `/api/agent/v1/tasks/${taskId}/source` } : null,
+        ...(release?.sourceKind === 'workspace-package' ? { sourceKind: release.sourceKind, sourceIdentity: structuredClone(release.sourceIdentity) } : {}),
+        ...(input.actor === undefined ? {} : { actor: deploymentActor(input.actor) }),
         sourceArchiveId: archived?.archiveId, revision: release?.revision || input.revision, commitSubject: release?.commitSubject || selectedCommit?.subject,
         recoveryAllowed: !!supportsRecovery, requestId: input.requestId, requestFingerprint, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
       transition(task, task.status);
@@ -441,13 +518,35 @@ export class DeploymentService extends EventEmitter {
     if (task.status === 'preparing') this.startPrepare(task.id);
     this.changed('task', task.id); return task;
   }
-  startPrepare(id) {
+  startPrepare(id, archive) {
     if (this.preparations.has(id)) return this.preparations.get(id);
-    const promise = this.prepare(id).catch(error => { this.emit('error-safe', { taskId: id, message: error.message }); }).finally(() => this.preparations.delete(id));
+    const promise = this.prepare(id, archive).catch(error => { this.emit('error-safe', { taskId: id, message: error.message }); }).finally(() => this.preparations.delete(id));
     this.preparations.set(id, promise); return promise;
   }
-  async prepare(id) {
+  async prepareWorkspaceArchive(id, archive) {
+    try {
+      const task = find(this.data.tasks, id, '任务');
+      if (archive) await this.archives.import(task, archive);
+      // 重启时仅使用已经持久化的固定档案；绝不能降级成拉取当前仓库。
+      const current = find(this.data.tasks, id, '任务');
+      if (!current.source?.archiveId) throw new HttpError(410, '工作区固定源码档案尚未完成或已丢失，请重新创建发布任务');
+      const source = await this.archives.verify(current.source);
+      if (source.revision !== current.revision || source.sha256 !== current.source.sha256 || source.size !== current.source.size) throw new HttpError(409, '固定源码档案与任务版本不一致');
+      await this.store.change(state => {
+        const saved = find(state.deployments.tasks, id, '任务'); if (saved.status !== 'preparing') return;
+        transition(saved, 'queued'); Object.assign(saved, { status: 'queued', stage: 'queued', sourceArchiveId: source.archiveId,
+          source: { archiveId: source.archiveId, revision: source.revision, sha256: source.sha256, size: source.size, commitSubject: source.commitSubject, url: `/api/agent/v1/tasks/${id}/source` }, updatedAt: now() });
+      });
+    } catch (error) {
+      await this.store.change(state => {
+        const current = find(state.deployments.tasks, id, '任务'); if (current.status !== 'preparing') return;
+        transition(current, 'failed', true); Object.assign(current, { status: 'failed', stage: 'failed', error: error instanceof HttpError ? error.message : '固定工作区源码失败，请检查服务存储', finishedAt: now(), updatedAt: now() });
+      });
+    } finally { this.changed('task', id); }
+  }
+  async prepare(id, archive) {
     const task = find(this.data.tasks, id, '任务'); const sourceId = task.sourceProjectId;
+    if (task.sourceKind === 'workspace-package') return this.prepareWorkspaceArchive(id, archive);
     const snapshot = task.sourceSnapshot || sourceSnapshot(find(this.store.state.projects, sourceId));
     const key = archiveKey(snapshot);
     if (!this.pins.has(key)) this.pins.set(key, new Set()); this.pins.get(key).add(id);
@@ -613,6 +712,8 @@ export class DeploymentService extends EventEmitter {
           const saved = { id: release.id, artifactId: artifactId(release), action: task.action, recoveryMethod: release.recoveryMethod, ...(task.config.kind === 'static' ? { kind: 'static', artifact: release.artifact } : { image: release.image }), revision: release.revision,
             commitSubject: task.commitSubject, config: structuredClone(task.config), targetId: target.id, applicationId: target.applicationId,
             sourceSnapshot: task.sourceSnapshot, sourceArchiveId: task.sourceArchiveId,
+            ...(task.sourceKind === 'workspace-package' ? { sourceKind: task.sourceKind, sourceIdentity: structuredClone(task.sourceIdentity) } : {}),
+            ...(task.actor ? { actor: structuredClone(task.actor) } : {}),
             buildSnapshot: release.buildSnapshot || task.release?.buildSnapshot,
             ...(release.id === task.id && task.action === 'rollback' ? { restoredFromReleaseId: task.release.id } : {}), createdAt: timing.at, available: true };
           if (!data.releases.some(existing => existing.id === saved.id && existing.targetId === target.id)) data.releases.push(saved);

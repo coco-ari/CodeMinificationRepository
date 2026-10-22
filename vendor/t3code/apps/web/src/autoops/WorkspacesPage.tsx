@@ -14,6 +14,7 @@ import { ScrollArea } from '~/components/ui/scroll-area'
 import { Spinner } from '~/components/ui/spinner'
 import { randomUUID } from '~/lib/utils'
 import { readAutoOpsHost } from './hostConfig'
+import { DeploymentsPanel } from './DeploymentsPanel'
 import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFiles'
 import { ReadOnlySourcePreview } from '~/components/files/AttachmentFilePreview'
 import { FILE_SURFACE_SUBHEADER_CLASS, FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
@@ -37,10 +38,21 @@ const dateLabel = (value: string) => new Date(value).toLocaleString('zh-CN')
 const sizeLabel = (value: number) => value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KB` : `${(value / 1024 / 1024).toFixed(1)} MB`
 const errorLabel = (error: unknown) => error instanceof Error ? error.message : '操作失败，请重试。'
 const taskActive = (task: WorkspaceTask) => task.status === 'queued' || task.status === 'running'
+const selectionKey = (key: string) => `autoops:workspaces:${readAutoOpsHost()?.principal.id ?? ''}:${key}`
+function readSelection(key: string) {
+  try { return sessionStorage.getItem(selectionKey(key)) } catch { return null }
+}
+function saveSelection(key: string, value: string) {
+  try { sessionStorage.setItem(selectionKey(key), value) } catch { /* Navigation remains usable without browser storage. */ }
+}
 
 export function AutoOpsWorkspacesPage() {
   const host = readAutoOpsHost()
-  const [projectId, setProjectId] = useState(host?.projects[0]?.id ?? '')
+  const [projectId, setProjectId] = useState(() => {
+    const stored = readSelection('project')
+    return host?.projects.find((project) => project.id === stored)?.id ?? host?.projects[0]?.id ?? ''
+  })
+  useEffect(() => { if (projectId) saveSelection('project', projectId) }, [projectId])
   if (!host || !projectId) return <Empty><EmptyHeader><EmptyTitle>没有可用的项目工作区</EmptyTitle></EmptyHeader></Empty>
   return (
     <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden overscroll-y-none">
@@ -62,9 +74,15 @@ function ProjectWorkspaces({ projectId }: { projectId: string }) {
   const membership = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.membership
   const manager = membership?.workspaceAccess === 'internal' && membership.role === 'manager'
   const externalOnly = membership?.workspaceAccess === 'external'
-  const [selectedTab, setTab] = useState<Tab>(externalOnly ? 'external' : 'internal')
+  const [selectedTab, setTab] = useState<Tab>(() => {
+    const stored = readSelection(`${projectId}:tab`)
+    return externalOnly ? 'external' : stored === 'external' || stored === 'packages' ? stored : 'internal'
+  })
+  const [deploymentView, setDeploymentView] = useState<'services' | 'packages'>(() => readSelection(`${projectId}:deployment-view`) === 'packages' ? 'packages' : 'services')
   const tab = externalOnly ? 'external' : !manager && selectedTab === 'packages' ? 'internal' : selectedTab
   const availableTabs = tabs.filter((item) => externalOnly ? item.id === 'external' : manager || item.id !== 'packages')
+  useEffect(() => { saveSelection(`${projectId}:tab`, tab) }, [projectId, tab])
+  useEffect(() => { saveSelection(`${projectId}:deployment-view`, deploymentView) }, [projectId, deploymentView])
   const [overview, setOverview] = useState<WorkspaceOverview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
@@ -178,7 +196,10 @@ function ProjectWorkspaces({ projectId }: { projectId: string }) {
         </div>
       </div>
       {error && !dialog ? <div className="shrink-0 border-b border-border/60 px-3 py-2"><Alert variant="error"><AlertTitle>工作区操作未完成</AlertTitle><AlertDescription>{error}</AlertDescription></Alert><Button className="mt-2" size="xs" variant="outline" onClick={() => setRefresh((value) => value + 1)}>重新加载</Button></div> : null}
-      {!overview ? error ? null : <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" />正在读取工作区…</div> : tab === 'packages' ? <WorkspaceReleases projectId={projectId} releases={overview.releases} versions={internal} /> : current ? <FileBrowser key={`files:${current.id}`} projectId={projectId} version={current} /> : <WorkspaceEmpty title={tab === 'internal' ? '还没有内部工作区' : '还没有外部工作区'} description={tab === 'internal' ? '导入 HTTPS Git 仓库，保存原始源码、文档和原型的固定版本。' : '从内部固定版本生成，检查完成后再发布给外部对话使用。'} />}
+      {!overview ? error ? null : <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" />正在读取工作区…</div> : tab === 'packages' ? <>
+        <div className="shrink-0 border-b border-border/60 px-3 py-1.5"><ToggleGroup aria-label="部署发布分类" variant="segmented" value={[deploymentView]} onValueChange={(value) => { if (value[0] === 'services' || value[0] === 'packages') setDeploymentView(value[0]) }}><Toggle value="services">服务发布</Toggle><Toggle value="packages">源码包</Toggle></ToggleGroup></div>
+        {deploymentView === 'services' ? <DeploymentsPanel key={`deployments:${projectId}`} projectId={projectId} packages={overview.releases} /> : <WorkspaceReleases projectId={projectId} releases={overview.releases} versions={internal} />}
+      </> : current ? <FileBrowser key={`files:${current.id}`} projectId={projectId} version={current} /> : <WorkspaceEmpty title={tab === 'internal' ? '还没有内部工作区' : '还没有外部工作区'} description={tab === 'internal' ? '导入 HTTPS Git 仓库，保存原始源码、文档和原型的固定版本。' : '从内部固定版本生成，检查完成后再发布给外部对话使用。'} />}
       {manager ? <>
         <WorkspaceImportDialog open={dialog === 'import'} onOpenChange={dialogChange} finalFocus={restoreDialogFocus} disabled={actionDisabled || overview?.import?.supported === false} limits={overview?.import} error={error} onImport={(url, branch) => mutate(() => importWorkspaceRepository(projectId, url, branch, randomUUID()))} />
         <ExternalWorkspaceDialog open={dialog === 'external'} onOpenChange={dialogChange} finalFocus={restoreDialogFocus} disabled={actionDisabled} internalVersions={internal} initialSourceId={currentInternal?.id} error={error} onGenerate={(sourceId, rules) => mutate(() => generateExternalWorkspace(projectId, sourceId, rules, randomUUID()))} />
