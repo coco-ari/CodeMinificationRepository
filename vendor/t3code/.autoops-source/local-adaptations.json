@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T10:48:53.115380+00:00",
+  "generatedAt": "2026-10-22T11:10:05.011827+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -596,7 +596,7 @@
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "14077585aed8edbdc289b4e397c45c2201b1d2bf6f5520e77b91726672ea42ee",
-      "localSha256": "74cb811e9a9eac56de66bbd56ea3182eae970e991c8a0dda13056575bc32cdf1"
+      "localSha256": "956cc118dac26d2fa96b33b06c66382f974855f43023dfecd2dc047d63b02fae"
     },
     {
       "path": "apps/web/src/components/chat/ChatGptSharingControl.tsx",
@@ -650,7 +650,7 @@
       "path": "apps/web/src/components/chat/ComposerCommandMenu.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "7103a425dc0af46931e230ce3cbc488e4ce69e61727f57248d9ee51c57bc7967",
-      "localSha256": "3299b661a94ca8587a71f047ebb95120e0e25662499c9f262b2b4d4be2f04e77"
+      "localSha256": "6ce82b55df17b58dcb9bb69ec53d5646f67bc4641a72d28d5b536f5d498879f5"
     },
     {
       "path": "apps/web/src/components/chat/ComposerControl.tsx",
@@ -2189,6 +2189,18 @@
       "localSha256": "6e323ec2768f72279a80a88f830f0c84f09b800430a2e0007f5d902d2b8b06f2"
     },
     {
+      "path": "apps/web/src/composer-logic.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "ad3eb7870b8d9b9a378cb2b482428947e38d849b7f9f197fc35b05ba4b72e7f8",
+      "localSha256": "cb51ac6057954a418b24f28ba03eb3a3fb5f64ad0b230b24a855b3ff59ab6e1c"
+    },
+    {
+      "path": "apps/web/src/composer-logic.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "72148a30868ed9b2a0f85914d6657382adf152a6a338e59f7788ad7b006fb9ca",
+      "localSha256": "aa6e5585bd6e52278988b5cfc89b3e55ed80757df455c41a97b436f3d1b9dc89"
+    },
+    {
       "path": "apps/web/src/composerDraftStore.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "95537f7809990e4120064e2fbbbdf88305872e58a8f0cfb2528c9303d88e988b",
@@ -2661,6 +2673,18 @@
       "reason": "local content differs from upstream",
       "upstreamSha256": "d60165961c79bd11d8342d84b388217db6a07b4d9f0a7035a37224a1d3ea7d47",
       "localSha256": "7f341c7792818451ab61a2134856795ece961ca4d876f11401d3435dade8c3d3"
+    },
+    {
+      "path": "packages/shared/src/composerTrigger.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "d2edd811c8d995150d69090ca30432331a0e1672939f7f4c89914ac719004cc9",
+      "localSha256": "7b56c57f5bd93d1451acb96217e1db0e78cb1ac7c120098a9f6aa27d5c7eba86"
+    },
+    {
+      "path": "packages/shared/src/composerTrigger.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "0b9edb29e5d804fd556cba3df300f1f84ca8fdb9f1910c7a66725151a2e6afa5",
+      "localSha256": "939158412d057c44617b7881a1dbb6e20588a63e18f7b2f4efe601fec7a4a83a"
     },
     {
       "path": "packages/shared/src/themePalettes.ts",

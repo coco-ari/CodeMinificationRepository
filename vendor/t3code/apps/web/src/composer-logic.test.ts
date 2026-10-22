@@ -1,5 +1,7 @@
 import { resolveComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
 import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
+import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
+import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { EnvironmentId, MessageId, ThreadId, type AssistantCitation } from "@t3tools/contracts";
 import {
   collectAssistantCitations,
@@ -23,11 +25,45 @@ import {
   formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
   isPathSuggestionCurrent,
+  isComposerDirectoryCompletionKey,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "./composer-logic";
 import { carryDisplacedCustomAnswerIntoPrompt } from "./pendingUserInput";
 import { formatTerminalContextReference } from "./lib/terminalContext";
+import { autoOpsWorkspaceDirectoryCompletion } from "./autoops/resources";
+
+describe("workspace directory completion", () => {
+  const tab = { key: "Tab", shiftKey: false, altKey: false, ctrlKey: false, metaKey: false };
+  it("only handles unmodified Tab outside an IME composition", () => {
+    expect(isComposerDirectoryCompletionKey(tab)).toBe(true);
+    for (const patch of [{ key: "Enter" }, { shiftKey: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+      expect(isComposerDirectoryCompletionKey({ ...tab, ...patch })).toBe(false);
+    }
+  });
+
+  it("navigates quoted directories as text, then commits a canonical native file reference", () => {
+    const scope = { projectId: "p-autoops", workspaceType: "internal" as const, workspaceVersionId: "version-1" };
+    const canonicalRoot = "autoops/p-autoops/workspaces/version-1/";
+    const completion = autoOpsWorkspaceDirectoryCompletion(canonicalRoot + '需求 文档/含"引号', scope)!;
+    const prefix = "请检查 👋 ";
+    const original = `${prefix}@需 后续正文`;
+    const trigger = detectComposerTrigger(original, prefix.length + 2)!;
+    const navigated = replaceTextRange(original, trigger.rangeStart, trigger.rangeEnd, completion);
+    expect(navigated.text).toBe(`${prefix}@"需求 文档/含\\"引号/ 后续正文`);
+    expect(collectComposerInlineTokens(navigated.text)).toEqual([]);
+    const current = detectComposerTrigger(navigated.text, navigated.cursor)!;
+    expect(current.query).toBe('需求 文档/含"引号/');
+    const cwd = "autoops://projects/p-autoops/environments/test/threads/thread-1?workspaceType=internal&workspaceVersionId=version-1";
+    const searchedTarget = { environmentId: EnvironmentId.make("local"), cwd, query: current.query };
+    expect(isPathSuggestionCurrent(searchedTarget, current, searchedTarget.environmentId, cwd)).toBe(true);
+    expect(isPathSuggestionCurrent(searchedTarget, current, searchedTarget.environmentId, cwd.replace("version-1", "version-2"))).toBe(false);
+    const filePath = canonicalRoot + '需求 文档/含"引号/发布说明.md';
+    const selected = replaceTextRange(navigated.text, current.rangeStart, current.rangeEnd, serializeComposerFileLink(filePath) + " ");
+    expect(collectComposerInlineTokens(selected.text)).toMatchObject([{ type: "mention", value: filePath }]);
+    expect(selected.text).toContain("后续正文");
+  });
+});
 
 const terminalReference = formatTerminalContextReference({
   id: "ctx-1",
@@ -403,6 +439,15 @@ describe("detectComposerTrigger", () => {
       rangeStart: "Please check ".length,
       rangeEnd: text.length,
     });
+  });
+
+  it("reuses the unfinished quoted-path detector while keeping closed references inactive", () => {
+    const text = '请检查 @"需求 文档/含\\"引号/';
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "path", query: '需求 文档/含"引号/', rangeStart: 4, rangeEnd: text.length,
+    });
+    expect(detectComposerTrigger(text + '" ', text.length + 2)).toBeNull();
+    expect(detectComposerTrigger('@"资料\t目录/', 8)).toBeNull();
   });
 
   it("detects slash command token while typing command name", () => {

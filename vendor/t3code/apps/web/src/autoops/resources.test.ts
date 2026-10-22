@@ -1,6 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 afterEach(() => vi.resetModules())
 
+it('completes only directories inside the selected fixed workspace version', async () => {
+  const { autoOpsWorkspaceDirectoryCompletion } = await import('./resources')
+  const scope = { projectId: 'p-autoops', workspaceType: 'internal' as const, workspaceVersionId: 'version-1' }
+  const prefix = 'autoops/p-autoops/workspaces/version-1/'
+  expect(autoOpsWorkspaceDirectoryCompletion(prefix + 'frontend/src', scope)).toBe('@frontend/src/')
+  expect(autoOpsWorkspaceDirectoryCompletion(prefix + '需求 文档', scope)).toBe('@"需求 文档/')
+  expect(autoOpsWorkspaceDirectoryCompletion(prefix + '文档/含"引号', scope)).toBe('@"文档/含\\"引号/')
+  for (const path of [
+    'frontend',
+    'autoops/p-autoops/workspaces/version-10/frontend',
+    'autoops/other-project/workspaces/version-1/frontend',
+    'autoops/p-autoops/documents/doc-1',
+    'autoops/p-autoops/threads/thread-1/reports',
+    prefix, prefix + '../frontend', prefix + 'frontend//src', prefix + 'frontend/./src', prefix + 'front\\end',
+    ...['\n', '\r', '\t', '\0', '\u007f', '\u0085', '\u2028', '\u2029'].map((control) => prefix + '目录' + control + '资料'),
+  ]) expect(autoOpsWorkspaceDirectoryCompletion(path, scope)).toBeNull()
+  expect(autoOpsWorkspaceDirectoryCompletion(prefix + 'frontend', undefined)).toBeNull()
+  expect(autoOpsWorkspaceDirectoryCompletion(prefix + 'frontend', { projectId: scope.projectId })).toBeNull()
+  expect(autoOpsWorkspaceDirectoryCompletion(prefix + 'frontend', { ...scope, workspaceType: 'external' })).toBe('@frontend/')
+})
+
 it('shows workspace-relative candidate directories without changing resource identities', async () => {
   const { autoOpsResourcePathDescription } = await import('./resources')
   const scope = { projectId: 'p-autoops', workspaceVersionId: 'version-1' }

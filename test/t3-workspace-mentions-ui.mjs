@@ -109,6 +109,134 @@ async function clearOwnDraft(session) {
   assert(hash.startsWith('#/draft/'), '不能操作已有用户对话')
   session.draftIds.add(decodeURIComponent(hash.slice('#/draft/'.length).split('?')[0]))
 }
+async function pathCandidates() {
+  return candidates().evaluateAll((elements) => elements.flatMap((element) => {
+    const id = element.getAttribute('data-composer-item-id') ?? ''
+    const match = /^path:(file|directory):(.+)$/.exec(id)
+    return match ? [{ id, kind: match[1], path: match[2], selected: element.getAttribute('data-active') === 'true' }] : []
+  }))
+}
+async function waitDirectoryCandidate(prefix, directory) {
+  await drawer().waitFor()
+  await page.getByRole('listbox', { name: '文件与文件夹', exact: true }).waitFor()
+  return until(async () => {
+    const rows = await pathCandidates()
+    const workspaceRows = rows.filter((entry) => /^autoops\/[^/]+\/workspaces\//.test(entry.path))
+    // This excludes the previous bare-@ list while the new query is still debouncing.
+    return rows.some((entry) => entry.id === `path:directory:${prefix}/${directory}`) && workspaceRows.every((entry) => entry.path === `${prefix}/${directory}` || entry.path.startsWith(`${prefix}/${directory}/`)) ? rows : null
+  }, `等待目录 ${directory} 的防抖候选完成`)
+}
+async function waitDirectChildren(prefix, directory) {
+  await drawer().waitFor()
+  return until(async () => {
+    const rows = await pathCandidates()
+    const parent = `${prefix}/${directory}`
+    // A recursive fuzzy result, or a stale parent query, cannot satisfy this boundary.
+    return rows.length && rows.every((entry) => entry.path.slice(0, entry.path.lastIndexOf('/')) === parent) ? rows : null
+  }, `目录 ${directory}/ 补全后没有显示真实直系孩子`)
+}
+async function highlightCandidate(id) {
+  const initial = await pathCandidates()
+  const count = await candidates().count()
+  assert(initial.some((entry) => entry.id === id), `候选不存在：${id}`)
+  for (let step = 0; step <= count + 1; step++) {
+    const selected = await candidates().evaluateAll((elements) => elements.find((element) => element.getAttribute('data-active') === 'true')?.getAttribute('data-composer-item-id') ?? null)
+    if (selected === id) return
+    await editor().press('ArrowDown')
+    await until(async () => (await candidates().evaluateAll((elements) => elements.find((element) => element.getAttribute('data-active') === 'true')?.getAttribute('data-composer-item-id') ?? null)) !== selected, '方向键没有更新原生候选高亮')
+  }
+  assert.fail(`方向键无法选中候选：${id}`)
+}
+async function expectRawDirectoryQuery(query, versionId) {
+  await until(async () => (await editor().innerText()).trimEnd() === query, `Tab 应保留原始查询 ${query}`)
+  assert(!(await editor().innerHTML()).includes(versionId), '目录 Tab 只能继续查询，不能提前形成固定资料标签')
+}
+async function expectCanonicalTag(canonicalPath, message) {
+  return until(async () => {
+    const html = await editor().innerHTML()
+    let decoded = html
+    try { decoded = decodeURIComponent(html) } catch {}
+    return decoded.includes(canonicalPath) && !(await drawer().isVisible()) ? html : null
+  }, message)
+}
+async function tabNavigationCycle(session, type, name, version) {
+  const prefix = `autoops/${session.projectId}/workspaces/${version.id}`
+  const completions = [], childCounts = []
+  await clearOwnDraft(session)
+  await editor().fill('@front')
+  await waitDirectoryCandidate(prefix, 'frontend')
+  await editor().press('ArrowDown')
+  await editor().press('ArrowUp')
+  await highlightCandidate(`path:directory:${prefix}/frontend`)
+  assert(await drawer().isVisible())
+  await editor().press('Tab')
+  await expectRawDirectoryQuery('@frontend/', version.id)
+  let children = await waitDirectChildren(prefix, 'frontend')
+  assert(children.some((entry) => entry.path === `${prefix}/frontend/package.json`), '目录候选必须来自实际前端构建目录')
+  completions.push('frontend/'); childCounts.push(children.length)
+  await page.screenshot({ path: path.join(output, `${name}-tab-frontend-children.png`) })
+
+  if (type === 'internal') {
+    const gitId = `path:directory:${prefix}/frontend/.git`
+    assert(children.some((entry) => entry.id === gitId), '内部原始示例应保留可导航的真实 .git 目录')
+    await highlightCandidate(gitId)
+    await editor().press('Tab')
+    await expectRawDirectoryQuery('@frontend/.git/', version.id)
+    children = await waitDirectChildren(prefix, 'frontend/.git')
+    completions.push('frontend/.git/'); childCounts.push(children.length)
+    const next = ['hooks', 'objects'].map((directory) => children.find((entry) => entry.kind === 'directory' && entry.path === `${prefix}/frontend/.git/${directory}`)).find(Boolean)
+      ?? children.find((entry) => entry.kind === 'directory')
+    assert(next, '使用原生候选里真实存在的 Git 子目录继续验证多级补全')
+    const relative = next.path.slice(prefix.length + 1)
+    await editor().press('ArrowDown')
+    await editor().press('ArrowUp')
+    await highlightCandidate(next.id)
+    await editor().press('Tab')
+    await expectRawDirectoryQuery(`@${relative}/`, version.id)
+    const nested = await waitDirectChildren(prefix, relative)
+    completions.push(relative + '/'); childCounts.push(nested.length)
+    await page.screenshot({ path: path.join(output, `${name}-tab-nested-git-children.png`) })
+  }
+
+  await clearOwnDraft(session)
+  await editor().fill('@frontend/package')
+  await until(async () => {
+    const rows = await pathCandidates()
+    return rows.length === 2 && rows.every((entry) => entry.kind === 'file' && entry.path.startsWith(`${prefix}/frontend/package`))
+  }, '文件 Tab 前必须等防抖筛选完成，不能使用上一层目录候选')
+  await highlightCandidate(`path:file:${prefix}/frontend/package.json`)
+  await editor().press('Tab')
+  await expectCanonicalTag(`${prefix}/frontend/package.json`, '文件 Tab 没有转成 canonical 标签')
+  await page.screenshot({ path: path.join(output, `${name}-tab-file-tag.png`) })
+
+  await clearOwnDraft(session)
+  await editor().fill('@doc')
+  await waitDirectoryCandidate(prefix, 'docs')
+  await highlightCandidate(`path:directory:${prefix}/docs`)
+  assert(await drawer().isVisible(), '按 Enter 前目录菜单必须真实打开，避免触发发送')
+  await editor().press('Enter')
+  await expectCanonicalTag(`${prefix}/docs`, 'Enter 应保留原生目录引用能力')
+  await page.screenshot({ path: path.join(output, `${name}-enter-directory-tag.png`) })
+
+  await clearOwnDraft(session)
+  await editor().fill('@front')
+  await waitDirectoryCandidate(prefix, 'frontend')
+  await editor().press('Escape')
+  await until(async () => !(await drawer().isVisible()), 'Escape 没有关闭目录候选')
+  assert.equal((await editor().innerText()).trimEnd(), '@front')
+  await clearOwnDraft(session)
+  await editor().fill('@front')
+  await waitDirectoryCandidate(prefix, 'frontend')
+  await highlightCandidate(`path:directory:${prefix}/frontend`)
+  await editor().press('Shift+Tab')
+  assert.equal((await editor().innerText()).trimEnd(), '@front', 'Shift+Tab 不得被目录补全占用')
+  assert(!(await editor().innerHTML()).includes(version.id), 'Shift+Tab 不得插入引用标签')
+  await page.screenshot({ path: path.join(output, `${name}-shift-tab-preserves-query.png`) })
+  await clearOwnDraft(session)
+  assert.equal(report.messageDispatches, 0)
+  assert.equal(report.initialMessages, 0)
+  return { completions, directChildCounts: childCounts, arrowNavigation: true, directoryTabRemainsRawQuery: true, fileTabCanonicalTag: true, directoryEnterCanonicalTag: true, escapeClosesMenu: true, shiftTabDoesNotComplete: true }
+}
 async function mentionCycle(session, type, name) {
   const description = await scopeDescription(type)
   const versions = (type === 'internal' ? session.overview.internalVersions : session.overview.externalVersions).filter((version) => version.status === 'published' && description.endsWith(version.name))
@@ -152,7 +280,8 @@ async function mentionCycle(session, type, name) {
   assert(!(await drawer().isVisible()), '选中候选后原生列表应关闭')
   await page.screenshot({ path: path.join(output, `${name}-selected-tag.png`) })
   await clearOwnDraft(session)
-  return { scopeDescription: description, workspaceType: type, workspaceVersionId: version.id, bareFilePath: canonicalPath, candidateCount: rows.length, noPlatformAncestors: true, selectedCanonicalPath: `${prefix}/frontend/package.json` }
+  const tabNavigation = await tabNavigationCycle(session, type, name, version)
+  return { scopeDescription: description, workspaceType: type, workspaceVersionId: version.id, bareFilePath: canonicalPath, candidateCount: rows.length, noPlatformAncestors: true, selectedCanonicalPath: `${prefix}/frontend/package.json`, tabNavigation }
 }
 
 try {

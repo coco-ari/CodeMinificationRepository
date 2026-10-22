@@ -92,6 +92,11 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     }
     return [...result.values()].sort((a, b) => a.path.localeCompare(b.path))
   }
+  const directChildren = (files, directory) => {
+    if (directory) assertPath(directory)
+    const prefix = directory ? directory + '/' : ''
+    return entriesWithFolders(files).filter((entry) => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'))
+  }
   function findVisible(principal, path) {
     assertPath(path)
     const project = access.requireProject(principal, path.split('/')[1])
@@ -145,6 +150,12 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
       const workspacePrefix = scope.binding.workspaceVersionId ? `autoops/${project.id}/workspaces/${scope.binding.workspaceVersionId}/` : undefined
       const workspaceAncestors = workspacePrefix ? new Set(['autoops', `autoops/${project.id}`, `autoops/${project.id}/workspaces`, workspacePrefix.slice(0, -1)]) : undefined
       const files = visible(principal, project, scope.binding).filter((file) => (file.environmentId === undefined || file.environmentId === scope.environmentId) && (!input.imageOnly || file.mime.startsWith('image/')))
+      if (workspacePrefix && input.query.endsWith('/')) {
+        const directory = input.query.slice(0, -1)
+        if (directory) assertPath(directory)
+        const matches = directChildren(files, workspacePrefix.slice(0, -1) + (directory ? '/' + directory : '')).filter((entry) => !input.kind || entry.kind === input.kind)
+        return { entries: matches.slice(0, input.limit), truncated: matches.length > input.limit }
+      }
       const matches = entriesWithFolders(files).filter((entry) => {
         if (workspaceAncestors?.has(entry.path)) return false
         const relativePath = workspacePrefix && entry.path.startsWith(workspacePrefix) ? entry.path.slice(workspacePrefix.length) : entry.path
@@ -155,9 +166,7 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     list(principal, input) {
       const { project, environmentId, binding } = scopeAtCwd(principal, input.cwd)
       const directory = input.directoryPath?.replace(/\/$/, '') || ''
-      if (directory) assertPath(directory)
-      const prefix = directory ? directory + '/' : ''
-      const matches = entriesWithFolders(visible(principal, project, binding).filter((entry) => entry.environmentId === undefined || entry.environmentId === environmentId)).filter((entry) => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'))
+      const matches = directChildren(visible(principal, project, binding).filter((entry) => entry.environmentId === undefined || entry.environmentId === environmentId), directory)
       return { entries: matches.slice(0, 500), truncated: matches.length > 500 }
     },
     async read(principal, input) {

@@ -1,5 +1,20 @@
 import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from './hostConfig'
 
+/** A directory stays editable until a file or folder is explicitly committed as a reference. */
+export function autoOpsWorkspaceDirectoryCompletion(
+  path: string,
+  scope: Pick<AutoOpsThreadScope, 'projectId' | 'workspaceType' | 'workspaceVersionId'> | undefined,
+): string | null {
+  if (!scope?.workspaceType || !scope.workspaceVersionId) return null
+  const prefix = `autoops/${scope.projectId}/workspaces/${scope.workspaceVersionId}/`
+  if (!path.startsWith(prefix)) return null
+  const relative = path.slice(prefix.length).replace(/\/$/u, '')
+  if (!relative || relative.split('/').some((part) => !part || part === '.' || part === '..') ||
+    /[\\\p{Cc}\u2028\u2029]/u.test(relative)) return null
+  const directory = `${relative}/`
+  return /[\s"@]/u.test(directory) ? `@"${directory.replaceAll('"', '\\"')}` : `@${directory}`
+}
+
 /** Display workspace-relative directories while keeping resource identities canonical. */
 export function autoOpsResourcePathDescription(
   path: string,

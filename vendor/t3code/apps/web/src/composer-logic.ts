@@ -9,7 +9,7 @@ import {
   serializeAssistantCitation,
   withAssistantCitationComment,
 } from "@t3tools/shared/assistantCitations";
-import { isPathWord } from "@t3tools/shared/composerTrigger";
+import { detectIncompleteQuotedComposerPath, isPathWord } from "@t3tools/shared/composerTrigger";
 import {
   splitPromptIntoComposerSegments,
   type ComposerPromptSegment,
@@ -40,6 +40,13 @@ export function isPathSuggestionCurrent(
     searchTarget.cwd === cwd &&
     searchTarget.query === trigger.query.trim()
   );
+}
+
+export function isComposerDirectoryCompletionKey(
+  event: ShortcutEventLike & { isComposing?: boolean; keyCode?: number },
+): boolean {
+  return event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey &&
+    !event.metaKey && !event.isComposing && event.keyCode !== 229;
 }
 
 export function formatAssistantCitationForComposer(citation: AssistantCitation, comment = "") {
@@ -280,6 +287,8 @@ export function isCollapsedCursorAdjacentToInlineToken(
 
 export function detectComposerTrigger(text: string, cursorInput: number): ComposerTrigger | null {
   const cursor = clampCursor(text, cursorInput);
+  const quotedPath = detectIncompleteQuotedComposerPath(text, cursor);
+  if (quotedPath) return quotedPath;
   const tokenStart = tokenStartForCursor(text, cursor);
   const token = text.slice(tokenStart, cursor);
   if (token.startsWith("/")) {
@@ -309,7 +318,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
       rangeEnd: cursor,
     };
   }
-  if (!token.startsWith("@")) {
+  if (!token.startsWith("@") || token.startsWith('@"')) {
     return null;
   }
 

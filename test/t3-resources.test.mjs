@@ -29,6 +29,7 @@ test('业务@目录只接受资源身份，保留版本/目录/环境与共享�
     assert.match(document.path,/\/documents\/doc-design\/[a-f0-9]{16}\//)
     assert.ok(!listing.entries.some((entry)=>entry.path.includes('/environments/env-prod/')))
     assert.ok(listing.entries.some((entry)=>entry.kind==='directory'&&entry.path.endsWith('/documents')))
+    assert.equal(catalog.search(principal,{cwd,query:'documents/',limit:100,kind:'file'}).entries.length,2)
     assert.match((await catalog.read(principal,{cwd,relativePath:document.path})).contents,/工作台/)
     assert.throws(()=>catalog.search(principal,{cwd:'/etc',query:'',limit:100}),/业务资料目录/)
     await assert.rejects(catalog.read(principal,{cwd,relativePath:'../../etc/passwd'}),/资料不存在/)
@@ -121,6 +122,64 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   for (const query of ['workspaceType=internal&workspaceVersionId=external-v1', 'workspaceType=external&workspaceVersionId=external-pending', 'workspaceType=external&workspaceVersionId=missing', 'workspaceType=external'])
     assert.throws(() => catalog.search(principal, { cwd: draft + '?' + query, query: '', limit: 100 }))
   assert.throws(() => catalog.search(principal, { cwd: cwd + '?workspaceType=external&workspaceVersionId=external-v2', query: '', limit: 100 }), /不能切换/)
+})
+
+test('工作区@目录导航复用直系枚举，深层关键字检索和外部版本边界保持不变', (t) => {
+  const sessions = new DatabaseSync(':memory:'), bindings = new DatabaseSync(':memory:')
+  t.after(() => { sessions.close(); bindings.close() })
+  sessions.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
+  initializeAutoOpsAccessSchema(bindings)
+  sessions.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('workspace-navigation').digest('hex'), 'u-guest', 'csrf', Date.now() + 100000)
+  const paths = [
+    'frontend/index.ts', 'frontend/src/index.ts', 'backend/src/index.ts',
+    'frontend/src/components/Button.tsx', 'frontend/src/components/icons/箭头.svg',
+    'frontend/src/设计 文档/说明.md',
+    ...Array.from({ length: 82 }, (_,index) => `frontend/generated/file-${String(index).padStart(3, '0')}.ts`),
+    'frontend/generated/z-image.png', 'frontend/generated/z-nested/deeper.ts',
+  ]
+  const versions = [
+    { id: 'internal-v1', type: 'internal', status: 'published', paths: ['private/内部资料.md'] },
+    { id: 'external-v1', type: 'external', status: 'published', paths },
+    { id: 'external-v2', type: 'external', status: 'published', paths: ['next-only/下一版本.md'] },
+  ]
+  const workspaceStore = {
+    getVersion(projectId, id) {
+      const found = projectId === 'p-autoops' && versions.find((version) => version.id === id)
+      if (!found) throw new Error('工作区版本不可用')
+      return found
+    },
+    files(projectId, id) { return this.getVersion(projectId, id).paths.map((path) => ({ path, name: path.split('/').at(-1), mime: path.endsWith('.png') ? 'image/png' : path.endsWith('.svg') ? 'image/svg+xml' : 'text/plain', size: 1 })) },
+  }
+  const access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, workspaceStore })
+  const principal = access.authenticateCookie('demo_session=workspace-navigation')
+  access.bindThread(principal, { threadId: 'external', projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: 'external', workspaceVersionId: 'external-v1' })
+  const catalog = createBusinessResourceCatalog({ access, bindingDb: bindings, workspaceStore })
+  const cwd = 'autoops://projects/p-autoops/environments/env-test/threads/external'
+  const root = 'autoops/p-autoops/workspaces/external-v1'
+  const search = (query, options = {}) => catalog.search(principal, { cwd, query, limit: 80, ...options })
+  const childPaths = (result) => result.entries.map(({path}) => path).sort()
+  assert.deepEqual(childPaths(search('frontend/')), ['generated', 'index.ts', 'src'].map((path) => `${root}/frontend/${path}`).sort())
+  const src = search('frontend/src/')
+  assert.deepEqual(childPaths(src), ['components', 'index.ts', '设计 文档'].map((path) => `${root}/frontend/src/${path}`).sort())
+  assert.deepEqual(src, catalog.list(principal, { cwd, directoryPath: `${root}/frontend/src` }))
+  assert.deepEqual(childPaths(search('frontend/src/components/')), ['Button.tsx', 'icons'].map((path) => `${root}/frontend/src/components/${path}`).sort())
+  assert.deepEqual(search('frontend/src/components/icons/').entries, [{ path: `${root}/frontend/src/components/icons/箭头.svg`, kind: 'file' }])
+  assert.deepEqual(search('frontend/src/设计 文档/').entries, [{ path: `${root}/frontend/src/设计 文档/说明.md`, kind: 'file' }])
+  assert.deepEqual(childPaths(search('index.ts', { kind: 'file' })), ['frontend/index.ts', 'frontend/src/index.ts', 'backend/src/index.ts'].map((path) => `${root}/${path}`).sort())
+  assert.deepEqual(search('frontend/src/components/But').entries, [{ path: `${root}/frontend/src/components/Button.tsx`, kind: 'file' }])
+  assert.deepEqual(search('frontend/src/missing/'), { entries: [], truncated: false })
+  const many = search('frontend/generated/')
+  assert.equal(many.entries.length, 80); assert.equal(many.truncated, true)
+  assert.ok(!many.entries.some(({path}) => path.endsWith('/file-081.ts')))
+  assert.deepEqual(search('file-081').entries, [{ path: `${root}/frontend/generated/file-081.ts`, kind: 'file' }])
+  assert.deepEqual(search('frontend/generated/', { kind: 'directory' }), { entries: [{ path: `${root}/frontend/generated/z-nested`, kind: 'directory' }], truncated: false })
+  assert.deepEqual(search('frontend/generated/', { imageOnly: true }), { entries: [{ path: `${root}/frontend/generated/z-image.png`, kind: 'file' }], truncated: false })
+  assert.equal(search('frontend/generated/', { kind: 'file' }).truncated, true)
+  assert.deepEqual(search('next-only/'), { entries: [], truncated: false })
+  assert.deepEqual(search('private/'), { entries: [], truncated: false })
+  assert.throws(() => search('../internal-v1/'), /资料不存在/)
+  assert.throws(() => catalog.search(principal, { cwd: cwd + '?workspaceType=external&workspaceVersionId=external-v2', query: 'next-only/', limit: 80 }), /不能切换/)
+  assert.throws(() => catalog.search(principal, { cwd: 'autoops://projects/p-autoops/environments/env-test/threads/draft?workspaceType=internal&workspaceVersionId=internal-v1', query: 'private/', limit: 80 }), { code: 'WORKSPACE_FORBIDDEN' })
 })
 
 test('真实生成的脱敏快照同时驱动MCP文档与原生@读取，原始资料保持独立', async (t) => {

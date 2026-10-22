@@ -90,5 +90,7 @@ AutoOps 的身份、权限、项目/环境、资料和报告接在适配边界�
 
 工作区与对话整合时，复用 `ComposerSurface.ContextStrip`、`ComposerControl`、原生菜单及标签压缩逻辑，范围选择放在输入框下方。目录和预览复用 `FileBrowserPanel`、`FilePreviewPanel`、`AttachmentFilePreview`、右侧面板与窄屏侧栏，只适配授权数据源。显示项目相对路径，引用保持固定版本的完整身份；不另写递归树或源码预览器。管理页与对话页共用这套文件交互。
 
+工作区 `@` 候选使用 T3 原生搜索和键盘选择。当前固定版本内的目录支持 Tab 补成相对路径并继续展示直系子项，文件 Tab 仍确认引用，Enter/点击仍可引用整个目录。复用原生输入替换、焦点、旧结果校验及 quoted mention 转义；不另建输入状态机或执行 Shell。技能、命令、Shift+Tab 与代码块缩进保持原行为。
+
 T3 主聊天组件依赖 React Compiler 缓存。不要在渲染或 JSX 属性中读取 `ref.current`，发送状态使用原生 `isSendBusy`；事件与 effect 内的 ref 判重保留。相关改动须通过 `test/t3-chatview-compiler.test.mjs`，仅类型检查通过不足以证明页面能运行。相邻报告与文件组件切换版本时使用不同前缀的 key，避免旧区域残留。
 ```

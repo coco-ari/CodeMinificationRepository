@@ -1,5 +1,5 @@
 import { chatSubmissionIntentAllowed, chatSlashCommandAllowed, unavailableChatSlashCommand } from "./autoOpsChatPolicy";
-import { autoOpsResourceCwd, autoOpsResourcePathDescription, autoOpsResourceUrl } from "~/autoops/resources";
+import { autoOpsResourceCwd, autoOpsResourcePathDescription, autoOpsResourceUrl, autoOpsWorkspaceDirectoryCompletion } from "~/autoops/resources";
 import { openAutoOpsResource } from '~/autoops/ResourceLink';
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { readAutoOpsHost } from "~/autoops/hostConfig";
@@ -98,6 +98,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
+  isComposerDirectoryCompletionKey,
   isPathSuggestionCurrent,
   replaceTextRange,
 } from "../../composer-logic";
@@ -3852,7 +3853,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
 
   const { onUsageLimitsCommand } = props;
-  const onSelectComposerItem = (item: ComposerCommandItem) => {
+  const onSelectComposerItem = (item: ComposerCommandItem, completeDirectory = false) => {
     if (composerSelectLockRef.current) return;
     composerSelectLockRef.current = true;
     window.requestAnimationFrame(() => {
@@ -3862,8 +3863,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (!trigger) return;
     if (item.type === "path") {
       if (!isPathSuggestionCurrent(item.searchTarget, trigger, environmentId, composerReferenceCwd)) return;
-      const replacement = `${serializeComposerFileLink(item.path)} `;
-      const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+      const directoryCompletion = completeDirectory && item.pathKind === "directory"
+        ? autoOpsWorkspaceDirectoryCompletion(item.path, autoOpsThreadScope) : null;
+      const replacement = directoryCompletion ?? `${serializeComposerFileLink(item.path)} `;
+      const replacementRangeEnd = directoryCompletion ? trigger.rangeEnd : extendReplacementRangeForTrailingSpace(
         snapshot.value,
         trigger.rangeEnd,
         replacement,
@@ -4281,7 +4284,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       }
       if ((key === "Enter" || key === "Tab") && selectedItem) {
-        onSelectComposerItem(selectedItem);
+        onSelectComposerItem(selectedItem, isComposerDirectoryCompletionKey(event));
         return true;
       }
     }
@@ -6794,6 +6797,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     resolvedTheme={resolvedTheme}
                     isLoading={isComposerMenuLoading}
                     triggerKind={composerTriggerKind}
+                    directoryCompletionAvailable={activeComposerMenuItem?.type === "path" && activeComposerMenuItem.pathKind === "directory" &&
+                      autoOpsWorkspaceDirectoryCompletion(activeComposerMenuItem.path, autoOpsThreadScope) !== null}
                     emptyStateText={composerMenuEmptyState}
                     activeItemId={activeComposerMenuItem?.id ?? null}
                     onHighlightedItemChange={onComposerMenuItemHighlightedStable}

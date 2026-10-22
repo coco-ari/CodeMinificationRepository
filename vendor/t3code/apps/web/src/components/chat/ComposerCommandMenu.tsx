@@ -26,7 +26,8 @@ import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
-import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import { Command, CommandFooter, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import { Kbd } from "../ui/kbd";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { ComposerBanner } from "./ComposerBanner";
 import { resolvePullRequestState } from "../pullRequest/pullRequestPresentation";
@@ -87,6 +88,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   triggerKind: ComposerTriggerKind | null;
   emptyStateText?: string;
   activeItemId: string | null;
+  directoryCompletionAvailable?: boolean;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
@@ -154,6 +156,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             </p>
           </div>
         )}
+        {props.directoryCompletionAvailable ? <CommandFooter className="justify-start text-xs">
+          <Kbd>Tab</Kbd> 补全目录 <span aria-hidden="true">·</span> <Kbd>Enter</Kbd> 引用
+        </CommandFooter> : null}
       </ComposerBanner.Surface>
     </Command>
   );

@@ -45,6 +45,48 @@ function isWhitespace(char: string): boolean {
   return char === " " || char === "\n" || char === "\t" || char === "\r";
 }
 
+/** The unfinished form of composerInlineTokens' @"quoted path" convention. */
+export function detectIncompleteQuotedComposerPath(
+  text: string,
+  cursorInput: number,
+  isWhitespaceChar: (char: string) => boolean = isWhitespace,
+): (ComposerTrigger & { kind: "path" }) | null {
+  const cursor = clampCursor(text, cursorInput);
+  const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
+  const firstQuote = text.indexOf('@"', lineStart);
+  if (firstQuote < 0 || firstQuote + 1 >= cursor) return null;
+  let start: number | null = null;
+  let query = "";
+  let escaped = false;
+  for (let index = firstQuote; index < cursor; index += 1) {
+    const char = text[index]!;
+    if (start === null) {
+      if (char === "@" && text[index + 1] === '"' && index + 1 < cursor &&
+        (index === 0 || isWhitespaceChar(text[index - 1] ?? ""))) {
+        start = index;
+        query = "";
+        escaped = false;
+        index += 1;
+      }
+    } else if (/[\p{Cc}\u2028\u2029]/u.test(char)) {
+      start = null;
+      escaped = false;
+    } else if (escaped) {
+      query += char;
+      escaped = false;
+    } else if (char === "\\") {
+      escaped = true;
+    } else if (char === '"') {
+      start = null;
+    } else {
+      query += char;
+    }
+  }
+  return start === null || escaped ? null : {
+    kind: "path", query, rangeStart: start, rangeEnd: cursor,
+  };
+}
+
 /**
  * A slash word with a second slash, such as `/tmp/build.sh`, is a path, not a
  * command. The whole word counts, so a caret before the second slash still sees it.
@@ -68,6 +110,8 @@ export function detectComposerTrigger(
   isWhitespaceChar?: (char: string) => boolean,
 ): ComposerTrigger | null {
   const cursor = clampCursor(text, cursorInput);
+  const quotedPath = detectIncompleteQuotedComposerPath(text, cursor, isWhitespaceChar);
+  if (quotedPath) return quotedPath;
   const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
   const linePrefix = text.slice(lineStart, cursor);
 
@@ -139,7 +183,7 @@ export function detectComposerTrigger(
       rangeEnd: cursor,
     };
   }
-  if (!token.startsWith("@")) {
+  if (!token.startsWith("@") || token.startsWith('@"')) {
     return null;
   }
 

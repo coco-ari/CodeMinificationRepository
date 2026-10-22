@@ -1,6 +1,37 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { detectComposerTrigger, serializeComposerFileLink } from "./composerTrigger.ts";
+import { detectComposerTrigger, detectIncompleteQuotedComposerPath, serializeComposerFileLink } from "./composerTrigger.ts";
+import { collectComposerInlineTokens } from "./composerInlineTokens.ts";
+
+describe("unfinished quoted path queries", () => {
+  it.each([
+    ['@"需求 文档/', '需求 文档/'],
+    ['@"目录/含\\"引号/', '目录/含"引号/'],
+    ['@"目录/反\\\\斜杠/', '目录/反\\斜杠/'],
+  ])("keeps %j editable and decodes the existing quoted-path escapes", (source, query) => {
+    expect(detectComposerTrigger(source, source.length)).toEqual({
+      kind: "path", query, rangeStart: 0, rangeEnd: source.length,
+    });
+    expect(collectComposerInlineTokens(source)).toEqual([]);
+    expect(collectComposerInlineTokens(`${source}" `)).toMatchObject([{ type: "mention", value: query }]);
+  });
+
+  it("keeps UTF-16 cursor offsets and the surrounding text outside the replacement", () => {
+    const prefix = "请检查 👋 ";
+    const active = '@"需求 文档/';
+    const text = `${prefix}${active} 后续正文`;
+    expect(detectIncompleteQuotedComposerPath(text, prefix.length + active.length)).toEqual({
+      kind: "path", query: "需求 文档/", rangeStart: prefix.length, rangeEnd: prefix.length + active.length,
+    });
+  });
+
+  it.each(['@"已闭合"', '@"已闭合" ', '前缀@"不是独立路径/', '@"末尾\\',
+    ...["\n", "\r", "\t", "\0", "\u007f", "\u0085", "\u2028", "\u2029"].map((control) => `@"需求${control}文档/`),
+  ])("does not continue a closed, invalid or incomplete escape in %j", (text) => {
+    expect(detectIncompleteQuotedComposerPath(text, text.length)).toBeNull();
+    expect(detectComposerTrigger(text, text.length)).toBeNull();
+  });
+});
 
 describe("detectComposerTrigger", () => {
   it.each([
