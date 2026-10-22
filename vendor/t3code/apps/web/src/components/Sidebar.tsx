@@ -1402,15 +1402,33 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             {props.project ? (
               <ProjectFavicon project={props.project} className="size-4 shrink-0" />
             ) : null}
-            <span className={compactDraft ? "min-w-0 flex-1 truncate text-sm font-medium text-foreground/90" : "min-w-0 flex-1 truncate text-xs font-medium text-secondary-label"}>
+            <span data-slot={compactDraft ? "sidebar-row-title" : undefined} className={compactDraft ? "min-w-0 flex-1 truncate text-sm font-medium text-foreground/90" : "min-w-0 flex-1 truncate text-xs font-medium text-secondary-label"}>
               {compactDraft ? preview : props.projectDisplayName}
             </span>
-            {compactDraft ? <span role="status" className="shrink-0 text-xs text-warning-foreground">草稿</span> : null}
-            <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
-              {compactDraft ? <SidebarHeaderIconButton label="丢弃草稿" onClick={handleDiscard}
-                onPointerDown={(event) => event.stopPropagation()}
-                className="pointer-events-none opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
-              ><XIcon className="size-3" /></SidebarHeaderIconButton> : <Tooltip>
+            <span
+              data-slot={compactDraft ? "sidebar-row-tail" : undefined}
+              className={compactDraft
+                ? "relative ml-auto inline-grid h-7 min-w-7 shrink-0 grid-cols-[max-content] items-center justify-items-end pointer-coarse:flex pointer-coarse:gap-1"
+                : "ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end"}
+            >
+              {compactDraft ? <>
+                <span
+                  role="status"
+                  data-slot="sidebar-row-tail-status"
+                  className="col-start-1 row-start-1 text-xs text-warning-foreground transition-opacity motion-reduce:transition-none not-pointer-coarse:group-hover/sidebar-row:opacity-0 not-pointer-coarse:group-focus-within/sidebar-row:opacity-0"
+                >草稿</span>
+                <span
+                  data-slot="sidebar-row-tail-actions"
+                  className="pointer-events-none col-start-1 row-start-1 inline-flex items-center opacity-0 transition-opacity motion-reduce:transition-none group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:overflow-hidden pointer-coarse:opacity-100"
+                >
+                  <SidebarHeaderIconButton
+                    label="丢弃草稿"
+                    onClick={handleDiscard}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    className="pointer-coarse:size-11"
+                  ><XIcon className="size-3" /></SidebarHeaderIconButton>
+                </span>
+              </> : <Tooltip>
                 <TooltipTrigger
                   render={
                     <button
@@ -2019,6 +2037,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ) : (
       <span
         aria-hidden
+        data-slot="sidebar-row-title"
         className={cn(
           "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
           shouldRecede ? "font-normal" : "font-medium",
@@ -2242,7 +2261,57 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             {prBadge}
             {sortable?.isDragging ? (
               dragDestination
-            ) : compactActiveRow && !statusIndicator ? null : (
+            ) : compactActiveRow ? (
+              <span
+                data-slot="sidebar-row-tail"
+                className={cn(
+                  // Both layers size the same grid cell, so swapping status for
+                  // controls never takes more space from the title on hover.
+                  "relative ml-auto h-7 min-w-7 shrink-0 items-center justify-end",
+                  isWokeStatus
+                    ? "flex gap-1"
+                    : "inline-grid grid-cols-[max-content] justify-items-end pointer-coarse:flex pointer-coarse:gap-1",
+                  props.sweepAction !== null && "hidden",
+                )}
+              >
+                {statusIndicator ? (
+                  <span
+                    data-slot="sidebar-row-tail-status"
+                    className={cn(
+                      "col-start-1 row-start-1 inline-flex justify-end text-xs tabular-nums transition-opacity motion-reduce:transition-none",
+                      !isWokeStatus && "not-pointer-coarse:group-hover/sidebar-row:opacity-0 not-pointer-coarse:group-focus-within/sidebar-row:opacity-0",
+                    )}
+                  >
+                    {statusIndicator}
+                  </span>
+                ) : null}
+                <span
+                  data-slot="sidebar-row-tail-actions"
+                  className="pointer-events-none col-start-1 row-start-1 inline-flex items-center opacity-0 transition-opacity motion-reduce:transition-none group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:overflow-hidden pointer-coarse:opacity-100"
+                >
+                  {hasUnsentDraft ? (
+                    <SidebarHeaderIconButton
+                      label="丢弃未发送草稿"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={handleDiscardDraftClick}
+                      className="pointer-coarse:size-11"
+                    ><XIcon className="size-3" /></SidebarHeaderIconButton>
+                  ) : null}
+                  <SidebarHeaderIconButton
+                    label="对话更多操作"
+                    tooltip="更多操作"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      onContextMenu(threadRef, { x: rect.left, y: rect.bottom });
+                    }}
+                    className="pointer-coarse:size-11"
+                  ><EllipsisIcon className="size-3.5" /></SidebarHeaderIconButton>
+                </span>
+              </span>
+            ) : (
               <span
                 className={cn(
                   "relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
@@ -2252,15 +2321,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <span
                   className={cn(
                     "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
-                    !isWoke && !compactActiveRow && "group-any-hover/sidebar-row:opacity-0",
-                    compactActiveRow && "text-xs",
+                    !isWoke && "group-any-hover/sidebar-row:opacity-0",
                   )}
                 >
                   {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
                     <span className="text-xs text-info-foreground tabular-nums">
                       {props.snoozeWakeLabelText}
                     </span>
-                  ) : compactActiveRow && statusIndicator ? statusIndicator : isWoke ? (
+                  ) : isWoke ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -2340,19 +2408,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 )}
               </span>
             )}
-            {compactActiveRow ? <span className="pointer-events-none inline-flex shrink-0 items-center opacity-0 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100">
-              {hasUnsentDraft ? <SidebarHeaderIconButton label="丢弃未发送草稿"
-                onPointerDown={(event) => event.stopPropagation()} onClick={handleDiscardDraftClick}
-              ><XIcon className="size-3" /></SidebarHeaderIconButton> : null}
-              <SidebarHeaderIconButton label="对话更多操作" tooltip="更多操作"
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.preventDefault(); event.stopPropagation();
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  onContextMenu(threadRef, { x: rect.left, y: rect.bottom });
-                }}
-              ><EllipsisIcon className="size-3.5" /></SidebarHeaderIconButton>
-            </span> : null}
             {props.sweepAction !== null ? dragDestination : null}
             {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
           </TooltipTrigger>
