@@ -19,6 +19,7 @@ await mkdir(output, { recursive: true })
 const report = {
   origin, baseline, phase, baselineReportPath, startedAt: new Date().toISOString(), cases: [], pageErrors: [],
   messageDispatches: 0, initialMessages: 0, filesystemWrites: 0, suppressedTelemetry: 0, blockedRpcMutations: [], blockedHttpMutations: [],
+  localToastDismissals: { closed: 0, expiredDuringClick: 0, exitAnimationWaits: 0 },
   coverage: { realExistingRows: true, ownUnsentLocalDraft: true, noExistingThreadActivated: true, synthesizedServerStates: false, themePreferencePersistence: '仅测试隔离 profile 的本地外观，不验证服务器偏好持久化' },
   cleanup: {},
 }
@@ -145,6 +146,35 @@ async function closeMobileSidebar(session) {
   if (await toggle.isVisible()) await toggle.click()
   else await page.keyboard.press('Escape')
   await until(async () => !await mobile.isVisible(), '移动端原生侧栏应先关闭，避免目标页面被 modal inert')
+}
+// Reuse the native dismissal flow from t3-workspace-style-ui.mjs. Transient
+// local recovery notices can cover the first row; do not hide them with CSS or
+// weaken the real elementFromPoint hit-area assertions below.
+async function dismissToasts() {
+  const controls = page.getByRole('button', { name: '关闭通知', exact: true }).filter({ visible: true })
+  for (let index = 0; index < 8; index++) {
+    const count = await controls.count()
+    if (count === 0) break
+    try {
+      await controls.first().click({ timeout: 1500 })
+      report.localToastDismissals.closed++
+    } catch (error) {
+      const expiredDuringClick = error.name === 'TimeoutError' || /not attached|detached/i.test(error.message)
+      if (expiredDuringClick && await controls.count() === 0) {
+        report.localToastDismissals.expiredDuringClick++
+        break
+      }
+      throw error
+    }
+    await until(async () => await controls.count() < count, '通知关闭后应消失，不能遮挡实际命中区域', 2500)
+  }
+  assert.equal(await controls.count(), 0, '测量前仍有未关闭通知')
+  // Native T3/Radix notices and Sonner can keep the exiting card mounted after
+  // its close control is gone. Wait for the actual toast content to detach;
+  // opacity-zero content may still intercept elementFromPoint.
+  const visibleToasts = page.locator('[data-slot="toast-viewport"] [data-slot="toast-title"], [data-slot="toast-viewport-anchored"] [data-slot="toast-title"], [data-sonner-toast]')
+  if (await visibleToasts.count()) report.localToastDismissals.exitAnimationWaits++
+  await until(async () => await visibleToasts.count() === 0, '原生通知退出动画必须结束，卡片不能继续遮挡真实命中区域', 5000)
 }
 async function theme(session, mode) {
   assertOwnDraft(session)
@@ -273,6 +303,12 @@ async function measureTail(row) {
       actionRect: rectangle(action?.getBoundingClientRect()), actionHitAreaRects: hitAreas,
       rawActionHitAreaRects: hitAreaElements.map((item) => rectangle(item.getBoundingClientRect())),
       actionCenterHit: Boolean(action && hit && (action === hit || action.contains(hit))), boundaryHitProbes: boundaryPoints,
+      actionCenterBlocker: action && hit && action !== hit && !action.contains(hit) ? {
+        tag: hit.tagName.toLowerCase(), role: hit.getAttribute('role'),
+        closestToast: Boolean(hit.closest('[data-sonner-toast], [data-slot="toast-viewport"], [data-slot="toast-viewport-anchored"]')),
+        toastRemoved: hit.closest('[data-sonner-toast]')?.getAttribute('data-removed') ?? null,
+        toastVisible: hit.closest('[data-sonner-toast]')?.getAttribute('data-visible') ?? null,
+      } : null,
     }
   })
 }
@@ -293,6 +329,7 @@ function assertTailBounds(geometry, session) {
   }
 }
 async function verifyTail(session, mode, sample) {
+  await dismissToasts()
   const row = sample.key
     ? sidebar().locator(`[data-thread-item=${JSON.stringify(sample.key)}]`).getByTestId('sidebar-row-slim')
     : ownDraftRow(session)
@@ -300,11 +337,18 @@ async function verifyTail(session, mode, sample) {
   report.tailGeometry ??= []; report.tailGeometry.push(result)
   await page.mouse.move(0, 0)
   // Focus another owned row to clear :focus-within without activating a real
-  // conversation. This keeps the default measurement independent of theme UI.
-  if (sample.key) await ownDraftRow(session).focus()
+  // conversation. Touch actions are always visible; focusing a different row
+  // there would scroll the actual completed-status sample back out of view.
+  if (session.touch) await row.scrollIntoViewIfNeeded()
+  else if (sample.key) await ownDraftRow(session).focus()
   else await sidebar().getByRole('combobox', { name: '搜索对话', exact: true }).focus()
-  if (!baseline && !session.touch) await until(async () => (await measureTail(row)).actionOpacity <= 0.01, '桌面默认态低频操作应在离开后收起')
-  result.states.default = await measureTail(row)
+  result.states.default = !baseline && !session.touch
+    ? await until(async () => {
+      const geometry = await measureTail(row)
+      return !geometry.actionVisible && geometry.actionOpacity <= 0.01 &&
+        (!geometry.completedStatusPresent || geometry.completedStatusVisible) ? geometry : null
+    }, '桌面默认态必须等待低频操作收起，真实完成状态恢复可读')
+    : await measureTail(row)
   if (!baseline) {
     assertTailBounds(result.states.default, session)
     if (result.states.default.completedStatusPresent) assert(result.states.default.completedStatusVisible, '真实未读完成状态在默认态必须可读')
@@ -335,6 +379,10 @@ async function verifyTail(session, mode, sample) {
     }
   } else if (!baseline && result.states.default.completedStatusPresent) {
     assert(result.states.default.completedStatusVisible && result.states.default.actionVisible, '触屏必须同时保留真实完成状态与更多入口')
+    const more = row.getByRole('button', { name: '对话更多操作', exact: true })
+    await more.tap()
+    result.completedStatusRowMenu = await verifyMenuKeyboard(session, more, `completed-${mode}-menu`)
+    result.completedStatusMoreActuallyTapped = true
   }
   const previous = previousRow(session, mode, sample)
   result.comparison = previous ? {
@@ -349,11 +397,42 @@ async function verifyTail(session, mode, sample) {
   result.coverage = { realCompletedStatus: result.states.default.completedStatusPresent, noSynthesizedStatus: true, missingStateReason: result.states.default.completedStatusPresent ? null : '本视窗没有真实已完成状态，此项不造数据' }
   assertOwnDraft(session)
   await page.mouse.move(0, 0)
-  if (sample.key) await ownDraftRow(session).focus()
-  else await sidebar().getByRole('combobox', { name: '搜索对话', exact: true }).focus()
+  if (!session.touch) {
+    if (sample.key) await ownDraftRow(session).focus()
+    else await sidebar().getByRole('combobox', { name: '搜索对话', exact: true }).focus()
+  }
   return result
 }
+async function findTailSample(session, measurement) {
+  const targetId = process.env.SIDEBAR_TARGET_THREAD_ID
+  const initialCompleted = measurement.rows.find((row) => row.key && row.statusLabels.some((label) => label.includes('已完成')))
+  let sample = targetId ? measurement.rows.find((row) => row.key?.endsWith(':' + targetId)) : initialCompleted
+  const discovery = { session: session.name, mode: measurement.mode, initialCompletedStatusVisible: Boolean(initialCompleted), searchedExistingDom: false, scrolled: false }
+  if (session.touch && !sample) {
+    // Only inspect and scroll rows already rendered from the real server. This
+    // neither opens a conversation nor creates an unread/completed fixture.
+    discovery.searchedExistingDom = true
+    const candidate = targetId
+      ? sidebar().locator(`[data-thread-item$=${JSON.stringify(':' + targetId)}]`).getByTestId('sidebar-row-slim').first()
+      : sidebar().getByTestId('sidebar-row-slim').filter({ has: page.locator('[role="status"]').filter({ hasText: '已完成' }) }).first()
+    if (await candidate.count()) {
+      const key = await candidate.evaluate((element) => element.closest('[data-thread-item]')?.getAttribute('data-thread-item'))
+      assert(key, '只允许滚动真实已有会话行')
+      await candidate.scrollIntoViewIfNeeded()
+      discovery.scrolled = true
+      sample = await until(async () => (await measureRows(session)).find((row) => row.key === key), '滚动后真实完成状态行必须完整进入内部视窗')
+    }
+  }
+  sample ??= targetId ? null : measurement.rows.find((row) => row.key)
+  assert(sample, '真实会话行必须存在；显式指定目标时不能替换成其他对话')
+  discovery.key = sample.key
+  discovery.realCompletedStatusFound = sample.statusLabels.some((label) => label.includes('已完成'))
+  discovery.noExistingThreadActivated = true
+  report.completedStatusDiscovery ??= []; report.completedStatusDiscovery.push(discovery)
+  return { sample, discovery }
+}
 async function capture(session, mode) {
+  await dismissToasts()
   await page.mouse.move(0, 0)
   const media = await page.evaluate(() => ({ coarse: matchMedia('(pointer: coarse)').matches, fine: matchMedia('(pointer: fine)').matches, width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, touchPoints: navigator.maxTouchPoints }))
   if (session.touch) { assert.equal(media.coarse, true); assert(media.touchPoints > 0); assert.equal(media.width, 390) }
@@ -501,12 +580,12 @@ try {
     const check = async (mode) => {
       const measurement = await capture(session, mode)
       captures.push(measurement)
-      const targetId = process.env.SIDEBAR_TARGET_THREAD_ID
-      const sample = targetId
-        ? measurement.rows.find((row) => row.key?.endsWith(':' + targetId))
-        : measurement.rows.find((row) => row.key && row.statusLabels.some((label) => label.includes('已完成'))) ?? measurement.rows.find((row) => row.key)
-      assert(sample, '真实会话行必须在本次视窗内，显式指定目标时不能替换成其他对话')
-      tailChecks.push(await verifyTail(session, mode, sample))
+      const { sample, discovery } = await findTailSample(session, measurement)
+      const realProjection = await compareProjection(session, [sample])
+      const tail = await verifyTail(session, mode, sample)
+      tail.sampleDiscovery = discovery
+      tail.realProjection = realProjection
+      tailChecks.push(tail)
       tailChecks.push(await verifyTail(session, mode, measurement.rows.find((row) => row.title === session.marker)))
     }
     for (const mode of ['light', 'dark']) { await theme(session, mode); await check(mode) }

@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T13:06:04.054348+00:00",
+  "generatedAt": "2026-10-22T13:15:52.284178+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -542,7 +542,7 @@
       "path": "apps/web/src/components/Sidebar.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "c7e84c76bb16ff70db5c2cd298cae15ec0b85a9e593bbddbdd9f617ba7662318",
-      "localSha256": "9c60496367ce78124ad5064d9bb8898f36e0d5e1403fd07f62e44abcb67b358f"
+      "localSha256": "8f61268ab16a8ff19274fc925503867b2e0c04a5d548b87f036a9e3330784a16"
     },
     {
       "path": "apps/web/src/components/SlowRpcRequestToastCoordinator.tsx",
@@ -2859,6 +2859,32 @@
   ],
   "ignoredGeneratedDirectories": [
     "node_modules",
+    "scripts/node_modules",
+    "packages/source-control-gitcafe/node_modules",
+    "packages/source-control-gitlab/node_modules",
+    "packages/effect-acp/node_modules",
+    "packages/source-control-forgejo/node_modules",
+    "packages/source-control-bitbucket/node_modules",
+    "packages/provider-grok/node_modules",
+    "packages/source-control-core/node_modules",
+    "packages/provider-acp-registry/node_modules",
+    "packages/contracts/node_modules",
+    "packages/provider-opencode/node_modules",
+    "packages/provider-muse/node_modules",
+    "packages/provider-core/node_modules",
+    "packages/shared/node_modules",
+    "packages/source-control-testing/node_modules",
+    "packages/source-control-azure-devops/node_modules",
+    "packages/effect-codex-app-server/node_modules",
+    "packages/ssh/node_modules",
+    "packages/source-control-github/node_modules",
+    "packages/client-runtime/node_modules",
+    "packages/tailscale/node_modules",
+    "packages/provider-acp/node_modules",
+    "packages/provider-cursor/node_modules",
+    "packages/provider-testing/node_modules",
+    "packages/provider-pi/node_modules",
+    "apps/web/dist",
     "apps/web/node_modules",
     "apps/server/dist",
     "apps/server/node_modules"

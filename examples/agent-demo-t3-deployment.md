@@ -2,7 +2,21 @@
 
 实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。原 Demo 的 8787 入口已切换到本模块；当前发布证据见下一节，早期构建、数据迁移与恢复记录保留在历史章节。
 
-## 当前发布：T3 工作区整页统一（t3-workspace-ui-1，仅网页）
+## 当前发布：紧凑侧栏尾槽复用（t3-sidebar-actions-1，仅网页）
+
+2026-10-22，验收 18887 与正式 ZeroTier 8787 已切换到 `releases/t3-sidebar-actions-1-static`。基于最新 `t3-workspace-ui-1` 增量发布，保留工作区整页统一及已读提示修复；后端继续运行 `t3-workspace-prefix-1`。仅空闲时重启网页网关，验收/正式 worker PID `182970` / `183322` 前后不变，验收原两条暂停队列继续暂停。
+
+沿用锁定 T3 的 `SidebarThreadRow` 单行布局、尾部区域切换方式和 `SidebarHeaderIconButton`。桌面状态与更多/删除操作在同一尾槽叠放，宽度取两者较大值，悬停和键盘聚焦不再增加独立操作列；草稿标记与删除遵循同一规则。保留桌面 36px、触屏至少 44px 行高及原有标题强调。触屏保持状态和操作并排，按钮实际占位为 44px，原扩展触区裁在操作区内；可交互提醒始终并排，避免隐藏的焦点目标。置顶、原菜单处理器、权限、拖拽和真实状态判断保持原流程。
+
+Sidebar.logic 156 项、ChatView Compiler 回归 2 项、两类侧栏行实际 Compiler 缓存、Web 与宿主类型检查及宿主网页构建通过；类型检查仍有原有 Effect suggestions，构建保留原有 CSS/chunk 提示。只读浏览器基线位于 `.test-artifacts/sidebar-actions/before/` 与 `before-stage/`，验收 `stage-verified/report.json` 和正式 `production-complete/report.json` 覆盖浅深色、1440px 桌面、390px 触屏、560px 短窗口、长本地草稿、悬停/焦点宽度稳定、原菜单键盘与焦点恢复、内部滚动及真实省略。验收同一完成状态行的标题由 93px 增至 131px（+38px），桌面草稿由 99px 增至 133px（+34px）；触屏以明确的 44px 实际操作区为优先，空闲标题减少 16px、草稿减少 10px，不将触屏变化记为增宽。触屏实际滚动到已有完成状态行，验证状态与操作同时可见、实际点按菜单、标题及相邻行坐标不误触；正式当时没有未读完成行，不造状态。测试不激活既有对话，不发送消息或模型请求，不创建运行、写入文件或改动业务数据，仅清空自己的临时 profile 草稿。未重复 Windows、实体手机或模型多轮测试。
+
+`stage-1` 保留首轮已通过但未滚到触屏完成状态行的覆盖记录；脚本随后补充真实行滚动。正式初次及两次复查（`production-verified`、`production-final`、`production-pass`）遇到历史草稿恢复通知及其退出阶段遮挡顶部草稿按钮，真实命中断言失败；证据全部保留。脚本复用已有验收的原生“关闭通知”流程，并按实际 T3/Radix 的 `data-slot` 等待通知内容移除后再测量，最终正式检查通过；不使用 CSS 隐藏通知或放松实际命中断言。
+
+增量归档 SHA-256 `04bc06b9761375909258656e6ea896a63e19e1742c8eb71c30096ea11cc08cf5`，完整发布清单 `9b7ab6a5d693b6dc6316e4e0de60e9055355cf49c1f838b2e0c46035f76f2a50`，原生依赖清单 `51648a57ec6cc71d129ef1edf18800d136daf153e57081a006dac314c6de069d`。3854 个文件、59 个相对链接及原生 2038 个文件/21 个包校验通过；两入口实际 HTML SHA-256 均为 `042cdb6efc5903be662e142edeafca268e61866fc3c5d7df1e2a74da23659434`，保留旧哈希静态资源。
+
+配置恢复点为 `backups/t3-sidebar-actions-1-stage-20261022T131755Z` 与 `backups/t3-sidebar-actions-1-production-20261022T132058Z`。正式原 23 个会话、146 条消息、51 个轮次及 188 个文件摘要一致，见服务器 `sidebar-actions-1-retention.json.verified.json`。只回退本次 UI 时，空闲后恢复对应快照内网关的 `zzzzzzzz-workspace-chat.conf`，执行用户级 `daemon-reload` 并重启网关，静态目录回到 `t3-workspace-ui-1-static`；不重启 worker、不覆盖数据库，已有数据归档继续保留。
+
+## 历史版本：T3 工作区整页统一（t3-workspace-ui-1，仅网页）
 
 2026-10-22，在独立 worktree `t3-workspace-ui` / 分支 `feat/t3-workspace-ui` 完成，基于原分支最新 `3aca52ac`，保留其已完成修复。验收 18887 与正式 ZeroTier 8787 均使用 `releases/t3-workspace-ui-1-static`；后端仍为 `t3-workspace-prefix-1`，验收/正式 worker PID `182970` / `183322` 未变化，原两条暂停队列继续暂停。
 
