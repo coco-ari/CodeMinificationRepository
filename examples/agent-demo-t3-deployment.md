@@ -2,7 +2,23 @@
 
 实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。原 Demo 的 8787 入口已切换到本模块；当前发布证据见下一节，早期构建、数据迁移与恢复记录保留在历史章节。
 
-## 当前发布：紧凑侧栏尾槽复用（t3-sidebar-actions-1，仅网页）
+## 当前发布：项目搜索输入修复（t3-project-search-1，仅网页）
+
+2026-10-22，验收 18887 与正式 ZeroTier 8787 已切换到 `releases/t3-project-search-1-static`。基于 `t3-sidebar-actions-1` 增量发布，保留工作区整页统一、紧凑侧栏和已读提示修复；后端仍运行 `t3-workspace-prefix-1`。仅在空闲时重启网页网关，验收/正式 worker PID `182970` / `183322` 前后不变，验收原两条暂停队列继续暂停。
+
+复用锁定 T3 的 `CommandPalette`、`CommandInput` 与 `AutocompleteInput` 完整流程。迁入的共享 `Input` 把默认 `data-slot=input` 放在传入属性之后，覆盖了原组件的 `autocomplete-input`，导致原生返回图标避让样式失效。现在恢复上游的属性优先级，并将子菜单占位符改为“搜索…”。没有手写图标间距、替换项目筛选或新增键盘状态机；项目选择仍只生成本地未发送草稿，不启动 Agent。
+
+相关搜索逻辑 40/40、ChatView Compiler 回归 2/2、Input/Autocomplete/Command/CommandPaletteContent/CommandPalette 五组件实际 Compiler 缓存检查、Web 与宿主类型检查及网页构建通过；保留既有 Effect suggestions、CSS/chunk 提示。来源适配清单已更新，第三方许可保留。
+
+隔离浏览器脚本为 `test/t3-project-search-ui.mjs`。修复前 `.test-artifacts/project-search/before-3/report.json` 复现全部六种组合的重叠：桌面文字起点 453px、返回按钮右边界 463px；390px 窄屏分别为 37px / 49px，占位符为英文。修复后验收 `stage-1/report.json` 与正式 `production-1/report.json` 均通过：桌面文字起点 474px（按钮右侧留 11px），触屏 62px（留 13px），输入 slot 正确且占位中文。实际截图覆盖浅深色、1440px 桌面、390px 触屏及 600px 短窗口；检查逐字中英文筛选、无结果提示、清空恢复、Home/End/方向键、Backspace/按钮返回、Escape 焦点恢复与 Enter 选择真实机柜项目的本地草稿。页面错误、消息/运行/文件写入及被拦截业务 mutation 均为 0。未重复 Windows、实体手机、模型多轮或暂存读写测试。
+
+首次基线脚本把空编辑器原生换行误判为内容；第二次将仅输入 `AutoOps` 必须收窄作为错误假设。原生搜索还匹配工作区路径，共有部署路径可使多个项目命中 `AutoOps`。脚本随后按授权项目元数据及原生延迟筛选等待准确结果集，完整真实标题和中文“机柜”均唯一匹配，早期失败证据保留在 `before/`、`before-2/`。根命令返回流程使用原生已有的 `new thread` 搜索词；本轮未扩展其他命令的中文检索词，不将此项声称为全命令中文搜索验收。
+
+增量归档 SHA-256 `1530fffc26165d08c823d9f061526cc5b84a013e915ae9a5b0307bff760bb04d`，完整发布清单 `9edb95d0b088f1fba83400aa56f45f021bd60c7a031b694ba793ba66582c8f26`，原生依赖清单 `c03114837d7348543c52b91080f33f88e5a9895524263f3558c4d6dec4f7c11b`。3854 个文件、59 个相对链接及原生 2038 个文件/21 个包校验通过；两入口实际 HTML SHA-256 均为 `a0d56d11f7616072ec775aee6103ccb5c97c0eb3045bde9ee1a83c68804d770b`，保留旧哈希静态资源。
+
+配置恢复点为 `backups/t3-project-search-1-stage-20261022T135420Z` 与 `backups/t3-project-search-1-production-20261022T135506Z`。正式原 23 个会话、146 条消息、51 个轮次及 188 个文件摘要一致，见服务器 `project-search-1-retention.json.verified.json`。只回退此次 UI 时，空闲后恢复对应快照内网关的 `zzzzzzzz-workspace-chat.conf`，执行用户级 `daemon-reload` 并重启网关，静态目录回到 `t3-sidebar-actions-1-static`；不重启 worker、不覆盖数据库，既有数据备份继续保留。
+
+## 历史版本：紧凑侧栏尾槽复用（t3-sidebar-actions-1，仅网页）
 
 2026-10-22，验收 18887 与正式 ZeroTier 8787 已切换到 `releases/t3-sidebar-actions-1-static`。基于最新 `t3-workspace-ui-1` 增量发布，保留工作区整页统一及已读提示修复；后端继续运行 `t3-workspace-prefix-1`。仅空闲时重启网页网关，验收/正式 worker PID `182970` / `183322` 前后不变，验收原两条暂停队列继续暂停。
 

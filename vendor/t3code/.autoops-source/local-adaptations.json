@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T13:15:52.284178+00:00",
+  "generatedAt": "2026-10-22T13:43:27.145306+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -392,7 +392,7 @@
       "path": "apps/web/src/components/CommandPalette.logic.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "85a0d85a76b6e53095247204d413cc87e95d5dbc8f0683d6bdfbcbec39fb838f",
-      "localSha256": "f2cac43d7708059ad55b03b15f7c0542f10b4f39088842408798bc521e7489ba"
+      "localSha256": "02b49f507f36e690f6f85e73de022dc3016e1b47d9c2dd911834c781bc5b7eb1"
     },
     {
       "path": "apps/web/src/components/CommandPalette.tsx",
@@ -2006,7 +2006,7 @@
       "path": "apps/web/src/components/ui/input.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "3da4013e812d00d8a3f9795825625ab098bf4e14c360b20fcd653ca1f8b77f57",
-      "localSha256": "70dc1e1e8de4d7668ddf68bbf4774f2dd43f0fbcda76c4995df18541b8e8588c"
+      "localSha256": "9df5f58ddb2479682d8d7e7c99e598df9d2605bddc753c5ecf070368ff9a60fb"
     },
     {
       "path": "apps/web/src/components/ui/label.tsx",
