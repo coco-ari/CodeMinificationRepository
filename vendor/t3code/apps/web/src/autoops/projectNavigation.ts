@@ -40,6 +40,13 @@ function nativeChatProjectId(href: string, purpose: 'context' | 'recent' = 'cont
   return resolveAutoOpsNativeThreadProjectId(shell, detail, purpose)
 }
 
+/** Read an existing native identity for safe settings-return navigation. */
+export function readAutoOpsChatProjectId(href: string): string | null {
+  const projectId = nativeChatProjectId(href)
+  if (projectId === null) return null
+  return readAutoOpsHost()?.projects.some((project) => project.id === projectId) ? projectId : ''
+}
+
 const navigation = createAutoOpsProjectNavigation({
   readHost: readAutoOpsHost,
   readStorage: () => typeof window === 'undefined' ? undefined : window.sessionStorage,

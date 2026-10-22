@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T15:53:59.009313+00:00",
+  "generatedAt": "2026-10-22T16:21:27.114425+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -350,7 +350,7 @@
       "path": "apps/web/src/components/AppSidebarLayout.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "e5e5bb8296029c0136887b8d05e7ba79055430cccd9dfb6a40515221d1acd91d",
-      "localSha256": "a35438ddbf0e456e6403a301fe64f4fe032e9f21acb1d4ef5b47c95705775522"
+      "localSha256": "ddc4cdf3b36275e92ba24eaff85084bde79b00173d1a1a4a24a4801c4d1caaac"
     },
     {
       "path": "apps/web/src/components/BranchToolbar.tsx",
@@ -380,7 +380,7 @@
       "path": "apps/web/src/components/ChatView.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "cfbdfc9832cc66c42ca2976b735c051b4e7d02834f3e6a4c513e98e4e86e8816",
-      "localSha256": "e52442b18602ea1ac9124f3da8790a55b5d2dc0f92eef0e6123ad3f725dbfcff"
+      "localSha256": "559024eb9c0decfe315ae90d1ce023d4e11fe0ce27c97d0313e9549f46617c5d"
     },
     {
       "path": "apps/web/src/components/CommandPalette.logic.test.ts",
@@ -494,7 +494,7 @@
       "path": "apps/web/src/components/RightPanelTabs.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "50e7011fa815502c76c4d2c628e44f6864a5dc63e7193691d3d10c06e794cd59",
-      "localSha256": "cb24a00e72bae9b87b3c0d7cd0913d6d8732e65d6679b83fb69c8566be881d64"
+      "localSha256": "1785a224188ece53489def0eece5e627c6143d8f111e0d161f14804916f7feb7"
     },
     {
       "path": "apps/web/src/components/Sidebar.drag.test.ts",
@@ -542,7 +542,7 @@
       "path": "apps/web/src/components/Sidebar.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "c7e84c76bb16ff70db5c2cd298cae15ec0b85a9e593bbddbdd9f617ba7662318",
-      "localSha256": "c682b67ab180ab3ec5aca2e6a50e51815fa614ccabac33a1cfec0a82c668e3df"
+      "localSha256": "a7d5970685d74395eb6a1e7bf6858ab0d8a01a3fd58c766efb41fcff69435ac4"
     },
     {
       "path": "apps/web/src/components/SlowRpcRequestToastCoordinator.tsx",
@@ -573,6 +573,12 @@
       "reason": "local content differs from upstream",
       "upstreamSha256": "aa8d0c99a272cc91ab987f0fa0d600a9be56d2b01ae74f0d94706ac8384d3d0c",
       "localSha256": "e3055c48fb9a4235cd5bfa0a6ad289919449bd48ef6f4c82aa92314913c3f5d5"
+    },
+    {
+      "path": "apps/web/src/components/WorkspacePageHeader.tsx",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "3d89e7a5b8f143f97105f5a28f8a9d8f827b76e9e873377586d8eb50dc4a5346",
+      "localSha256": "38cb09336274319bbb5c76890ffb735bf7658a558ddd0d79236d26c59d25481e"
     },
     {
       "path": "apps/web/src/components/auth/ConnectAgentSurface.tsx",
@@ -1910,7 +1916,7 @@
       "path": "apps/web/src/components/sidebar/mainAppLocation.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "93e05aaa48632bae2451a504beb207b3ed31c72f295ad5b3841b8479138707ad",
-      "localSha256": "5670209debe9feb9aeb9bcc36cffe162bc205b764bd4dc8e1c3b4ad6f5f323ea"
+      "localSha256": "62428afa39c9058144a3fedec88d64e387a5f17a0d0475593d881bc694f0030e"
     },
     {
       "path": "apps/web/src/components/sidebar/updateEverything.logic.ts",
@@ -2072,7 +2078,7 @@
       "path": "apps/web/src/components/ui/sidebar.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "9a92e4632178f8e9079d92db0af056c453a2909b71a4e5ef404472032b850c85",
-      "localSha256": "a8fc73531fc5f87bb5179a6437c2d206a1fb441d9bae329bf2d4b61c65163939"
+      "localSha256": "f1079597e5544701fe1ed99f6750eadfe5b5416cd2d9f2d068aa03d1129f0ba4"
     },
     {
       "path": "apps/web/src/components/ui/spinner.tsx",
@@ -2813,6 +2819,7 @@
     "apps/web/src/autoops/projectNavigation.logic.ts",
     "apps/web/src/autoops/materialPreviewScope.ts",
     "apps/web/src/components/ChatMarkdown.autoops-csp.browser.test.tsx",
+    "apps/web/src/components/sidebar/mainAppLocation.logic.ts",
     "apps/web/src/components/ui/radix-number-field.tsx",
     "apps/web/src/components/ui/radix-menu.tsx",
     "apps/web/src/components/ui/radix-search.tsx",

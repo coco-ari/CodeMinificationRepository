@@ -32,6 +32,7 @@ const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 const SIDEBAR_TITLEBAR_CONTROL_SIZE = "max-sm:[--workspace-titlebar-control-size:--spacing(8)]";
 
 type SidebarContextProps = {
+  topOffset: number;
   state: ResponsiveSidebarState;
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -97,6 +98,7 @@ function useSidebarVisibility() {
 
 function SidebarProvider({
   defaultOpen = true,
+  topOffset = 0,
   open: openProp,
   onOpenChange: setOpenProp,
   className,
@@ -105,6 +107,8 @@ function SidebarProvider({
   ...props
 }: React.ComponentProps<"div"> & {
   defaultOpen?: boolean;
+  /** Space owned by an application header above this sidebar's viewport. */
+  topOffset?: number;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -146,6 +150,7 @@ function SidebarProvider({
   const state = resolveSidebarState({ isMobile, open, openMobile });
 
   const contextValue: SidebarContextProps = {
+    topOffset,
     isMobile,
     open,
     openMobile,
@@ -213,6 +218,7 @@ function Sidebar({
   collapsible = "offcanvas",
   resizable = false,
   className,
+  style,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
@@ -221,7 +227,7 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
 }) {
-  const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
+  const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement, topOffset } = useSidebar();
   const desktopSidebarRef = React.useRef<HTMLDivElement>(null);
   const offcanvasCollapsed = !isMobile && collapsible === "offcanvas" && state === "collapsed";
 
@@ -252,6 +258,7 @@ function Sidebar({
             className,
           )}
           data-slot="sidebar"
+          style={style}
           {...props}
         >
           {children}
@@ -278,6 +285,7 @@ function Sidebar({
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+                ...(topOffset > 0 ? { top: topOffset, height: `calc(100dvh - ${topOffset}px)` } : {}),
               } as React.CSSProperties
             }
           >
@@ -292,6 +300,7 @@ function Sidebar({
                 side === "left" ? "pl-safe" : "pr-safe",
               )}
               {...props}
+              style={style}
             >
               {children}
             </div>
@@ -337,6 +346,7 @@ function Sidebar({
             className,
           )}
           data-slot="sidebar-container"
+          style={topOffset > 0 ? { ...style, top: topOffset, height: `calc(100dvh - ${topOffset}px)` } : style}
           {...props}
         >
           <div
@@ -588,6 +598,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       className={cn(
         "relative flex min-w-0 w-full flex-1 flex-col bg-background surface-grain",
+        "in-data-[autoops-body]:h-full! in-data-[autoops-body]:min-h-0!",
         "md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ms-2 md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ms-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm/5",
         className,
       )}

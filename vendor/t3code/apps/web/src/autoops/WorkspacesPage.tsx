@@ -11,7 +11,6 @@ import {
   RefreshCwIcon,
   ShieldCheckIcon,
 } from 'lucide-react'
-import { WorkspacePageHeader } from '~/components/WorkspacePageHeader'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
 import { Badge } from '~/components/ui/badge'
@@ -99,9 +98,7 @@ export function AutoOpsWorkspacesPage() {
       aria-label="项目工作区"
       data-testid="workspace-page"
     >
-      <WorkspacePageHeader>
-        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">工作区</h1>
-      </WorkspacePageHeader>
+      <h1 className="sr-only">工作区</h1>
       {project ? (
         <ProjectWorkspaces
           key={`${projectId}:${versionId === undefined ? 'remembered' : versionId === null ? 'invalid' : versionId}`}

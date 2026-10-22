@@ -1,5 +1,4 @@
 import { autoOpsFeature, filterAutoOpsThreadMenu, isAutoOpsHosted, isAutoOpsLite } from "~/autoops/capabilities";
-import { ProjectAreaNavigation } from "~/autoops/ProjectAreaNavigation";
 import { useAutoOpsProjectId } from "~/autoops/projectNavigation";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
@@ -4675,8 +4674,7 @@ export default function Sidebar() {
   return (
     <>
       <ThreadContextDragGhost />
-      <SidebarChromeHeader isElectron={isElectron} />
-      {isAutoOpsHosted() ? <ProjectAreaNavigation /> : null}
+      {isAutoOpsHosted() ? <div className="shrink-0 md:hidden"><SidebarChromeHeader isElectron={isElectron} /></div> : <SidebarChromeHeader isElectron={isElectron} />}
       <SidebarContent
         className={isAutoOpsHosted() ? "min-h-0" : "min-h-full"}
         fixedHeader={

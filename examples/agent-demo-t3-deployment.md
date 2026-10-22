@@ -4,9 +4,25 @@
 
 ## 独立验证：工作区部署发布（28887）
 
-2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在统一侧栏选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
+2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在顶部选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
 
-### 项目导航与独立页面（t3-project-areas-4，仅网页）
+### 顶部项目与模块导航（t3-top-navigation-2，仅网页）
+
+2026-10-23，按确认后的结构，将全局项目选择和模块导航移到全宽 `52px` 顶部栏。桌面显示问答、工作区、部署发布及“更多功能”，窄屏合并为“切换模块”；搜索菜单只列已授权、已闭环功能，不增加 MCP 或插件占位。问答与设置保留自己的侧栏，工作区和部署不挂载空侧栏，正文占满剩余宽高，并移除重复的页面标题行。
+
+复用锁定 T3 的 `WorkspacePageHeader`、项目 `Combobox`、原生 `ToggleGroup`、`SidebarTrigger`、文件工作区与设置返回流程；顶部模块编排是 AutoOps 适配。设置内切项目留在设置页，返回时按当前项目和权限恢复原区域。聊天的固定右面板按钮随正文下移，局部 absolute 控件保持原坐标，避免覆盖顶栏或重复偏移；独立 T3 默认坐标不变。
+
+导航及设置返回定向逻辑 19/19、ChatView Compiler 回归 2/2、宿主/Web 类型检查、10 个相关组件实际 Compiler 零诊断且保留缓存、网页构建及锁定来源校验通过。最终 `.test-artifacts/top-project-navigation/ui-deep-link/report.json` **19/19**：1439/1440px 桌面浅深色、390px 触屏模拟、600px 短窗口、顶栏实际点击命中、原生搜索/方向键/Escape 焦点、三区与 A/B 项目联动、刷新/历史、无查询及携带原项目查询的设置返回、真实 HTML 内容、固定来源 Dialog、ZIP/清单下载、无效项目无回退及外部部署 API 403。页面错误、被阻止业务写入和既有会话激活为 0；未发送模型请求、生成源码包或提交部署。自有浏览器与临时 profile 均已关闭清理。实体 Windows/手机、大项目以及运行中流式切页时序未重复验证。
+
+首轮 `ui-first` 在窄屏复现原固定右面板按钮遮挡模块入口，修正后通过；后续 `ui-verified` 的截图等待跨越 iframe 文档导航而失败，改为宿主页等待绘制并重新校验真实正文，未注入内容或放松内容断言。`ui-final`、`ui-complete` 各 18/18 通过，补充原始设置深链回归后最终 19/19。早期报告保留，最终构建与部署版逐文件哈希一致。
+
+当前运行程序仍为 `t3-deployment-validation-1`，网页为 `releases/t3-top-navigation-2/dist/web`，基础为保留的 `t3-top-navigation-1`。最终增量归档 SHA-256 `76a115a3ce10cfe7efd83881ca90147b7f38626585429e8a8c84c405b4fe5a3c`，完整清单 `9b3af42d155de94788f927c995f0b0469fe72d3fde52e51c9ef1ec333e170ee2`，原生清单 `bcca38e3fa612dee42653e420d4c19f364ef5580b83d768b643ac709938186c8`。3893 文件、59 相对链接及官方同版原生依赖 2038 文件/21 包校验通过；实际 HTML SHA-256 `5612c74c2de35726d8c1324bb3b0e2e258be63a8e9418ae1b20d12472afc7905`。
+
+本轮未主动重启 worker，但 `00:21:52` 内核 OOM 杀死验证 worker，systemd 于 `00:21:55` 自动恢复，MainPID 从 `202045` 变为 `205547`。静态切换脚本的进程保护断言正确失败，随后通过只读检查核实新网页、服务恢复与原部署站点不变，并保存真实原因到 `top-navigation-static-switch.json`。最终完整验收期间 `205547` 稳定，原部署站点 HTML SHA-256 仍为 `05cfb58e9c16ec826922bddbbb1240990f2b9fb024579cc5634532ff157c0545`。验收结束可用磁盘约 558 MiB（97%），可用内存约 78 MiB。没有清理共享数据或调整其它服务；不能宣称全程无重启。原 8787/18887 网关没有切换。
+
+仅回退本轮顶部导航时，独立网关空闲后恢复 `/home/tao/autoops-deployment-validation/web-unit-before-top-navigation-1.txt`，用户级 `daemon-reload` 并只重启独立网关即可回到 `t3-project-areas-4`。`web-unit-before-top-navigation-2.txt` 仅恢复第一版顶部导航，仍有已发现的窄屏遮挡，不作为最终回退目标。保留当前业务数据和旧资源，不用旧数据库覆盖。
+
+### 前一版项目导航与独立页面（t3-project-areas-4，仅网页）
 
 按确认后的结构，将问答、工作区、部署发布改为项目下同级页面，统一侧栏顶部项目 Combobox；只有问答挂载原生紧凑会话列表，另外两页直接使用各自的满高目录/服务与详情分栏。工作区保留内部/外部与导入、脱敏、复核；源码包生成、下载、清单及相关任务移入独立部署页。复用 T3 `AppSidebarLayout`、`SettingsSidebarNav` 的原生导航模式、项目 Combobox、`WorkspacePageHeader` 和文件面板，不另加设计系统。项目切换与新建对话接入同一授权上下文，环境和已开始执行的绑定不变。
 
@@ -36,7 +52,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 | 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
 | 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
 | 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
-| 程序 / 网页 | `releases/t3-deployment-validation-1` / `releases/t3-project-areas-4/dist/web` |
+| 程序 / 网页 | `releases/t3-deployment-validation-1` / `releases/t3-top-navigation-2/dist/web` |
 
 固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
 

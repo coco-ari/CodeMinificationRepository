@@ -8,7 +8,6 @@ import {
   PackageIcon,
   RefreshCwIcon,
 } from 'lucide-react'
-import { WorkspacePageHeader } from '~/components/WorkspacePageHeader'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
@@ -81,9 +80,7 @@ export function AutoOpsDeploymentsPage() {
       aria-label="项目部署"
       data-testid="deployments-page"
     >
-      <WorkspacePageHeader>
-        <h1 className="min-w-0 flex-1 truncate text-sm font-medium">部署发布</h1>
-      </WorkspacePageHeader>
+      <h1 className="sr-only">部署发布</h1>
       {project && manager ? (
         <ProjectDeployments
           key={projectId}

@@ -57,9 +57,10 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { isAutoOpsHosted } from "../autoops/capabilities";
-import { AutoOpsProjectRouteSync, ProjectAreaSidebar } from "../autoops/ProjectAreaNavigation";
+import { AutoOpsProjectRouteSync, ProjectAreaTopbar } from "../autoops/ProjectAreaNavigation";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
+const AUTOOPS_TOPBAR_HEIGHT = 52;
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -120,7 +121,7 @@ function readInitialThreadSidebarWidth(): number {
   }
 }
 
-function SidebarControl() {
+function SidebarControl({ renderControl = true }: { renderControl?: boolean }) {
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
@@ -171,6 +172,8 @@ function SidebarControl() {
       unsubscribe?.();
     };
   }, [keybindings, toggleSidebar, usagePageOpen]);
+
+  if (!renderControl) return null;
 
   return (
     <div
@@ -255,6 +258,14 @@ function ProjectProjectionRetention() {
   return null;
 }
 
+function SidebarRouteAvailability({ available }: { available: boolean }) {
+  const { setOpenMobile } = useSidebar();
+  useEffect(() => {
+    if (!available) setOpenMobile(false);
+  }, [available, setOpenMobile]);
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -265,6 +276,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  const hosted = isAutoOpsHosted();
+  const showSidebar = !hosted || !/^\/(?:workspaces|deployments)(?:\/|$)/.test(pathname);
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
@@ -317,23 +330,14 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     };
   }, [navigate, pathname]);
 
-  return (
-    <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
-      <SidebarProvider
-        className="h-dvh! min-h-0!"
-        data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
-        defaultOpen
-        style={sidebarProviderStyle}
-      >
-        <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
-        <ProjectProjectionRetention />
-        <AutoOpsProjectRouteSync />
+  const content = <>
+    {showSidebar ? (
         <Sidebar
           side="left"
           collapsible="offcanvas"
           data-app-sidebar=""
           role="navigation"
-          aria-label={isOnSettings ? "设置" : isAutoOpsHosted() ? "项目导航" : "对话"}
+          aria-label={isOnSettings ? "设置" : "对话"}
           resizable={{
             maxWidth: sidebarMaximumWidth,
             minWidth: sidebarMinimumWidth,
@@ -347,22 +351,40 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         >
           {isOnSettings ? (
             <>
-              <SidebarChromeHeader isElectron={isElectron} />
+              {hosted ? <div className="shrink-0 md:hidden"><SidebarChromeHeader isElectron={isElectron} /></div> : <SidebarChromeHeader isElectron={isElectron} />}
               <SettingsSidebarNav pathname={pathname} />
             </>
-          ) : isAutoOpsHosted() && (pathname === "/workspaces" || pathname === "/deployments") ? (
-            <ProjectAreaSidebar />
-          ) : legacySidebarEnabled && !isAutoOpsHosted() ? (
+          ) : legacySidebarEnabled && !hosted ? (
             <LegacyThreadSidebar />
           ) : (
             <ThreadSidebar />
           )}
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
+    ) : null}
         {children}
-        <SidebarControl />
+        {showSidebar ? <SidebarControl renderControl={!hosted} /> : null}
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />
+  </>;
+
+  return (
+    <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
+      <SidebarProvider
+        className={cn("h-dvh! min-h-0!", hosted && "flex-col")}
+        data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
+        defaultOpen
+        topOffset={hosted ? AUTOOPS_TOPBAR_HEIGHT : 0}
+        style={sidebarProviderStyle}
+      >
+        <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
+        <ProjectProjectionRetention />
+        <AutoOpsProjectRouteSync />
+        {hosted ? <SidebarRouteAvailability available={showSidebar} /> : null}
+        {hosted ? <>
+          <ProjectAreaTopbar />
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-autoops-body="" style={{ "--workspace-fixed-controls-top": `calc(var(--workspace-controls-top) + ${AUTOOPS_TOPBAR_HEIGHT}px)` } as CSSProperties}>{content}</div>
+        </> : content}
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
   );

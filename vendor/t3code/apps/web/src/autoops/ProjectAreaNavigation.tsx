@@ -1,21 +1,23 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { ChevronDownIcon, FolderGit2Icon, MessageSquareIcon, RocketIcon } from 'lucide-react'
+import { ArchiveIcon, ChevronDownIcon, FolderGit2Icon, Grid2X2Icon, LogOutIcon, MessageSquareIcon, PaletteIcon, RocketIcon, SettingsIcon, type LucideIcon } from 'lucide-react'
 import { readAutoOpsHost } from './hostConfig'
 import {
   autoOpsAreaFromPath, autoOpsProjectHref, rememberAutoOpsChatLocation,
-  selectAutoOpsProject, useAutoOpsProjectId,
+  selectAutoOpsProject, useAutoOpsProjectId, type AutoOpsArea,
 } from './projectNavigation'
 import { useThreadRouteTarget } from '~/hooks/useThreadRouteTarget'
 import { useThreadSelectionStore } from '~/threadSelectionStore'
-import { SidebarChromeFooter, SidebarChromeHeader } from '~/components/sidebar/SidebarChrome'
-import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
+import { WorkspacePageHeader } from '~/components/WorkspacePageHeader'
+import { SidebarTrigger } from '~/components/ui/sidebar'
+import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
+import { toastManager } from '~/components/ui/toast'
+import { useMediaQuery } from '~/hooks/useMediaQuery'
 import {
   Combobox, ComboboxEmpty, ComboboxItem, ComboboxList,
   ComboboxPopup, ComboboxSearchInput, ComboboxTrigger, useComboboxFilter,
 } from '~/components/ui/combobox'
-import { isElectron } from '~/env'
 
 const areas = [
   { id: 'chat', label: '问答', icon: MessageSquareIcon },
@@ -41,29 +43,75 @@ export function AutoOpsProjectRouteSync() {
   return null
 }
 
-/** T3's project Combobox and SettingsSidebarNav compose one business navigation. */
-export function ProjectAreaNavigation() {
+type FunctionItem = { value: string; label: string; icon: LucideIcon } & (
+  | { kind: 'area'; area: AutoOpsArea }
+  | { kind: 'settings'; href: string }
+  | { kind: 'logout' }
+)
+
+/** T3 workspace chrome and searchable pickers keep global navigation in one row. */
+export function ProjectAreaTopbar() {
   const host = readAutoOpsHost()
   const projectId = useAutoOpsProjectId()
-  const pathname = useLocation({ select: (location) => location.pathname })
+  const location = useLocation()
+  const pathname = location.pathname
   const navigate = useNavigate()
-  const { isMobile, setOpenMobile } = useSidebar()
+  const wide = useMediaQuery('lg')
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const [functionOpen, setFunctionOpen] = useState(false)
+  const [functionQuery, setFunctionQuery] = useState('')
+  const [logoutBusy, setLogoutBusy] = useState(false)
   const filter = useComboboxFilter()
+  useEffect(() => {
+    setOpen(false)
+    setQuery('')
+    setFunctionOpen(false)
+    setFunctionQuery('')
+  }, [projectId, pathname, wide])
   if (!host) return null
   const selected = host.projects.find((project) => project.id === projectId) ?? null
   const currentArea = autoOpsAreaFromPath(pathname)
+  const settings = pathname === '/settings' || pathname.startsWith('/settings/')
   const canDeploy = selected?.membership?.workspaceAccess === 'internal' && selected.membership.role === 'manager'
   const filtered = host.projects.filter((project) => filter.contains(project.name, query))
-  const go = (area: typeof areas[number]['id'], nextProjectId = projectId) => {
+  const availableAreas = areas.filter((area) => area.id !== 'deployments' || canDeploy)
+  const items: FunctionItem[] = [
+    ...availableAreas.map((area) => ({ value: area.id, label: area.label, icon: area.icon, kind: 'area' as const, area: area.id })),
+    { value: 'settings-general', label: '常规设置', icon: SettingsIcon, kind: 'settings', href: '/settings/general' },
+    { value: 'settings-appearance', label: '外观设置', icon: PaletteIcon, kind: 'settings', href: '/settings/appearance' },
+    { value: 'settings-archived', label: '归档对话', icon: ArchiveIcon, kind: 'settings', href: '/settings/archived' },
+    { value: 'logout', label: '退出登录', icon: LogOutIcon, kind: 'logout' },
+  ]
+  const filteredFunctions = items.filter((item) => filter.contains(item.label, functionQuery))
+  const currentFunction = items.find((item) => settings
+    ? item.kind === 'settings' && item.href === pathname
+    : item.kind === 'area' && item.area === currentArea) ?? null
+  const currentLabel = settings ? '设置' : areas.find((area) => area.id === currentArea)?.label ?? '选择模块'
+  const reportFailure = (error: unknown) => toastManager.add({ type: 'error', title: '操作未完成', description: error instanceof Error ? error.message : '请重试。' })
+  const navigateTo = (href: string) => { void navigate({ href }).catch(reportFailure) }
+  const go = (area: AutoOpsArea, nextProjectId = projectId) => {
     if (!nextProjectId) return
     selectAutoOpsProject(nextProjectId)
-    if (isMobile) setOpenMobile(false)
-    void navigate({ href: autoOpsProjectHref(area, nextProjectId) })
+    navigateTo(autoOpsProjectHref(area, nextProjectId))
+  }
+  const chooseFunction = (item: FunctionItem) => {
+    if (item.kind === 'area') go(item.area)
+    else if (item.kind === 'settings') navigateTo(item.href)
+    else {
+      setLogoutBusy(true)
+      void fetch('/api/agent-demo/logout', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Demo-CSRF': host.csrfToken }, body: '{}' })
+        .then((response) => {
+          if (!response.ok) throw new Error('退出登录失败，请重试。')
+          window.location.replace('/agent-demo.html')
+        }).catch(reportFailure).finally(() => setLogoutBusy(false))
+    }
   }
   return (
-    <SidebarGroup className="shrink-0 gap-2 border-b border-sidebar-border/60 pb-3" data-testid="project-area-navigation">
+    <WorkspacePageHeader reserveSidebarControl={false} className="relative z-30 w-full min-w-0 gap-2 border-b border-border/60 pl-3! pr-3!" data-testid="project-area-navigation" aria-label="项目与功能导航">
+      {settings || currentArea === 'chat' ? <SidebarTrigger aria-label="切换主侧栏" /> : null}
+      <span className="hidden shrink-0 text-sm font-semibold sm:block">AutoOps</span>
+      <div className="min-w-0 flex-1 sm:max-w-56">
       <Combobox
         items={host.projects} filteredItems={filtered} autoHighlight aria-label="搜索项目"
         itemToStringLabel={(project) => project.name}
@@ -72,6 +120,15 @@ export function ProjectAreaNavigation() {
         onOpenChange={(value) => { setOpen(value); if (!value) setQuery('') }}
         onValueChange={(project) => {
           if (!project || project.id === projectId) return
+          if (settings) {
+            selectAutoOpsProject(project.id)
+            if (Object.hasOwn(location.search, 'projectId')) {
+              const url = new URL(location.href, 'https://autoops.invalid')
+              url.searchParams.delete('projectId')
+              navigateTo(url.pathname + url.search)
+            }
+            return
+          }
           const allowedDeployment = project.membership?.workspaceAccess === 'internal' && project.membership.role === 'manager'
           go(currentArea === 'deployments' && !allowedDeployment ? 'workspaces' : currentArea, project.id)
         }}
@@ -89,22 +146,29 @@ export function ProjectAreaNavigation() {
           </ComboboxItem>}</ComboboxList>
         </ComboboxPopup>
       </Combobox>
-      <SidebarMenu aria-label="项目功能">
-        {areas.filter((area) => area.id !== 'deployments' || canDeploy).map((area) => <SidebarMenuItem key={area.id}>
-          <SidebarMenuButton aria-label={area.label} aria-current={currentArea === area.id ? 'page' : undefined} isActive={currentArea === area.id} disabled={!projectId} onClick={() => go(area.id)}>
-            <area.icon /><span>{area.label}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>)}
-      </SidebarMenu>
-    </SidebarGroup>
+      </div>
+      {wide ? <nav aria-label="常用模块" className="min-w-0 shrink-0">
+        <ToggleGroup variant="segmented" aria-label="项目功能" value={settings ? [] : [currentArea]} onValueChange={(value) => { const area = availableAreas.find((entry) => entry.id === value[0]); if (area) go(area.id) }}>
+          {availableAreas.map((area) => <Toggle key={area.id} value={area.id} aria-label={area.label} aria-current={!settings && currentArea === area.id ? 'page' : undefined} disabled={!projectId}><area.icon /><span>{area.label}</span></Toggle>)}
+        </ToggleGroup>
+      </nav> : null}
+      <div className="hidden flex-1 sm:block" />
+      <Combobox<FunctionItem> items={items} filteredItems={filteredFunctions} aria-label="搜索功能" autoHighlight
+        itemToStringLabel={(item) => item.label} isItemEqualToValue={(left, right) => left.value === right.value}
+        value={currentFunction} open={functionOpen}
+        onOpenChange={(value) => { setFunctionOpen(value); if (!value) setFunctionQuery('') }}
+        onValueChange={(item) => { if (item) chooseFunction(item) }}>
+        <ComboboxTrigger render={<Button size="sm" variant="ghost" aria-label={wide ? '更多功能' : '切换模块'} disabled={logoutBusy} className="max-w-40 min-w-0 shrink-0" />}>
+          {wide ? <Grid2X2Icon /> : null}<span className="truncate">{wide ? '更多功能' : currentLabel}</span><ChevronDownIcon className="size-3.5 shrink-0" />
+        </ComboboxTrigger>
+        <ComboboxPopup align="end" className="w-64 max-w-(--available-width)">
+          <ComboboxSearchInput aria-label="搜索功能" placeholder="搜索功能…" value={functionQuery} onChange={(event) => setFunctionQuery(event.target.value)} />
+          <ComboboxEmpty>没有匹配的功能。</ComboboxEmpty>
+          <ComboboxList>{(item: FunctionItem) => <ComboboxItem key={item.value} value={item} disabled={item.kind === 'area' && !projectId}>
+            <item.icon className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{item.label}</span>
+          </ComboboxItem>}</ComboboxList>
+        </ComboboxPopup>
+      </Combobox>
+    </WorkspacePageHeader>
   )
-}
-
-export function ProjectAreaSidebar() {
-  return <>
-    <SidebarChromeHeader isElectron={isElectron} />
-    <ProjectAreaNavigation />
-    <div className="min-h-0 flex-1" />
-    <SidebarChromeFooter />
-  </>
 }
