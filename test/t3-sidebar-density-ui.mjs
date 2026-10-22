@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { chromium } from '../vendor/t3code/node_modules/.pnpm/playwright@1.60.0/node_modules/playwright/index.mjs'
@@ -10,12 +10,14 @@ import { T3LiveClient } from './helpers/t3-live-client.mjs'
 const origin = (process.env.BASE_URL || process.env.AGENT_DEMO_URL || 'http://192.168.31.157:18887').replace(/\/$/, '')
 if (new URL(origin).port === '8787' && process.env.T3_PRODUCTION_SMOKE !== '1') throw new Error('正式入口验收需要显式设置 T3_PRODUCTION_SMOKE=1。')
 const baseline = process.env.SIDEBAR_DENSITY_BASELINE === '1'
+const baselineReportPath = process.env.BASELINE_REPORT ? path.resolve(process.env.BASELINE_REPORT) : null
+const baselineReport = baselineReportPath ? JSON.parse(await readFile(baselineReportPath, 'utf8')) : null
 const phase = baseline ? 'before' : 'after'
 const output = path.resolve(process.env.ARTIFACT_DIR || `.test-artifacts/t3-sidebar-density/${phase}-${Date.now()}`)
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.BROWSER_EXECUTABLE_PATH
 await mkdir(output, { recursive: true })
 const report = {
-  origin, baseline, phase, startedAt: new Date().toISOString(), cases: [], pageErrors: [],
+  origin, baseline, phase, baselineReportPath, startedAt: new Date().toISOString(), cases: [], pageErrors: [],
   messageDispatches: 0, initialMessages: 0, filesystemWrites: 0, suppressedTelemetry: 0, blockedRpcMutations: [], blockedHttpMutations: [],
   coverage: { realExistingRows: true, ownUnsentLocalDraft: true, noExistingThreadActivated: true, synthesizedServerStates: false, themePreferencePersistence: '仅测试隔离 profile 的本地外观，不验证服务器偏好持久化' },
   cleanup: {},
@@ -38,7 +40,7 @@ async function run(name, action) {
   catch (error) {
     entry.status = 'failed'; entry.error = error.stack
     if (page) {
-      await writeFile(path.join(output, `${phase}-${name}-dom.txt`), await page.locator('body').innerText()).catch(() => {})
+      await writeFile(path.join(output, `${phase}-${name}-metadata.json`), JSON.stringify({ url: page.url(), geometry: report.geometry ?? [], tailGeometry: report.tailGeometry ?? [] }, null, 2)).catch(() => {})
       await page.screenshot({ path: path.join(output, `${phase}-${name}-failed.png`) }).catch(() => {})
     }
     throw error
@@ -196,8 +198,164 @@ async function measureRows(session) {
     }]
   }), { projectNames: session.bootstrap.projects.map((project) => project.name) })
 }
+function previousRow(session, mode, row) {
+  if (!baselineReport) return null
+  const sameViewport = (item) => item.session === session.name && item.mode === mode && item.media?.width === (session.touch ? 390 : 1440)
+  const previous = (baselineReport.geometry ?? baselineReport.cases?.flatMap((entry) => entry.result?.captures ?? []) ?? []).find(sameViewport)
+  // Server row identities are real and environment-qualified. Never compare
+  // unrelated stage/production rows, nor persist a synthetic server fixture.
+  return row.key ? previous?.rows.find((item) => item.key === row.key) ?? null : previous?.rows.find((item) => !item.key && item.testId === 'sidebar-draft-row') ?? null
+}
+async function measureTail(row) {
+  return row.evaluate((element) => {
+    const rectangle = (rect) => rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null
+    const effectiveOpacity = (item) => {
+      if (!item) return 0
+      let opacity = 1
+      for (let current = item; current && current !== element.parentElement; current = current.parentElement) {
+        const css = getComputedStyle(current)
+        if (css.display === 'none' || css.visibility === 'hidden') return 0
+        opacity *= Number(css.opacity)
+      }
+      return opacity
+    }
+    const shown = (item) => {
+      if (!item) return false
+      const rect = item.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 && effectiveOpacity(item) > 0.9
+    }
+    const clippedRectangle = (item) => {
+      const source = item.getBoundingClientRect()
+      let left = source.left, right = source.right, top = source.top, bottom = source.bottom
+      for (let parent = item.parentElement; parent; parent = parent.parentElement) {
+        const css = getComputedStyle(parent), box = parent.getBoundingClientRect()
+        if (/hidden|clip|scroll|auto/.test(css.overflowX)) { left = Math.max(left, box.left); right = Math.min(right, box.right) }
+        if (/hidden|clip|scroll|auto/.test(css.overflowY)) { top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom) }
+      }
+      return { left, right, top, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top) }
+    }
+    const titleCandidates = [...element.querySelectorAll('.truncate')]
+    const title = element.querySelector('[data-slot="sidebar-row-title"]') ?? titleCandidates.find((item) => item.hasAttribute('aria-hidden')) ?? titleCandidates.at(-1)
+    const tail = element.querySelector('[data-slot="sidebar-row-tail"]')
+    const statusSlot = element.querySelector('[data-slot="sidebar-row-tail-status"]')
+    const actionsSlot = element.querySelector('[data-slot="sidebar-row-tail-actions"]')
+    const statuses = [...element.querySelectorAll('[role="status"]')]
+    const completedStatus = statuses.find((item) => (item.getAttribute('aria-label') ?? item.textContent).includes('已完成'))
+    const more = element.querySelector('button[aria-label="对话更多操作"]')
+    const discard = element.querySelector('button[aria-label="丢弃草稿"], button[aria-label="丢弃未发送草稿"]')
+    const action = more ?? discard
+    const actionBounds = [...statuses, ...element.querySelectorAll('button[aria-label="对话更多操作"], button[aria-label="丢弃草稿"], button[aria-label="丢弃未发送草稿"], [aria-label="取消置顶对话"]')].map((item) => item.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0)
+    const rowRect = element.getBoundingClientRect(), titleRect = title?.getBoundingClientRect(), tailRect = tail?.getBoundingClientRect()
+    const viewportRect = (element.closest('[data-slot="scroll-area-viewport"]') ?? element.closest('[data-sidebar="sidebar"]')).getBoundingClientRect()
+    const hitAreaElements = action ? [action, ...action.querySelectorAll('span[aria-hidden]')] : []
+    const hitAreas = hitAreaElements.map(clippedRectangle).filter((rect) => rect.width > 0 && rect.height > 0)
+    const hit = action ? document.elementFromPoint(action.getBoundingClientRect().left + action.getBoundingClientRect().width / 2, action.getBoundingClientRect().top + action.getBoundingClientRect().height / 2) : null
+    const boundaryPoints = action && titleRect ? [
+      { boundary: 'title', x: titleRect.right - 1, y: rowRect.top + rowRect.height / 2 },
+      { boundary: 'previous-row', x: action.getBoundingClientRect().left + action.getBoundingClientRect().width / 2, y: rowRect.top - 1 },
+      { boundary: 'next-row', x: action.getBoundingClientRect().left + action.getBoundingClientRect().width / 2, y: rowRect.bottom + 1 },
+    ].map((point) => {
+      const target = document.elementFromPoint(point.x, point.y)
+      return { ...point, hitsOwnAction: Boolean(target && (action === target || action.contains(target))) }
+    }) : []
+    return {
+      rowRect: rectangle(rowRect), viewportRect: rectangle(viewportRect), titleRect: rectangle(titleRect), tailRect: rectangle(tailRect),
+      sideReservedWidth: titleRect ? rowRect.right - titleRect.right : null,
+      actionEnvelopeWidth: actionBounds.length ? Math.max(...actionBounds.map((rect) => rect.right)) - Math.min(...actionBounds.map((rect) => rect.left)) : 0,
+      tailPresent: Boolean(tail), tailDisplay: tail ? getComputedStyle(tail).display : null,
+      statusPresent: statuses.length > 0, completedStatusPresent: Boolean(completedStatus), completedStatusVisible: shown(completedStatus),
+      statusSlotVisible: shown(statusSlot), actionVisible: shown(action), actionOpacity: effectiveOpacity(action), actionFocused: action === document.activeElement,
+      statusGridArea: statusSlot ? getComputedStyle(statusSlot).gridArea : null,
+      actionsGridArea: actionsSlot ? getComputedStyle(actionsSlot).gridArea : null,
+      slotsShareParent: Boolean(statusSlot && actionsSlot && statusSlot.parentElement === actionsSlot.parentElement),
+      actionsOverlayGrid: Boolean(tail && statusSlot && actionsSlot && getComputedStyle(tail).display.endsWith('grid') && getComputedStyle(statusSlot).gridArea === getComputedStyle(actionsSlot).gridArea),
+      completedStatusRect: rectangle(completedStatus?.getBoundingClientRect()),
+      actionRect: rectangle(action?.getBoundingClientRect()), actionHitAreaRects: hitAreas,
+      rawActionHitAreaRects: hitAreaElements.map((item) => rectangle(item.getBoundingClientRect())),
+      actionCenterHit: Boolean(action && hit && (action === hit || action.contains(hit))), boundaryHitProbes: boundaryPoints,
+    }
+  })
+}
+function assertTailBounds(geometry, session) {
+  assert(geometry.tailPresent, '原生紧凑行必须存在唯一共享尾槽')
+  assert(geometry.tailRect.left >= geometry.titleRect.right - 1 && geometry.tailRect.right <= geometry.rowRect.right + 1, '尾槽必须位于标题后且在本行内')
+  assert(geometry.tailRect.left >= geometry.viewportRect.left - 1 && geometry.tailRect.right <= geometry.viewportRect.right + 1, '尾槽必须完整留在内部滚动视窗')
+  if (session.touch) {
+    assert(geometry.actionVisible && geometry.actionCenterHit, '触屏原生更多/删除入口必须可见，中心点击命中自己的按钮')
+    assert(geometry.actionRect.width >= 44 && geometry.actionRect.height >= 44, '触屏原生操作按钮必须有至少 44px 的实际命中区域')
+    assert(geometry.boundaryHitProbes.every((point) => !point.hitsOwnAction), '标题及相邻行实际坐标不能命中本行的操作扩展区域')
+    if (geometry.completedStatusPresent) assert(geometry.completedStatusRect.right <= geometry.actionRect.left + 1, '触屏真实完成状态与更多按钮必须分开可读')
+    for (const box of geometry.actionHitAreaRects) {
+      assert(box.left >= geometry.titleRect.right - 1, '触屏操作扩展命中区域不能跨入标题')
+      assert(box.left >= geometry.viewportRect.left - 1 && box.right <= geometry.viewportRect.right + 1, '触屏操作扩展命中区域不能溢出视窗')
+      assert(box.top >= geometry.rowRect.top - 1 && box.bottom <= geometry.rowRect.bottom + 1, '触屏操作扩展命中区域不能跨入相邻行')
+    }
+  }
+}
+async function verifyTail(session, mode, sample) {
+  const row = sample.key
+    ? sidebar().locator(`[data-thread-item=${JSON.stringify(sample.key)}]`).getByTestId('sidebar-row-slim')
+    : ownDraftRow(session)
+  const result = { session: session.name, mode, key: sample.key, ownDraft: !sample.key, states: {} }
+  report.tailGeometry ??= []; report.tailGeometry.push(result)
+  await page.mouse.move(0, 0)
+  // Focus another owned row to clear :focus-within without activating a real
+  // conversation. This keeps the default measurement independent of theme UI.
+  if (sample.key) await ownDraftRow(session).focus()
+  else await sidebar().getByRole('combobox', { name: '搜索对话', exact: true }).focus()
+  if (!baseline && !session.touch) await until(async () => (await measureTail(row)).actionOpacity <= 0.01, '桌面默认态低频操作应在离开后收起')
+  result.states.default = await measureTail(row)
+  if (!baseline) {
+    assertTailBounds(result.states.default, session)
+    if (result.states.default.completedStatusPresent) assert(result.states.default.completedStatusVisible, '真实未读完成状态在默认态必须可读')
+    if (!session.touch) assert.equal(result.states.default.actionVisible, false, '桌面默认不显示低频操作，尾槽保留稳定占位')
+  }
+  if (!session.touch) {
+    await row.hover()
+    if (!baseline) await until(async () => (await measureTail(row)).actionVisible, '桌面 hover 必须显示原更多/删除操作')
+    result.states.hover = await measureTail(row)
+    await page.mouse.move(0, 0)
+    await page.keyboard.press('Tab'); await row.focus()
+    if (!baseline) await until(async () => (await measureTail(row)).actionVisible, '桌面键盘聚焦必须显示原更多/删除操作')
+    result.states.focus = await measureTail(row)
+    const action = row.getByRole('button', { name: sample.key ? '对话更多操作' : '丢弃草稿', exact: true })
+    if (!baseline) {
+      await action.focus()
+      result.states.actionFocus = await measureTail(row)
+      assert(result.states.actionFocus.actionVisible && result.states.actionFocus.actionFocused, '操作自身必须能获得键盘焦点且保持可见')
+      for (const [state, geometry] of Object.entries(result.states)) {
+        assertTailBounds(geometry, session)
+        assert(Math.abs(geometry.titleRect.width - result.states.default.titleRect.width) <= 1, `桌面 ${state} 不能使标题宽度跳动`)
+        assert(Math.abs(geometry.tailRect.width - result.states.default.tailRect.width) <= 1, `桌面 ${state} 不能使尾槽宽度跳动`)
+        if (geometry.completedStatusPresent) {
+          assert(geometry.slotsShareParent && geometry.actionsOverlayGrid, '真实完成状态与低频操作必须共用同一 grid 单元，不再占独立 flex 列')
+          if (state !== 'default') assert.equal(geometry.completedStatusVisible, false, '非交互完成提示在 hover/focus 时让位给同槽操作')
+        }
+      }
+    }
+  } else if (!baseline && result.states.default.completedStatusPresent) {
+    assert(result.states.default.completedStatusVisible && result.states.default.actionVisible, '触屏必须同时保留真实完成状态与更多入口')
+  }
+  const previous = previousRow(session, mode, sample)
+  result.comparison = previous ? {
+    sameRealRow: Boolean(sample.key), sameViewport: true,
+    beforeTitleWidth: previous.titleRect.width, afterTitleWidth: result.states.default.titleRect.width,
+    titleWidthGain: result.states.default.titleRect.width - previous.titleRect.width,
+    beforeSideReservedWidth: previous.rowRect.right - previous.titleRect.right,
+    afterSideReservedWidth: result.states.default.sideReservedWidth,
+    sideReservedWidthReduction: previous.rowRect.right - previous.titleRect.right - result.states.default.sideReservedWidth,
+    ownDraftComparison: sample.key ? null : '各隔离 profile 原生未发送草稿的相同布局，不比较不同草稿内容',
+  } : { skipped: baselineReport ? '该基线中没有同 viewport 的相同真实 row；不比较不同环境数据' : '未指定 BASELINE_REPORT' }
+  result.coverage = { realCompletedStatus: result.states.default.completedStatusPresent, noSynthesizedStatus: true, missingStateReason: result.states.default.completedStatusPresent ? null : '本视窗没有真实已完成状态，此项不造数据' }
+  assertOwnDraft(session)
+  await page.mouse.move(0, 0)
+  if (sample.key) await ownDraftRow(session).focus()
+  else await sidebar().getByRole('combobox', { name: '搜索对话', exact: true }).focus()
+  return result
+}
 async function capture(session, mode) {
-  const media = await page.evaluate(() => ({ coarse: matchMedia('(pointer: coarse)').matches, fine: matchMedia('(pointer: fine)').matches, width: innerWidth, scrollWidth: document.documentElement.scrollWidth, touchPoints: navigator.maxTouchPoints }))
+  await page.mouse.move(0, 0)
+  const media = await page.evaluate(() => ({ coarse: matchMedia('(pointer: coarse)').matches, fine: matchMedia('(pointer: fine)').matches, width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, touchPoints: navigator.maxTouchPoints }))
   if (session.touch) { assert.equal(media.coarse, true); assert(media.touchPoints > 0); assert.equal(media.width, 390) }
   const rows = await until(async () => { const rows = await measureRows(session); return rows.some((row) => row.key) && rows.some((row) => row.title === session.marker) ? rows : null }, '需要现有真实会话及本次未发送草稿来测量侧栏')
   const scope = sidebar().getByTestId('sidebar-project-scope-label')
@@ -339,13 +497,31 @@ async function interaction(session, sample) {
 try {
   for (const touch of [false, true]) await run(touch ? 'touch-390-density' : 'desktop-density', async () => {
     const session = await login(touch)
-    const captures = []
-    for (const mode of ['light', 'dark']) { await theme(session, mode); captures.push(await capture(session, mode)) }
+    const captures = [], tailChecks = []
+    const check = async (mode) => {
+      const measurement = await capture(session, mode)
+      captures.push(measurement)
+      const targetId = process.env.SIDEBAR_TARGET_THREAD_ID
+      const sample = targetId
+        ? measurement.rows.find((row) => row.key?.endsWith(':' + targetId))
+        : measurement.rows.find((row) => row.key && row.statusLabels.some((label) => label.includes('已完成'))) ?? measurement.rows.find((row) => row.key)
+      assert(sample, '真实会话行必须在本次视窗内，显式指定目标时不能替换成其他对话')
+      tailChecks.push(await verifyTail(session, mode, sample))
+      tailChecks.push(await verifyTail(session, mode, measurement.rows.find((row) => row.title === session.marker)))
+    }
+    for (const mode of ['light', 'dark']) { await theme(session, mode); await check(mode) }
     const projection = await compareProjection(session, captures[0].rows)
-    const sample = captures.at(-1).rows.find((row) => row.key)
+    const sample = captures.at(-1).rows.find((row) => row.key && row.statusLabels.some((label) => label.includes('已完成'))) ?? captures.at(-1).rows.find((row) => row.key)
     const interactions = baseline ? { skipped: '基线仅记录旧版截图与几何' } : await interaction(session, sample)
+    if (!session.touch) {
+      await page.setViewportSize({ width: 1440, height: 560 })
+      await check('dark-short')
+      const shortSample = captures.at(-1).rows.find((row) => row.key)
+      interactions.shortWindow = baseline ? { skipped: '基线只测量' } : await interaction(session, shortSample)
+      await page.setViewportSize({ width: 1440, height: 900 })
+    }
     assertOwnDraft(session)
-    return { requestedDraftId: session.requestedDraftId, nativeOwnedDraftId: session.draftId, captures, projection, interactions }
+    return { requestedDraftId: session.requestedDraftId, nativeOwnedDraftId: session.draftId, captures, tailChecks, projection, interactions }
   })
   assert.deepEqual(report.pageErrors, [])
   assert.equal(report.messageDispatches, 0)
