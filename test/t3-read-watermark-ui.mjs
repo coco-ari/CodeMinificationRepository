@@ -115,6 +115,13 @@ async function badge(session) {
     current: element.getAttribute('aria-current'),
   }))
 }
+async function openedThreadReady() {
+  return until(async () => {
+    if (await page.getByText('此历史对话仅支持查看。', { exact: true }).first().isVisible()) return 'readonly-history'
+    if (await page.getByTestId('composer-editor').isVisible()) return 'editable-composer'
+    return null
+  }, '授权对话应显示编辑器或原生只读历史提示', 60000)
+}
 async function clickAndObserve(session) {
   const before = await summary(session)
   assert.equal(before.latestRunStatus, 'completed', '目标必须是现有已完成对话，本验收不创建或推进运行')
@@ -129,7 +136,7 @@ async function clickAndObserve(session) {
   await row.locator('span[aria-hidden].truncate').first().click()
   observation.clickTarget = 'native-title-span'
   await until(() => new URL(page.url()).hash === `#/${session.environmentId}/${targetId}`, '必须由真实侧栏点击进入唯一授权对话')
-  await page.getByTestId('composer-editor').waitFor()
+  observation.readyAfterClick = await openedThreadReady()
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const needsVisit = ms(before.lastVisitedAt) < (baseline ? ms(before.updatedAt) : requiredReadAt(before))
   if (needsVisit) await until(() => session.visits.some((visit) => visit.successful), '授权目标的原生 thread.visit 未成功返回')
@@ -145,7 +152,7 @@ async function clickAndObserve(session) {
   await page.screenshot({ path: path.join(output, `${session.name}-after-click.png`) })
   const result = { before, badgeBefore, after, badgeAfter, expectedReadAt: new Date(requiredReadAt(after)).toISOString(), nativeVisitCount: session.visits.length, baselineObservedBug: baseline ? ms(after.lastVisitedAt) < requiredReadAt(after) && badgeAfter.completedBadgeVisible : undefined }
   if (!baseline) {
-    await page.reload(); await page.getByTestId('composer-editor').waitFor({ timeout: 60000 }); await threadRow(session).waitFor()
+    await page.reload(); result.readyAfterRefresh = await openedThreadReady(); await threadRow(session).waitFor()
     result.afterRefresh = await until(async () => { const current = await summary(session); return ms(current.lastVisitedAt) >= requiredReadAt(current) && !(await badge(session)).completedBadgeVisible ? current : null }, '刷新后个人已读状态必须保持')
     result.badgeAfterRefresh = await badge(session)
     await page.screenshot({ path: path.join(output, `${session.name}-after-refresh.png`) })

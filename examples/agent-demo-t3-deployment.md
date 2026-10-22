@@ -2,7 +2,19 @@
 
 实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。原 Demo 的 8787 入口已切换到本模块；当前发布证据见下一节，早期构建、数据迁移与恢复记录保留在历史章节。
 
-## 当前发布：紧凑对话侧栏（t3-sidebar-density-3，仅网页）
+## 当前发布：打开对话后清除未读完成提示（t3-thread-read-1，仅网页）
+
+2026-10-22，验收 18887 与正式 ZeroTier 8787 的静态目录已切换至 `releases/t3-thread-read-1-static`。后端与 worker 继续运行 `t3-workspace-prefix-1`；仅空闲时重启网页网关，验收 worker PID `182970`、正式 `183322` 前后均一致，验收原两条暂停队列保持暂停。
+
+复用 T3 的 `ThreadVisitWatermark`、原生 `thread.visit` 与个人阅读水位。存量导入对话可能出现轮次完成时间晚于会话更新时间，原逻辑提前判为已读并跳过回执，导致侧栏的未读“已完成”提示始终保留。现在取两个有效服务端时间的较晚者，统一用于已读判断、回执、去重与旧服务本地回退；不使用客户端当前时间覆盖业务时间。当前页主动标记未读仍保持，新完成会提升目标水位并再次确认；不修改侧栏状态含义、样式或历史数据。
+
+13 项水位回归、156 项侧栏测试、Web 与宿主类型检查、React Compiler 回归 2/2、实际 `ChatView` 与水位叶组件编译缓存检查及宿主网页构建通过。修复前 `.test-artifacts/read-watermark/before2/report.json` 真实点击目标后没有发出回执，徽标仍显示；修复后正式 `production-final/report.json` 记录同一目标的成功原生回执，水位由 `2026-10-21T03:44:51.185Z` 推进至实际完成时间 `2026-10-21T03:44:56.187Z`，徽标消失。该次脚本随后因假设历史页面有编辑器而超时；修正脚本支持原生只读历史提示，首次证据保留。验收 `stage-final/report.json` 与正式 `production-verified/report.json` 均验证点击、刷新及第二隔离 profile 的服务器个人已读持久化。首轮基线点击中心可能触达嵌套取消置顶按钮，已被脚本白名单阻止，后续均点击原生标题；未改变置顶。浏览器均使用独立临时 profile，不发送消息、不创建运行、不写文件，仅允许指定目标的个人阅读回执。此次未改变布局或视觉样式，不重复此前浅深色、窄屏与菜单的视觉验收，也未发起模型请求或 Windows 真机测试。
+
+增量基础为 `t3-sidebar-density-3`；归档 SHA-256 为 `aadb2f5277110fb8a30af5daed27f24b64a0bac22bcd1464d7dbc0ce20be3a6a`，完整发布清单为 `3b969b6f0995f378ae3108d428cb9a64591561cf253e04d38984742b276c45cc`，原生依赖清单为 `5c35236ce095fa32680fb3a7b8019e9c39394c1806bfa79424aae66ee477187f`。3854 个文件、59 个相对链接及原生 2038 个文件/21 个包校验通过；两入口实际 HTML SHA-256 均为 `270fcb4951b91815071cec62f771a015ca7e85c524bc4525e6e61011cced6568`，保留旧哈希静态资源。
+
+配置恢复点为 `backups/t3-thread-read-1-stage-20261022T125000Z` 与 `backups/t3-thread-read-1-production-20261022T125052Z`，不新增或覆盖数据归档。正式原 23 个会话、146 条消息、51 个轮次及 188 个文件摘要全部一致，见服务器 `thread-read-1-retention.json.verified.json`；个人阅读状态通过原服务持久化。仅回退本次网页时，空闲后恢复对应快照内网关的 `zzzzzzzz-workspace-chat.conf`，执行用户级 `daemon-reload` 并重启网关，静态目录回到 density3；不重启 worker、不覆盖数据库。此前配对数据恢复点继续保留。
+
+## 历史版本：紧凑对话侧栏（t3-sidebar-density-3，仅网页）
 
 2026-10-22，验收 18887 与正式 ZeroTier 8787 的静态目录已切换至 `releases/t3-sidebar-density-3-static`。后端与 worker 继续运行 `t3-workspace-prefix-1`，本轮仅在空闲时重启网关以选择新静态目录，两环境 worker PID 均保持不变。没有数据迁移或模型请求；此前的 `@` 前缀与 Tab 补全继续保留。
 

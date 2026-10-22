@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T12:19:57.432440+00:00",
+  "generatedAt": "2026-10-22T12:48:48.355926+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -365,16 +365,22 @@
       "localSha256": "8e08dcf963d1347f51fbf9a7580e03a4e4d2e0f3562c121eac55de7b44742fef"
     },
     {
+      "path": "apps/web/src/components/ChatView.logic.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "d5899705437bedda61bc23f0baeeb7aacdfc75ca2f4092a1878be7d479772ea0",
+      "localSha256": "aad54c13a1671f0ae1b37b6c874532578fb6770df5099f139ca68a934686bea4"
+    },
+    {
       "path": "apps/web/src/components/ChatView.logic.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "83a2b0e035c14592669f103f3b16f2f7fcdf7b6808b81c20913ee061b8fbd996",
-      "localSha256": "4649aae8dce56c738ef8be554cbc7e7da10800a695349c3a699d3f48bde5d914"
+      "localSha256": "2102ba476618b94e95a559eb0d072e00a0fb8e93ebffe528708961e7bbff2b6c"
     },
     {
       "path": "apps/web/src/components/ChatView.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "cfbdfc9832cc66c42ca2976b735c051b4e7d02834f3e6a4c513e98e4e86e8816",
-      "localSha256": "28cccbff5d6623945c1df45f16635a063528e67175cd1f4d2c4f2df7fd25bd9f"
+      "localSha256": "e52442b18602ea1ac9124f3da8790a55b5d2dc0f92eef0e6123ad3f725dbfcff"
     },
     {
       "path": "apps/web/src/components/CommandPalette.logic.test.ts",
