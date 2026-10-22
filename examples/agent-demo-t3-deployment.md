@@ -2,7 +2,21 @@
 
 实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。原 Demo 的 8787 入口已切换到本模块；当前发布证据见下一节，早期构建、数据迁移与恢复记录保留在历史章节。
 
-## 当前发布：打开对话后清除未读完成提示（t3-thread-read-1，仅网页）
+## 当前发布：T3 工作区整页统一（t3-workspace-ui-1，仅网页）
+
+2026-10-22，在独立 worktree `t3-workspace-ui` / 分支 `feat/t3-workspace-ui` 完成，基于原分支最新 `3aca52ac`，保留其已完成修复。验收 18887 与正式 ZeroTier 8787 均使用 `releases/t3-workspace-ui-1-static`；后端仍为 `t3-workspace-prefix-1`，验收/正式 worker PID `182970` / `183322` 未变化，原两条暂停队列继续暂停。
+
+工作区管理复用 T3 `WorkspacePageHeader`、文件工具栏、`ReadOnlyWorkspaceFiles` 和原生 Dialog/Menu：目录与预览填满剩余窗口，版本与业务动作放紧凑工具栏；导入、脱敏、复核、任务、版本详情按需打开，完整哈希默认折叠。部署交付使用连续列表与原生源码预览，窄屏通过原生菜单和弹窗访问。业务差异仍是两类授权只读工作区和部署 ZIP，后端接口、版本绑定与权限保持原语义；没有上游完全相同的管理业务页，不将组合适配声称为逐页照搬。全局 AGENTS.md、仓库 AGENTS.md 与 `t3-ui-standard.md` 已明确整页布局、密度、滚动、焦点和响应式的统一要求。
+
+Web 类型检查、实际 React Compiler 编译、宿主 Vite 构建及来源清单校验通过。构建使用既有锁定 SPDX 缓存，保留第三方许可；构建存在原有 CSS/chunk 提示。只读浏览器验收脚本 `test/t3-workspace-style-ui.mjs` 使用隔离 profile；基线 `before/report.json` 4/4，验收 `stage-2/report.json` 与正式 `production-verified/report.json` 均 8/8，覆盖浅深色、1440px 桌面、390px 粗指针、600px 短窗口、目录键盘、源码/受限 HTML 预览、管理弹窗、Tab/Escape/焦点恢复、20 条规则的真实内部滚动、交付清单下载和外部身份。均无未处理页面错误、消息发送或业务写入；遥测请求仅在测试浏览器本地返回 204。截图和报告位于新 worktree 的 `.test-artifacts/t3-workspace-style/`，不提交图片。
+
+首次验收 12 条规则恰好能放入桌面窗口，测试错误要求必须滚动；扩大到 20 条后原断言通过。首次正式验收因通知自动消失产生测试 ElementHandle 竞态，改为 Locator 并仅接受确认消失的情况，失败证据分别保留在 `stage-1` / `production-final`。现有安全示例没有待复核版本，本轮未创建新版本或运行生成/取消/发布写操作；这些操作做接口与条件守恒审查，已发布报告和全部表单入口已实测。未重复模型请求、Windows 真机与实体手机测试。
+
+增量基础为 `t3-thread-read-1`；归档 SHA-256 `03aed898c9dd2263954720a8445687cacb43716526134bab11b00a7083b2e68b`，完整发布清单 `011a51be8a718d4490d25312c4e156fb37bc7e89772a0c9fcdde9b4085d7c21a`，原生依赖清单 `d1a4d5533de96d1bc20548f2531471fd88ee4a6e18073043e00dbcfffe0c7f33`。3856 个文件、59 个相对链接及原生 2038 个文件/21 个包校验通过；实际 HTML SHA-256 `ad9000cd75395f6ab4ecb26451d22393693dd79e99af633c2961f9a4f611c5b4`，保留旧哈希静态资源。
+
+配置恢复点为 `backups/t3-workspace-ui-1-stage-20261022T130647Z` 与 `backups/t3-workspace-ui-1-production-20261022T130956Z`。正式原 23 个会话、146 条消息、51 个轮次及 188 个文件摘要完全一致，见服务器 `workspace-ui-1-retention.json.verified.json`。只回退此次 UI 时，空闲后恢复对应快照内网关的 `zzzzzzzz-workspace-chat.conf`，执行用户级 `daemon-reload` 并重启网关，静态目录回到 `t3-thread-read-1-static`；无需重启 worker 或覆盖数据库，现有数据归档继续保留。
+
+## 历史版本：打开对话后清除未读完成提示（t3-thread-read-1，仅网页）
 
 2026-10-22，验收 18887 与正式 ZeroTier 8787 的静态目录已切换至 `releases/t3-thread-read-1-static`。后端与 worker 继续运行 `t3-workspace-prefix-1`；仅空闲时重启网页网关，验收 worker PID `182970`、正式 `183322` 前后均一致，验收原两条暂停队列保持暂停。
 
