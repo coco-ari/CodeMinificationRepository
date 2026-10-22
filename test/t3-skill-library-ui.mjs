@@ -14,6 +14,9 @@ const origin = (process.env.BASE_URL || 'http://192.168.31.157:18897').replace(/
 if (process.env.T3_SKILL_LIBRARY_MUTATIONS !== '1' || new URL(origin).port === '8787')
   throw new Error('技能管理验收仅允许显式授权的隔离实例，不能在正式 8787 运行。')
 const marker = `skill-ui-${randomUUID().slice(0, 8)}`
+const targetedCase = process.env.T3_SKILL_LIBRARY_CASE
+if (targetedCase && targetedCase !== 'project-filter-unassign')
+  throw new Error(`未知的技能验收案例：${targetedCase}`)
 const longName =
   `技能闭环验收 ${marker} · ${'长中文标题用于验证列表省略和菜单边界'.repeat(3)}`.slice(0, 76)
 const referenceName = `${'长中文参考资料目录文件'.repeat(5)}.md`
@@ -31,7 +34,7 @@ const report = {
   blockedMutations: [],
   mutations: [],
   ownedSkillIds: [],
-  coverage: { actualApi: true, actualUploads: true, modelCalls: false, actualTouchDevice: false },
+  coverage: { actualApi: true, actualUploads: !targetedCase, modelCalls: false, actualTouchDevice: false },
   cleanup: {},
 }
 const sessions = [],
@@ -264,6 +267,52 @@ async function closeProjectPopover(trigger) {
 async function assertQuickView() {
   assert.equal(await page.locator('[aria-label="技能详情"]:visible').count(),0,'快切不应打开技能文件详情')
 }
+async function visualCardContract() {
+  const normal=currentCatalog.skills.filter(skill=>skill.enabled&&skill.versions.find(version=>version.id===skill.latestVersionId)?.readiness==='ready')
+  for(const skill of normal) {
+    const card=skillCard(skill.id)
+    if(!(await card.count()))continue
+    const text=await card.innerText()
+    assert(!text.includes('新分配：')&&!text.includes('可分配'),'正常卡片不应常驻新分配行或可分配徽标')
+    for(const version of skill.versions)assert(!text.includes(version.id.slice(0,8)),'版本标识应在按需详情/提示中展示')
+  }
+  const measured=await page.locator('[data-skill-card]').first().evaluate(card=>{
+    const grid=card.parentElement,gridBounds=grid.getBoundingClientRect()
+    return {gridWidth:gridBounds.width,columns:getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length,cards:[...grid.querySelectorAll('[data-skill-card]')].map(element=>({id:element.getAttribute('data-skill-card'),height:element.getBoundingClientRect().height}))}
+  })
+  if(page.viewportSize().width===1440) {
+    assert.equal(measured.columns,2,'1440桌面应使用T3受控宽度双列卡片')
+    assert(measured.gridWidth<=1026,'技能内容列不应超过T3 wide/max-w-5xl容器')
+  }
+  return {...measured,normalCards:measured.cards.filter(card=>normal.some(skill=>skill.id===card.id))}
+}
+async function assignmentHelp() {
+  const trigger=page.getByRole('button',{name:'技能分配说明',exact:true})
+  await trigger.scrollIntoViewIfNeeded()
+  if(sessions.some(session=>session.page===page&&session.touch))await trigger.tap()
+  else await trigger.click()
+  const popup=page.locator('[data-slot="popover-popup"]').filter({hasText:'项目未单独分配时沿用助手设置'})
+  await popup.waitFor()
+  const rect=await popup.boundingBox(),viewport=page.viewportSize()
+  assert(rect&&rect.x>=-2&&rect.x+rect.width<=viewport.width+2&&rect.y>=-2&&rect.y+rect.height<=viewport.height+2,'技能分配说明浮层不能越出视窗')
+  await page.keyboard.press('Escape')
+  await until(()=>trigger.evaluate(element=>element===document.activeElement),'分配说明关闭后恢复说明入口焦点')
+}
+async function restrictedReason(skill,screenshotName) {
+  const trigger=skillCard(skill.id).getByRole('button',{name:skill.versions.length>1?'最新版本未就绪':'未就绪',exact:true})
+  await trigger.scrollIntoViewIfNeeded()
+  if(sessions.some(session=>session.page===page&&session.touch))await trigger.tap()
+  else await trigger.click()
+  const popup=page.locator('[data-slot="popover-popup"]').filter({hasText:'运行条件未满足'})
+  await popup.waitFor()
+  const version=skill.versions.find(entry=>entry.id===skill.latestVersionId)
+  assert((await popup.innerText()).includes(version.reason),'未就绪原因应完整来自真实技能版本')
+  const rect=await popup.boundingBox(),viewport=page.viewportSize()
+  assert(rect&&rect.x>=-2&&rect.x+rect.width<=viewport.width+2&&rect.y>=-2&&rect.y+rect.height<=viewport.height+2,'运行条件浮层不能越出视窗')
+  if(screenshotName)await page.screenshot({path:path.join(output,`${screenshotName}.png`)})
+  await page.keyboard.press('Escape')
+  await until(()=>trigger.evaluate(element=>element===document.activeElement),'运行条件浮层关闭后恢复入口焦点')
+}
 async function delayedRefreshGuard(skillId,agentId) {
   await until(()=>agentTarget(skillId,agentId).isEnabled(),'目录载入完成后再验证刷新')
   let release,received=false,completed,routeError,claimed=false
@@ -415,6 +464,41 @@ try {
   primaryProject=originalCatalog.projects.find(entry=>entry.id==='p-autoops'&&primaryAgent.projectIds.includes(entry.id))??originalCatalog.projects.find(entry=>primaryAgent.projectIds.includes(entry.id))
   assert(primaryAgent&&secondaryAgent&&primaryProject,'验收需要两个助手和至少一个授权项目')
   const desktop = await openSession()
+  if(targetedCase==='project-filter-unassign') {
+    await step('project-filter-unassign-removes-card-and-releases-toast',async()=>{
+      await ownedMutation({action:'import-markdown',contents:readyMarkdown})
+      readySkill=currentCatalog.skills.find(skill=>skill.name===marker)
+      assert(readySkill)
+      await ownedMutation({action:'assign',skillId:readySkill.id,targetType:'project',targetId:primaryProject.id,versionId:readySkill.latestVersionId,workspaceTypes:['internal'],enabled:true})
+      await management(desktop)
+      await page.locator('[aria-label="技能管理范围"]').getByText('项目技能',{exact:true}).click()
+      await choose('技能范围项目',primaryProject.name)
+      await skillCard(readySkill.id).waitFor()
+      const {list}=await projectPopover(readySkill)
+      const project=list.locator(targetSelector('project',primaryProject.id))
+      assert.equal(await project.getAttribute('aria-pressed'),'true')
+      await mutation('unassign',()=>project.click())
+      await until(async()=>await skillCard(readySkill.id).count()===0,'取消当前项目分配后卡片必须退出该项目筛选')
+      await until(async()=>await page.locator('[aria-label="项目分配列表"]').count()===0,'卡片移除后项目浮层必须卸载')
+      assert.equal(assignedTo(readySkill.id,'project',primaryProject.id),undefined)
+      const expectedFocus=await page.locator('[data-skill-row]:visible').count()
+        ?page.locator('[data-skill-row]:visible').first()
+        :page.getByRole('button',{name:'添加技能',exact:true})
+      await until(()=>expectedFocus.evaluate(element=>element===document.activeElement),'卡片移除后焦点必须恢复到下一张可见卡片或添加技能入口')
+      assert.equal(await expectedFocus.isEnabled(),true)
+      await page.locator('[data-slot="toast-title"]:visible').filter({hasText:`已取消“${primaryProject.name}”的单独分配。该项目将沿用助手设置。`}).waitFor()
+      await page.screenshot({path:path.join(output,'project-filter-after-unassign.png')})
+      await page.getByRole('button',{name:'添加技能',exact:true}).click()
+      await choose('分配的技能',readySkill.displayName)
+      await mutation('assign',()=>page.getByRole('button',{name:'保存分配',exact:true}).click())
+      await dialogClosed()
+      await skillCard(readySkill.id).waitFor()
+      await page.locator('[data-slot="toast-title"]:visible').filter({hasText:'分配已保存，新对话将使用该版本；已有对话保持其固定版本。'}).waitFor()
+      assert.deepEqual(assignedTo(readySkill.id,'project',primaryProject.id).workspaceTypes,['internal'])
+      await page.screenshot({path:path.join(output,'project-filter-after-reassign.png')})
+      return {skillId:readySkill.id,projectId:primaryProject.id,removedFromFilteredCards:true,popupUnmounted:true,focusReturnedToAvailableControl:true,unassignToastPublished:true,subsequentAssignmentToastPublished:true,defaultInternal:true}
+    })
+  } else {
   await step('markdown-import-and-agent-assignment', async () => {
     await page.getByRole('button', { name: '导入技能', exact: true }).click()
     await page.locator('[aria-label="技能导入方式"]').getByText('粘贴正文', { exact: true }).click()
@@ -430,8 +514,13 @@ try {
     const target=agentTarget(readySkill.id,primaryAgent.id)
     await target.waitFor()
     await page.screenshot({path:path.join(output,'initial-desktop-cards.png')})
+    const cardVisual=await visualCardContract()
+    await assignmentHelp()
     await delayedRefreshGuard(readySkill.id,primaryAgent.id)
+    const beforeSuccess=await skillCard(readySkill.id).boundingBox()
     await mutation('assign',()=>target.click())
+    const afterSuccess=await skillCard(readySkill.id).boundingBox()
+    assert(beforeSuccess&&afterSuccess&&Math.abs(beforeSuccess.y-afterSuccess.y)<=1&&Math.abs(beforeSuccess.x-afterSuccess.x)<=1,'成功反馈不能推动卡片的位置')
     await assertQuickView()
     let assigned = assignedTo(readySkill.id,'agent',primaryAgent.id)
     assert.deepEqual(assigned.workspaceTypes, ['internal'])
@@ -448,13 +537,18 @@ try {
     await mutation('assign',()=>project.click())
     assert.deepEqual(assignedTo(readySkill.id,'project',primaryProject.id).workspaceTypes,['internal'])
     assert.equal(await project.getAttribute('aria-pressed'),'true')
+    const assignedToast=page.locator('[data-slot="toast-title"]:visible').filter({hasText:`已分配给“${primaryProject.name}”，仅用于内部工作区。`})
+    assert.equal(await assignedToast.count(),0,'项目弹层打开时成功Toast应延后，避免抢占Escape')
     await mutation('unassign',()=>project.click())
     assert.equal(assignedTo(readySkill.id,'project',primaryProject.id),undefined)
     assert.deepEqual(assignedTo(readySkill.id,'agent',primaryAgent.id),originalAgent,'项目快切不可改写助手绑定')
+    const revokedToast=page.locator('[data-slot="toast-title"]:visible').filter({hasText:`已取消“${primaryProject.name}”的单独分配。该项目将沿用助手设置。`})
+    assert.equal(await revokedToast.count(),0,'项目弹层打开时取消分配的成功Toast也应延后')
     await closeProjectPopover(trigger)
+    await revokedToast.waitFor()
     await assertQuickView()
     await management(desktop,readySkill.id)
-    return { skillId: readySkill.id, assignmentId: assigned.id, versionId: assigned.versionId,agentQuickToggle:true,projectPopoverQuickToggle:true,keyboardAssign:true,defaultInternal:true,refreshBlocksWrites:true }
+    return { skillId: readySkill.id, assignmentId: assigned.id, versionId: assigned.versionId,agentQuickToggle:true,projectPopoverQuickToggle:true,keyboardAssign:true,defaultInternal:true,refreshBlocksWrites:true,cardVisual,successDoesNotMoveCards:true,assignmentHelpFocus:true,projectSuccessToastAfterClose:true }
   })
   await step('archive-new-version-pinned-assignment-and-files', async () => {
     const first = currentCatalog.assignments.find((entry) => entry.skillId === readySkill.id)
@@ -727,6 +821,9 @@ try {
         await theme(session, mode)
         await management(session)
         checks.push(await geometry(`${name}-${mode}-list`))
+        checks.push({name:`${name}-${mode}-card-hierarchy`,...await visualCardContract()})
+        await assignmentHelp()
+        await restrictedReason(restrictedSkill,`${name}-${mode}-restricted-reason`)
         const scroll = page.locator('[aria-label="技能列表"] [data-slot="scroll-area-viewport"]').first()
         const scrolling=await scroll.evaluate(element=>{const before=element.scrollTop;element.scrollTop=element.scrollHeight;return {before,after:element.scrollTop,height:element.clientHeight,total:element.scrollHeight}})
         assert(scrolling.total>scrolling.height&&scrolling.after>0,'多卡列表必须有独立可用滚动')
@@ -821,6 +918,7 @@ try {
     assert(!after.skills.some((entry) => ownedSkills.has(entry.id)))
     return { uiDeletions: 2, allOwnedRemoved: true }
   })
+  }
   assert.deepEqual(report.pageErrors, [])
   assert.deepEqual(report.blockedMutations, [])
 } catch (error) {

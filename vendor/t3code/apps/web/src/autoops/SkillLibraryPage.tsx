@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeftIcon,
-  CheckCircle2Icon,
   InfoIcon,
   MoreHorizontalIcon,
   PlusIcon,
   RefreshCwIcon,
+  SearchIcon,
   UploadIcon,
 } from 'lucide-react'
 import { WorkspacePageHeader } from '~/components/WorkspacePageHeader'
+import { WorkspacePageContainer } from '~/components/WorkspacePageContainer'
 import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFiles'
 import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
 import { Badge } from '~/components/ui/badge'
-import { Input } from '~/components/ui/input'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '~/components/ui/input-group'
+import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from '~/components/ui/popover'
+import { toastManager } from '~/components/ui/toast'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '~/components/ui/menu'
@@ -68,12 +71,13 @@ export function AutoOpsSkillLibraryPage() {
   const [selectedVersionId, setSelectedVersionId] = useState('')
   const [detailOpen, setDetailOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [pendingTarget, setPendingTarget] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
   const [dialog, setDialog] = useState<OpenDialog>(null)
+  const [assignmentPopoverSkillId, setAssignmentPopoverSkillId] = useState<string | null>(null)
+  const [successNotice, setSuccessNotice] = useState<string | null>(null)
   const dialogReturnFocus = useRef<HTMLElement | null>(null)
   const libraryActionRef = useRef<HTMLButtonElement | null>(null)
   const gridRef = useRef<HTMLDivElement | null>(null)
@@ -81,6 +85,20 @@ export function AutoOpsSkillLibraryPage() {
   const mutationLock = useRef(false)
   const requestGeneration = useRef(0)
   const refreshPending = useRef(true)
+
+  // Publish after the active editor closes, so a toast cannot become the top
+  // dismissable layer while the user is still selecting assignment targets.
+  useEffect(() => {
+    if (!successNotice || dialog || assignmentPopoverSkillId) return
+    toastManager.add({
+      id: 'autoops-skill-library-update',
+      type: 'success',
+      title: successNotice,
+      timeout: 4000,
+      data: { hideCopyButton: true },
+    })
+    setSuccessNotice(null)
+  }, [successNotice, dialog, assignmentPopoverSkillId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -130,6 +148,19 @@ export function AutoOpsSkillLibraryPage() {
         .toLocaleLowerCase()
         .includes(query.toLocaleLowerCase().trim()),
   )
+  const assignmentPopoverCardVisible =
+    !detailOpen && visibleSkills.some((skill) => skill.id === assignmentPopoverSkillId)
+  useEffect(() => {
+    if (!assignmentPopoverSkillId || assignmentPopoverCardVisible) return
+    // Revoking the active scope can remove its card without an onOpenChange.
+    setAssignmentPopoverSkillId(null)
+    requestAnimationFrame(() => {
+      if (document.activeElement !== document.body) return
+      const nextCard = gridRef.current?.querySelector<HTMLButtonElement>('[data-skill-row]')
+      if (nextCard?.getClientRects().length) nextCard.focus({ preventScroll: true })
+      else libraryActionRef.current?.focus({ preventScroll: true })
+    })
+  }, [assignmentPopoverSkillId, assignmentPopoverCardVisible])
   const selected = visibleSkills.find((entry) => entry.id === selectedId) ?? visibleSkills[0]
   const assignment = selected
     ? assignments.find((entry) => entry.skillId === selected.id)
@@ -164,12 +195,12 @@ export function AutoOpsSkillLibraryPage() {
     const generation = ++requestGeneration.current
     setBusy(true)
     setError(null)
-    setNotice(null)
+    setSuccessNotice(null)
     return changeSkillLibrary(catalog.revision, action)
       .then((next) => {
         if (generation !== requestGeneration.current) return false
         setCatalog(next)
-        setNotice(success)
+        setSuccessNotice(success)
         if (action.action.startsWith('import-')) {
           const imported =
             'skillId' in action && action.skillId
@@ -254,6 +285,7 @@ export function AutoOpsSkillLibraryPage() {
     })
   }
   const resetSelection = () => {
+    setAssignmentPopoverSkillId(null)
     setSelectedId('')
     setSelectedVersionId('')
     setDetailOpen(false)
@@ -307,105 +339,24 @@ export function AutoOpsSkillLibraryPage() {
     >
       <WorkspacePageHeader>
         <h1 className="min-w-0 flex-1 truncate text-sm font-medium">技能</h1>
+        {!showDetail && canManage ? (
+          <Button
+            ref={libraryActionRef}
+            size="sm"
+            variant="outline"
+            disabled={busy || loading || (scope !== 'library' && !target)}
+            onClick={() =>
+              openDialog(scope === 'library' ? { type: 'import' } : { type: 'assign' })
+            }
+          >
+            {scope === 'library' ? <UploadIcon /> : <PlusIcon />}
+            {scope === 'library' ? '导入技能' : '添加技能'}
+          </Button>
+        ) : null}
         <FileSurfaceAction label="刷新技能库" disabled={busy || loading} onPress={refreshLibrary}>
           <RefreshCwIcon className={loading ? 'animate-spin' : undefined} />
         </FileSurfaceAction>
       </WorkspacePageHeader>
-      {!showDetail ? (
-        <div
-          className="flex shrink-0 flex-col gap-2 border-y border-border/60 px-3 py-2"
-          aria-label="技能库工具栏"
-        >
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <ToggleGroup
-              value={[scope]}
-              variant="segmented"
-              aria-label="技能管理范围"
-              onValueChange={(values) => {
-                const next = values[0]
-                if (next === 'library' || next === 'agent' || next === 'project') {
-                  setScope(next)
-                  setTargetId('')
-                  resetSelection()
-                }
-              }}
-            >
-              {Object.entries(scopeNames).map(([value, name]) => (
-                <Toggle key={value} value={value}>
-                  {name}
-                </Toggle>
-              ))}
-            </ToggleGroup>
-            <span className="flex-1" />
-            {canManage ? (
-              <Button
-                ref={libraryActionRef}
-                size="sm"
-                variant="outline"
-                disabled={busy || loading || (scope !== 'library' && !target)}
-                onClick={() =>
-                  openDialog(scope === 'library' ? { type: 'import' } : { type: 'assign' })
-                }
-              >
-                {scope === 'library' ? <UploadIcon /> : <PlusIcon />}
-                {scope === 'library' ? '导入技能' : '添加技能'}
-              </Button>
-            ) : null}
-          </div>
-          <div className="flex min-w-0 items-center gap-2">
-            {scope !== 'library' ? (
-              <div className="w-40 min-w-0 shrink-0 sm:w-56">
-                <Select
-                  value={target?.id ?? ''}
-                  disabled={!targets.length}
-                  onValueChange={(value) => {
-                    if (typeof value === 'string') {
-                      setTargetId(value)
-                      resetSelection()
-                    }
-                  }}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    className="min-w-0"
-                    aria-label={scope === 'agent' ? '技能范围助手' : '技能范围项目'}
-                  >
-                    <SelectValue>{target?.name ?? '没有可用目标'}</SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {targets.map((entry) => (
-                      <SelectItem key={entry.id} value={entry.id}>
-                        {entry.name}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              </div>
-            ) : null}
-            <div className="min-w-0 flex-1 sm:max-w-80">
-              <Input
-                type="search"
-                size="sm"
-                aria-label="搜索技能"
-                value={query}
-                placeholder="搜索技能"
-                onChange={(event) => {
-                  setQuery(event.currentTarget.value)
-                  setDetailOpen(false)
-                }}
-              />
-            </div>
-            <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
-              {visibleSkills.length} 项
-            </span>
-          </div>
-          {canManage ? (
-            <p className="text-[11px] text-muted-foreground">
-              点击助手或项目即可单独分配，再点取消。新分配仅用于内部工作区，版本与外部范围可在“分配与版本详情”中调整。
-            </p>
-          ) : null}
-        </div>
-      ) : null}
       {error && !dialog ? (
         <div className="shrink-0 border-b border-border/60 p-3">
           <Alert variant="error">
@@ -420,18 +371,6 @@ export function AutoOpsSkillLibraryPage() {
             onClick={refreshLibrary}
           >
             重新加载
-          </Button>
-        </div>
-      ) : null}
-      {notice ? (
-        <div
-          role="status"
-          className="flex shrink-0 items-start gap-2 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground"
-        >
-          <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 wrap-anywhere">{notice}</span>
-          <Button size="xs" variant="ghost" onClick={() => setNotice(null)}>
-            关闭提示
           </Button>
         </div>
       ) : null}
@@ -454,50 +393,157 @@ export function AutoOpsSkillLibraryPage() {
             aria-label="技能列表"
           >
             <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
-              <div
-                ref={gridRef}
-                className="grid content-start gap-3 p-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 sm:p-4"
-              >
-                {visibleSkills.map((skill) => {
-                  const currentAssignment = assignments.find((entry) => entry.skillId === skill.id)
-                  return (
-                    <SkillLibraryCard
-                      key={skill.id}
-                      skill={skill}
-                      catalog={catalog}
-                      busy={busy || loading}
-                      pendingTarget={pendingTarget}
-                      actions={actions(
-                        skill,
-                        skillVersion(skill, currentAssignment?.versionId),
-                        currentAssignment,
-                      )}
-                      onOpen={() => openFiles(skill)}
-                      onToggle={toggleTarget}
-                    />
-                  )
-                })}
-              </div>
-              {!visibleSkills.length ? (
-                <SkillEmpty
-                  title={
-                    query
-                      ? '没有匹配的技能'
-                      : scope === 'library'
-                        ? '技能库为空'
-                        : '尚未单独分配技能'
-                  }
-                  description={
-                    query
-                      ? '换一个名称或关键词试试。'
-                      : canManage
-                        ? scope === 'library'
-                          ? '导入 SKILL.md、ZIP 或公开 Git 技能包。'
-                          : '可从中央技能库的卡片直接分配给助手或项目。'
-                        : '请联系管理员分配可用技能。'
-                  }
-                />
-              ) : null}
+              <WorkspacePageContainer width="wide" className="gap-4">
+                <div
+                  className="flex min-w-0 flex-wrap items-center gap-2"
+                  aria-label="技能库工具栏"
+                >
+                  <ToggleGroup
+                    value={[scope]}
+                    variant="segmented"
+                    aria-label="技能管理范围"
+                    onValueChange={(values) => {
+                      const next = values[0]
+                      if (next === 'library' || next === 'agent' || next === 'project') {
+                        setScope(next)
+                        setTargetId('')
+                        resetSelection()
+                      }
+                    }}
+                  >
+                    {Object.entries(scopeNames).map(([value, name]) => (
+                      <Toggle key={value} value={value}>
+                        {name}
+                      </Toggle>
+                    ))}
+                  </ToggleGroup>
+                  {scope !== 'library' ? (
+                    <div className="w-40 min-w-0 max-w-full">
+                      <Select
+                        value={target?.id ?? ''}
+                        disabled={!targets.length}
+                        onValueChange={(value) => {
+                          if (typeof value === 'string') {
+                            setTargetId(value)
+                            resetSelection()
+                          }
+                        }}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className="min-w-0"
+                          aria-label={scope === 'agent' ? '技能范围助手' : '技能范围项目'}
+                        >
+                          <SelectValue>{target?.name ?? '没有可用目标'}</SelectValue>
+                        </SelectTrigger>
+                        <SelectPopup>
+                          {targets.map((entry) => (
+                            <SelectItem key={entry.id} value={entry.id}>
+                              {entry.name}
+                            </SelectItem>
+                          ))}
+                        </SelectPopup>
+                      </Select>
+                    </div>
+                  ) : null}
+                  <div className="flex min-w-0 flex-1 basis-48 items-center gap-1 sm:ml-auto sm:max-w-72">
+                    <InputGroup>
+                      <InputGroupAddon>
+                        <SearchIcon aria-hidden />
+                      </InputGroupAddon>
+                      <InputGroupInput
+                        type="search"
+                        size="sm"
+                        aria-label="搜索技能"
+                        value={query}
+                        placeholder="搜索技能"
+                        onChange={(event) => {
+                          setQuery(event.currentTarget.value)
+                          setDetailOpen(false)
+                        }}
+                      />
+                      <InputGroupAddon align="inline-end">
+                        <span
+                          className="text-xs text-muted-foreground"
+                          aria-label={`${visibleSkills.length} 项技能`}
+                        >
+                          {visibleSkills.length}
+                        </span>
+                      </InputGroupAddon>
+                    </InputGroup>
+                    <Popover>
+                      <PopoverTrigger
+                        aria-label="技能分配说明"
+                        render={<Button size="icon-sm" variant="ghost-muted" />}
+                      >
+                        <InfoIcon />
+                      </PopoverTrigger>
+                      <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
+                        <PopoverTitle>技能分配</PopoverTitle>
+                        <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
+                          <p>
+                            点击助手或项目即可分配，再点取消。新分配使用当前最新版本，仅用于内部工作区；未就绪版本不能分配。
+                          </p>
+                          <p>
+                            项目未单独分配时沿用助手设置。取消项目的单独分配后，会恢复这层继承。
+                          </p>
+                          <p>
+                            版本、来源和外部工作区范围，可从技能菜单的“分配与版本详情”查看和调整。
+                          </p>
+                        </div>
+                      </PopoverPopup>
+                    </Popover>
+                  </div>
+                </div>
+                <div ref={gridRef} className="grid content-start gap-2 md:grid-cols-2">
+                  {visibleSkills.map((skill) => {
+                    const currentAssignment = assignments.find(
+                      (entry) => entry.skillId === skill.id,
+                    )
+                    return (
+                      <SkillLibraryCard
+                        key={skill.id}
+                        skill={skill}
+                        catalog={catalog}
+                        busy={busy || loading}
+                        pendingTarget={pendingTarget}
+                        actions={actions(
+                          skill,
+                          skillVersion(skill, currentAssignment?.versionId),
+                          currentAssignment,
+                        )}
+                        onOpen={() => openFiles(skill)}
+                        onProjectOpenChange={(open) =>
+                          setAssignmentPopoverSkillId((previous) =>
+                            open ? skill.id : previous === skill.id ? null : previous,
+                          )
+                        }
+                        onToggle={toggleTarget}
+                      />
+                    )
+                  })}
+                </div>
+                {!visibleSkills.length ? (
+                  <SkillEmpty
+                    title={
+                      query
+                        ? '没有匹配的技能'
+                        : scope === 'library'
+                          ? '技能库为空'
+                          : '尚未单独分配技能'
+                    }
+                    description={
+                      query
+                        ? '换一个名称或关键词试试。'
+                        : canManage
+                          ? scope === 'library'
+                            ? '导入 SKILL.md、ZIP 或公开 Git 技能包。'
+                            : '可从中央技能库的卡片直接分配给助手或项目。'
+                          : '请联系管理员分配可用技能。'
+                    }
+                  />
+                ) : null}
+              </WorkspacePageContainer>
             </ScrollArea>
           </div>
           {showDetail ? (
