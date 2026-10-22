@@ -1,6 +1,8 @@
+import type { configuredWorkspaceStore } from './workspaces.mjs';
 export interface BusinessBinding {
   threadId: string; projectId: string; environmentId: string; agentId: string;
   ownerId: string; visibility: 'private' | 'project'; createdAt?: string;
+  workspaceType?: 'internal' | 'external'; workspaceVersionId?: string;
 }
 export interface BusinessAttachment { id: string; name: string; mime: string; readable?: boolean; bytes?: Uint8Array; content?: string; sourceUrl: string }
 export interface BusinessArtifact { id: string; name: string; mime: string; size: number; sourceUrl: string }
@@ -18,6 +20,7 @@ export function createAutoOpsBusinessTools(options: {
   loadAttachmentBytes?(binding: BusinessBinding, id: string): PromiseLike<Uint8Array> | Uint8Array;
   storeArtifact(input: { binding: BusinessBinding; runId: string; name: string; mime: string; bytes: Uint8Array }): PromiseLike<BusinessArtifact> | BusinessArtifact;
   renderPdf?(content: string): PromiseLike<Uint8Array> | Uint8Array;
+  workspaceStore?: ReturnType<typeof configuredWorkspaceStore>;
 }): {
   listMaterials(threadId: string): Promise<Record<string, unknown>>;
   readDocument(threadId: string, id: string): Promise<Record<string, unknown>>;

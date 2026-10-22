@@ -15,6 +15,8 @@ export interface ThreadBinding {
   readonly ownerId: string;
   readonly visibility: 'private' | 'project';
   readonly createdAt: string;
+  readonly workspaceType?: 'internal' | 'external';
+  readonly workspaceVersionId?: string;
   readonly revokedAt?: string;
   readonly compatibilityReadOnly: boolean;
   readonly continuationVerified: boolean;
@@ -40,7 +42,7 @@ export interface AutoOpsAccess {
   visibleThreadIds(principal: AutoOpsPrincipal): string[];
   requireThread(principal: AutoOpsPrincipal, threadId: string): ThreadBinding;
   markThreadDeleted(threadId: string): void;
-  bindThread(principal: AutoOpsPrincipal, input: Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'>): ThreadBinding;
+  bindThread(principal: AutoOpsPrincipal, input: Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'>): ThreadBinding;
   requireAttachment(principal: AutoOpsPrincipal, attachmentId: string, targetThreadId?: string): {id:string; ownerId:string; threadId:string|null;name?:string;mimeType?:string;sizeBytes?:number};
   recordPendingAttachment(principal: AutoOpsPrincipal, attachmentId: string, metadata?: {name:string;mimeType:string;sizeBytes:number}): void;
   recordClaimedAttachment(principal: AutoOpsPrincipal, sourceId: string, finalId: string, threadId: string): void;

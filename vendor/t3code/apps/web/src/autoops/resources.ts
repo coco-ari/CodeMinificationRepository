@@ -15,7 +15,7 @@ export function autoOpsBusinessPath(value: string | undefined): string | null {
     parts.some((part) => !part || part === '.' || part === '..' || /[\\\x00-\x1f?#]/.test(part))
   )
     return null
-  if (parts.length > 2 && !['documents', 'environments', 'threads'].includes(parts[2] ?? ''))
+  if (parts.length > 2 && !['documents', 'environments', 'threads', 'workspaces'].includes(parts[2] ?? ''))
     return null
   return path
 }
@@ -26,14 +26,14 @@ export function autoOpsResourceCwd(
   if (!threadId || !projectId || !readAutoOpsHost()) return null
   const scope = readAutoOpsThreadScope(threadId, projectId)
   return scope
-    ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}`
+    ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}${scope.workspaceType && scope.workspaceVersionId ? `?workspaceType=${scope.workspaceType}&workspaceVersionId=${encodeURIComponent(scope.workspaceVersionId)}` : ''}`
     : null
 }
 export function isAutoOpsResourceCwd(value: string | null): boolean {
   return (
     !!readAutoOpsHost() &&
     !!value &&
-    /^autoops:\/\/projects\/[a-zA-Z0-9_-]+\/environments\/[a-zA-Z0-9_-]+\/threads\/[a-zA-Z0-9_-]+$/.test(
+    /^autoops:\/\/projects\/[a-zA-Z0-9_-]+\/environments\/[a-zA-Z0-9_-]+\/threads\/[a-zA-Z0-9_-]+(?:\?workspaceType=(?:internal|external)&workspaceVersionId=[a-zA-Z0-9_-]+)?$/.test(
       value,
     )
   )

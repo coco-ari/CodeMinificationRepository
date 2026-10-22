@@ -6,7 +6,7 @@
 
 设计以 [项目工作台设计文档及配套图](examples/project-workbench-design.md)、[前端维护说明](examples/frontend-guide.md) 为依据；后续业务变化记录在 [需求补充](examples/workbench-v2-requirements.md)。当前开发分支为 `feat/t3-ui-standard-zh-cn`，UI 与 Agent 交互按锁定版本 T3 规范适配。原型仍在根据反馈修正，[工程检查记录](examples/workbench-v2-validation.md) 不代表 UI 或需求已获用户验收。
 
-未来项目工作区采用已确认的 [两种 Agent 工作区＋部署包出口](examples/project-workbench-design.md#工作区与部署包)：内部原始工作区保留 Git，外部工作区单向生成脱敏且去 Git 历史的版本，前后端部署 ZIP 直接从内部固定版本导出。该业务方案已保存，完整工作区尚未实现。
+Agent Demo 的项目工作区采用已确认的 [两种 Agent 工作区＋部署包出口](examples/project-workbench-design.md#工作区与部署包)：内部原始工作区保留 Git，外部工作区单向生成脱敏且去 Git 历史的版本，前后端部署 ZIP 直接从内部固定版本导出。`agent-demo.html#/workspaces` 已接入真实内部 Git 示例、公开 HTTPS 仓库导入、固定版本文件读取、外部脱敏与复核发布、前后端源码 ZIP 和校验清单。新对话固定工作区版本；跨内部/外部或版本的历史引用在服务端拒绝。部署包下载可用，目标服务器的自动发布尚未接入此 Demo。
 
 在仓库根目录运行 `pnpm install --frozen-lockfile`、`pnpm dev:prototype`，打开 [交互原型](http://127.0.0.1:5173/prototype.html)。使用虚构账号 `admin`（管理员）、`lin` 或 `chen`（成员），密码均为 `Demo123!`。左下角可重置演示。数据保存在当前浏览器 `autoops:interactive-prototype:v2`，与旧版演示分开。
 

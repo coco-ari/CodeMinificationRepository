@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { extractBusinessAttachment } from './business-documents.mjs'
 import { contextFor } from '../fixtures.mjs'
+import { configuredWorkspaceStore } from './workspaces.mjs'
 
 const TEXT_REPORT_MIMES = new Set(['text/markdown', 'text/plain', 'text/csv', 'application/json'])
 export class AutoOpsToolError extends Error {
@@ -58,25 +59,44 @@ export function configuredBusinessArtifactStore() {
  * by its registry, never a model argument. All resource callbacks must already
  * enforce the current canonical history/attachment boundary.
  */
-export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, loadAttachmentBytes, storeArtifact, renderPdf }) {
+export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, loadAttachmentBytes, storeArtifact, renderPdf, workspaceStore = configuredWorkspaceStore() }) {
   const authorize = async (threadId) => {
     const authorized = await authorizeThread(threadId)
     if (!authorized?.binding || !authorized.project || !authorized.agent) fail('THREAD_FORBIDDEN', '会话授权已失效')
     return authorized
   }
+  const workspace = (binding) => {
+    if (!binding.workspaceVersionId && !binding.workspaceType) return null
+    if (!binding.workspaceVersionId || !binding.workspaceType || !workspaceStore) fail('WORKSPACE_UNAVAILABLE', '会话固定工作区不可用')
+    const version = workspaceStore.getVersion(binding.projectId, binding.workspaceVersionId)
+    if (version.type !== binding.workspaceType) fail('WORKSPACE_FORBIDDEN', '工作区不属于当前会话范围')
+    return { version, files: workspaceStore.files(binding.projectId, binding.workspaceVersionId) }
+  }
+  const workspacePath = (binding, relativePath) => `autoops/${binding.projectId}/workspaces/${binding.workspaceVersionId}/${relativePath}`
+  const workspaceSource = (binding, path) => `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(workspacePath(binding, path))}`
+  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: `autoops/${binding.projectId}/workspaces/${version.id}`, source: { contentHash: version.source?.contentHash, repositories: version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) } })
   return {
     async listMaterials(threadId) {
       const { project, binding } = await authorize(threadId)
       const attachments = await loadAttachments(binding)
+      const selected = workspace(binding)
       return {
         project: { id: project.id, name: project.name },
         environmentId: binding.environmentId,
-        documents: project.documents.map(({ id, name, mime }) => ({ id, name, mime })),
+        ...(selected ? { source: 'workspace_snapshot', workspace: workspaceIdentity(selected, binding), documentCount: selected.files.length, truncated: selected.files.length > 250 } : {}),
+        documents: selected ? selected.files.slice(0, 250).map(({ path, name, mime, size }) => ({ id: path, name, path: workspacePath(binding, path), mime, size })) : project.documents.map(({ id, name, mime }) => ({ id, name, mime })),
         attachments: attachments.map(({ id, name, mime, readable }) => ({ id, name, mime, ...(readable === undefined ? {} : { readable }) })),
       }
     },
     async readDocument(threadId, id) {
-      const { project } = await authorize(threadId)
+      const { project, binding } = await authorize(threadId)
+      const selected = workspace(binding)
+      if (selected) {
+        const file = selected.files.find((entry) => entry.path === id || workspacePath(binding, entry.path) === id)
+        if (!file) fail('DOCUMENT_FORBIDDEN', '资料不属于会话固定工作区版本')
+        const read = workspaceStore.read(binding.projectId, binding.workspaceVersionId, file.path)
+        return { id: file.path, name: file.name, mime: file.mime, content: read.contents, byteLength: read.byteLength, truncated: read.truncated, source: 'workspace_snapshot', workspaceType: binding.workspaceType, workspaceVersionId: binding.workspaceVersionId, sourceUrl: workspaceSource(binding, file.path) }
+      }
       const document = project.documents.find((entry) => entry.id === id)
       if (!document) fail('DOCUMENT_FORBIDDEN', '资料不存在或不属于当前项目')
       return { ...document, sourceUrl: `/api/agent-demo/t3/autoops/projects/${encodeURIComponent(project.id)}/documents/${encodeURIComponent(document.id)}` }
@@ -96,6 +116,8 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
     async queryEnvironment(threadId, environmentId) {
       const { binding, project } = await authorize(threadId)
       if (binding.environmentId !== environmentId) fail('ENVIRONMENT_FORBIDDEN', '只能查询会话固定环境')
+      const selected = workspace(binding)
+      if (selected) return { environmentId, environmentName: project.environments.find((environment) => environment.id === environmentId)?.name, source: 'workspace_snapshot', workspace: workspaceIdentity(selected, binding), notice: '当前会话读取固定工作区文件快照；未接入服务器实时观测，不能据此判断部署或运行状态。' }
       const context = contextFor(binding)
       return { environmentId, environmentName: project.environments.find((environment) => environment.id === environmentId)?.name, source: 'demo_fixture_snapshot', observedAt: context.resourceSnapshot.collectedAt, resources: context.resources, resourceSnapshot: context.resourceSnapshot, notice: '这是测试主服务提供的演示夹具，不是生产环境实时观测。' }
     },

@@ -1,7 +1,7 @@
 import { readAutoOpsHost } from "~/autoops/hostConfig";
 import { toastManager } from "~/components/ui/toast";
 import { autoOpsFeature, isAutoOpsHosted } from "~/autoops/capabilities";
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon, LogOutIcon } from "lucide-react";
+import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon, LogOutIcon, FolderGit2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -218,6 +218,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="设置"
             onClick={handleSettingsClick}
           />
+          {isAutoOpsHosted() ? <SidebarUtilityItem
+            icon={<FolderGit2Icon />}
+            label="工作区"
+            onClick={() => { closeMobileSidebar(); void navigate({ to: '/workspaces' }); }}
+          /> : null}
           {pullRequestsSupported && autoOpsFeature("workspace") ? (
             <SidebarUtilityItem
               icon={<PullRequestGlyph.pullRequest />}

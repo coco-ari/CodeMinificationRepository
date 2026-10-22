@@ -151,6 +151,8 @@ export interface AutoOpsThreadScope {
   environmentId: string
   agentId: string
   visibility: 'private' | 'project'
+  workspaceType?: 'internal' | 'external'
+  workspaceVersionId?: string
   compatibilityReadOnly?: boolean
   continuationVerified?: boolean
   nativeThreadId?: string
@@ -233,6 +235,7 @@ export async function inheritAutoOpsThreadScope(
     environmentId: source.environmentId,
     agentId: source.agentId,
     visibility: 'private',
+    ...(source.workspaceType ? {workspaceType: source.workspaceType, workspaceVersionId: source.workspaceVersionId} : {}),
   })
 }
 async function authorizeThreadLaunch({
@@ -256,9 +259,11 @@ async function authorizeThreadLaunch({
   if (!response.ok)
     throw new Error(
       response.status === 401
-        ? 'Please sign in again.'
-        : 'The conversation scope could not be authorized.',
+        ? '请重新登录。'
+        : ((await response.json().catch(() => ({}))) as {error?:string}).error ?? '无法授权此会话的工作区，请重新选择版本。',
     )
+  const result = (await response.json()) as {binding: AutoOpsThreadScope}
+  publishThreadScope(threadId, result.binding)
 }
 
 export async function loadAutoOpsThreadScope(

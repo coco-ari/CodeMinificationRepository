@@ -1,6 +1,7 @@
 import type { AutoOpsPrincipal, AutoOpsAccess } from './access.mjs';
 import type { DatabaseSync } from 'node:sqlite';
 import type { createBusinessArtifactStore } from './business-tools.mjs';
+import type { configuredWorkspaceStore } from './workspaces.mjs';
 export interface ResourceInput {cwd:string;query:string;limit:number;kind?:'file'|'directory';imageOnly?:boolean}
 export interface ResourceContext {records:ReadonlyArray<{kind:string;path?:string}>}
 export interface BusinessResourceCatalog {
@@ -13,5 +14,5 @@ export interface BusinessResourceCatalog {
   requireContext(threadId:string,context:ResourceContext|undefined):void;
   readForThread(threadId:string,path:string):Promise<Record<string,unknown>>;
 }
-export function createBusinessResourceCatalog(options:{access:AutoOpsAccess;bindingDb:DatabaseSync;artifactStore?:ReturnType<typeof createBusinessArtifactStore>;attachmentsDir:string}):BusinessResourceCatalog;
+export function createBusinessResourceCatalog(options:{access:AutoOpsAccess;bindingDb:DatabaseSync;artifactStore?:ReturnType<typeof createBusinessArtifactStore>;attachmentsDir:string;workspaceStore?:ReturnType<typeof configuredWorkspaceStore>}):BusinessResourceCatalog;
 export function configuredBusinessResourceCatalog():BusinessResourceCatalog|undefined;

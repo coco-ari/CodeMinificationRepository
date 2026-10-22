@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { WorkspaceScopeControl } from './WorkspaceScopeControl'
+import { useAutoOpsThreadScope } from './useThreadScope'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import {
   loadAutoOpsThreadScope,
@@ -19,6 +21,7 @@ export function AutoOpsThreadScopeControl({
   isDraft: boolean
 }) {
   const host = readAutoOpsHost()
+  const knownScope = useAutoOpsThreadScope(threadId)
   const [, refresh] = useState(0)
   const [loadedThread, setLoadedThread] = useState<string | null>(null)
   const [failedThread, setFailedThread] = useState<string | null>(null)
@@ -53,7 +56,7 @@ export function AutoOpsThreadScopeControl({
       </div>
     )
   const project = host.projects.find((entry) => entry.id === projectId)
-  const scope = readAutoOpsThreadScope(threadId, projectId)
+  const scope = knownScope ?? readAutoOpsThreadScope(threadId, projectId)
   if (!project || !scope)
     return (
       <div role="alert" className="px-4 py-2 text-sm text-destructive">
@@ -147,6 +150,7 @@ export function AutoOpsThreadScopeControl({
           <SelectItem value="project">项目共享</SelectItem>
         </SelectPopup>
       </Select>}
+      <WorkspaceScopeControl threadId={threadId} projectId={projectId} isDraft={isDraft} />
     </div>
   )
 }

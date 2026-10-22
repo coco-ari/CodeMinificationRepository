@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { users, projects, agents } from '../fixtures.mjs'
 import { resolveProductProfile } from './product-profile.mjs'
 import { configuredBusinessModels } from './models.mjs'
+import { configuredWorkspaceStore } from './workspaces.mjs'
 
 // AutoOps business authorization only. T3 remains the sole owner of runs,
 // commands, queues, events and native-provider session state.
@@ -26,6 +27,11 @@ const identifier = (value, name) => {
     fail(400, 'INVALID_ID', `${name}无效`)
   return value
 }
+const requireMatchingWorkspaces = (source, target) => {
+  if ((source.workspaceType || target.workspaceType) &&
+      ['projectId', 'workspaceType', 'workspaceVersionId'].some((key) => source[key] !== target[key]))
+    fail(403, 'REFERENCE_WORKSPACE_MISMATCH', '不同工作区或版本的历史资料不能带入此会话，请使用独立新对话')
+}
 const fromRow = (row) => row && ({
   threadId: row.thread_id,
   projectId: row.project_id,
@@ -34,6 +40,7 @@ const fromRow = (row) => row && ({
   ownerId: row.owner_id,
   visibility: row.visibility,
   createdAt: row.created_at,
+  ...(row.workspace_type ? { workspaceType: row.workspace_type, workspaceVersionId: row.workspace_version_id } : {}),
   compatibilityReadOnly: Boolean(row.compatibility_read_only),
   continuationVerified: Boolean(row.continuation_verified),
   ...(row.native_thread_id ? {nativeThreadId:row.native_thread_id} : {}),
@@ -70,14 +77,14 @@ export function initializeAutoOpsAccessSchema(db) {
   `)
   if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === 'revoked_at'))
     db.exec('ALTER TABLE t3_thread_bindings ADD COLUMN revoked_at TEXT')
-  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT']]) {
+  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT']]) {
     if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === name)) db.exec(`ALTER TABLE t3_thread_bindings ADD COLUMN ${name} ${type}`)
   }
   if (!db.prepare('PRAGMA table_info(t3_attachment_access)').all().some((column) => column.name === 'metadata_json'))
     db.exec('ALTER TABLE t3_attachment_access ADD COLUMN metadata_json TEXT')
 }
 
-export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, projects, agents }, now = Date.now }) {
+export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, projects, agents }, now = Date.now, workspaceStore }) {
   const lookupSession = (sessionHash) => {
     const row = sessionDb.prepare('SELECT token,uid,csrf,expires FROM sessions WHERE token=? AND expires>?').get(sessionHash, now())
     const user = row && catalog.users.find((entry) => entry.id === row.uid)
@@ -107,10 +114,17 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     ancestors.add(binding.threadId)
     if (binding.nativeParentThreadId) {
       const parent=getThreadBinding(binding.nativeParentThreadId)
-      if (!parent || ['projectId','environmentId','agentId','ownerId','visibility'].some(key=>parent[key]!==binding[key])) fail(403,'THREAD_SCOPE_REVOKED','原生子任务来源已失效')
+      if (!parent || ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'].some(key=>parent[key]!==binding[key])) fail(403,'THREAD_SCOPE_REVOKED','原生子任务来源已失效')
       validateBinding(parent, ancestors)
     }
     if (binding.revokedAt) fail(404, 'THREAD_NOT_FOUND', '会话已删除')
+    if (binding.workspaceType) {
+      if (!['internal', 'external'].includes(binding.workspaceType) || !binding.workspaceVersionId)
+        fail(400, 'INVALID_WORKSPACE_BINDING', '请选择有效的工作区版本')
+      const version = workspaceStore?.getVersion(binding.projectId, binding.workspaceVersionId)
+      if (workspaceStore && (!version || version.type !== binding.workspaceType || version.status !== 'published'))
+        fail(403, 'WORKSPACE_NOT_AVAILABLE', '此工作区版本尚未发布或已不可用')
+    }
     const project = catalog.projects.find((entry) => entry.id === binding.projectId)
     const agent = catalog.agents.find((entry) => entry.id === binding.agentId)
     if (!project?.memberIds.includes(binding.ownerId) ||
@@ -145,21 +159,27 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       ownerId: current.id,
       visibility: input.visibility,
       createdAt: new Date(now()).toISOString(),
+      ...(input.workspaceType !== undefined || input.workspaceVersionId !== undefined ? {
+        workspaceType: input.workspaceType,
+        workspaceVersionId: identifier(input.workspaceVersionId, '工作区版本'),
+      } : {}),
     }
     if (!['private', 'project'].includes(binding.visibility)) fail(400, 'INVALID_VISIBILITY', '会话可见范围无效')
     validateBinding(binding)
     const existing = getThreadBinding(binding.threadId)
     if (existing) {
-      if (['projectId','environmentId','agentId','ownerId','visibility'].some((key) => existing[key] !== binding[key]))
+      if (['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'].some((key) => existing[key] !== binding[key]))
         fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
       return existing
     }
-    bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
+    if (workspaceStore && !binding.workspaceType)
+      fail(400, 'WORKSPACE_REQUIRED', '新对话必须先选择固定的工作区版本')
+    bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
       binding.threadId, binding.projectId, binding.environmentId, binding.agentId,
-      binding.ownerId, binding.visibility, binding.createdAt,
+      binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null,
     )
     const stored = getThreadBinding(binding.threadId)
-    if (['projectId','environmentId','agentId','ownerId','visibility'].some((key) => stored[key] !== binding[key]))
+    if (['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'].some((key) => stored[key] !== binding[key]))
       fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
     return stored
   }
@@ -174,6 +194,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       requireThread(current, row.thread_id)
       if (targetThreadId && targetThreadId !== row.thread_id) {
         const source = requireThread(current, row.thread_id), target = requireThread(current, targetThreadId)
+        requireMatchingWorkspaces(source, target)
         const sourceAudience = source.visibility === 'private' ? [source.ownerId] : projectFor(current, source.projectId).memberIds
         const targetAudience = target.visibility === 'private' ? [target.ownerId] : projectFor(current, target.projectId).memberIds
         if (targetAudience.some((member) => !sourceAudience.includes(member)))
@@ -258,7 +279,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       const audience = source.visibility === 'private' ? [source.ownerId] : project.memberIds
       if (source.compatibilityReadOnly || source.nativeParentThreadId || source.nativeThreadId !== sourceNativeId ||
           target.compatibilityReadOnly || target.nativeParentThreadId || target.visibility !== 'private' ||
-          !audience.includes(target.ownerId) || ['projectId','environmentId','agentId'].some(key => source[key] !== target[key]))
+          !audience.includes(target.ownerId) || ['projectId','environmentId','agentId','workspaceType','workspaceVersionId'].some(key => source[key] !== target[key]))
         fail(403, 'NATIVE_FORK_SCOPE_MISMATCH', '原生分支的授权范围或来源不一致')
       identifier(targetNativeId, '原生会话ID')
       if (targetNativeId === sourceNativeId || (target.nativeThreadId && target.nativeThreadId !== targetNativeId))
@@ -274,6 +295,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     requireReference(principal, sourceThreadId, targetThreadId) {
       const source = requireThread(principal, sourceThreadId)
       const target = requireThread(principal, targetThreadId)
+      requireMatchingWorkspaces(source, target)
       const sourceProject = projectFor(principal, source.projectId)
       const targetProject = projectFor(principal, target.projectId)
       const sourceAudience = source.visibility === 'private' ? [source.ownerId] : sourceProject.memberIds
@@ -339,7 +361,7 @@ export function configuredAutoOpsAccess() {
   const bindingDb = new DatabaseSync(join(directory, 't3-autoops.sqlite'))
   bindingDb.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;')
   initializeAutoOpsAccessSchema(bindingDb)
-  configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb })
+  configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore: configuredWorkspaceStore() })
   return configuredAccess
 }
 

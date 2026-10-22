@@ -67,3 +67,42 @@ test('报告真实保存、同轮重试幂等、不同轮不覆盖且共享状�
   assert.equal(f.artifacts.list('thread-1').length, 2)
   await assert.rejects(f.tools.createReport('thread-1', 'run-3', { ...input, name: '../escape.md' }), { code: 'INVALID_TOOL_INPUT' })
 })
+
+test('工作区资料工具只读固定版本，不回退到原始夹具或暴露内部仓库地址', async () => {
+  const binding = { threadId: 'external-thread', projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', ownerId: 'u-admin', visibility: 'private', workspaceType: 'external', workspaceVersionId: 'external-v1' }
+  const source = { contentHash: 'version-digest', repositories: [{ path: 'backend', commit: 'fixed-commit' }], repositoryHost: 'internal.invalid', branch: 'private-release' }
+  const version = { id: 'external-v1', projectId: binding.projectId, type: 'external', source }
+  const file = { path: 'docs/需求.md', name: '需求.md', mime: 'text/markdown', size: 40 }
+  const tools = createAutoOpsBusinessTools({
+    authorizeThread: () => ({ binding, project: projects[0], agent: agents[0] }),
+    loadAttachments: () => [],
+    storeArtifact: () => { throw new Error('unexpected write') },
+    workspaceStore: {
+      getVersion(projectId, id) { assert.equal(projectId, 'p-autoops'); assert.equal(id, 'external-v1'); return version },
+      files() { return [file] },
+      read(projectId, id, path) { assert.equal(path, file.path); return { contents: '已脱敏的需求', byteLength: 100000, truncated: true } },
+    },
+  })
+  const materials = await tools.listMaterials(binding.threadId)
+  assert.equal(materials.source, 'workspace_snapshot')
+  assert.equal(materials.workspace.root, 'autoops/p-autoops/workspaces/external-v1')
+  assert.deepEqual(materials.documents.map(({id}) => id), [file.path])
+  assert.ok(!JSON.stringify(materials).includes('internal.invalid'))
+  assert.ok(!JSON.stringify(materials).includes('private-release'))
+  const result = await tools.readDocument(binding.threadId, file.path)
+  assert.equal(result.content, '已脱敏的需求')
+  assert.equal(result.truncated, true)
+  assert.equal(result.byteLength, 100000)
+  assert.equal(result.workspaceVersionId, 'external-v1')
+  assert.match(result.sourceUrl, /resources\?path=/)
+  assert.equal((await tools.readDocument(binding.threadId, materials.documents[0].path)).content, result.content)
+  await assert.rejects(tools.readDocument(binding.threadId, 'doc-design'), { code: 'DOCUMENT_FORBIDDEN' })
+  await assert.rejects(tools.readDocument(binding.threadId, 'autoops/p-autoops/workspaces/internal-v1/docs/需求.md'), { code: 'DOCUMENT_FORBIDDEN' })
+  const environment = await tools.queryEnvironment(binding.threadId, 'env-test')
+  assert.equal(environment.source, 'workspace_snapshot')
+  assert.equal(environment.resourceSnapshot, undefined)
+  binding.workspaceType = 'internal'
+  await assert.rejects(tools.listMaterials(binding.threadId), { code: 'WORKSPACE_FORBIDDEN' })
+  delete binding.workspaceVersionId
+  await assert.rejects(tools.listMaterials(binding.threadId), { code: 'WORKSPACE_UNAVAILABLE' })
+})
