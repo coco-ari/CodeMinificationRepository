@@ -38,8 +38,9 @@ function Input({
       "text-muted-foreground file:me-3 file:bg-transparent file:font-medium file:text-foreground file:text-sm",
   );
   const inputElement = renderWithSlot("input", {
+    "data-slot": "input",
     ...props, ...(props.type === "file" ? {} : { value }),
-    className: inputClassName, "data-slot": "input", "data-ui": "input",
+    className: inputClassName, "data-ui": "input",
     size: typeof size === "number" ? size : undefined,
     style: resolveStateValue(style, state),
     onFocus: (event: React.FocusEvent<HTMLInputElement>) => { onFocus?.(compatibleEvent(event)); field.onFocus(); },

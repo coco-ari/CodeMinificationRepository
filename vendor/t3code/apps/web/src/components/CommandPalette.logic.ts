@@ -652,7 +652,7 @@ export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): str
     case "root-browse":
       return "输入项目路径（例如 ~/projects/my-app）";
     case "submenu":
-      return "Search...";
+      return "搜索…";
     case "submenu-browse":
       return "输入路径（例如 ~/projects/my-app）";
   }
