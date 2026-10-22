@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T11:10:05.011827+00:00",
+  "generatedAt": "2026-10-22T11:40:15.901570+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -596,7 +596,7 @@
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "14077585aed8edbdc289b4e397c45c2201b1d2bf6f5520e77b91726672ea42ee",
-      "localSha256": "956cc118dac26d2fa96b33b06c66382f974855f43023dfecd2dc047d63b02fae"
+      "localSha256": "6986caa407fec475b439cb7bd3aadfce72e48a1f8fddddfa295e33f1d4128697"
     },
     {
       "path": "apps/web/src/components/chat/ChatGptSharingControl.tsx",
@@ -650,7 +650,7 @@
       "path": "apps/web/src/components/chat/ComposerCommandMenu.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "7103a425dc0af46931e230ce3cbc488e4ce69e61727f57248d9ee51c57bc7967",
-      "localSha256": "6ce82b55df17b58dcb9bb69ec53d5646f67bc4641a72d28d5b536f5d498879f5"
+      "localSha256": "8fa835615b170964fd35e5c7a80c267faf82a424a5fc0d865e2d41b87077932d"
     },
     {
       "path": "apps/web/src/components/chat/ComposerControl.tsx",
@@ -2474,13 +2474,13 @@
       "path": "apps/web/src/state/queries.filesystem.test.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "fd7ee5ba6f88594b51dd9fba982435d14eafe5e14ae139613396f1fad929f972",
-      "localSha256": "c4b2e7512e8e461d49a55fb60905a6d6c0d236bb4597d126de43f32d700dc18c"
+      "localSha256": "b2b6769eef20bfc147abe448ecaecbddad574415210846f6d0c7348fddc77d7b"
     },
     {
       "path": "apps/web/src/state/queries.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "c05e91ea269f81aa0cf3239eefbe1270c6212b938e5607da7ca35bfae3e2391d",
-      "localSha256": "ebe3709db8a28ea3b37a6b4329c9bbd2e4323abc946740ac58cdffc461ecaa0b"
+      "localSha256": "4e5506d220fe25d6e72e479ec9ba665f88ca020a217752de2c861cb5575db7d7"
     },
     {
       "path": "apps/web/src/state/usage.ts",
@@ -2751,9 +2751,11 @@
     "apps/web/src/motionPreference.test.ts",
     "apps/web/src/autoops/ResourceLink.tsx",
     "apps/web/src/autoops/workspaces.ts",
+    "apps/web/src/autoops/pathCompletion.ts",
     "apps/web/src/autoops/materialPreviewScope.test.ts",
     "apps/web/src/autoops/clientSettings.test.ts",
     "apps/web/src/autoops/theme.css",
+    "apps/web/src/autoops/pathCompletion.test.ts",
     "apps/web/src/autoops/capabilities.test.ts",
     "apps/web/src/autoops/hostConfig.ts",
     "apps/web/src/autoops/WorkspacesPage.tsx",

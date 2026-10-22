@@ -150,6 +150,17 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
       const workspacePrefix = scope.binding.workspaceVersionId ? `autoops/${project.id}/workspaces/${scope.binding.workspaceVersionId}/` : undefined
       const workspaceAncestors = workspacePrefix ? new Set(['autoops', `autoops/${project.id}`, `autoops/${project.id}/workspaces`, workspacePrefix.slice(0, -1)]) : undefined
       const files = visible(principal, project, scope.binding).filter((file) => (file.environmentId === undefined || file.environmentId === scope.environmentId) && (!input.imageOnly || file.mime.startsWith('image/')))
+      if (workspacePrefix && input.query.startsWith('./')) {
+        const path = input.query.slice(2)
+        if (path) assertPath(path)
+        if (path.includes('//') || /[\u0000-\u001f\u007f:]/.test(path)) fail()
+        const separator = path.lastIndexOf('/')
+        const directory = separator < 0 ? '' : path.slice(0, separator)
+        const prefix = path.slice(separator + 1).toLocaleLowerCase()
+        const matches = directChildren(files, workspacePrefix.slice(0, -1) + (directory ? '/' + directory : '')).filter((entry) =>
+          (!input.kind || entry.kind === input.kind) && entry.path.slice(entry.path.lastIndexOf('/') + 1).toLocaleLowerCase().startsWith(prefix))
+        return { entries: matches.slice(0, input.limit), truncated: matches.length > input.limit }
+      }
       if (workspacePrefix && input.query.endsWith('/')) {
         const directory = input.query.slice(0, -1)
         if (directory) assertPath(directory)

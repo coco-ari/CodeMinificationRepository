@@ -43,7 +43,7 @@ async function run(name, action) {
 }
 async function login(username) {
   const profile = await mkdtemp(path.join(os.tmpdir(), 'autoops-workspace-mentions-'))
-  const session = { username, profile, ownedThreads: new Set(), draftIds: new Set() }
+  const session = { username, profile, ownedThreads: new Set(), draftIds: new Set(), searchRequests: [] }
   sessions.push(session)
   const context = await chromium.launchPersistentContext(profile, { headless: true, locale: 'zh-CN', viewport: { width: 1440, height: 900 }, ...(executablePath ? { executablePath } : {}) })
   session.context = context
@@ -51,16 +51,37 @@ async function login(username) {
   session.page = page = target
   target.setDefaultTimeout(15000)
   target.on('pageerror', (error) => report.pageErrors.push({ username, message: error.message }))
-  target.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    try {
-      const decoded = JSON.parse(String(payload))
-      for (const message of Array.isArray(decoded) ? decoded : [decoded]) {
-        if (message.payload?.type === 'message.dispatch') report.messageDispatches++
-        if (message.tag === 'orchestration.launchThread' && message.payload?.initialMessage) report.initialMessages++
-        if (/^(?:projects|filesystem)\.(?:writeFile|createDirectory|remove|rename)$/.test(message.tag ?? '')) report.filesystemWrites++
-      }
-    } catch {}
-  }))
+  target.on('websocket', (socket) => {
+    const pendingSearches = new Map()
+    socket.on('framesent', ({ payload }) => {
+      try {
+        const decoded = JSON.parse(String(payload))
+        for (const message of Array.isArray(decoded) ? decoded : [decoded]) {
+          if (message.payload?.type === 'message.dispatch') report.messageDispatches++
+          if (message.tag === 'orchestration.launchThread' && message.payload?.initialMessage) report.initialMessages++
+          if (/^(?:projects|filesystem)\.(?:writeFile|createDirectory|remove|rename)$/.test(message.tag ?? '')) report.filesystemWrites++
+          if (message.tag === 'projects.searchEntries') {
+            const request = { query: message.payload?.query, cwd: message.payload?.cwd, completed: false, successful: false }
+            session.searchRequests.push(request)
+            pendingSearches.set(String(message.id), request)
+          }
+        }
+      } catch {}
+    })
+    socket.on('framereceived', ({ payload }) => {
+      try {
+        const decoded = JSON.parse(String(payload))
+        for (const message of Array.isArray(decoded) ? decoded : [decoded]) {
+          const request = pendingSearches.get(String(message.requestId))
+          if (message._tag === 'Exit' && request) {
+            request.completed = true
+            request.successful = message.exit?._tag === 'Success'
+            pendingSearches.delete(String(message.requestId))
+          }
+        }
+      } catch {}
+    })
+  })
   target.on('request', (request) => {
     if (request.method() !== 'POST') return
     const pathname = new URL(request.url()).pathname
@@ -116,38 +137,70 @@ async function pathCandidates() {
     return match ? [{ id, kind: match[1], path: match[2], selected: element.getAttribute('data-active') === 'true' }] : []
   }))
 }
-async function waitDirectoryCandidate(prefix, directory) {
+async function waitSearchQuery(session, prefix, query) {
+  const versionId = prefix.slice(prefix.lastIndexOf('/') + 1)
+  const wireQuery = query.startsWith('./') ? query : './' + query
+  // Cached queries may reuse an earlier successful result in this exact immutable scope.
+  return until(() => session.searchRequests.findLast((request) => {
+    if (request.query !== wireQuery || !request.completed || !request.successful) return false
+    try {
+      const cwd = new URL(request.cwd)
+      return cwd.protocol === 'autoops:' && cwd.hostname === 'projects' &&
+        cwd.pathname.startsWith(`/${session.projectId}/environments/`) && cwd.searchParams.get('workspaceVersionId') === versionId
+    } catch { return false }
+  }), `当前范围没有完成前缀查询 ${wireQuery}`)
+}
+async function waitPrefixCandidates(session, prefix, query, accepts = () => true) {
+  await waitSearchQuery(session, prefix, query)
   await drawer().waitFor()
   await page.getByRole('listbox', { name: '文件与文件夹', exact: true }).waitFor()
   return until(async () => {
     const rows = await pathCandidates()
-    const workspaceRows = rows.filter((entry) => /^autoops\/[^/]+\/workspaces\//.test(entry.path))
-    // This excludes the previous bare-@ list while the new query is still debouncing.
-    return rows.some((entry) => entry.id === `path:directory:${prefix}/${directory}`) && workspaceRows.every((entry) => entry.path === `${prefix}/${directory}` || entry.path.startsWith(`${prefix}/${directory}/`)) ? rows : null
-  }, `等待目录 ${directory} 的防抖候选完成`)
+    const relative = query.startsWith('./') ? query.slice(2) : query
+    const slash = relative.lastIndexOf('/')
+    const parent = slash < 0 ? prefix : `${prefix}/${relative.slice(0, slash)}`
+    const basenamePrefix = relative.slice(slash + 1)
+    // A stale parent result, recursive descendant, or thread row cannot satisfy this boundary.
+    return rows.length && rows.length === await candidates().count() && rows.every((entry) =>
+      entry.path.slice(0, entry.path.lastIndexOf('/')) === parent &&
+      entry.path.slice(entry.path.lastIndexOf('/') + 1).startsWith(basenamePrefix)) && accepts(rows) ? rows : null
+  }, `查询 @${query} 未显示当前层 basename 前缀候选`)
 }
-async function waitDirectChildren(prefix, directory) {
-  await drawer().waitFor()
-  return until(async () => {
-    const rows = await pathCandidates()
-    const parent = `${prefix}/${directory}`
-    // A recursive fuzzy result, or a stale parent query, cannot satisfy this boundary.
-    return rows.length && rows.every((entry) => entry.path.slice(0, entry.path.lastIndexOf('/')) === parent) ? rows : null
-  }, `目录 ${directory}/ 补全后没有显示真实直系孩子`)
+async function waitDirectoryCandidate(session, prefix, directory, query = directory) {
+  return waitPrefixCandidates(session, prefix, query, (rows) =>
+    rows.length === 1 && rows[0].id === `path:directory:${prefix}/${directory}`)
+}
+async function waitDirectChildren(session, prefix, directory) {
+  return waitPrefixCandidates(session, prefix, directory + '/')
 }
 async function highlightCandidate(id) {
   const initial = await pathCandidates()
   const count = await candidates().count()
   assert(initial.some((entry) => entry.id === id), `候选不存在：${id}`)
+  const activeId = () => candidates().evaluateAll((elements) => elements.find((element) => element.getAttribute('data-active') === 'true')?.getAttribute('data-composer-item-id') ?? null)
+  const initiallyActive = await activeId()
+  // The first row can be visually active without a user selection. Send an actual arrow
+  // before trusting it; the first arrow may keep that visual row while making it explicit.
+  await editor().press('ArrowDown')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  if (count === 1) {
+    await until(async () => await activeId() === id, '单项方向键选择没有保留原生候选高亮')
+    return
+  }
+  if (initiallyActive === id && await activeId() === id) {
+    await editor().press('ArrowDown')
+    await until(async () => await activeId() !== id, '多项候选必须先离开视觉默认项，再用方向键明确选回')
+  }
   for (let step = 0; step <= count + 1; step++) {
-    const selected = await candidates().evaluateAll((elements) => elements.find((element) => element.getAttribute('data-active') === 'true')?.getAttribute('data-composer-item-id') ?? null)
+    const selected = await activeId()
     if (selected === id) return
     await editor().press('ArrowDown')
-    await until(async () => (await candidates().evaluateAll((elements) => elements.find((element) => element.getAttribute('data-active') === 'true')?.getAttribute('data-composer-item-id') ?? null)) !== selected, '方向键没有更新原生候选高亮')
+    await until(async () => await activeId() !== selected, '方向键没有更新原生候选高亮')
   }
   assert.fail(`方向键无法选中候选：${id}`)
 }
 async function expectRawDirectoryQuery(query, versionId) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   await until(async () => (await editor().innerText()).trimEnd() === query, `Tab 应保留原始查询 ${query}`)
   assert(!(await editor().innerHTML()).includes(versionId), '目录 Tab 只能继续查询，不能提前形成固定资料标签')
 }
@@ -162,16 +215,36 @@ async function expectCanonicalTag(canonicalPath, message) {
 async function tabNavigationCycle(session, type, name, version) {
   const prefix = `autoops/${session.projectId}/workspaces/${version.id}`
   const completions = [], childCounts = []
+  const docsQueries = []
+  await clearOwnDraft(session)
+  await page.mouse.move(0, 0)
+  await editor().fill('@d')
+  for (const query of ['d', 'do', 'doc', 'docs']) {
+    if (query !== 'd') await editor().press(query.at(-1))
+    await expectRawDirectoryQuery('@' + query, version.id)
+    const rows = await waitDirectoryCandidate(session, prefix, 'docs', query)
+    assert.equal(rows[0].id, `path:directory:${prefix}/docs`)
+    assert.equal(rows.length, 1, '逐字前缀只允许 docs 本层目录，不得混入 backend、md 或对话')
+    docsQueries.push({ query: '@' + query, wireQuery: './' + query, paths: rows.map((entry) => entry.path), activeIds: rows.filter((entry) => entry.selected).map((entry) => entry.id) })
+    if (query === 'd') await page.screenshot({ path: path.join(output, `${name}-d-first-docs.png`) })
+  }
+  // No arrow key, candidate click or pointer hover has explicitly selected this unique row.
+  await editor().press('Tab')
+  await expectRawDirectoryQuery('@docs/', version.id)
+  const docsChildren = await waitDirectChildren(session, prefix, 'docs')
+  await page.screenshot({ path: path.join(output, `${name}-docs-tab-direct-children.png`) })
+  completions.push('docs/'); childCounts.push(docsChildren.length)
+
   await clearOwnDraft(session)
   await editor().fill('@front')
-  await waitDirectoryCandidate(prefix, 'frontend')
+  await waitDirectoryCandidate(session, prefix, 'frontend', 'front')
   await editor().press('ArrowDown')
   await editor().press('ArrowUp')
   await highlightCandidate(`path:directory:${prefix}/frontend`)
   assert(await drawer().isVisible())
   await editor().press('Tab')
   await expectRawDirectoryQuery('@frontend/', version.id)
-  let children = await waitDirectChildren(prefix, 'frontend')
+  let children = await waitDirectChildren(session, prefix, 'frontend')
   assert(children.some((entry) => entry.path === `${prefix}/frontend/package.json`), '目录候选必须来自实际前端构建目录')
   completions.push('frontend/'); childCounts.push(children.length)
   await page.screenshot({ path: path.join(output, `${name}-tab-frontend-children.png`) })
@@ -182,7 +255,7 @@ async function tabNavigationCycle(session, type, name, version) {
     await highlightCandidate(gitId)
     await editor().press('Tab')
     await expectRawDirectoryQuery('@frontend/.git/', version.id)
-    children = await waitDirectChildren(prefix, 'frontend/.git')
+    children = await waitDirectChildren(session, prefix, 'frontend/.git')
     completions.push('frontend/.git/'); childCounts.push(children.length)
     const next = ['hooks', 'objects'].map((directory) => children.find((entry) => entry.kind === 'directory' && entry.path === `${prefix}/frontend/.git/${directory}`)).find(Boolean)
       ?? children.find((entry) => entry.kind === 'directory')
@@ -193,17 +266,30 @@ async function tabNavigationCycle(session, type, name, version) {
     await highlightCandidate(next.id)
     await editor().press('Tab')
     await expectRawDirectoryQuery(`@${relative}/`, version.id)
-    const nested = await waitDirectChildren(prefix, relative)
+    const nested = await waitDirectChildren(session, prefix, relative)
     completions.push(relative + '/'); childCounts.push(nested.length)
     await page.screenshot({ path: path.join(output, `${name}-tab-nested-git-children.png`) })
   }
 
   await clearOwnDraft(session)
-  await editor().fill('@frontend/package')
-  await until(async () => {
-    const rows = await pathCandidates()
-    return rows.length === 2 && rows.every((entry) => entry.kind === 'file' && entry.path.startsWith(`${prefix}/frontend/package`))
-  }, '文件 Tab 前必须等防抖筛选完成，不能使用上一层目录候选')
+  await page.mouse.move(0, 0)
+  await editor().fill('@frontend/pack')
+  const packagePaths = [`${prefix}/frontend/package-lock.json`, `${prefix}/frontend/package.json`]
+  const isPackagePair = (rows) => rows.length === 2 && rows.every((entry) => entry.kind === 'file') &&
+    JSON.stringify(rows.map((entry) => entry.path).sort()) === JSON.stringify(packagePaths)
+  await waitPrefixCandidates(session, prefix, 'frontend/pack', isPackagePair)
+  await editor().press('Tab')
+  await expectRawDirectoryQuery('@frontend/package', version.id)
+  const ambiguousRows = await waitPrefixCandidates(session, prefix, 'frontend/package', isPackagePair)
+  await page.screenshot({ path: path.join(output, `${name}-tab-common-package-prefix.png`) })
+  await editor().press('Tab')
+  await expectRawDirectoryQuery('@frontend/package', version.id)
+  await waitPrefixCandidates(session, prefix, 'frontend/package', isPackagePair)
+  assert(await drawer().isVisible(), '共有前缀不能再延长时 Tab 必须保留候选，不能默认引用第一项')
+  await page.screenshot({ path: path.join(output, `${name}-tab-ambiguous-package-preserved.png`) })
+  // Actual arrow input makes the later selection explicit even if its row was visually active.
+  await editor().press('ArrowDown')
+  await editor().press('ArrowUp')
   await highlightCandidate(`path:file:${prefix}/frontend/package.json`)
   await editor().press('Tab')
   await expectCanonicalTag(`${prefix}/frontend/package.json`, '文件 Tab 没有转成 canonical 标签')
@@ -211,7 +297,7 @@ async function tabNavigationCycle(session, type, name, version) {
 
   await clearOwnDraft(session)
   await editor().fill('@doc')
-  await waitDirectoryCandidate(prefix, 'docs')
+  await waitDirectoryCandidate(session, prefix, 'docs', 'doc')
   await highlightCandidate(`path:directory:${prefix}/docs`)
   assert(await drawer().isVisible(), '按 Enter 前目录菜单必须真实打开，避免触发发送')
   await editor().press('Enter')
@@ -220,13 +306,13 @@ async function tabNavigationCycle(session, type, name, version) {
 
   await clearOwnDraft(session)
   await editor().fill('@front')
-  await waitDirectoryCandidate(prefix, 'frontend')
+  await waitDirectoryCandidate(session, prefix, 'frontend', 'front')
   await editor().press('Escape')
   await until(async () => !(await drawer().isVisible()), 'Escape 没有关闭目录候选')
   assert.equal((await editor().innerText()).trimEnd(), '@front')
   await clearOwnDraft(session)
   await editor().fill('@front')
-  await waitDirectoryCandidate(prefix, 'frontend')
+  await waitDirectoryCandidate(session, prefix, 'frontend', 'front')
   await highlightCandidate(`path:directory:${prefix}/frontend`)
   await editor().press('Shift+Tab')
   assert.equal((await editor().innerText()).trimEnd(), '@front', 'Shift+Tab 不得被目录补全占用')
@@ -235,7 +321,12 @@ async function tabNavigationCycle(session, type, name, version) {
   await clearOwnDraft(session)
   assert.equal(report.messageDispatches, 0)
   assert.equal(report.initialMessages, 0)
-  return { completions, directChildCounts: childCounts, arrowNavigation: true, directoryTabRemainsRawQuery: true, fileTabCanonicalTag: true, directoryEnterCanonicalTag: true, escapeClosesMenu: true, shiftTabDoesNotComplete: true }
+  return {
+    completions, directChildCounts: childCounts, arrowNavigation: true,
+    docsPrefixReproduction: { queries: docsQueries, noExplicitSelection: true, uniqueTabQuery: '@docs/', directChildren: docsChildren.map((entry) => entry.path), noRecursiveOrThreadRows: true },
+    ambiguousFileTab: { initialQuery: '@frontend/pack', commonQuery: '@frontend/package', paths: ambiguousRows.map((entry) => entry.path), repeatedTabPreservesQuery: true, implicitFirstItemNotInserted: true, explicitArrowSelectionCreatesCanonicalTag: true },
+    directoryTabRemainsRawQuery: true, fileTabCanonicalTag: true, directoryEnterCanonicalTag: true, escapeClosesMenu: true, shiftTabDoesNotComplete: true,
+  }
 }
 async function mentionCycle(session, type, name) {
   const description = await scopeDescription(type)
@@ -247,29 +338,34 @@ async function mentionCycle(session, type, name) {
   await page.getByRole('listbox', { name: '文件与文件夹', exact: true }).waitFor()
   const rows = await until(async () => {
     const items = await candidates().evaluateAll((elements) => elements.map((element) => ({ id: element.getAttribute('data-composer-item-id'), label: element.querySelector('span.font-medium')?.textContent?.trim() ?? '', text: element.innerText })))
-    return items.some((item) => item.id?.endsWith('/backend/.env.example')) ? items : null
-  }, '裸 @ 未列出真实 backend/.env.example 文件')
-  const file = rows.find((item) => item.id?.endsWith('/backend/.env.example'))
-  const canonicalPath = file.id.replace(/^path:(?:file|directory):/, '')
+    const roots = versions.map((version) => `autoops/${session.projectId}/workspaces/${version.id}`)
+    const expectedNames = ['WORKSPACE.md', 'backend', 'docs', 'frontend', 'prototypes']
+    return items.length === expectedNames.length && items.every((item) => {
+      const match = /^path:(?:file|directory):(.+)$/.exec(item.id ?? '')
+      const itemPath = match?.[1] ?? ''
+      return roots.includes(itemPath.slice(0, itemPath.lastIndexOf('/'))) && expectedNames.includes(itemPath.slice(itemPath.lastIndexOf('/') + 1))
+    }) && new Set(items.map((item) => item.id?.slice(item.id.lastIndexOf('/') + 1))).size === expectedNames.length ? items : null
+  }, '裸 @ 必须只显示真实根层 backend/docs/frontend/prototypes/WORKSPACE.md，不得有后代或对话')
+  const directory = rows.find((item) => item.id?.startsWith('path:directory:') && item.id.endsWith('/frontend'))
+  assert(directory, '根层候选缺少 frontend 目录')
+  const canonicalPath = directory.id.replace(/^path:(?:file|directory):/, '')
   const version = versions.find((entry) => canonicalPath.startsWith(`autoops/${session.projectId}/workspaces/${entry.id}/`))
   assert(version, '裸 @ 候选的固定版本与原生范围说明不一致')
   const prefix = `autoops/${session.projectId}/workspaces/${version.id}`
+  await waitPrefixCandidates(session, prefix, '', (items) => items.length === rows.length)
   const ancestorPaths = new Set(['autoops', `autoops/${session.projectId}`, `autoops/${session.projectId}/workspaces`, prefix])
   const ancestorLabels = new Set(['autoops', session.projectId, 'workspaces', version.id])
   for (const item of rows) {
     const candidatePath = item.id?.replace(/^path:(?:file|directory):/, '')
-    if (!item.id?.startsWith('path:')) continue
+    assert(item.id?.startsWith('path:'), '固定工作区裸 @ 不得混入对话候选')
     assert(!ancestorPaths.has(candidatePath), `裸 @ 出现平台祖先候选：${candidatePath}`)
     assert(!ancestorLabels.has(item.label), `裸 @ 出现平台祖先标签：${item.label}`)
     if (/^autoops\/[^/]+\/workspaces\/[^/]+\//.test(candidatePath)) assert(candidatePath.startsWith(prefix + '/'), '候选混入其他项目或版本')
   }
-  assert(file.text.includes('backend') && !file.text.includes(prefix), '工作区文件应显示真实项目相对目录')
+  assert(directory.text.includes('frontend') && !directory.text.includes(prefix), '工作区目录应显示真实项目相对路径')
   await page.screenshot({ path: path.join(output, `${name}-bare-at.png`) })
   await editor().fill('@frontend/package')
-  await until(async () => {
-    const ids = await candidates().evaluateAll((elements) => elements.map((element) => element.getAttribute('data-composer-item-id')))
-    return ids.length === 2 && ids.every((id) => id?.startsWith(`path:file:${prefix}/frontend/package`))
-  }, '等待原生防抖搜索完成后再选择，不能点击上一个查询的候选')
+  await waitPrefixCandidates(session, prefix, 'frontend/package', (items) => items.length === 2 && items.every((item) => item.kind === 'file'))
   const selected = candidates().filter({ hasText: 'package.json' }).filter({ hasText: 'frontend' }).first()
   await selected.waitFor()
   const selectedId = await selected.getAttribute('data-composer-item-id')
@@ -281,7 +377,12 @@ async function mentionCycle(session, type, name) {
   await page.screenshot({ path: path.join(output, `${name}-selected-tag.png`) })
   await clearOwnDraft(session)
   const tabNavigation = await tabNavigationCycle(session, type, name, version)
-  return { scopeDescription: description, workspaceType: type, workspaceVersionId: version.id, bareFilePath: canonicalPath, candidateCount: rows.length, noPlatformAncestors: true, selectedCanonicalPath: `${prefix}/frontend/package.json`, tabNavigation }
+  return {
+    scopeDescription: description, workspaceType: type, workspaceVersionId: version.id,
+    bareRootPaths: rows.map((item) => item.id.replace(/^path:(?:file|directory):/, '')),
+    candidateCount: rows.length, bareAtRootLayerOnly: true, noDescendantCandidates: true, noThreadCandidates: true,
+    noPlatformAncestors: true, selectedCanonicalPath: `${prefix}/frontend/package.json`, tabNavigation,
+  }
 }
 
 try {

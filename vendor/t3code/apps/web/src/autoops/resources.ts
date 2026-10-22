@@ -1,18 +1,13 @@
 import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from './hostConfig'
+import { formatWorkspacePathQuery, workspaceRelativePath } from './pathCompletion'
 
 /** A directory stays editable until a file or folder is explicitly committed as a reference. */
 export function autoOpsWorkspaceDirectoryCompletion(
   path: string,
   scope: Pick<AutoOpsThreadScope, 'projectId' | 'workspaceType' | 'workspaceVersionId'> | undefined,
 ): string | null {
-  if (!scope?.workspaceType || !scope.workspaceVersionId) return null
-  const prefix = `autoops/${scope.projectId}/workspaces/${scope.workspaceVersionId}/`
-  if (!path.startsWith(prefix)) return null
-  const relative = path.slice(prefix.length).replace(/\/$/u, '')
-  if (!relative || relative.split('/').some((part) => !part || part === '.' || part === '..') ||
-    /[\\\p{Cc}\u2028\u2029]/u.test(relative)) return null
-  const directory = `${relative}/`
-  return /[\s"@]/u.test(directory) ? `@"${directory.replaceAll('"', '\\"')}` : `@${directory}`
+  const relative = workspaceRelativePath(path.replace(/\/$/u, ''), scope)
+  return relative === null ? null : formatWorkspacePathQuery(`${relative}/`)
 }
 
 /** Display workspace-relative directories while keeping resource identities canonical. */
@@ -65,6 +60,10 @@ export function isAutoOpsResourceCwd(value: string | null): boolean {
       value,
     )
   )
+}
+export function isAutoOpsWorkspaceResourceCwd(value: string | null): boolean {
+  return isAutoOpsResourceCwd(value) && !!value &&
+    /\?workspaceType=(?:internal|external)&workspaceVersionId=[a-zA-Z0-9_-]+$/.test(value)
 }
 export function autoOpsResourceRequestUrl(url: string, mode: 'metadata' | 'inline'): string {
   const target = new URL(url, readAutoOpsHost()?.httpBaseUrl)

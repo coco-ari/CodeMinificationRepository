@@ -1,5 +1,6 @@
 import { chatSubmissionIntentAllowed, chatSlashCommandAllowed, unavailableChatSlashCommand } from "./autoOpsChatPolicy";
-import { autoOpsResourceCwd, autoOpsResourcePathDescription, autoOpsResourceUrl, autoOpsWorkspaceDirectoryCompletion } from "~/autoops/resources";
+import { autoOpsResourceCwd, autoOpsResourcePathDescription, autoOpsResourceUrl, autoOpsWorkspaceDirectoryCompletion, isAutoOpsWorkspaceResourceCwd } from "~/autoops/resources";
+import { completeWorkspaceCommonPrefix, workspaceRelativePath } from "~/autoops/pathCompletion";
 import { openAutoOpsResource } from '~/autoops/ResourceLink';
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { readAutoOpsHost } from "~/autoops/hostConfig";
@@ -2594,9 +2595,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  const environmentThreadShells = useThreadShells(isPathTrigger);
   const autoOpsThreadScope = useAutoOpsThreadScope(activeThreadId ?? "");
   const composerReferenceCwd = autoOpsResourceCwd(activeThreadId, activeThread?.projectId, autoOpsThreadScope) ?? gitCwd;
+  const workspacePathCompletion = isAutoOpsWorkspaceResourceCwd(composerReferenceCwd);
+  const environmentThreadShells = useThreadShells(isPathTrigger && !workspacePathCompletion);
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? composerReferenceCwd : null,
@@ -2674,13 +2676,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = ((): ComposerCommandItem[] => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
+      if (workspacePathCompletion && (workspaceEntries.isPending ||
+        !isPathSuggestionCurrent(workspaceEntries.searchedTarget, composerTrigger, environmentId, composerReferenceCwd))) return [];
       return [
-        ...matchComposerThreadItems({
+        ...(workspacePathCompletion ? [] : matchComposerThreadItems({
           shells: environmentThreadShells,
           environmentId,
           excludeThreadId: activeThreadId,
           query: composerTrigger.query,
-        }),
+        })),
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,
           type: "path" as const,
@@ -2873,7 +2877,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
 
   const isComposerMenuLoading =
-    (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending) ||
+    (composerTriggerKind === "path" && (workspacePathCompletion || pathTriggerQuery.length > 0) && workspaceEntries.isPending) ||
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
       pullRequestRepository !== null &&
@@ -3424,10 +3428,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerTerminalContextsRef.current = composerTerminalContexts;
   }, [composerTerminalContexts, composerTerminalContextsRef]);
 
-  // The highlight is stored resolved, so keyboard handlers and the next
-  // search compare against the item that is actually shown as active.
-  const resolvedHighlightedItemId = composerMenuOpen ? activeComposerMenuItemId : null;
-  const resolvedHighlightedSearchKey = composerMenuOpen ? composerMenuSearchKey : null;
+  // Workspace Tab distinguishes an explicit choice from the first result's visual highlight.
+  // Other menus retain upstream's resolved highlight state.
+  const workspacePathMenu = workspacePathCompletion && composerTriggerKind === "path";
+  const hasExplicitWorkspaceHighlight = workspacePathMenu &&
+    composerHighlightedSearchKey === composerMenuSearchKey && composerHighlightedItemId !== null &&
+    composerMenuItems.some((item) => item.id === composerHighlightedItemId);
+  const resolvedHighlightedItemId = composerMenuOpen && (!workspacePathMenu || hasExplicitWorkspaceHighlight)
+    ? activeComposerMenuItemId : null;
+  const resolvedHighlightedSearchKey = composerMenuOpen && (!workspacePathMenu || hasExplicitWorkspaceHighlight)
+    ? composerMenuSearchKey : null;
   if (composerHighlightedItemId !== resolvedHighlightedItemId) {
     setComposerHighlightedItemId(resolvedHighlightedItemId);
   }
@@ -4013,6 +4023,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       (normalizedIndex + offset + composerMenuItems.length) % composerMenuItems.length;
     const nextItem = composerMenuItems[nextIndex];
     setComposerHighlightedItemId(nextItem?.id ?? null);
+    setComposerHighlightedSearchKey(composerMenuSearchKey);
   };
 
   const blurMobileComposerAfterSend = () => {
@@ -4263,7 +4274,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       toggleInteractionMode();
       return true;
     }
-    const { trigger } = resolveActiveComposerTrigger();
+    const { snapshot, trigger } = resolveActiveComposerTrigger();
     const menuIsActive =
       !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
     if (key === "Escape") {
@@ -4281,6 +4292,32 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (key === "ArrowUp" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowUp");
+        return true;
+      }
+      if (workspacePathCompletion && trigger?.kind === "path" && isComposerDirectoryCompletionKey(event)) {
+        // Pending or stale results must never complete an old directory or another version.
+        if (workspaceEntries.isPending || currentItems.length === 0 || currentItems.some((item) =>
+          item.type !== "path" || !isPathSuggestionCurrent(item.searchTarget, trigger, environmentId, composerReferenceCwd) ||
+          workspaceRelativePath(item.path, autoOpsThreadScope) === null)) return true;
+        const explicitItem = composerHighlightedSearchKey === composerMenuSearchKey
+          ? currentItems.find((item) => item.id === composerHighlightedItemId) : undefined;
+        if (explicitItem) {
+          onSelectComposerItem(explicitItem, true);
+          return true;
+        }
+        // A truncated result set cannot establish uniqueness or a safe common prefix.
+        if (workspaceEntries.truncated) return true;
+        if (currentItems.length === 1) {
+          onSelectComposerItem(currentItems[0]!, true);
+          return true;
+        }
+        const entries = currentItems.flatMap((item) => item.type === "path" ? [{ path: item.path, kind: item.pathKind }] : []);
+        const completion = completeWorkspaceCommonPrefix(entries, trigger.query, autoOpsThreadScope, {
+          truncated: workspaceEntries.truncated,
+        });
+        if (completion && applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, completion, {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        })) setComposerHighlightedItemId(null);
         return true;
       }
       if ((key === "Enter" || key === "Tab") && selectedItem) {
@@ -6797,8 +6834,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     resolvedTheme={resolvedTheme}
                     isLoading={isComposerMenuLoading}
                     triggerKind={composerTriggerKind}
-                    directoryCompletionAvailable={activeComposerMenuItem?.type === "path" && activeComposerMenuItem.pathKind === "directory" &&
-                      autoOpsWorkspaceDirectoryCompletion(activeComposerMenuItem.path, autoOpsThreadScope) !== null}
+                    workspacePathCompletion={workspacePathCompletion && composerTriggerKind === "path"}
                     emptyStateText={composerMenuEmptyState}
                     activeItemId={activeComposerMenuItem?.id ?? null}
                     onHighlightedItemChange={onComposerMenuItemHighlightedStable}

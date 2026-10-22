@@ -88,7 +88,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   triggerKind: ComposerTriggerKind | null;
   emptyStateText?: string;
   activeItemId: string | null;
-  directoryCompletionAvailable?: boolean;
+  workspacePathCompletion?: boolean;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
@@ -107,6 +107,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
       autoHighlight={false}
       mode="none"
       onItemHighlighted={(highlightedValue) => {
+        if (props.workspacePathCompletion) return;
         props.onHighlightedItemChange(
           typeof highlightedValue === "string" ? highlightedValue : null,
         );
@@ -132,6 +133,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                   triggerKind={props.triggerKind}
                   resolvedTheme={props.resolvedTheme}
                   isActive={props.activeItemId === item.id}
+                  explicitPointerHighlight={props.workspacePathCompletion === true}
                   onHighlight={props.onHighlightedItemChange}
                   onSelect={props.onSelect}
                 />
@@ -156,8 +158,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             </p>
           </div>
         )}
-        {props.directoryCompletionAvailable ? <CommandFooter className="justify-start text-xs">
-          <Kbd>Tab</Kbd> 补全目录 <span aria-hidden="true">·</span> <Kbd>Enter</Kbd> 引用
+        {props.workspacePathCompletion && props.items.length > 0 ? <CommandFooter className="justify-start text-xs">
+          <Kbd>Tab</Kbd> 补全 <span aria-hidden="true">·</span> <Kbd>↑↓</Kbd> 选择 <span aria-hidden="true">·</span> <Kbd>Enter</Kbd> 引用
         </CommandFooter> : null}
       </ComposerBanner.Surface>
     </Command>
@@ -170,6 +172,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   triggerKind: ComposerTriggerKind | null;
   resolvedTheme: "light" | "dark";
   isActive: boolean;
+  explicitPointerHighlight: boolean;
   onHighlight: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
@@ -188,7 +191,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       data-composer-item-id={props.item.id}
       active={props.isActive}
       onMouseMove={() => {
-        if (!props.isActive) props.onHighlight(props.item.id);
+        if (!props.isActive || props.explicitPointerHighlight) props.onHighlight(props.item.id);
       }}
       onMouseDown={(event) => {
         event.preventDefault();

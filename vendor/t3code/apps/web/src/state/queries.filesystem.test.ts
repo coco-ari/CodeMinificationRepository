@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   sessionAtom: {},
   searchAtom: {},
   searchRequests: vi.fn(),
+  searchPending: false,
+  debouncedTarget: null as unknown,
   contentAtom: {},
   contentRequests: vi.fn(),
   contentError: null as string | null,
@@ -24,7 +26,11 @@ vi.mock("react", async (importOriginal) => ({
   useCallback: <A>(callback: A) => callback,
   useEffect: () => {},
   useMemo: <A>(factory: () => A) => factory(),
-  useState: <A>(value: A) => [value, vi.fn()],
+  useState: <A>(value: A) => [
+    state.debouncedTarget && typeof value === "object" && value !== null && "cwd" in value
+      ? state.debouncedTarget : value,
+    vi.fn(),
+  ],
 }));
 vi.mock("./session", () => ({
   environmentSession: { sessionStateAtom: () => state.sessionAtom },
@@ -65,14 +71,14 @@ vi.mock("./query", () => ({
         : atom === state.contentAtom
           ? state.contentError
           : null,
-    isPending:
+    isPending: atom === state.searchAtom ? state.searchPending :
       atom === state.sessionAtom &&
       (state.sessionWaiting || (state.session === null && state.sessionError === null)),
     refresh: vi.fn(),
   }),
 }));
 
-import { useComposerPathSearch, useProjectContentSearch } from "./queries";
+import { useComposerPathSearch, useProjectContentSearch, useProjectPathSearch } from "./queries";
 
 const target = {
   environmentId: EnvironmentId.make("test-environment"),
@@ -95,6 +101,8 @@ beforeEach(() => {
   state.sessionWaiting = false;
   state.phase = "connected";
   state.searchRequests.mockClear();
+  state.searchPending = false;
+  state.debouncedTarget = null;
   state.contentRequests.mockClear();
   state.contentError = null;
 });
@@ -147,7 +155,7 @@ it("lists scoped business candidates for a bare @ without requesting host-file a
   });
   expect(state.searchRequests).toHaveBeenCalledExactlyOnceWith({
     environmentId: target.environmentId,
-    input: { cwd, query: "", limit: 80 },
+    input: { cwd, query: "./", limit: 80 },
   });
 });
 
@@ -157,6 +165,53 @@ it("keeps bare @ in a native host directory idle even with a filesystem grant", 
     entries: [], error: null, isPending: false,
   });
   expect(state.searchRequests).not.toHaveBeenCalled();
+});
+
+const workspaceCwd = "autoops://projects/p-autoops/environments/env-test/threads/thread-1?workspaceType=external&workspaceVersionId=version-1";
+
+it.each(["d", "docs/x", "./docs/x", "需求 文档/"])(
+  "uses prefix-completion wire semantics while preserving the live query %j for stale checks", (query) => {
+    state.session = { authenticated: true, scopes: [] };
+    const input = { ...target, cwd: workspaceCwd, query };
+    expect(useComposerPathSearch(input)).toMatchObject({ searchedTarget: input, searchedQuery: query });
+    expect(state.searchRequests).toHaveBeenCalledExactlyOnceWith({
+      environmentId: input.environmentId,
+      input: { cwd: input.cwd, query: query.startsWith("./") ? query : `./${query}`, limit: 80 },
+    });
+  },
+);
+
+it("preserves ordinary host, legacy business, and global file-search wire queries", () => {
+  state.session = { authenticated: true, scopes: [AuthFilesystemReadScope] };
+  const legacy = "autoops://projects/p-autoops/environments/env-test/threads/thread-1";
+  for (const cwd of [target.cwd, legacy]) {
+    state.searchRequests.mockClear();
+    useComposerPathSearch({ ...target, cwd, query: "d" });
+    expect(state.searchRequests).toHaveBeenCalledExactlyOnceWith({
+      environmentId: target.environmentId, input: { cwd, query: "d", limit: 80 },
+    });
+  }
+  state.searchRequests.mockClear();
+  useProjectPathSearch({ ...target, cwd: workspaceCwd, query: "d" }, 200);
+  expect(state.searchRequests).toHaveBeenCalledExactlyOnceWith({
+    environmentId: target.environmentId, input: { cwd: workspaceCwd, query: "d", limit: 200 },
+  });
+});
+
+it("hides cached workspace candidates while a new query debounces or remains pending", () => {
+  state.session = { authenticated: true, scopes: [] };
+  state.debouncedTarget = { ...target, cwd: workspaceCwd, query: "back" };
+  expect(useComposerPathSearch({ ...target, cwd: workspaceCwd, query: "d" })).toMatchObject({
+    entries: [], isPending: true,
+  });
+  state.debouncedTarget = null;
+  state.searchPending = true;
+  expect(useComposerPathSearch({ ...target, cwd: workspaceCwd, query: "d" })).toMatchObject({
+    entries: [], isPending: true,
+  });
+  expect(useProjectPathSearch({ ...target, cwd: workspaceCwd, query: "d" }, 200)).toMatchObject({
+    entries: [{ path: "src/index.ts", kind: "file" }], isPending: true,
+  });
 });
 
 const contentTarget = {

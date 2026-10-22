@@ -1,4 +1,4 @@
-import { isAutoOpsResourceCwd } from "~/autoops/resources";
+import { isAutoOpsResourceCwd, isAutoOpsWorkspaceResourceCwd } from "~/autoops/resources";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type CheckpointDiffTarget,
@@ -228,7 +228,7 @@ export function areProjectPathSearchTargetsEqual(
 export function useProjectPathSearch(
   target: ProjectPathSearchTarget,
   limit: number,
-  options?: { readonly allowEmptyQuery?: boolean },
+  options?: { readonly allowEmptyQuery?: boolean; readonly workspacePrefixCompletion?: boolean },
 ) {
   const allowEmptyQuery = options?.allowEmptyQuery === true;
   const normalizedTarget = {
@@ -238,7 +238,8 @@ export function useProjectPathSearch(
     kind: target.kind,
     imageOnly: target.imageOnly,
   };
-  const debouncedTarget = useDebouncedValue(normalizedTarget, PROJECT_PATH_SEARCH_DEBOUNCE_MS);
+  const debouncedTarget = useDebouncedValue(normalizedTarget,
+    options?.workspacePrefixCompletion && isAutoOpsWorkspaceResourceCwd(target.cwd) ? 0 : PROJECT_PATH_SEARCH_DEBOUNCE_MS);
   const fileAccess = useFilesystemReadAccess(debouncedTarget.environmentId);
   const businessResources = isAutoOpsResourceCwd(debouncedTarget.cwd);
   const canReadFiles = businessResources || fileAccess.canReadFiles;
@@ -251,7 +252,8 @@ export function useProjectPathSearch(
           environmentId: debouncedTarget.environmentId,
           input: {
             cwd: debouncedTarget.cwd,
-            query: debouncedTarget.query,
+            query: options?.workspacePrefixCompletion && isAutoOpsWorkspaceResourceCwd(debouncedTarget.cwd) &&
+              !debouncedTarget.query.startsWith("./") ? `./${debouncedTarget.query}` : debouncedTarget.query,
             limit,
             ...(debouncedTarget.kind ? { kind: debouncedTarget.kind } : {}),
             ...(debouncedTarget.imageOnly ? { imageOnly: true } : {}),
@@ -282,9 +284,13 @@ export function useProjectPathSearch(
 }
 
 export function useComposerPathSearch(target: ComposerPathSearchTarget) {
-  return useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT, {
+  const result = useProjectPathSearch(target, COMPOSER_PATH_SEARCH_LIMIT, {
     allowEmptyQuery: isAutoOpsResourceCwd(target.cwd),
+    workspacePrefixCompletion: true,
   });
+  return isAutoOpsWorkspaceResourceCwd(target.cwd) && result.isPending
+    ? { ...result, entries: EMPTY_PROJECT_ENTRIES }
+    : result;
 }
 
 interface ProjectContentSearchTarget {

@@ -41,6 +41,21 @@ it('shows workspace-relative candidate directories without changing resource ide
     'autoops/p-autoops/workspaces/version-1/frontend/src',
   )
 })
+
+it('recognizes fixed workspace browsing independently of legacy business resource paths', async () => {
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost({
+    principal: { id: 'fixed-cwd-test', displayName: 'Test' }, gatewayBasePath: '/api/agent-demo/t3', csrfToken: 'x',
+    projects: [], capabilities: {}, fixedModel: { instanceId: 'codex', model: 'test' }, runtimeMode: 'approval-required',
+  }, 'https://work.test')
+  const { isAutoOpsWorkspaceResourceCwd } = await import('./resources')
+  const base = 'autoops://projects/p-autoops/environments/env-test/threads/thread-1'
+  expect(isAutoOpsWorkspaceResourceCwd(base + '?workspaceType=internal&workspaceVersionId=version-1')).toBe(true)
+  expect(isAutoOpsWorkspaceResourceCwd(base + '?workspaceType=external&workspaceVersionId=version-2')).toBe(true)
+  for (const cwd of [base, null, '/repo', base + '?workspaceType=internal', base + '?workspaceVersionId=version-1', base + '?workspaceType=internal&workspaceVersionId=version-1&extra=x']) {
+    expect(isAutoOpsWorkspaceResourceCwd(cwd)).toBe(false)
+  }
+})
 describe('authorized business resource transport', () => {
   it('maps only same-origin allowed resources and preserves the preview id through reload', async () => {
     const { installAutoOpsHost } = await import('./hostConfig')

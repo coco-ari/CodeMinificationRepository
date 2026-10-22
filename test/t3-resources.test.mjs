@@ -102,6 +102,7 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   assert.deepEqual(catalog.search(principal, { cwd, query: 'external-v1', limit: 100 }).entries, [])
   assert.ok(catalog.search(principal, { cwd, query: '脱敏报告', limit: 100 }).entries.some(({path}) => path.includes(externalReport.id)))
   assert.ok(catalog.search(principal, { cwd, query: '脱敏附件', limit: 100 }).entries.some(({path}) => path.includes('external-attachment')))
+  assert.deepEqual(catalog.search(principal, { cwd, query: './', limit: 80 }).entries, [{ path: workspaceRoot + '/docs', kind: 'directory' }])
   const read = await catalog.read(principal, { cwd, relativePath: externalPath })
   assert.equal(read.contents, '已经脱敏资料'); assert.equal(read.byteLength, file.size); assert.equal(read.truncated, true)
   assert.equal((await catalog.readForThread('external', externalPath)).content, read.contents)
@@ -134,6 +135,9 @@ test('工作区@目录导航复用直系枚举，深层关键字检索和外部�
     'frontend/index.ts', 'frontend/src/index.ts', 'backend/src/index.ts',
     'frontend/src/components/Button.tsx', 'frontend/src/components/icons/箭头.svg',
     'frontend/src/设计 文档/说明.md',
+    'docs/guide.md', 'docs/guide-extra.md', 'docs/design/规格.md',
+    'docs/README.md', 'docs/release.md', 'docs/reference/基础.md',
+    'notes/deep.md',
     ...Array.from({ length: 82 }, (_,index) => `frontend/generated/file-${String(index).padStart(3, '0')}.ts`),
     'frontend/generated/z-image.png', 'frontend/generated/z-nested/deeper.ts',
   ]
@@ -175,10 +179,35 @@ test('工作区@目录导航复用直系枚举，深层关键字检索和外部�
   assert.deepEqual(search('frontend/generated/', { kind: 'directory' }), { entries: [{ path: `${root}/frontend/generated/z-nested`, kind: 'directory' }], truncated: false })
   assert.deepEqual(search('frontend/generated/', { imageOnly: true }), { entries: [{ path: `${root}/frontend/generated/z-image.png`, kind: 'file' }], truncated: false })
   assert.equal(search('frontend/generated/', { kind: 'file' }).truncated, true)
+  assert.deepEqual(childPaths(search('./')), ['backend', 'docs', 'frontend', 'notes'].map((path) => `${root}/${path}`).sort())
+  for (const prefix of ['d', 'do', 'doc', 'docs', 'D'])
+    assert.deepEqual(search('./' + prefix), { entries: [{ path: `${root}/docs`, kind: 'directory' }], truncated: false })
+  assert.deepEqual(search('./d', { kind: 'file' }), { entries: [], truncated: false })
+  assert.deepEqual(search('./deep'), { entries: [], truncated: false })
+  assert.deepEqual(search('./docs/'), search('docs/'))
+  assert.deepEqual(search('./docs/des'), { entries: [{ path: `${root}/docs/design`, kind: 'directory' }], truncated: false })
+  assert.deepEqual(search('./docs/design/规'), { entries: [{ path: `${root}/docs/design/规格.md`, kind: 'file' }], truncated: false })
+  assert.deepEqual(search('./frontend/src/设计 文档/说'), { entries: [{ path: `${root}/frontend/src/设计 文档/说明.md`, kind: 'file' }], truncated: false })
+  assert.deepEqual(childPaths(search('./docs/r')), ['README.md', 'release.md', 'reference'].map((path) => `${root}/docs/${path}`).sort())
+  assert.deepEqual(childPaths(search('./docs/r', { kind: 'file' })), ['README.md', 'release.md'].map((path) => `${root}/docs/${path}`).sort())
+  assert.deepEqual(search('./frontend/generated/'), many)
+  assert.deepEqual(search('./frontend/generated/file-08'), { entries: [
+    { path: `${root}/frontend/generated/file-080.ts`, kind: 'file' },
+    { path: `${root}/frontend/generated/file-081.ts`, kind: 'file' },
+  ], truncated: false })
+  assert.deepEqual(search('./frontend/generated/z', { imageOnly: true }), { entries: [{ path: `${root}/frontend/generated/z-image.png`, kind: 'file' }], truncated: false })
+  assert.deepEqual(search('./frontend/generated/z', { kind: 'directory' }), { entries: [{ path: `${root}/frontend/generated/z-nested`, kind: 'directory' }], truncated: false })
+  assert.ok(search('d').entries.some(({path}) => path === `${root}/backend`))
+  assert.ok(search('d', { limit: 500 }).entries.some(({path}) => path === `${root}/notes/deep.md`))
+  assert.deepEqual(search('./next-only/'), { entries: [], truncated: false })
+  assert.deepEqual(search('./private/'), { entries: [], truncated: false })
+  for (const query of ['./../internal-v1/', './/etc/', './frontend/../../', './C:/Windows/', './frontend\\src/', './frontend//src/', './frontend/./src/', './frontend/\u0000'])
+    assert.throws(() => search(query), /资料不存在/)
   assert.deepEqual(search('next-only/'), { entries: [], truncated: false })
   assert.deepEqual(search('private/'), { entries: [], truncated: false })
   assert.throws(() => search('../internal-v1/'), /资料不存在/)
   assert.throws(() => catalog.search(principal, { cwd: cwd + '?workspaceType=external&workspaceVersionId=external-v2', query: 'next-only/', limit: 80 }), /不能切换/)
+  assert.throws(() => catalog.search(principal, { cwd: cwd + '?workspaceType=external&workspaceVersionId=external-v2', query: './next-only/', limit: 80 }), /不能切换/)
   assert.throws(() => catalog.search(principal, { cwd: 'autoops://projects/p-autoops/environments/env-test/threads/draft?workspaceType=internal&workspaceVersionId=internal-v1', query: 'private/', limit: 80 }), { code: 'WORKSPACE_FORBIDDEN' })
 })
 
