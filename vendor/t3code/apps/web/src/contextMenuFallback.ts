@@ -174,8 +174,10 @@ function clampMenuPosition(menu: HTMLDivElement, preferredLeft: number, preferre
     Math.max(4, preferredTop),
     Math.max(4, window.innerHeight - rect.height - 4),
   );
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
+  // A transformed Dialog/Sheet is a fixed-position containing block. Correct
+  // from the actual viewport rect instead of treating its local origin as 0,0.
+  menu.style.left = `${(Number.parseFloat(menu.style.left) || 0) + left - rect.left}px`;
+  menu.style.top = `${(Number.parseFloat(menu.style.top) || 0) + top - rect.top}px`;
 }
 
 function isNodeWithinMenuStack(target: EventTarget | null, menuStack: readonly HTMLDivElement[]) {
@@ -211,9 +213,14 @@ export function showContextMenuFallback<T extends string>(
   items: readonly ContextMenuItem<T>[],
   position?: { x: number; y: number },
 ): Promise<T | null> {
+  // Restore the prior invoker before capturing this menu's focus target.
+  // Otherwise replacing a focused menu would restore into its removed DOM.
+  activeContextMenuDismiss?.();
   return new Promise<T | null>((resolve) => {
     const previouslyFocusedElement =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Keep imperative menus inside the existing modal focus/outside boundary.
+    const menuHost = previouslyFocusedElement?.closest('[role="dialog"], [role="alertdialog"]') ?? document.body;
     const menuStack: HTMLDivElement[] = [];
     const submenuTriggerStack: Array<HTMLButtonElement | undefined> = [];
     let isDisposed = false;
@@ -229,7 +236,7 @@ export function showContextMenuFallback<T extends string>(
       if (activeContextMenuDismiss === dismiss) {
         activeContextMenuDismiss = null;
       }
-      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("contextmenu", onContextMenu, true);
       const shouldRestoreFocus = isNodeWithinMenuStack(document.activeElement, menuStack);
@@ -243,10 +250,59 @@ export function showContextMenuFallback<T extends string>(
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.shiftKey && event.key !== "Tab") return;
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         cleanup(null);
+        return;
       }
+      if (event.key === "Tab") {
+        cleanup(null);
+        return;
+      }
+      const level = menuStack.findIndex((menu) => isNodeWithinMenuStack(document.activeElement, [menu]));
+      const menu = menuStack[level];
+      if (!menu) return;
+      const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button")].filter((button) => !button.disabled);
+      const focused = buttons.findIndex((button) => button === document.activeElement);
+      let next: number;
+      switch (event.key) {
+        case "ArrowDown":
+          next = (focused + 1) % buttons.length;
+          break;
+        case "ArrowUp":
+          next = focused < 0 ? buttons.length - 1 : (focused + buttons.length - 1) % buttons.length;
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = buttons.length - 1;
+          break;
+        case "ArrowRight":
+          event.preventDefault();
+          event.stopPropagation();
+          if (buttons[focused]?.getAttribute("aria-haspopup") === "menu") buttons[focused]!.click();
+          return;
+        case "ArrowLeft": {
+          event.preventDefault();
+          event.stopPropagation();
+          if (level > 0) {
+            const parent = submenuTriggerStack[level];
+            closeMenusFromLevel(level);
+            parent?.focus({ preventScroll: true });
+          }
+          return;
+        }
+        default:
+          return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenusFromLevel(level + 1);
+      buttons[next]?.focus({ preventScroll: true });
     };
 
     const onPointerDown = (event: PointerEvent) => {
@@ -271,6 +327,11 @@ export function showContextMenuFallback<T extends string>(
       }
     };
 
+    const focusFirstEnabled = (menu: HTMLDivElement) => {
+      const first = [...menu.querySelectorAll<HTMLButtonElement>("button")].find((button) => !button.disabled);
+      (first ?? menu).focus({ preventScroll: true });
+    };
+
     const openMenu = (
       entries: readonly ContextMenuItem<T>[],
       preferredLeft: number,
@@ -288,6 +349,10 @@ export function showContextMenuFallback<T extends string>(
       menu.style.left = `${preferredLeft}px`;
       menu.style.top = `${preferredTop}px`;
       menu.dataset.level = String(level);
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("aria-label", "操作菜单");
+      menu.setAttribute("aria-orientation", "vertical");
+      menu.tabIndex = -1;
 
       const inner = document.createElement("div");
       inner.className =
@@ -310,6 +375,7 @@ export function showContextMenuFallback<T extends string>(
           const header = document.createElement("div");
           header.className = "px-2 py-1.5 font-medium text-muted-foreground text-xs";
           header.textContent = item.label;
+          header.setAttribute("role", "presentation");
           inner.appendChild(header);
           continue;
         }
@@ -322,6 +388,8 @@ export function showContextMenuFallback<T extends string>(
         button.type = "button";
         const isDisabled = item.disabled === true;
         button.disabled = isDisabled;
+        button.setAttribute("role", "menuitem");
+        if (isDisabled) button.setAttribute("aria-disabled", "true");
         const rowBase =
           "flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-left outline-none transition-colors sm:min-h-7 sm:text-sm min-h-8 text-base";
         button.className = isDisabled
@@ -433,9 +501,7 @@ export function showContextMenuFallback<T extends string>(
                 clampMenuPosition(childMenu, rect.left - childRect.width - 4, rect.top);
               }
               if (focusFirstItem) {
-                [...childMenu.querySelectorAll<HTMLButtonElement>("button")]
-                  .find((childButton) => !childButton.disabled)
-                  ?.focus();
+                focusFirstEnabled(childMenu);
               }
             };
             button.addEventListener("mouseenter", () => {
@@ -464,26 +530,24 @@ export function showContextMenuFallback<T extends string>(
         closeMenusFromLevel(level + 1);
       });
 
-      document.body.appendChild(menu);
+      menuHost.appendChild(menu);
       menuStack[level] = menu;
       submenuTriggerStack[level] = parentTrigger;
+      clampMenuPosition(menu, preferredLeft, preferredTop);
 
       requestAnimationFrame(() => {
         clampMenuPosition(menu, preferredLeft, preferredTop);
       });
     };
 
-    document.addEventListener("keydown", onKeyDown);
+    // Run before the modal's document-capture Escape handler; only keys owned
+    // by this menu stop propagation. Tab keeps its normal browser behavior.
+    window.addEventListener("keydown", onKeyDown, true);
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("contextmenu", onContextMenu, true);
     openMenu(items, position?.x ?? 0, position?.y ?? 0, 0);
-    // Only one fallback menu can be open at a time: a new show must dismiss
-    // any prior one, or its DOM and listeners leak and close() can only ever
-    // reach the newest menu.
-    if (activeContextMenuDismiss) {
-      activeContextMenuDismiss();
-    }
     activeContextMenuDismiss = dismiss;
+    focusFirstEnabled(menuStack[0]!);
 
     requestAnimationFrame(() => {
       canDismissFromPointer = true;

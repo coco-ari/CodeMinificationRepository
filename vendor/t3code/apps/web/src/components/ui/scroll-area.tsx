@@ -37,6 +37,7 @@ function ScrollArea({
   chainVerticalScroll = false,
   radius = "inherit",
   viewportTabIndex,
+  contentSizing = "auto",
   ...props
 }: BaseScrollArea.Root.Props & {
   scrollFade?: boolean;
@@ -46,6 +47,8 @@ function ScrollArea({
   chainVerticalScroll?: boolean;
   radius?: "inherit" | "none";
   viewportTabIndex?: number;
+  /** Vertical lists constrain content to their viewport; horizontal surfaces retain intrinsic sizing. */
+  contentSizing?: "auto" | "viewport";
 }) {
   const viewportRef = React.useRef<HTMLDivElement>(null);
   const [state, setState] = React.useState(initialState);
@@ -76,6 +79,7 @@ function ScrollArea({
     children: <ScrollState value={state}>
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
+        disableImplicitContentElement={contentSizing === "viewport"}
         {...stateDataAttributes(state)}
         {...(viewportTabIndex === undefined ? {} : { tabIndex: viewportTabIndex })}
         className={cn(
@@ -91,7 +95,14 @@ function ScrollArea({
         )}
         data-slot="scroll-area-viewport"
       >
-        {children}
+        {contentSizing === "viewport" ? (
+          <ScrollAreaPrimitive.Content
+            data-slot="scroll-area-content"
+            style={{ display: "block", width: "100%", minWidth: 0 }}
+          >
+            {children}
+          </ScrollAreaPrimitive.Content>
+        ) : children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar orientation="vertical" className={hideScrollbars ? "hidden" : undefined} />
       <ScrollBar orientation="horizontal" className={hideScrollbars ? "hidden" : undefined} />

@@ -747,6 +747,24 @@ describe("sidebar drag projection", () => {
     expect(strategy({ ...args, index: 4 })?.y).toBe(-42);
   });
 
+  it.each([36, 44])("keeps compact %ipx rows the same height when moving into an empty section", (height) => {
+    for (const fromSettled of [false, true]) {
+      const items = fromSettled ? [pinnedHeader, divider, marker("active-placeholder"), settledHeader, thread("source", "settled")]
+        : [pinnedHeader, divider, thread("source", "active"), settledHeader, marker("settled-placeholder")];
+      const destination = sidebarMarkerId(fromSettled ? "active-placeholder" : "settled-placeholder");
+      const args = layout(items, "source", destination);
+      let top = 100;
+      for (const [index, rect] of args.rects.entries()) {
+        const measuredHeight = items[index]?.kind === "thread" ? height : rect.height;
+        Object.assign(rect, { top, height: measuredHeight, bottom: top + measuredHeight });
+        top += measuredHeight + 1;
+      }
+      const strategy = createSidebarSortingStrategy({ items, compactRows: true, settledOrder: ["source"], settledExpanded: false });
+      const headerIndex = items.findIndex((item) => sidebarListItemId(item) === sidebarMarkerId("settled-header"));
+      expect(strategy({ ...args, index: headerIndex })?.y).toBe(fromSettled ? height : 0);
+    }
+  });
+
   it("keeps the route row visible after a settled drop pushes it beyond the page", () => {
     const items = [
       pinnedHeader,

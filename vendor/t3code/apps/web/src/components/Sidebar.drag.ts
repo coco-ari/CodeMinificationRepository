@@ -94,6 +94,7 @@ export function createSidebarCollisionDetection(
 export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
   enabled?: boolean;
+  compactRows?: boolean;
   settledOrder: readonly string[];
   activeOrder?: readonly string[];
   settledExpanded: boolean;
@@ -125,6 +126,7 @@ export function createSidebarSortingStrategy(input: {
     };
     let cardHeight = input.cardHeight;
     let slimHeight = input.slimHeight;
+    let compactHeight = input.slimHeight ?? input.cardHeight;
     let headerScale: number | undefined;
     for (const [index, item] of items.entries()) {
       if (item.kind === "marker") {
@@ -134,12 +136,16 @@ export function createSidebarSortingStrategy(input: {
         }
         continue;
       }
-      if (item.section === "pinned" || item.section === "active" || item.section === "working")
+      if (input.compactRows) {
+        const height = rects[index]?.height;
+        if (height) compactHeight ??= height;
+      } else if (item.section === "pinned" || item.section === "active" || item.section === "working")
         cardHeight ??= rects[index]?.height;
       else slimHeight ??= rects[index]?.height;
       if (item.key !== active.key) groups[item.section].push(item);
     }
-    const scale =
+    if (input.compactRows) cardHeight = slimHeight = compactHeight ?? 36 * (headerScale ?? 1);
+    const scale = input.compactRows ? (headerScale ?? 1) :
       slimHeight !== undefined ? slimHeight / 36 : (headerScale ?? (cardHeight ?? 82) / 82);
     cardHeight ??= 82 * scale;
     slimHeight ??= 36 * scale;

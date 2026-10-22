@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T11:40:15.901570+00:00",
+  "generatedAt": "2026-10-22T12:19:57.432440+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -491,6 +491,18 @@
       "localSha256": "cb24a00e72bae9b87b3c0d7cd0913d6d8732e65d6679b83fb69c8566be881d64"
     },
     {
+      "path": "apps/web/src/components/Sidebar.drag.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "645bfebdc52f3a92958aa6b1f9937cb9b86ca548ff1e23a4ee569a8a7e468a12",
+      "localSha256": "b0d4f69421e36e500016f8d1a2a263adfef4b75c83a903a281f4c1f42fb2006e"
+    },
+    {
+      "path": "apps/web/src/components/Sidebar.drag.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "d9176d97a02c722a590e39efe8c2fa0a34e90fea376a18eb14f9a464c690afe2",
+      "localSha256": "b25b4eb0f49928532f0868b62514b1058e7a82bba6a61e3114ecba15f870ff54"
+    },
+    {
       "path": "apps/web/src/components/Sidebar.logic.test.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "06c0ff0e680ac66569818d0ef8ae9bc3b0533baadaa4587f5edfd5da08a0fbf0",
@@ -524,7 +536,7 @@
       "path": "apps/web/src/components/Sidebar.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "c7e84c76bb16ff70db5c2cd298cae15ec0b85a9e593bbddbdd9f617ba7662318",
-      "localSha256": "a25b634678c062940b7898c74c5b8217044ba5ed54612a17a7f67de54c918d90"
+      "localSha256": "9c60496367ce78124ad5064d9bb8898f36e0d5e1403fd07f62e44abcb67b358f"
     },
     {
       "path": "apps/web/src/components/SlowRpcRequestToastCoordinator.tsx",
@@ -2030,7 +2042,7 @@
       "path": "apps/web/src/components/ui/scroll-area.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "9a28c0c8b71b73f59585ee1b38b0bf60f14deb225cc44fc80d1df47d818eeb0c",
-      "localSha256": "47747556c7db5a293d9c56f250e694d31c07080514730df8b78089dd8e9edf57"
+      "localSha256": "0fdab35a9f149f6367496dd17579064324cc68b28d718a9ddefe091f292529a9"
     },
     {
       "path": "apps/web/src/components/ui/select.tsx",
@@ -2054,7 +2066,7 @@
       "path": "apps/web/src/components/ui/sidebar.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "9a92e4632178f8e9079d92db0af056c453a2909b71a4e5ef404472032b850c85",
-      "localSha256": "9888ffbae4a766e67ae821fa03898e80f043bb237703e3c326f6a47f5c5dc140"
+      "localSha256": "7d96e5317af5a67bccc2e1cf31db4958eb25b92ee65916ddfccb7d76f7de9f81"
     },
     {
       "path": "apps/web/src/components/ui/spinner.tsx",
@@ -2223,6 +2235,18 @@
       "reason": "local content differs from upstream",
       "upstreamSha256": "f8f7551bc77e94a1ae45b969ce00f802d3e0ccac181dba861c5f54b8dab69fcb",
       "localSha256": "718e97ff9167d496cf1cf32aacade5ad5be570f3430b9ab17f4ac7fe4a2b2a79"
+    },
+    {
+      "path": "apps/web/src/contextMenuFallback.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "606d9d07816b11b7405a54db01f065377893070b30a5d410f817194f7bf17fae",
+      "localSha256": "579482fefa75c4ea7d8070ea4088add750f5e5a7d7de4507fb10b9f5da4358bf"
+    },
+    {
+      "path": "apps/web/src/contextMenuFallback.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "45f8b24c2ff4cc88ad9a0725e6b0473d65516e3c975d55d2b63484a4a3f63f81",
+      "localSha256": "e5cab44c9e07745f718449024b7bb6aa8962445db37aaa8d343d08e23d5a7748"
     },
     {
       "path": "apps/web/src/diffPanelStore.ts",
