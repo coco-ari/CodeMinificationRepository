@@ -6,6 +6,7 @@ import { resolveBusinessSkillMentions } from './skills.mjs'
 import { assertBusinessModelSelection } from './models.mjs'
 import { resolve } from 'node:path'
 import { resolveProductProfile, PRODUCT_CAPABILITY_DISABLED, PRODUCT_CAPABILITY_MESSAGE } from './product-profile.mjs'
+import { authorizeCustomerModel, assertCustomerInput, isCustomerProviderInstanceId } from './customer-target.mjs'
 
 const denied = (message = '该操作不在当前 AutoOps 业务权限范围内') => {
   throw new AutoOpsAccessError(403, 'AUTOOPS_OPERATION_FORBIDDEN', message)
@@ -56,17 +57,20 @@ export function authorizeProductRpc(method, payload = {}, env = process.env) {
       payload.restartContinuationOfRunId || payload.usageLimitContinuationOfRunId || payload.usageLimitRecoveryRequestId) requireCapability('automaticRecovery')
 }
 
-function checkRuntime(input) {
+function checkRuntime(input, access, binding) {
   if (input.runtimeMode !== undefined && input.runtimeMode !== 'approval-required') denied('当前 Agent 仅允许受限运行模式')
   if (input.workspaceStrategy && (input.workspaceStrategy.type !== 'root' || input.workspaceStrategy.branch)) denied()
   if (input.worktreePath || input.branch || input.cwd) denied('业务会话不允许切换宿主工作目录')
   if (input.importedNativeThread || input.scheduledTaskId || input.senderThreadId || input.notification || input.delegatedCompletion)
     denied('浏览器不能声明内部运行器或系统任务身份')
   if (input.createdBy !== undefined && input.createdBy !== 'user') denied()
-  if (input.dispatchMode?.workspaceStrategy) checkRuntime({ workspaceStrategy: input.dispatchMode.workspaceStrategy })
+  if (input.dispatchMode?.workspaceStrategy) checkRuntime({ workspaceStrategy: input.dispatchMode.workspaceStrategy }, access, binding)
   if (input.restoreFiles === true) denied('业务会话不允许恢复宿主文件')
   if (input.modelSelection) {
-    try { assertBusinessModelSelection(input.modelSelection) }
+    try {
+      if (binding?.executionBinding?.kind === 'customer') authorizeCustomerModel(access, binding, input.modelSelection)
+      else assertBusinessModelSelection(input.modelSelection)
+    }
     catch(error) { denied(error.message) }
   }
 }
@@ -98,6 +102,10 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
   authorizeProductRpc(method, payload)
   if (reads.has(method)) return
   if (method === 'server.refreshProviders') {
+    if (isCustomerProviderInstanceId(payload.instanceId)) {
+      if (Object.keys(payload).some(key=>!['instanceId','fresh'].includes(key)) || !access.customerRegistry.listDevices(principal.id).some(device=>payload.instanceId===`customer-${device.id}-codex`)) denied('只能刷新自己的客户运行器')
+      return
+    }
     if(Object.keys(payload).some(key=>!['instanceId','cwd','fresh'].includes(key)) || (payload.instanceId!==undefined&&payload.instanceId!=='codex') || (payload.fresh!==undefined&&typeof payload.fresh!=='boolean'))denied()
     if(payload.cwd!==undefined) {
       const data=process.env.AUTOOPS_T3_DATA_DIR
@@ -111,19 +119,22 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     return
   }
   if (method === 'orchestration.launchThread') {
-    resolveBusinessSkillMentions(payload.initialMessage?.text)
     const binding = access.requireThread(principal, payload.threadId)
+    const customer = binding.executionBinding?.kind === 'customer'
+    if (customer) { access.requireThreadExecution(principal, binding.threadId, {requireOnline:true}); assertCustomerInput(payload.initialMessage) }
+    else resolveBusinessSkillMentions(payload.initialMessage?.text)
     if (binding.nativeParentThreadId) denied('原生子任务由父会话控制，仅供查看')
     if (binding.compatibilityReadOnly) denied('兼容历史仅供查看，不能继续执行')
     if (binding.projectId !== payload.projectId) denied('会话项目与已确认的授权绑定不一致')
-    checkRuntime(payload)
+    checkRuntime(payload, access, binding)
     checkReferences(access, principal, payload.initialMessage, binding.threadId)
-    configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.initialMessage?.context)
+    if (!customer) configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.initialMessage?.context)
     return
   }
   if (method === 'orchestration.dispatchCommand') {
     if (!commands.has(payload.type)) denied()
     if (payload.type === 'thread.fork') {
+      if (access.requireThread(principal,payload.sourceThreadId).executionBinding?.kind === 'customer') denied('客户首版不支持会话分支')
       if (access.requireThread(principal, payload.sourceThreadId).nativeParentThreadId) denied('原生子任务不能独立分支')
       if (access.requireThread(principal, payload.sourceThreadId).compatibilityReadOnly) denied('兼容历史无法生成可靠的原生分支')
       const target = access.getThreadBinding(payload.targetThreadId)
@@ -132,6 +143,17 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
       return
     }
     const binding = access.requireThread(principal, payload.threadId)
+    const customer = binding.executionBinding?.kind === 'customer'
+    if (customer) {
+      if (['provider-session.detach','prepared-run.retry','thread.fork','checkpoint.rollback'].includes(payload.type)) denied('客户首版不支持此运行操作')
+      assertCustomerInput(payload)
+      assertCustomerInput(payload.message)
+      assertCustomerInput(payload.initialMessage)
+      if (['message.dispatch','queue.resume','thread.model-selection.set','queued-run.edit','runtime-request.respond'].includes(payload.type))
+        access.requireThreadExecution(principal, binding.threadId, {requireOnline:true})
+      if (payload.type === 'queued-message.promote-to-steer')
+        access.requireThreadExecution(principal, binding.threadId, {requireOnline:true})
+    }
     if (binding.nativeParentThreadId && !isPersonalPreferenceCommand(payload)) denied('原生子任务由父会话控制，仅供查看')
     if (binding.compatibilityReadOnly && !isPersonalPreferenceCommand(payload) && payload.type !== 'thread.delete') denied('兼容历史仅供查看，不能修改对话或继续执行')
     if (payload.type === 'checkpoint.rollback' && binding.visibility === 'project' && payload.confirmSharedHistoryEdit !== true) denied('请先确认该编辑会改变所有成员可见的共享历史')
@@ -140,16 +162,19 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if (payload.projectId !== undefined && payload.projectId !== binding.projectId) denied()
     if (payload.type === 'thread.metadata.update' &&
       ['projectId', 'worktreePath', 'branch', 'linkedPullRequest', 'branchPullRequest'].some((key) => key in payload)) denied()
-    checkRuntime(payload)
+    checkRuntime(payload, access, binding)
     checkReferences(access, principal, payload, binding.threadId)
     if (payload.type === 'message.dispatch') {
-      resolveBusinessSkillMentions(payload.text)
-      configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context)
+      if (!customer) {
+        resolveBusinessSkillMentions(payload.text)
+        configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context)
+      }
     }
     return
   }
   if (threadMethods.has(method)) {
     const binding = access.requireThread(principal, payload.threadId)
+    if (binding.executionBinding?.kind === 'customer' && (method === 'assets.persistChatAttachments' || method.startsWith('mcpApps.'))) denied('客户首版暂不支持平台附件和交互式工具页面')
     if (binding.nativeParentThreadId && ['assets.persistChatAttachments','mcpApps.callTool','mcpApps.updateModelContext'].includes(method)) denied('原生子任务仅供查看')
     if (binding.compatibilityReadOnly && ['assets.persistChatAttachments','mcpApps.callTool','mcpApps.updateModelContext'].includes(method)) denied('兼容历史仅供查看')
     if (method === 'mcpApps.updateModelContext') access.requireReference(principal, payload.threadId, payload.conversationThreadId)

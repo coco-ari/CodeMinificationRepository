@@ -495,6 +495,15 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
       }),
       reconcileAfterProcessLoss: Effect.gen(function* () {
         const now = DateTime.formatIso(yield* DateTime.now);
+        // Customer commands have their own durable execution ledger. Reuse the same
+        // effect/command identity; the device refuses to replay an unknown execution.
+        const customerRows = yield* sql<{ readonly effect_id: string }>`
+          UPDATE orchestration_v2_effect_outbox SET status = 'pending', lease_owner = NULL,
+            lease_expires_at = NULL, available_at = ${now}, updated_at = ${now}
+          WHERE status = 'running' AND effect_type IN ${sql.in(PROCESS_BOUND_EFFECT_TYPES)}
+            AND thread_id IN (SELECT thread_id FROM orchestration_v2_projection_threads WHERE provider_instance_id LIKE 'customer-%-codex')
+          RETURNING effect_id
+        `;
         const cancelledRows = yield* sql<{ readonly effect_id: string }>`
           UPDATE orchestration_v2_effect_outbox
           SET
@@ -506,6 +515,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             last_error = 'Cancelled because the server process ended before the effect completed.'
           WHERE status IN ('pending', 'running')
             AND effect_type IN ${sql.in(PROCESS_BOUND_EFFECT_TYPES)}
+            AND thread_id NOT IN (SELECT thread_id FROM orchestration_v2_projection_threads WHERE provider_instance_id LIKE 'customer-%-codex')
           RETURNING effect_id
         `;
         const requeuedRows = yield* sql<{ readonly effect_id: string }>`
@@ -521,8 +531,12 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             AND effect_type IN ${sql.in(REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS)}
           RETURNING effect_id
         `;
-        if (requeuedRows.length > 0) yield* notifyAvailable(requeuedRows.length);
-        return { requeued: requeuedRows.length, cancelled: cancelledRows.length };
+        if (requeuedRows.length + customerRows.length > 0)
+          yield* notifyAvailable(requeuedRows.length + customerRows.length);
+        return {
+          requeued: requeuedRows.length + customerRows.length,
+          cancelled: cancelledRows.length,
+        };
       }).pipe(
         Effect.mapError(
           (cause) => new EffectOutboxError({ operation: "reconcile-process-loss", cause }),

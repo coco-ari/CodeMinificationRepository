@@ -1,11 +1,17 @@
+import {
+  useCustomerRuntime,
+  customerScopedProviders,
+  customerInstanceId,
+  customerProviderAvailability,
+} from "~/autoops/customerAgents";
 import { isMotionReduced } from "~/motionPreference";
 import { chatSubmissionIntentAllowed, unavailableChatSlashCommand } from "./chat/autoOpsChatPolicy";
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
-import { inheritAutoOpsThreadScope } from "~/autoops/hostConfig";
+import { inheritAutoOpsThreadScope, readAutoOpsHost } from "~/autoops/hostConfig";
 import { autoOpsFeature, isAutoOpsHosted, isAutoOpsLite } from "~/autoops/capabilities";
 import { useThreadRelationshipsAvailable } from "./chat/ThreadRelationshipsControl";
 import { AutoOpsThreadScopeControl } from "~/autoops/ThreadScopeControl";
-import { autoOpsBusinessPath, autoOpsResourceCwd } from '~/autoops/resources';
+import { autoOpsBusinessPath, autoOpsResourceCwd } from "~/autoops/resources";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
@@ -706,9 +712,7 @@ async function startFanoutThread(input: {
   let requestMayHaveStarted = false;
   try {
     if (uncertainThreadId) {
-      throw new Error(
-        "上次请求可能已经开始。再次发送前请打开对应对话确认。",
-      );
+      throw new Error("上次请求可能已经开始。再次发送前请打开对应对话确认。");
     }
     requestMayHaveStarted = true;
     const result = await input.start(targetThreadId);
@@ -833,7 +837,7 @@ async function rewindToMessage(input: {
           threadId: input.threadId,
           turnCount: input.turnCount,
           restoreFiles: input.restoreFiles,
-          ...(input.confirmSharedHistoryEdit ? {confirmSharedHistoryEdit: true} : {}),
+          ...(input.confirmSharedHistoryEdit ? { confirmSharedHistoryEdit: true } : {}),
           ...(input.checkpoint === undefined
             ? {}
             : { checkpointId: input.checkpoint.id, scopeId: input.checkpoint.scopeId }),
@@ -1074,6 +1078,22 @@ export default function ChatView(props: ChatViewProps) {
     forceExpandedMobileComposer = false,
   } = props;
   const businessScope = useAutoOpsThreadScope(threadId);
+  const customerRuntime = useCustomerRuntime(businessScope);
+  const customerScope = customerRuntime.target !== null;
+  const customerSendBlock = customerScope
+    ? (customerRuntime.error ??
+      (readAutoOpsHost()?.customerAgentsEnabled !== true
+        ? "客户 Agent 接入已暂停，历史仍可查看。"
+        : customerRuntime.loading
+          ? "正在读取客户运行器…"
+          : !customerRuntime.device || customerRuntime.device.status !== "active"
+            ? "客户设备已停用或解绑，历史仍可查看。"
+            : !customerRuntime.device.online
+              ? "客户设备离线，草稿保留；恢复连接后再发送。"
+              : !customerRuntime.catalog?.models.length
+                ? "本机尚未提供模型目录，请检查连接程序。"
+                : null))
+    : null;
   const canOperateEnvironment = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const hasTerminalWriteAccess = () =>
@@ -1083,8 +1103,11 @@ export default function ChatView(props: ChatViewProps) {
   const handleNewThread = useNewThreadHandler();
   const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
   const routeThreadRef = scopeThreadRef(environmentId, threadId);
-  const hasThreadRelationships = useThreadRelationshipsAvailable(routeKind === "server" ? routeThreadRef : null);
-  const threadPanelAvailable = !isAutoOpsLite() || (routeKind === "server" && hasThreadRelationships);
+  const hasThreadRelationships = useThreadRelationshipsAvailable(
+    routeKind === "server" ? routeThreadRef : null,
+  );
+  const threadPanelAvailable =
+    !isAutoOpsLite() || (routeKind === "server" && hasThreadRelationships);
   const routeThreadKey = scopedThreadKey(routeThreadRef);
   const currentRouteThreadKeyRef = useRef<string | null>(routeThreadKey);
   useLayoutEffect(() => {
@@ -1160,8 +1183,16 @@ export default function ChatView(props: ChatViewProps) {
   const serverThreadProjection = useThreadProjection(routeThreadDetailRef);
   const serverProjection = serverThreadProjection?.projection ?? null;
   const rollbackSafety = serverProjection?.thread.rollbackSafety;
-  const isHistoryEditFrozen = isAutoOpsHosted() && rollbackSafety !== undefined && rollbackSafety.status !== "complete";
-  const canOperateThread = canOperateEnvironment && !isHistoryEditFrozen && (!isAutoOpsHosted() || routeKind === "draft" || (businessScope !== undefined && businessScope.compatibilityReadOnly !== true && !businessScope.nativeParentThreadId));
+  const isHistoryEditFrozen =
+    isAutoOpsHosted() && rollbackSafety !== undefined && rollbackSafety.status !== "complete";
+  const canOperateThread =
+    canOperateEnvironment &&
+    !isHistoryEditFrozen &&
+    (!isAutoOpsHosted() ||
+      routeKind === "draft" ||
+      (businessScope !== undefined &&
+        businessScope.compatibilityReadOnly !== true &&
+        !businessScope.nativeParentThreadId));
   const serverThread = (() => {
     if (serverThreadShell !== null || serverProjection === null) {
       return serverThreadShell;
@@ -1637,7 +1668,11 @@ export default function ChatView(props: ChatViewProps) {
   const [, setThreadErrorBannerDismissTick] = useState(0);
   const defaultRuntimeMode = resolveProjectSettings(settings, activeThread?.projectId ?? null)
     .settings.defaultRuntimeMode;
-  const runtimeMode = isAutoOpsHosted() ? "approval-required" : (composerRuntimeMode ?? (isServerThread ? activeThread?.runtimeMode : undefined) ?? defaultRuntimeMode);
+  const runtimeMode = isAutoOpsHosted()
+    ? "approval-required"
+    : (composerRuntimeMode ??
+      (isServerThread ? activeThread?.runtimeMode : undefined) ??
+      defaultRuntimeMode);
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = canWriteSourceControl && isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
@@ -1957,7 +1992,6 @@ export default function ChatView(props: ChatViewProps) {
               )
             }
           >
-            
             取消
           </Button>
         ),
@@ -1977,7 +2011,6 @@ export default function ChatView(props: ChatViewProps) {
             variant="ghost"
             onClick={() => void removeClonedProject({ environmentId, projectId })}
           >
-            
             移除项目
           </Button>
           <Button
@@ -1989,7 +2022,6 @@ export default function ChatView(props: ChatViewProps) {
               )
             }
           >
-            
             重试
           </Button>
         </>
@@ -2162,10 +2194,12 @@ export default function ChatView(props: ChatViewProps) {
     logicalProjectEnvironments.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
     ) ?? null;
-  const showComposerEnvironmentIndicator = autoOpsFeature("workspace") && shouldShowEnvironmentIndicator({
-    activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
-  });
+  const showComposerEnvironmentIndicator =
+    autoOpsFeature("workspace") &&
+    shouldShowEnvironmentIndicator({
+      activeEnvironment: activeEnvironmentOption,
+      canPickEnvironment: hasMultipleEnvironments,
+    });
   const openPullRequestDialog = (reference?: string) => {
     if (!canCheckoutPullRequestIntoThread) {
       return;
@@ -2256,10 +2290,15 @@ export default function ChatView(props: ChatViewProps) {
     : (primaryEnvironment?.serverConfig ?? null);
   const providerEnvironmentId = (activeThread ? activeEnvironment : primaryEnvironment)
     ?.environmentId;
-  const providerStatuses =
+  const availableProviderStatuses =
     (providerEnvironmentId === undefined
       ? undefined
       : providersByEnvironment.get(providerEnvironmentId)) ?? EMPTY_PROVIDERS;
+  const providerStatuses = customerScopedProviders(
+    availableProviderStatuses,
+    businessScope,
+    customerRuntime.catalog,
+  );
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
@@ -2277,8 +2316,10 @@ export default function ChatView(props: ChatViewProps) {
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
   const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null;
   const supportsQuestionAttachments =
+    !customerScope &&
     attachmentEnvironmentConfig?.environment.capabilities.questionAttachments === true;
   const supportsAttachmentUploads =
+    !customerScope &&
     attachmentEnvironmentConfig?.environment.capabilities.attachmentUploads === true;
   const advertisedFileAttachmentBytes =
     attachmentEnvironmentConfig?.environment.capabilities.fileAttachments?.maxUploadBytes ?? null;
@@ -2327,7 +2368,10 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatchDismissKey === dismissedVersionMismatchKey ||
     isVersionMismatchDismissed(versionMismatchDismissKey);
   const showVersionMismatchBanner =
-    !isAutoOpsHosted() && versionMismatch !== null && versionMismatchDismissKey !== null && !versionMismatchDismissed;
+    !isAutoOpsHosted() &&
+    versionMismatch !== null &&
+    versionMismatchDismissKey !== null &&
+    !versionMismatchDismissed;
   const hasMultipleRegisteredEnvironments = environments.length > 1;
   const versionMismatchServerLabel =
     hasMultipleRegisteredEnvironments && activeThread
@@ -2349,6 +2393,19 @@ export default function ChatView(props: ChatViewProps) {
     isServerUpdateFailureDismissed(serverUpdateState);
   const systemComposerBannerItems = (() => {
     const items: ComposerBannerStackItem[] = [];
+    if (customerSendBlock)
+      items.push({
+        id: "customer-connection",
+        variant: "warning",
+        icon: null,
+        title: customerSendBlock,
+        description: "本机已有执行不会因网页断线自动停止。",
+        actions: (
+          <Button size="xs" variant="ghost" onClick={customerRuntime.refresh}>
+            刷新
+          </Button>
+        ),
+      });
     const updateRunning = serverUpdateState.status === "running";
     const unavailableConnection = activeEnvironmentUnavailableState?.connection ?? null;
     const disconnectAction =
@@ -2364,7 +2421,6 @@ export default function ChatView(props: ChatViewProps) {
             )
           }
         >
-          
           断开服务器
         </Button>
       ) : undefined;
@@ -2395,7 +2451,6 @@ export default function ChatView(props: ChatViewProps) {
                   )
                 }
               >
-                
                 重新连接
               </Button>
             ) : null}
@@ -2429,7 +2484,6 @@ export default function ChatView(props: ChatViewProps) {
                     type="button"
                     className="block max-w-full cursor-help truncate rounded-sm text-left"
                   >
-                    
                     服务器有可用更新
                   </button>
                 }
@@ -2488,16 +2542,20 @@ export default function ChatView(props: ChatViewProps) {
     return items;
   })() as ComposerBannerStackItem[];
   const providerInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(
-      deriveProviderInstanceEntries(providerStatuses),
-      settings,
-      activeProject?.id ?? null,
+    customerProviderAvailability(
+      applyProviderInstanceSettings(
+        deriveProviderInstanceEntries(providerStatuses),
+        settings,
+        activeProject?.id ?? null,
+      ),
+      businessScope,
     ),
   );
   const activeThreadModelInstanceId = activeThread?.modelSelection.instanceId;
   const { selectedProviderEntry, requestedDriverKind } = resolveComposerProviderSelection({
     entries: providerInstanceEntries,
     candidateInstanceIds: [
+      customerRuntime.target ? customerInstanceId(customerRuntime.target) : null,
       selectedProviderByThreadId,
       activeRuntime?.providerInstanceId,
       activeThreadModelInstanceId,
@@ -2519,7 +2577,8 @@ export default function ChatView(props: ChatViewProps) {
     providerStatuses.find((status) => status.instanceId === activeRuntime?.providerInstanceId) ??
     activeProviderStatus;
   const supportsConversationRollback =
-    autoOpsFeature("historyRollback") && canOperateThread &&
+    autoOpsFeature("historyRollback") &&
+    canOperateThread &&
     conversationProviderStatus !== null &&
     conversationProviderStatus.supportsConversationRollback !== false;
   const phase = derivePhase(activeRuntime);
@@ -2572,13 +2631,15 @@ export default function ChatView(props: ChatViewProps) {
     }
     return findLatestProposedPlan(serverProjection, activeLatestRun?.runId ?? null);
   })();
-  const showPlanFollowUpPrompt = autoOpsFeature("planMode") && shouldShowPlanFollowUpPrompt({
-    pendingUserInputCount: pendingUserInputs.length,
-    interactionMode,
-    latestTurnSettled: latestRunSettled,
-    hasActionableProposedPlan: hasActionableProposedPlan(activeProposedPlan),
-    hasComposerAttachments: composerHasAttachments,
-  });
+  const showPlanFollowUpPrompt =
+    autoOpsFeature("planMode") &&
+    shouldShowPlanFollowUpPrompt({
+      pendingUserInputCount: pendingUserInputs.length,
+      interactionMode,
+      latestTurnSettled: latestRunSettled,
+      hasActionableProposedPlan: hasActionableProposedPlan(activeProposedPlan),
+      hasComposerAttachments: composerHasAttachments,
+    });
   // A pending approval or question is part of the key: once it is answered,
   // from this client or any other, the agent resumes and spends quota.
   const usageLimitsKey =
@@ -2861,8 +2922,7 @@ export default function ChatView(props: ChatViewProps) {
               const image = new Image();
               imageInstances.push(image);
               const handleLoad = () => resolve();
-              const handleError = () =>
-                reject(new Error(`加载服务器预览失败： ${messageId}.`));
+              const handleError = () => reject(new Error(`加载服务器预览失败： ${messageId}.`));
               image.addEventListener("load", handleLoad, { once: true });
               image.addEventListener("error", handleError, { once: true });
               image.src = previewUrl;
@@ -3074,13 +3134,14 @@ export default function ChatView(props: ChatViewProps) {
       : JSON.stringify([itemId, latestCheckpointCompletedAt]);
   })();
 
-  const gitCwd = activeProject && autoOpsFeature("workspace")
-    ? projectScriptCwd({
-        project: { cwd: activeProject.workspaceRoot },
-        worktreePath: activeThread?.worktreePath ?? null,
-      })
-    : null;
-  const gitStatusCwd = autoOpsFeature("workspace") ? activeThread?.worktreePath ?? gitCwd : null;
+  const gitCwd =
+    activeProject && autoOpsFeature("workspace")
+      ? projectScriptCwd({
+          project: { cwd: activeProject.workspaceRoot },
+          worktreePath: activeThread?.worktreePath ?? null,
+        })
+      : null;
+  const gitStatusCwd = autoOpsFeature("workspace") ? (activeThread?.worktreePath ?? gitCwd) : null;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -3101,12 +3162,14 @@ export default function ChatView(props: ChatViewProps) {
     DEFAULT_RESOLVED_KEYBINDINGS;
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   const remoteOpenState = useRemoteOpenState(activeThread?.environmentId ?? environmentId);
-  const showOpenInPicker = autoOpsFeature("workspace") && shouldShowOpenInPicker({
-    activeProjectName: activeProject?.title,
-    activeThreadEnvironmentId: activeThread?.environmentId ?? environmentId,
-    primaryEnvironmentId,
-    remoteOpenMode: remoteOpenState.mode,
-  });
+  const showOpenInPicker =
+    autoOpsFeature("workspace") &&
+    shouldShowOpenInPicker({
+      activeProjectName: activeProject?.title,
+      activeThreadEnvironmentId: activeThread?.environmentId ?? environmentId,
+      primaryEnvironmentId,
+      remoteOpenMode: remoteOpenState.mode,
+    });
   useOpenFavoriteEditorShortcut({
     enabled: showOpenInPicker,
     environmentId: activeThread?.environmentId ?? environmentId,
@@ -3161,9 +3224,13 @@ export default function ChatView(props: ChatViewProps) {
   const hasTimelineTopBanner = Boolean(timelineThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
-  const businessWorkspaceCwd = isAutoOpsHosted() ? autoOpsResourceCwd(threadId, activeThread?.projectId, businessScope) : null;
-  const businessFilesAvailable = businessWorkspaceCwd !== null && businessScope?.workspaceVersionId !== undefined;
-  const activeWorkspaceRoot = businessWorkspaceCwd ?? activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const businessWorkspaceCwd = isAutoOpsHosted()
+    ? autoOpsResourceCwd(threadId, activeThread?.projectId, businessScope)
+    : null;
+  const businessFilesAvailable =
+    businessWorkspaceCwd !== null && businessScope?.workspaceVersionId !== undefined;
+  const activeWorkspaceRoot =
+    businessWorkspaceCwd ?? activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   useLayoutEffect(() => {
     if (
       threadDetailLoading ||
@@ -3190,7 +3257,9 @@ export default function ChatView(props: ChatViewProps) {
       rememberCheckoutIsRepo(environmentId, gitStatusCwd, liveIsGitRepo);
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
-  const isGitRepo = autoOpsFeature("workspace") && (liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true);
+  const isGitRepo =
+    autoOpsFeature("workspace") &&
+    (liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true);
   // A provider-native subagent cannot take messages: a status bar replaces the
   // composer and its strips. Its approvals and questions are asked on the
   // top-level parent thread.
@@ -3219,24 +3288,31 @@ export default function ChatView(props: ChatViewProps) {
           providerSubagentModels,
           reportedModelSelection,
         );
-  const mountComposerContextStrip = !isAutoOpsHosted() && shouldShowComposerContextStrip({
-    isDraftHeroState,
-    persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-    isGitRepo,
-    showEnvironmentIndicator: showComposerEnvironmentIndicator,
-    hostsRestingComposerControls: routeKind === "server",
-  });
-  const showComposerContextStrip = !isAutoOpsHosted() && shouldShowComposerContextStrip({
-    isDraftHeroState,
-    persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-    isGitRepo,
-    showEnvironmentIndicator: showComposerEnvironmentIndicator,
-    hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
-  });
+  const mountComposerContextStrip =
+    !isAutoOpsHosted() &&
+    shouldShowComposerContextStrip({
+      isDraftHeroState,
+      persistInActiveThreads: settings.persistComposerContextStrip,
+      hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+      isGitRepo,
+      showEnvironmentIndicator: showComposerEnvironmentIndicator,
+      hostsRestingComposerControls: routeKind === "server",
+    });
+  const showComposerContextStrip =
+    !isAutoOpsHosted() &&
+    shouldShowComposerContextStrip({
+      isDraftHeroState,
+      persistInActiveThreads: settings.persistComposerContextStrip,
+      hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+      isGitRepo,
+      showEnvironmentIndicator: showComposerEnvironmentIndicator,
+      hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
+    });
   const mountComposerModelStrip =
-    !isAutoOpsHosted() && routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
+    !isAutoOpsHosted() &&
+    routeKind === "server" &&
+    !mountComposerContextStrip &&
+    !showProviderSubagentBar;
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
   const terminalShortcutLabelOptions = {
     context: {
@@ -3342,8 +3418,7 @@ export default function ChatView(props: ChatViewProps) {
         type: "warning",
         id: "load-balancing-attachments",
         title: "将附件保留在此机器上",
-        description:
-          "选择自动分配前请移除附件，再在选定的机器上重新添加。",
+        description: "选择自动分配前请移除附件，再在选定的机器上重新添加。",
       });
       return;
     }
@@ -3522,7 +3597,8 @@ export default function ChatView(props: ChatViewProps) {
   };
   const insertArtifactTemplateStable = useStableCallback(insertArtifactTemplate);
   const sendAppMessage = async (text: string) => {
-    if (!autoOpsFeature("interactiveArtifacts")) throw new Error("当前精简版仅支持查看已有应用产物。");
+    if (!autoOpsFeature("interactiveArtifacts"))
+      throw new Error("当前精简版仅支持查看已有应用产物。");
     if (!isServerThread || activeThreadId === null) {
       throw new Error("应用消息需要已经开始的对话。");
     }
@@ -4038,13 +4114,22 @@ export default function ChatView(props: ChatViewProps) {
   const activateRightPanelSurfaceStable = useStableCallback(activateRightPanelSurface);
   const toggleRightPanel = () => {
     if (!activeThreadRef) return;
-    if (isAutoOpsHosted() && !businessFilesAvailable && !rightPanelState.surfaces.some((surface) => surface.kind === "file" && (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null))) return;
+    if (
+      isAutoOpsHosted() &&
+      !businessFilesAvailable &&
+      !rightPanelState.surfaces.some(
+        (surface) =>
+          surface.kind === "file" &&
+          (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null),
+      )
+    )
+      return;
     if (rightPanelOpen) {
       closePreviewPanel();
       return;
     }
     if (businessFilesAvailable && rightPanelState.surfaces.length === 0) {
-      useRightPanelStore.getState().open(activeThreadRef, 'files');
+      useRightPanelStore.getState().open(activeThreadRef, "files");
       return;
     }
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
@@ -4849,9 +4934,11 @@ export default function ChatView(props: ChatViewProps) {
   const setPendingServerThreadBranch = (branch: string | null) => {
     if (activeThread) setPendingServerThreadBranchEntry({ threadId: activeThread.id, branch });
   };
-  const envMode: DraftThreadEnvMode = isAutoOpsHosted() ? "local" : canOverrideServerThreadEnvMode
-    ? (pendingServerThreadEnvMode ?? draftThread?.envMode ?? derivedEnvMode)
-    : derivedEnvMode;
+  const envMode: DraftThreadEnvMode = isAutoOpsHosted()
+    ? "local"
+    : canOverrideServerThreadEnvMode
+      ? (pendingServerThreadEnvMode ?? draftThread?.envMode ?? derivedEnvMode)
+      : derivedEnvMode;
   const activeThreadBranch =
     canOverrideServerThreadEnvMode && pendingServerThreadBranchEntryForThread !== null
       ? pendingServerThreadBranchEntryForThread.branch
@@ -4938,7 +5025,7 @@ export default function ChatView(props: ChatViewProps) {
       '[data-chat-composer-main-surface="true"]',
     );
     const button = composerOverlayElement?.parentElement?.querySelector<HTMLElement>(
-      "button[aria-label=\"滚动到底部\"]",
+      'button[aria-label="滚动到底部"]',
     );
     const clearance =
       composerOverlayElement && mainSurface && button
@@ -5446,11 +5533,8 @@ export default function ChatView(props: ChatViewProps) {
             <Button
               size="xs"
               variant="ghost"
-              onClick={() =>
-                void sendStandaloneCommandStable("/goal resume", "恢复目标失败。")
-              }
+              onClick={() => void sendStandaloneCommandStable("/goal resume", "恢复目标失败。")}
             >
-              
               恢复
             </Button>
           ) : null}
@@ -5459,7 +5543,6 @@ export default function ChatView(props: ChatViewProps) {
             variant="ghost"
             onClick={() => void sendStandaloneCommandStable("/goal clear", "清除目标失败。")}
           >
-            
             清除
           </Button>
         </>
@@ -5533,7 +5616,9 @@ export default function ChatView(props: ChatViewProps) {
   const threadStatusLine = activeThreadSnoozed ? (
     <ThreadStatusLine
       icon={<AlarmClockIcon />}
-      label={snoozedUntil ? `已暂时搁置， ${formatRelativeTimeUntilLabel(snoozedUntil)}` : "已暂时搁置"}
+      label={
+        snoozedUntil ? `已暂时搁置， ${formatRelativeTimeUntilLabel(snoozedUntil)}` : "已暂时搁置"
+      }
       clockMinute={nowMinute}
       actionLabel={isUnsnoozing ? "正在唤醒…" : "立即唤醒"}
       actionDisabled={!canOperateThread || isUnsnoozing}
@@ -5712,8 +5797,8 @@ export default function ChatView(props: ChatViewProps) {
                 }
               />
               <TooltipPopup side="top">
-                
-                此对话上次执行于 {localCheckoutBranchMismatch.threadBranch}。发送后将继续使用 {localCheckoutBranchMismatch.currentBranch}.
+                此对话上次执行于 {localCheckoutBranchMismatch.threadBranch}。发送后将继续使用{" "}
+                {localCheckoutBranchMismatch.currentBranch}.
               </TooltipPopup>
             </Tooltip>
           </span>
@@ -5791,7 +5876,9 @@ export default function ChatView(props: ChatViewProps) {
   });
   const getShortcutContextStable = useStableCallback(getShortcutContext);
   const timelineSkills = activeProviderStatus
-    ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
+    ? customerScope
+      ? activeProviderStatus.skills
+      : resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
     : EMPTY_PROVIDER_SKILLS;
   const threadFindControlsRef = useRef<ThreadFindControls | null>(null);
   const [isThreadFindActive, setIsThreadFindActive] = useState(false);
@@ -5848,9 +5935,7 @@ export default function ChatView(props: ChatViewProps) {
         if (!isServerThread || !activeThreadRef || !supportsPinning) return;
         void (
           activeThreadPinned ? confirmAndUnpinThread(activeThreadRef) : pinThread(activeThreadRef)
-        ).then(
-          toastPinFailure(activeThreadPinned ? "取消置顶对话失败" : "置顶对话失败"),
-        );
+        ).then(toastPinFailure(activeThreadPinned ? "取消置顶对话失败" : "置顶对话失败"));
       },
       "terminal.toggle": () => {
         if (!terminalUiState.terminalOpen && !canReadTerminal && !canOperateTerminal) return false;
@@ -5997,21 +6082,12 @@ export default function ChatView(props: ChatViewProps) {
   ) => {
     if (!autoOpsFeature("historyRollback")) return;
     const localApi = readLocalApi();
-    if (
-      !localApi ||
-      !activeThread ||
-      isRevertingCheckpoint ||
-      !canOperateThread
-    )
-      return;
+    if (!localApi || !activeThread || isRevertingCheckpoint || !canOperateThread) return;
     const message = timelineMessages.find((message) => message.id === messageId);
     if (!message || message.role !== "user") return;
 
     if (!supportsConversationRollback) {
-      setThreadError(
-        activeThread.id,
-        "此运行器不支持回退对话历史，请新建对话。",
-      );
+      setThreadError(activeThread.id, "此运行器不支持回退对话历史，请新建对话。");
       return;
     }
     if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
@@ -6041,7 +6117,9 @@ export default function ChatView(props: ChatViewProps) {
       threadId: activeThread.id,
       turnCount,
       restoreFiles: isAutoOpsHosted() ? false : restoreFiles,
-      ...(isAutoOpsHosted() && businessScope?.visibility === "project" ? {confirmSharedHistoryEdit: true} : {}),
+      ...(isAutoOpsHosted() && businessScope?.visibility === "project"
+        ? { confirmSharedHistoryEdit: true }
+        : {}),
       // Keep the live checkpoint identity when command context refetches a bounded window.
       checkpoint: findRevertCheckpoint(serverProjection?.checkpoints ?? [], turnCount),
       draftTarget: composerDraftTarget,
@@ -6077,7 +6155,13 @@ export default function ChatView(props: ChatViewProps) {
     readonly checkpointId: string;
     readonly scopeId: string;
   }) => {
-    if (!autoOpsFeature("historyRollback") || !activeThread || isRevertingCheckpoint || !canOperateThread) return;
+    if (
+      !autoOpsFeature("historyRollback") ||
+      !activeThread ||
+      isRevertingCheckpoint ||
+      !canOperateThread
+    )
+      return;
     if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
       setThreadError(
         activeThread.id,
@@ -6091,14 +6175,14 @@ export default function ChatView(props: ChatViewProps) {
     }
     const localApi = readLocalApi();
     const rollbackPrompt = isAutoOpsHosted()
-      ? (businessScope?.visibility === "project" ? "这会修改所有成员看到的共享历史。系统将先保留原生上下文安全副本，再回退至选定位置。确认继续？" : "系统将先保留原生上下文安全副本，再回退至选定位置。确认继续？")
+      ? businessScope?.visibility === "project"
+        ? "这会修改所有成员看到的共享历史。系统将先保留原生上下文安全副本，再回退至选定位置。确认继续？"
+        : "系统将先保留原生上下文安全副本，再回退至选定位置。确认继续？"
       : "将此对话回退到选定的检查点？此操作无法撤销。";
     const confirmed =
       localApi == null
         ? window.confirm(rollbackPrompt)
-        : await localApi.dialogs.confirm(
-            rollbackPrompt,
-          );
+        : await localApi.dialogs.confirm(rollbackPrompt);
     if (!confirmed) return;
 
     useComposerDraftStore.setState((store) => ({
@@ -6111,7 +6195,12 @@ export default function ChatView(props: ChatViewProps) {
         threadId: activeThread.id,
         checkpointId: input.checkpointId,
         scopeId: input.scopeId,
-        ...(isAutoOpsHosted() ? {restoreFiles:false,confirmSharedHistoryEdit:businessScope?.visibility === "project"} : {}),
+        ...(isAutoOpsHosted()
+          ? {
+              restoreFiles: false,
+              confirmSharedHistoryEdit: businessScope?.visibility === "project",
+            }
+          : {}),
       },
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
@@ -6233,10 +6322,7 @@ export default function ChatView(props: ChatViewProps) {
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
-        setThreadError(
-          threadId,
-          error instanceof Error ? error.message : "无法恢复对话。",
-        );
+        setThreadError(threadId, error instanceof Error ? error.message : "无法恢复对话。");
       }
     } else {
       clearUsageLimitsFor(routeThreadKey);
@@ -6262,7 +6348,11 @@ export default function ChatView(props: ChatViewProps) {
     e?.preventDefault();
     if (!chatSubmissionIntentAllowed(submissionIntent)) return;
     if (pendingUserInputs.length === 0 && unavailableChatSlashCommand(promptRef.current)) {
-      toastManager.add({type: "info", title: "当前精简版未开放此命令", description: "输入内容已保留。"});
+      toastManager.add({
+        type: "info",
+        title: "当前精简版未开放此命令",
+        description: "输入内容已保留。",
+      });
       return;
     }
     if (
@@ -6308,9 +6398,7 @@ export default function ChatView(props: ChatViewProps) {
     if (needsLoadBalancing) {
       toastManager.add({
         type: "warning",
-        title: loadBalancing.pending
-          ? "正在检查机器资源"
-          : "选择机器以继续",
+        title: loadBalancing.pending ? "正在检查机器资源" : "选择机器以继续",
         description: loadBalancing.pending
           ? "资源检查仍在进行，你可以在输入框中选择机器。"
           : referencedThreadContexts.length > 0 &&
@@ -6370,8 +6458,7 @@ export default function ChatView(props: ChatViewProps) {
         stackedThreadToast({
           type: "warning",
           title: "请选择模型和基准分支",
-          description:
-            "多模型需要在 Git 项目中新建对话，每个模型使用独立工作树。",
+          description: "多模型需要在 Git 项目中新建对话，每个模型使用独立工作树。",
         }),
       );
       return;
@@ -6391,8 +6478,11 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode: requestedSendInteractionMode,
       interactionModeEnabled: requestedSendInteractionModeEnabled,
     } = sendCtx;
-    const sendInteractionMode = autoOpsFeature("planMode") ? requestedSendInteractionMode : "default";
-    const sendInteractionModeEnabled = autoOpsFeature("planMode") && requestedSendInteractionModeEnabled;
+    const sendInteractionMode = autoOpsFeature("planMode")
+      ? requestedSendInteractionMode
+      : "default";
+    const sendInteractionModeEnabled =
+      autoOpsFeature("planMode") && requestedSendInteractionModeEnabled;
     const { images: composerImages, previewAnnotations: composerPreviewAnnotations } =
       mergeDirectPreviewAnnotation({
         images: sendContextImages,
@@ -6833,8 +6923,7 @@ export default function ChatView(props: ChatViewProps) {
       sendInFlightRef.current = false;
       setThreadError(
         threadIdForSend,
-        attachmentCapabilitiesBeforeDispatch.fileBlockReason ??
-          "当前连接不能修改对话。",
+        attachmentCapabilitiesBeforeDispatch.fileBlockReason ?? "当前连接不能修改对话。",
       );
       setDockedDraftHeroThreadKey((currentThreadKey) =>
         currentThreadKey === activeThreadKey ? null : currentThreadKey,
@@ -7006,10 +7095,7 @@ export default function ChatView(props: ChatViewProps) {
       if (sendResult._tag === "Failure") {
         const error = squashAtomCommandFailure(sendResult);
         failedSelections.push(...multipleModelSelections);
-        setThreadError(
-          threadIdForSend,
-          error instanceof Error ? error.message : "发送消息失败。",
-        );
+        setThreadError(threadIdForSend, error instanceof Error ? error.message : "发送消息失败。");
       }
       const restoreFailedDraft = () => {
         setMultipleModelSelections(failedSelections);
@@ -7045,8 +7131,7 @@ export default function ChatView(props: ChatViewProps) {
             stackedThreadToast({
               type: "error",
               title: "一条后台提示未能发送",
-              description:
-                "较新的草稿保持不变。输入框清空后可恢复发送失败的内容。",
+              description: "较新的草稿保持不变。输入框清空后可恢复发送失败的内容。",
               timeout: 0,
               actionProps: {
                 children: "恢复提示",
@@ -7060,8 +7145,7 @@ export default function ChatView(props: ChatViewProps) {
                     )
                   ) {
                     toastManager.update(recoveryToastId, {
-                      description:
-                        "请返回原草稿，发送或清空当前内容后再恢复。",
+                      description: "请返回原草稿，发送或清空当前内容后再恢复。",
                     });
                     return;
                   }
@@ -7421,10 +7505,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
-        setThreadError(
-          threadIdForSend,
-          error instanceof Error ? error.message : "发送消息失败。",
-        );
+        setThreadError(threadIdForSend, error instanceof Error ? error.message : "发送消息失败。");
         if (
           draftId &&
           (backgroundDraftOpened || currentRouteThreadKeyRef.current !== routeThreadKey)
@@ -7432,10 +7513,7 @@ export default function ChatView(props: ChatViewProps) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title:
-                submissionIntent === "background"
-                  ? "后台任务失败"
-                  : "无法开始对话",
+              title: submissionIntent === "background" ? "后台任务失败" : "无法开始对话",
               description: error instanceof Error ? error.message : "发送消息失败。",
               actionProps: {
                 children: "打开草稿",
@@ -7666,14 +7744,16 @@ export default function ChatView(props: ChatViewProps) {
     // AutoOps uses the existing atomic native launch path. Bind the derived
     // scope before attachments/launch; the source plan reference stays native.
     const createResult = isAutoOpsHosted()
-      ? await settlePromise(() => inheritAutoOpsThreadScope(activeThread.id, nextThreadId, activeProject.id))
+      ? await settlePromise(() =>
+          inheritAutoOpsThreadScope(activeThread.id, nextThreadId, activeProject.id),
+        )
       : await createThread({
-      environmentId,
-      input: {
-        threadId: nextThreadId,
-        ...implementationThread,
-      },
-    });
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+            ...implementationThread,
+          },
+        });
     let failure: AtomCommandResult<unknown, unknown> | null =
       createResult._tag === "Failure" ? createResult : null;
 
@@ -7696,7 +7776,7 @@ export default function ChatView(props: ChatViewProps) {
             threadId: activeThread.id,
             planId: activeProposedPlan.id,
           },
-          ...(isAutoOpsHosted() ? { bootstrap: {createThread: implementationThread} } : {}),
+          ...(isAutoOpsHosted() ? { bootstrap: { createThread: implementationThread } } : {}),
           createdAt,
         },
       });
@@ -7731,10 +7811,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
       if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
-        console.warn(
-          "启动失败后清理执行计划对话失败。",
-          squashAtomCommandFailure(cleanupResult),
-        );
+        console.warn("启动失败后清理执行计划对话失败。", squashAtomCommandFailure(cleanupResult));
       }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
@@ -7742,10 +7819,7 @@ export default function ChatView(props: ChatViewProps) {
           stackedThreadToast({
             type: "error",
             title: "无法开始执行计划对话",
-            description:
-              error instanceof Error
-                ? error.message
-                : "创建新对话时发生错误。",
+            description: error instanceof Error ? error.message : "创建新对话时发生错误。",
           }),
         );
       }
@@ -8097,7 +8171,16 @@ export default function ChatView(props: ChatViewProps) {
     threadPanelPresentation,
     threadPanelPopoverHandle,
     threadPanelShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
-    rightPanelAvailable: activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace") || rightPanelState.surfaces.some((surface) => surface.kind === "file" && (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null))),
+    rightPanelAvailable:
+      activeProject !== null &&
+      (businessFilesAvailable ||
+        autoOpsFeature("workspace") ||
+        rightPanelState.surfaces.some(
+          (surface) =>
+            surface.kind === "file" &&
+            (surface.attachment !== undefined ||
+              autoOpsBusinessPath(surface.relativePath) !== null),
+        )),
     rightPanelOpen,
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleTerminal: toggleTerminalVisibilityStable,
@@ -8246,7 +8329,6 @@ export default function ChatView(props: ChatViewProps) {
                   className="flex items-center gap-2 rounded-full border border-primary/25 bg-background/95 px-4 py-2.5 text-sm font-medium text-foreground shadow-lg"
                 >
                   <PaperclipIcon className="size-4 text-primary" aria-hidden="true" />
-                  
                   拖放文件以添加附件
                 </div>
               </div>
@@ -8418,7 +8500,6 @@ export default function ChatView(props: ChatViewProps) {
                     variant="glass"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    
                     滚动到底部
                   </Button>
                 </div>
@@ -8440,9 +8521,21 @@ export default function ChatView(props: ChatViewProps) {
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
                 >
-                  {isAutoOpsHosted() && rollbackSafety ? <div role="status" className="mb-2 rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground">
-                    {rollbackSafety.status === "complete" ? "已保留原生上下文安全副本并完成历史编辑。" : rollbackSafety.status === "uncertain" || serverProjection?.thread.rollbackFailure ? "历史编辑结果需要核对，当前会话已暂停执行，避免重复回退。" : rollbackSafety.protectedNativeThreadId ? "安全副本已保留，正在应用历史编辑…" : "正在保留原生上下文安全副本…"}
-                  </div> : null}
+                  {isAutoOpsHosted() && rollbackSafety ? (
+                    <div
+                      role="status"
+                      className="mb-2 rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground"
+                    >
+                      {rollbackSafety.status === "complete"
+                        ? "已保留原生上下文安全副本并完成历史编辑。"
+                        : rollbackSafety.status === "uncertain" ||
+                            serverProjection?.thread.rollbackFailure
+                          ? "历史编辑结果需要核对，当前会话已暂停执行，避免重复回退。"
+                          : rollbackSafety.protectedNativeThreadId
+                            ? "安全副本已保留，正在应用历史编辑…"
+                            : "正在保留原生上下文安全副本…"}
+                    </div>
+                  ) : null}
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
                       <div
@@ -8471,7 +8564,9 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ComposerSurface.Shell
-                      contextStrip={isAutoOpsHosted() || showComposerContextStrip || showComposerModelStrip}
+                      contextStrip={
+                        isAutoOpsHosted() || showComposerContextStrip || showComposerModelStrip
+                      }
                     >
                       <ComposerSurface.Host
                         inert={queuedRunEdit.isSaving}
@@ -8498,19 +8593,35 @@ export default function ChatView(props: ChatViewProps) {
                               }
                             />
                           ) : null}
-                          {!composerMounted ? null : isAutoOpsHosted() && businessScope?.compatibilityReadOnly ? (
-                            <div className="flex flex-wrap items-center justify-between gap-3 p-3" data-autoops-readonly-history>
-                              <p role="status" className="text-sm text-muted-foreground">此历史对话仅支持查看。</p>
-                              <Button variant="outline" size="sm" disabled={!activeProjectRef} onClick={() => { if (activeProjectRef) void handleNewThread(activeProjectRef); }}>新建对话</Button>
+                          {!composerMounted ? null : isAutoOpsHosted() &&
+                            businessScope?.compatibilityReadOnly ? (
+                            <div
+                              className="flex flex-wrap items-center justify-between gap-3 p-3"
+                              data-autoops-readonly-history
+                            >
+                              <p role="status" className="text-sm text-muted-foreground">
+                                此历史对话仅支持查看。
+                              </p>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={!activeProjectRef}
+                                onClick={() => {
+                                  if (activeProjectRef) void handleNewThread(activeProjectRef);
+                                }}
+                              >
+                                新建对话
+                              </Button>
                             </div>
                           ) : (
                             <ChatComposer
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
-                              supportsMultipleModels={autoOpsFeature("externalAgents") &&
+                              supportsMultipleModels={
+                                autoOpsFeature("externalAgents") &&
                                 serverConfig?.environment.capabilities.requiredWorktreeBootstrap ===
-                                true
+                                  true
                               }
                               onMultipleModelSelectionsChange={setMultipleModelSelectionsStable}
                               composerRef={composerRef}
@@ -8550,7 +8661,8 @@ export default function ChatView(props: ChatViewProps) {
                               canResume={resumableRunId !== null || hasHeldQueuedRuns}
                               isRevertingCheckpoint={isRevertingCheckpoint}
                               sendDisabledReason={
-                                !canOperateThread
+                                customerSendBlock ??
+                                (!canOperateThread
                                   ? "当前连接不能修改对话。"
                                   : isEnvironmentChanging
                                     ? "正在准备机器"
@@ -8562,7 +8674,7 @@ export default function ChatView(props: ChatViewProps) {
                                           ? "正在加载消息"
                                           : worktreeSetupBlocksSend
                                             ? "正在准备工作树"
-                                            : projectCloneSendBlockReason
+                                            : projectCloneSendBlockReason)
                               }
                               isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
                               queuedRunsControl={queuedRunsControl}
@@ -8622,8 +8734,9 @@ export default function ChatView(props: ChatViewProps) {
                               threadPullRequests={(activeThreadShell ?? activeThread)?.pullRequests}
                               restingControlsHost={restingComposerControlsHost}
                               restingControlsHaveLeadingContext={
-                                isAutoOpsHosted() || (mountComposerContextStrip &&
-                                (isGitRepo || showComposerEnvironmentIndicator))
+                                isAutoOpsHosted() ||
+                                (mountComposerContextStrip &&
+                                  (isGitRepo || showComposerEnvironmentIndicator))
                               }
                               onRestingControlsVisibilityChange={setRestingComposerControlsVisible}
                               getTimelineScrollableNode={getTimelineScrollableNodeStable}
@@ -8698,17 +8811,24 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </ComposerSurface.ContextStrip>
                           ) : null}
-                          {isAutoOpsHosted() ? <AutoOpsThreadScopeControl
-                            key={activeThread.id}
-                            threadId={activeThread.id}
-                            projectId={activeThread.projectId}
-                            runtimeEnvironmentId={activeThread.environmentId}
-                            isDraft={isLocalDraftThread}
-                            draftTarget={composerDraftTarget}
-                            submitting={isSendBusy}
-                            hasAcceptedMessage={committedServerMessageIds.size > 0 || serverProjection?.messages.some((message) => message.role === 'user') === true}
-                            composerControlsHostRef={setRestingComposerControlsHost}
-                          /> : null}
+                          {isAutoOpsHosted() ? (
+                            <AutoOpsThreadScopeControl
+                              key={activeThread.id}
+                              threadId={activeThread.id}
+                              projectId={activeThread.projectId}
+                              runtimeEnvironmentId={activeThread.environmentId}
+                              isDraft={isLocalDraftThread}
+                              draftTarget={composerDraftTarget}
+                              submitting={isSendBusy}
+                              hasAcceptedMessage={
+                                committedServerMessageIds.size > 0 ||
+                                serverProjection?.messages.some(
+                                  (message) => message.role === "user",
+                                ) === true
+                              }
+                              composerControlsHostRef={setRestingComposerControlsHost}
+                            />
+                          ) : null}
                           {mountComposerContextStrip && (
                             <div className="pointer-events-auto">
                               <BranchToolbar
@@ -8788,68 +8908,74 @@ export default function ChatView(props: ChatViewProps) {
               onConfirm={handleSwitchCheckoutToThreadStable}
             />
 
-            {threadPanelAvailable ? <ThreadDetailsPanel
-              anchor={threadPanelPopoverAnchorRef}
-              handle={threadPanelPopoverHandle}
-              onPresentationChange={setThreadPanelPresentation}
-              forceNewWorktree={multipleModelSelections !== null}
-              environmentId={activeThread.environmentId}
-              threadId={activeThread.id}
-              projectId={activeThread.projectId}
-              worktreePath={activeThread.worktreePath}
-              isServerThread={isServerThread}
-              {...(draftId ? { draftId } : {})}
-              activeProjectName={activeProject?.title}
-              activeProjectScripts={activeProject && autoOpsFeature("workspace") ? activeProjectScripts : undefined}
-              preferredScriptId={
-                activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-              }
-              keybindings={keybindings}
-              availableEditors={availableEditors}
-              showOpenInPicker={showOpenInPicker}
-              openInShortcutEnabled={
-                !(
-                  rightPanelOpen &&
-                  renderedRightPanelSurface?.kind === "file" &&
-                  renderedRightPanelSurface.attachment === undefined
-                )
-              }
-              gitCwd={gitCwd}
-              isGitRepo={isGitRepo}
-              envLocked={envLocked}
-              availableEnvironments={logicalProjectEnvironments}
-              autoEnvironmentLabel={autoEnvironmentLabel}
-              onAutoEnvironment={
-                draftId &&
-                !envLocked &&
-                canAutoBalanceEnvironments &&
-                loadBalancingSettings.loadBalancingEnabled
-                  ? onAutoEnvironmentStable
-                  : undefined
-              }
-              {...(canChangeEnvironment ? { onEnvironmentChange: onEnvironmentChangeStable } : {})}
-              onEnvModeChange={onEnvModeChangeStable}
-              envMode={envMode}
-              {...(canOverrideServerThreadEnvMode
-                ? {
-                    activeThreadBranchOverride: activeThreadBranch,
-                    onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-                  }
-                : {})}
-              startFromOrigin={startFromOrigin}
-              onStartFromOriginChange={onStartFromOriginChange}
-              {...(canCheckoutPullRequestIntoThread
-                ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
-                : {})}
-              onComposerFocusRequest={scheduleComposerFocusStable}
-              {...(isServerThread && isGitRepo
-                ? { onOpenChanges: openChangesFromThreadPanelStable }
-                : {})}
-              onRunProjectScript={runProjectScriptStable}
-              onAddProjectScript={saveProjectScriptStable}
-              onUpdateProjectScript={updateProjectScriptStable}
-              onDeleteProjectScript={deleteProjectScriptStable}
-            /> : null}
+            {threadPanelAvailable ? (
+              <ThreadDetailsPanel
+                anchor={threadPanelPopoverAnchorRef}
+                handle={threadPanelPopoverHandle}
+                onPresentationChange={setThreadPanelPresentation}
+                forceNewWorktree={multipleModelSelections !== null}
+                environmentId={activeThread.environmentId}
+                threadId={activeThread.id}
+                projectId={activeThread.projectId}
+                worktreePath={activeThread.worktreePath}
+                isServerThread={isServerThread}
+                {...(draftId ? { draftId } : {})}
+                activeProjectName={activeProject?.title}
+                activeProjectScripts={
+                  activeProject && autoOpsFeature("workspace") ? activeProjectScripts : undefined
+                }
+                preferredScriptId={
+                  activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+                }
+                keybindings={keybindings}
+                availableEditors={availableEditors}
+                showOpenInPicker={showOpenInPicker}
+                openInShortcutEnabled={
+                  !(
+                    rightPanelOpen &&
+                    renderedRightPanelSurface?.kind === "file" &&
+                    renderedRightPanelSurface.attachment === undefined
+                  )
+                }
+                gitCwd={gitCwd}
+                isGitRepo={isGitRepo}
+                envLocked={envLocked}
+                availableEnvironments={logicalProjectEnvironments}
+                autoEnvironmentLabel={autoEnvironmentLabel}
+                onAutoEnvironment={
+                  draftId &&
+                  !envLocked &&
+                  canAutoBalanceEnvironments &&
+                  loadBalancingSettings.loadBalancingEnabled
+                    ? onAutoEnvironmentStable
+                    : undefined
+                }
+                {...(canChangeEnvironment
+                  ? { onEnvironmentChange: onEnvironmentChangeStable }
+                  : {})}
+                onEnvModeChange={onEnvModeChangeStable}
+                envMode={envMode}
+                {...(canOverrideServerThreadEnvMode
+                  ? {
+                      activeThreadBranchOverride: activeThreadBranch,
+                      onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                    }
+                  : {})}
+                startFromOrigin={startFromOrigin}
+                onStartFromOriginChange={onStartFromOriginChange}
+                {...(canCheckoutPullRequestIntoThread
+                  ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
+                  : {})}
+                onComposerFocusRequest={scheduleComposerFocusStable}
+                {...(isServerThread && isGitRepo
+                  ? { onOpenChanges: openChangesFromThreadPanelStable }
+                  : {})}
+                onRunProjectScript={runProjectScriptStable}
+                onAddProjectScript={saveProjectScriptStable}
+                onUpdateProjectScript={updateProjectScriptStable}
+                onDeleteProjectScript={deleteProjectScriptStable}
+              />
+            ) : null}
 
             <PullRequestThreadDialogHost
               threadKey={activeThreadKey}
@@ -8918,9 +9044,13 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
-          terminalAvailable={activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")}
+          terminalAvailable={
+            activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")
+          }
           diffAvailable={isServerThread && isGitRepo}
-          filesAvailable={activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))}
+          filesAvailable={
+            activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))
+          }
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
           deviceAvailable={activeThreadRef !== null}
@@ -8973,9 +9103,13 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequests={addPullRequestsSurfaceStable}
             onAddDevice={addDeviceSurfaceStable}
             browserAvailable={canOperatePreview && browserAvailable}
-            terminalAvailable={activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")}
+            terminalAvailable={
+              activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")
+            }
             diffAvailable={isServerThread && isGitRepo}
-            filesAvailable={activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))}
+            filesAvailable={
+              activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))
+            }
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
             deviceAvailable={activeThreadRef !== null}
@@ -8985,7 +9119,12 @@ export default function ChatView(props: ChatViewProps) {
         </RightPanelSheet>
       ) : null}
 
-      <RevertConfirmHost threadKey={routeThreadKey} onConfirm={onConfirmRevertStable} businessHosted={isAutoOpsHosted()} shared={businessScope?.visibility === "project"} />
+      <RevertConfirmHost
+        threadKey={routeThreadKey}
+        onConfirm={onConfirmRevertStable}
+        businessHosted={isAutoOpsHosted()}
+        shared={businessScope?.visibility === "project"}
+      />
       <LinkPullRequestDialogHost />
       <ThreadVisitWatermark threadRef={routeThreadRef} />
       <ExpandedImageDialogHost threadKey={routeThreadKey} />

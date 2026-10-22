@@ -1,6 +1,7 @@
 import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
 import {
   ChatAttachment,
+  CommandId,
   CheckpointId,
   MessageId,
   ModelSelection,
@@ -403,6 +404,8 @@ export const ProviderAdapterV2Error = Schema.Union([
 export type ProviderAdapterV2Error = typeof ProviderAdapterV2Error.Type;
 
 export interface ProviderAdapterV2OpenSessionInput {
+  /** Attach durable remote events without launching or resuming a native process. */
+  readonly reattachOnly?: boolean;
   readonly threadId: ThreadId;
   readonly providerSessionId: ProviderSessionId;
   readonly modelSelection: ModelSelection;
@@ -559,6 +562,12 @@ export interface ProviderAdapterV2SessionRuntime {
    * Adapter runtimes may omit this and expose only their single-consumer event stream.
    */
   readonly subscribeEvents?: Effect.Effect<ProviderAdapterV2EventSubscription>;
+  /** Durable transports acknowledge only after their canonical event is committed. */
+  readonly eventPersistenceKey?: (event: ProviderAdapterV2Event) => CommandId | undefined;
+  readonly acknowledgeEvent?: (
+    event: ProviderAdapterV2Event,
+  ) => Effect.Effect<void, ProviderAdapterV2Error>;
+
   readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
   /**
    * When present, RunExecutionService uses only this probe (never the

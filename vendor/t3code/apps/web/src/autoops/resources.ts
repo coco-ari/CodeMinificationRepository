@@ -48,7 +48,7 @@ export function autoOpsResourceCwd(
 ): string | null {
   if (!threadId || !projectId || !readAutoOpsHost()) return null
   const scope = scopeOverride ?? readAutoOpsThreadScope(threadId, projectId)
-  return scope
+  return scope && scope.executionBinding?.kind !== 'customer'
     ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}${scope.workspaceType && scope.workspaceVersionId ? `?workspaceType=${scope.workspaceType}&workspaceVersionId=${encodeURIComponent(scope.workspaceVersionId)}` : ''}`
     : null
 }

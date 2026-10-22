@@ -56,7 +56,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
             disabled={disabled || isResponding || !canRespond}
             aria-description={option.warning}
             onClick={() => {
-              if (!disabled && !isResponding) {
+              if (!disabled && !isResponding && canRespond) {
                 void onRespondToApproval(requestId, option.decision);
               }
             }}
@@ -77,7 +77,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
       {moreOptions.length > 0 ? (
         <Menu>
           <MenuTrigger
-            disabled={disabled || isResponding}
+            disabled={disabled || isResponding || !canRespond}
             render={<Button size="icon-xs" variant="outline" aria-label="更多审批选项" />}
           >
             <EllipsisIcon />
@@ -87,17 +87,19 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
               const item = (
                 <MenuItem
                   key={option.decision}
-                  disabled={disabled || isResponding}
+                  disabled={disabled || isResponding || !canRespond}
                   aria-description={option.warning}
                   onClick={() => {
-                    if (!disabled && !isResponding)
+                    if (!disabled && !isResponding && canRespond)
                       void onRespondToApproval(requestId, option.decision);
                   }}
                   variant="ghost"
                   className="mb-1 last:mb-0"
                 >
                   {option.warning ? <TriangleAlertIcon className="size-3 text-warning" /> : null}
-                  <span className="min-w-0 whitespace-normal wrap-break-word">{displayChatLabel(option.label)}</span>
+                  <span className="min-w-0 whitespace-normal wrap-break-word">
+                    {displayChatLabel(option.label)}
+                  </span>
                 </MenuItem>
               );
               return option.warning ? (

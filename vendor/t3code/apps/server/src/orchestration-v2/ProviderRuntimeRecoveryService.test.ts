@@ -1592,3 +1592,44 @@ it.effect("leaves delegated tasks to their own child threads after process loss"
     assert.deepEqual(noted, [`subagent ${nativeSubagentId}`]);
   }).pipe(Effect.provide(layer));
 });
+
+it.effect("preserves customer execution and approvals across center restart and shutdown", () => {
+  const threadId = ThreadId.make("thread_customer_recovery");
+  const instanceId = ProviderInstanceId.make("customer-11111111-1111-1111-1111-111111111111-codex");
+  const projection = {
+    thread: { id: threadId, providerInstanceId: instanceId },
+    runs: [{ id: RunId.make("run_customer"), status: "running" }],
+    runtimeRequests: [{ id: RuntimeRequestId.make("request_customer"), status: "pending" }],
+    providerSessions: [{ id: ProviderSessionId.make("session_customer"), status: "running" }],
+  } as unknown as OrchestrationV2ThreadProjection;
+  const recovered = vi.fn(() => Effect.void);
+  const write = vi.fn(() =>
+    Effect.die("Remote facts must not be terminalized by center shutdown."),
+  );
+  const layer = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        ServerSettings.layerTest(),
+        Layer.succeed(ProviderRuntimeRecovery.CustomerRuntimeRecovery, { recover: recovered }),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getRecoveryThreadIds: () => Effect.succeed([threadId]),
+          getRuntimeRecoveryProjection: () => Effect.succeed(projection),
+        }),
+        Layer.mock(EventSink.EventSinkV2)({ commitCommand: write }),
+        IdAllocator.layer,
+        Layer.mock(EffectOutbox.EffectOutboxV2)({
+          reconcileAfterProcessLoss: Effect.succeed({ requeued: 1, cancelled: 0 }),
+        }),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+    const started = yield* recovery.reconcile("startup");
+    const stopped = yield* recovery.reconcile("shutdown");
+    assert.equal(started.terminalizedRuns, 0);
+    assert.equal(stopped.closedRequests, 0);
+    assert.equal(recovered.mock.calls.length, 1);
+    assert.equal(write.mock.calls.length, 0);
+  }).pipe(Effect.provide(layer));
+});

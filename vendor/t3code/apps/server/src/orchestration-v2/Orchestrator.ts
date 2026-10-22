@@ -1,3 +1,5 @@
+import { RemoteDeviceService } from "../autoops/RemoteDeviceService.ts";
+import { requestCustomerRunStop } from "../autoops/CustomerRunStop.ts";
 import { isRollbackFrozen } from "../autoops/rollbackSafety.ts";
 import { isAutoOpsEnabled } from "../../../../../../agent-demo/t3-adapters/access.mjs";
 import type {
@@ -915,6 +917,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const providerAdapters = yield* ProviderAdapterRegistryV2;
   const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
   const providerSessions = yield* ProviderSessionManagerV2;
+  const customerDevices = yield* Effect.serviceOption(RemoteDeviceService);
   const providerSwitchService = yield* ProviderSwitchServiceV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const runtimePolicy = yield* RuntimePolicyV2;
@@ -9585,6 +9588,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       type: "run_interrupt_request",
       message: command.reason ?? "Interrupt requested",
     };
+
+    const customerStop = yield* Effect.sync(() => requestCustomerRunStop({
+      hub: Option.getOrUndefined(customerDevices)?.hub, run, providerThread, providerTurn,
+      requestedAt: DateTime.formatIso(now),
+    }));
+    if (customerStop) {
+      yield* emitEvent({
+        type: "turn-item.updated", threadId: command.threadId, runId: run.id,
+        nodeId: rootNode.id, providerInstanceId: run.providerInstanceId, occurredAt: now,
+        payload: {...interruptRequestItem, title: customerStop.state === "pending" ? "等待停止确认" : "停止结果待核实", message: customerStop.message},
+      });
+      yield* stopRemainingWork();
+      return undefined;
+    }
 
     const otherProviderInterrupts: Array<PendingOrchestrationEffectV2> = [];
     if (hasBackgroundWork || command.holdQueue === true) {

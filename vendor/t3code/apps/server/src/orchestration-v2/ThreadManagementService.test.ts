@@ -32,6 +32,7 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { ProviderInstanceAvailability } from "../provider/ProviderInstanceAvailability.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -285,6 +286,47 @@ const layerThreadManagementTest = (settingsLayer: ReturnType<typeof ServerSettin
     Layer.provide(settingsLayer),
     Layer.provide(layerReceiptsTest),
   );
+
+it.effect(
+  "host availability admits a registered dynamic provider without rewriting machine settings",
+  () => {
+    const projectId = ProjectId.make("project:customer");
+    const instanceId = ProviderInstanceId.make("customer-test-codex");
+    const layerTest = layerThreadManagementTest(ServerSettings.layerTest({})).pipe(
+      Layer.provide(
+        Layer.succeed(ProviderInstanceAvailability, {
+          resolve: (input) =>
+            Effect.succeed(
+              input.instanceId === instanceId ? input.projectId === projectId : undefined,
+            ),
+        }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const service = yield* ThreadManagementService.ThreadManagementService;
+      yield* service.assertProviderInstanceEnabled({
+        projectId,
+        instanceId,
+        commandId: CommandId.make("dynamic-provider"),
+      });
+      expect(yield* service.isProviderInstanceEnabledForProject({ projectId, instanceId })).toBe(
+        true,
+      );
+      expect(
+        yield* service.isProviderInstanceEnabledForProject({
+          projectId: ProjectId.make("another-project"),
+          instanceId,
+        }),
+      ).toBe(false);
+      expect(
+        yield* service.isProviderInstanceEnabledForProject({
+          projectId,
+          instanceId: ProviderInstanceId.make("unknown-platform-instance"),
+        }),
+      ).toBe(false);
+    }).pipe(Effect.provide(layerTest));
+  },
+);
 
 it.effect("refuses a new turn when the project effectively disables the instance", () => {
   const projectId = ProjectId.make("project:thread-management:gate-disabled");

@@ -1,3 +1,5 @@
+import { RemoteDeviceService } from "../autoops/RemoteDeviceService.ts";
+import { isCustomerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
@@ -117,6 +119,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
+    const remoteDeviceService = yield* Effect.serviceOption(RemoteDeviceService);
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -386,7 +389,11 @@ export const layer: Layer.Layer<
           });
         },
       );
-      if (message.attachments.length === 0 && message.text.trimStart().startsWith("/")) {
+      if (
+        !isCustomerProviderInstanceId(run.providerInstanceId) &&
+        message.attachments.length === 0 &&
+        message.text.trimStart().startsWith("/")
+      ) {
         const isEmptyCompaction =
           message.text.trim().toLowerCase() === "/compact" && !projection.hasConversation;
         // Preparing a run may already point the thread at a newly selected
@@ -473,7 +480,11 @@ export const layer: Layer.Layer<
         }
       }
       const { worktreePath, branch } = projection.thread;
-      if (worktreePath !== null && branch !== null) {
+      if (
+        !isCustomerProviderInstanceId(run.providerInstanceId) &&
+        worktreePath !== null &&
+        branch !== null
+      ) {
         const exists = yield* fileSystem
           .exists(worktreePath)
           .pipe(Effect.orElseSucceed(() => true));
@@ -1278,7 +1289,35 @@ export const layer: Layer.Layer<
           // Storage cleanup removes worktrees under the same lease. Only startup
           // holds it; the provider turn runs after it is released.
           const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
-          const providerTurn = yield* thread.worktreePath === null
+          const customerHub = Option.isSome(remoteDeviceService)
+            ? remoteDeviceService.value.hub
+            : undefined;
+          if (
+            isCustomerProviderInstanceId(thread.providerInstanceId) &&
+            customerHub !== undefined
+          ) {
+            yield* Effect.tryPromise({
+              try: (signal) => customerHub.acquireWorkspace(input.threadId, input.runId, signal),
+              catch: (cause) => new ProviderTurnStartError({ runId: input.runId, cause }),
+            });
+            yield* Effect.gen(function* () {
+              const providerTurn = yield* start(input);
+              if (providerTurn !== undefined) yield* providerTurn;
+            }).pipe(
+              Effect.ensuring(
+                Effect.promise(() =>
+                  Promise.resolve(
+                    customerHub.releaseWorkspace(input.threadId, input.runId, {
+                      onlyIfNotDispatched: true,
+                    }),
+                  ),
+                ),
+              ),
+            );
+            return;
+          }
+          const providerTurn = yield* thread.worktreePath === null ||
+          isCustomerProviderInstanceId(thread.providerInstanceId)
             ? start(input)
             : withWorkspaceLease(path.resolve(thread.worktreePath), start(input));
           if (providerTurn !== undefined) yield* providerTurn;

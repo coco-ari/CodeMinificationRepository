@@ -1,4 +1,8 @@
+import type { DatabaseSync } from 'node:sqlite';
+import type { WorkspaceStore } from './workspaces.mjs';
 import type { ProductProfile } from './product-profile.mjs';
+import type { CustomerRegistry, ExecutionBinding } from './customer-registry.mjs';
+export type { ExecutionBinding, CustomerExecutionBinding } from './customer-registry.mjs';
 export interface AutoOpsPrincipal {
   readonly id: string;
   readonly displayName: string;
@@ -9,6 +13,7 @@ export interface AutoOpsPrincipal {
 }
 export interface ThreadBinding {
   readonly threadId: string;
+  readonly executionBinding: ExecutionBinding;
   readonly projectId: string;
   readonly environmentId: string;
   readonly agentId: string;
@@ -42,7 +47,10 @@ export interface AutoOpsProject {
 export interface AutoOpsAgent { id: string; name: string; description: string; projectIds: string[]; capabilities: string[] }
 export interface ToolScope { binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
 export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
+export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding};
 export interface AutoOpsAccess {
+  readonly customerRegistry: CustomerRegistry;
+  requireThreadExecution(principal: AutoOpsPrincipal, threadId: string, options?: {requireOnline?: boolean}): ThreadBinding;
   authenticateCookie(cookie?: string): AutoOpsPrincipal;
   refresh(principal: AutoOpsPrincipal): AutoOpsPrincipal;
   requireProject(principal: AutoOpsPrincipal, projectId: string): AutoOpsProject;
@@ -57,8 +65,8 @@ export interface AutoOpsAccess {
   visibleThreadIds(principal: AutoOpsPrincipal): string[];
   requireThread(principal: AutoOpsPrincipal, threadId: string): ThreadBinding;
   markThreadDeleted(threadId: string): void;
-  bindThread(principal: AutoOpsPrincipal, input: Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'>): ThreadBinding;
-  reserveThread(principal: AutoOpsPrincipal, input: Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'>): ThreadBinding;
+  bindThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding;
+  reserveThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding;
   beginThreadSubmission(principal: AutoOpsPrincipal, threadId: string, commandId: string): ThreadBinding;
   finishThreadSubmission(threadId: string, commandId: string, accepted: boolean): ThreadBinding | undefined;
   markThreadAccepted(threadId: string): ThreadBinding | undefined;
@@ -80,6 +88,7 @@ export interface AutoOpsAccess {
     principal: {id: string; displayName: string; role:string}; csrfToken: string; gatewayBasePath: string;
     fixedModel: {instanceId: 'codex'; model: string}; runtimeMode: 'approval-required';
     modelSelectionEnabled:boolean;
+    customerAgentsEnabled:boolean;
     projects: (Pick<AutoOpsProject, 'id'|'name'|'environments'> & {agents: {id:string; name:string}[];membership:ProjectMembership})[];
     agents: AutoOpsAgent[];
     productProfile: {id: ProductProfile['id']};
@@ -93,3 +102,6 @@ export function configuredAutoOpsProjects(): AutoOpsProject[];
 export function configuredAutoOpsAccess(): AutoOpsAccess | undefined;
 export function getThreadBinding(threadId: string): ThreadBinding | undefined;
 export function requireToolThread(threadId: string): ToolScope;
+
+export function initializeAutoOpsAccessSchema(db: DatabaseSync): void;
+export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry}): AutoOpsAccess;

@@ -185,8 +185,8 @@ export function AutoOpsSkillsSettings() {
         }
       >
         <SettingsRow
-          title="使用技能"
-          description="在对话中输入 $ 搜索并选择技能，点击技能标签可查看说明。管理员管理的技能由工作台共享，所有项目成员可见。"
+          title={host?.customerAgentsEnabled ? "使用平台技能" : "使用技能"}
+          description={host?.customerAgentsEnabled ? "这里管理平台共享技能；客户本机技能在对应客户工作区的对话中输入 $ 选择。" : "在对话中输入 $ 搜索并选择技能，点击技能标签可查看说明。管理员管理的技能由工作台共享，所有项目成员可见。"}
         />
         {catalog?.skills.map((skill) => (
           <SettingsRow

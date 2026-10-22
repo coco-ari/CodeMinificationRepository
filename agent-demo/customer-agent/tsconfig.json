@@ -1,0 +1,5 @@
+{
+  "extends": "../../vendor/t3code/tsconfig.base.json",
+  "compilerOptions": { "types": ["node"], "lib": ["ESNext", "DOM", "esnext.disposable"] },
+  "include": ["*.ts"]
+}

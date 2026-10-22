@@ -9,7 +9,7 @@ export interface HostTurnConfiguration {
   readonly runtimeMode: RuntimeMode
 }
 export interface ClientHostIntegration {
-  readonly turnConfiguration?: () => HostTurnConfiguration
+  readonly turnConfiguration?: (input?: {readonly threadId: string}) => HostTurnConfiguration
   /** Runs before attachment persistence and native launch; failure aborts both. */
   readonly beforeThreadLaunch?: (input: HostThreadLaunch) => Promise<void>
 }
@@ -21,6 +21,6 @@ export async function prepareHostThreadLaunch(input: HostThreadLaunch): Promise<
   await integration.beforeThreadLaunch?.(input)
 }
 
-export function readHostTurnConfiguration(): HostTurnConfiguration | undefined {
-  return integration.turnConfiguration?.()
+export function readHostTurnConfiguration(input?: {readonly threadId: string}): HostTurnConfiguration | undefined {
+  return integration.turnConfiguration?.(input)
 }

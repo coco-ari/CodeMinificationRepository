@@ -1,4 +1,8 @@
-import { forThread as autoOpsThreadSettings, applyProductSettings } from "../autoops/personalSettings.ts";
+import { isCustomerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
+import {
+  forThread as autoOpsThreadSettings,
+  applyProductSettings,
+} from "../autoops/personalSettings.ts";
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -564,6 +568,7 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly attempt: OrchestrationV2RunAttempt;
   readonly attemptId: RunAttemptId;
   readonly providerTurnOrdinal: number;
+  readonly resumeOnly?: boolean;
   readonly nativeThreadHasTurns?: boolean;
   readonly loadInheritedBackgroundTurnItems?: () => Effect.Effect<
     ReadonlyArray<InheritedBackgroundTurnItemRoute>,
@@ -626,6 +631,7 @@ export const layer: Layer.Layer<
         readonly terminal: ProviderTerminalEvent;
         readonly completedAt?: DateTime.Utc;
         readonly failureItemPersisted: boolean;
+        readonly persistenceKey?: CommandId;
         readonly refreshAfterTurn: Effect.Effect<void>;
         readonly writeIfRunCurrent?: {
           readonly activeAttemptId: RunAttemptId;
@@ -692,8 +698,9 @@ export const layer: Layer.Layer<
                 allocateEventId,
               })
             : [];
-        const persistedStatus =
-          input.terminal.status === "completed" ? "waiting" : input.terminal.status;
+        const customer = isCustomerProviderInstanceId(input.run.providerInstanceId);
+        const needsCheckpoint = !customer && input.terminal.status === "completed";
+        const persistedStatus = needsCheckpoint ? "waiting" : input.terminal.status;
         // Completion cohorts are advanced by Orchestrator while a provider
         // turn is in flight. Do not replay the run snapshot captured at start
         // over a newer acknowledgement, successor, or Stop barrier.
@@ -702,12 +709,12 @@ export const layer: Layer.Layer<
         const finalizedRun: OrchestrationV2Run = {
           ...runWithoutDelegatedCompletion,
           status: persistedStatus,
-          completedAt: input.terminal.status === "completed" ? null : completedAt,
+          completedAt: needsCheckpoint ? null : completedAt,
         };
         const finalizedRootNode: OrchestrationV2ExecutionNode = {
           ...input.rootNode,
           status: persistedStatus,
-          completedAt: input.terminal.status === "completed" ? null : completedAt,
+          completedAt: needsCheckpoint ? null : completedAt,
           checkpointScopeId: input.checkpointScope.id,
         };
         const finalizedProviderThread: OrchestrationV2ProviderThread = {
@@ -725,10 +732,12 @@ export const layer: Layer.Layer<
         // the next message. The capture is enqueued with these terminal events,
         // ahead of any later run's start on this thread's effect lane.
         const finalization = {
+          ...(input.persistenceKey === undefined ? {} : { commandId: input.persistenceKey }),
           effects:
-            input.terminal.status === "completed" ||
-            input.terminal.status === "interrupted" ||
-            input.terminal.status === "cancelled"
+            !customer &&
+            (input.terminal.status === "completed" ||
+              input.terminal.status === "interrupted" ||
+              input.terminal.status === "cancelled")
               ? [
                   {
                     id: `effect:checkpoint.capture:${input.run.id}`,
@@ -840,6 +849,7 @@ export const layer: Layer.Layer<
             expectedStatus: input.writeIfRunCurrent.expectedStatus,
             events: finalization.events,
             effects: finalization.effects,
+            ...(input.persistenceKey === undefined ? {} : { commandId: input.persistenceKey }),
           });
           if (!result.committed) {
             return;
@@ -853,9 +863,13 @@ export const layer: Layer.Layer<
 
     return RunExecutionServiceV2.of({
       startRootRun: Effect.fn("RunExecutionService.startRootRun")(function* (input) {
+        const customer = isCustomerProviderInstanceId(input.run.providerInstanceId);
         // Startup failure and stream shutdown can report the same attempt.
         const refreshAfterTurn = yield* Effect.cached(
-          finalizationObserver.refreshAfterTurn(input.appThread.projectId).pipe(
+          (customer
+            ? Effect.void
+            : finalizationObserver.refreshAfterTurn(input.appThread.projectId)
+          ).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("failed to refresh pull requests after run termination", {
                 threadId: input.run.threadId,
@@ -888,25 +902,30 @@ export const layer: Layer.Layer<
           const responseStreamingMode = yield* serverSettings.getSettings.pipe(
             Effect.map(
               (settings) =>
-                applyProductSettings(resolveProjectSettings(autoOpsThreadSettings(input.appThread.id,settings), input.appThread.projectId).settings)
-                  .responseStreamingMode,
+                applyProductSettings(
+                  resolveProjectSettings(
+                    autoOpsThreadSettings(input.appThread.id, settings),
+                    input.appThread.projectId,
+                  ).settings,
+                ).responseStreamingMode,
             ),
           );
-          yield* checkpointService
-            .captureBaseline({
-              scope: input.checkpointScope,
-              ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
-            })
-            .pipe(
-              Effect.catchCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.failCause(cause)
-                  : Effect.logWarning(
-                      "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
-                      { runId: input.run.id },
-                    ),
-              ),
-            );
+          if (!customer && !input.resumeOnly)
+            yield* checkpointService
+              .captureBaseline({
+                scope: input.checkpointScope,
+                ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.logWarning(
+                        "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
+                        { runId: input.run.id },
+                      ),
+                ),
+              );
           if (
             input.shouldStartProviderTurn !== undefined &&
             !(yield* input.shouldStartProviderTurn())
@@ -1044,6 +1063,9 @@ export const layer: Layer.Layer<
             openRunOwnedSubagents: openSubagents,
             terminal,
             failureItemPersisted: terminal.status === "failed",
+            ...(input.session.eventPersistenceKey?.(terminal) === undefined
+              ? {}
+              : { persistenceKey: input.session.eventPersistenceKey!(terminal)! }),
             refreshAfterTurn,
           }).pipe(
             Effect.mapError((cause) => new RunExecutionIngestError({ runId: input.run.id, cause })),
@@ -1320,10 +1342,9 @@ export const layer: Layer.Layer<
             Effect.gen(function* () {
               if (!accepted) return;
               let storedEventCount = 0;
-              const deliveredEvent = filterAssistantEvent(
-                event,
-                DateTime.toEpochMillis(yield* DateTime.now),
-              );
+              const deliveredEvent = customer
+                ? event
+                : filterAssistantEvent(event, DateTime.toEpochMillis(yield* DateTime.now));
               if (deliveredEvent) {
                 const rootTerminalAlreadySeen = yield* Ref.get(rootTerminalSeen);
                 const isRootProviderThreadUpdate =
@@ -1341,6 +1362,9 @@ export const layer: Layer.Layer<
                   runId: input.run.id,
                   nodeId: input.rootNode.id,
                   event: deliveredEvent,
+                  ...(input.session.eventPersistenceKey?.(event) === undefined
+                    ? {}
+                    : { commandId: input.session.eventPersistenceKey!(event)! }),
                   ...(isRootProviderThreadUpdate
                     ? rootTerminalAlreadySeen
                       ? {
@@ -1401,7 +1425,12 @@ export const layer: Layer.Layer<
                 yield* finalizeRootRun(event);
               }
               yield* trackChildLifecycle(event, deliveredEvent !== null);
-            }),
+              if (deliveredEvent !== null)
+                yield* input.session.acknowledgeEvent?.(event) ?? Effect.void;
+            }).pipe(Effect.retry({
+              while: () => customer,
+              schedule: Schedule.exponential("1 second").pipe(Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(30))))),
+            })),
           ),
           Stream.takeUntilEffect(() => shouldStopProviderEventIngestion),
           Stream.runDrain,
@@ -1435,7 +1464,7 @@ export const layer: Layer.Layer<
                   runId: input.run.id,
                   cause,
                 });
-                if (yield* Ref.get(rootRunFinalized)) return;
+                if (customer || (yield* Ref.get(rootRunFinalized))) return;
                 const providerThread = yield* Ref.get(latestProviderThread);
                 const latestItemOrdinal = yield* Ref.get(latestTurnItemOrdinal);
                 const openSubagents = yield* Ref.get(openRunOwnedSubagents);
@@ -1499,25 +1528,29 @@ export const layer: Layer.Layer<
           Effect.forkDetach,
         );
 
+        if (input.resumeOnly) return;
+
         // A provider turn is a sign that the session is still alive. Keep
         // its already-issued MCP credential valid even when the agent goes
         // a long time between browser-tool calls.
-        const touchMcpCredential = McpSessionRegistry.touchActiveMcpThread(input.run.threadId).pipe(
+        const touchMcpCredential = (
+          customer ? Effect.void : McpSessionRegistry.touchActiveMcpThread(input.run.threadId)
+        ).pipe(
           Effect.ignoreCause({
             log: true,
             message: "Failed to refresh MCP credential liveness.",
           }),
         );
         yield* touchMcpCredential;
-        const appContext = (yield* mcpAppModelContext
-          .forThread(input.run.threadId)
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("Failed to read MCP app model context.", { cause }).pipe(
-                Effect.as([]),
-              ),
+        const appContext = (yield* (
+          customer ? Effect.succeed([]) : mcpAppModelContext.forThread(input.run.threadId)
+        ).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Failed to read MCP app model context.", { cause }).pipe(
+              Effect.as([]),
             ),
-          )).map((entry) => ({
+          ),
+        )).map((entry) => ({
           // The item id alone is unique and needs no escaping; server and
           // tool names are free text that would break the tag Codex wraps
           // the context in.
@@ -1582,52 +1615,57 @@ export const layer: Layer.Layer<
             ),
           ),
           Effect.catchCause((cause) =>
-            Effect.logError("orchestration V2 provider turn start failed", {
-              runId: input.run.id,
-              cause,
-            }).pipe(
-              Effect.andThen(Fiber.interrupt(providerEventFiber)),
-              Effect.andThen(Ref.get(latestProviderThread)),
-              Effect.flatMap((providerThread) =>
-                Ref.get(latestTurnItemOrdinal).pipe(
-                  Effect.flatMap((latestItemOrdinal) =>
-                    Ref.get(openRunOwnedSubagents).pipe(
-                      Effect.flatMap((openSubagents) =>
-                        writeFinalRunEvents({
-                          run: input.run,
-                          rootNode: input.rootNode,
-                          checkpointScope: input.checkpointScope,
-                          providerThread,
-                          attempt: input.attempt,
-                          writeIfRunCurrent: {
-                            activeAttemptId: input.attempt.id,
-                            expectedStatus: "running",
-                          },
-                          openRunOwnedSubagents: openSubagents,
-                          terminal: makeFailedTerminalEvent(
-                            makeProviderFailure({
-                              cause: Cause.squash(cause),
-                              class: Exit.isFailure(shouldStart) ? "unknown" : "provider_error",
+            customer && !isKnownNotStarted(Cause.squash(cause))
+              ? Effect.logWarning(
+                  "Customer turn acceptance is unknown; retaining its run until device reconciliation.",
+                  { runId: input.run.id },
+                )
+              : Effect.logError("orchestration V2 provider turn start failed", {
+                  runId: input.run.id,
+                  cause,
+                }).pipe(
+                  Effect.andThen(Fiber.interrupt(providerEventFiber)),
+                  Effect.andThen(Ref.get(latestProviderThread)),
+                  Effect.flatMap((providerThread) =>
+                    Ref.get(latestTurnItemOrdinal).pipe(
+                      Effect.flatMap((latestItemOrdinal) =>
+                        Ref.get(openRunOwnedSubagents).pipe(
+                          Effect.flatMap((openSubagents) =>
+                            writeFinalRunEvents({
+                              run: input.run,
+                              rootNode: input.rootNode,
+                              checkpointScope: input.checkpointScope,
+                              providerThread,
+                              attempt: input.attempt,
+                              writeIfRunCurrent: {
+                                activeAttemptId: input.attempt.id,
+                                expectedStatus: "running",
+                              },
+                              openRunOwnedSubagents: openSubagents,
+                              terminal: makeFailedTerminalEvent(
+                                makeProviderFailure({
+                                  cause: Cause.squash(cause),
+                                  class: Exit.isFailure(shouldStart) ? "unknown" : "provider_error",
+                                }),
+                                latestItemOrdinal + 1,
+                              ),
+                              failureItemPersisted: false,
+                              refreshAfterTurn,
                             }),
-                            latestItemOrdinal + 1,
                           ),
-                          failureItemPersisted: false,
-                          refreshAfterTurn,
-                        }),
+                        ),
                       ),
                     ),
                   ),
+                  Effect.mapError(
+                    (writeCause) =>
+                      new RunExecutionStartError({
+                        commandId: input.commandId,
+                        runId: input.run.id,
+                        cause: { start: cause, write: writeCause },
+                      }),
+                  ),
                 ),
-              ),
-              Effect.mapError(
-                (writeCause) =>
-                  new RunExecutionStartError({
-                    commandId: input.commandId,
-                    runId: input.run.id,
-                    cause: { start: cause, write: writeCause },
-                  }),
-              ),
-            ),
           ),
         );
       }),
@@ -1666,4 +1704,10 @@ export function makeInterruptResultTurnItem(input: {
     type: "run_interrupt_result",
     message: "Run interrupted by user",
   };
+}
+
+function isKnownNotStarted(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ("outcome" in error && error.outcome === "not_started") return true;
+  return "cause" in error && isKnownNotStarted(error.cause);
 }

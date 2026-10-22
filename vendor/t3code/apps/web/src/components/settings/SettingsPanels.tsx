@@ -177,6 +177,7 @@ import {
 import { searchableSetting } from './settingsSearch'
 import { ProjectFavicon } from '../ProjectFavicon'
 import { PanelAnimationsPreview } from './PanelAnimationsPreview'
+import { CustomerDevicesSettings } from '../../autoops/CustomerDevicesSettings'
 import { AutoOpsSkillsSettings } from '../../autoops/SkillsSettings'
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
@@ -2125,8 +2126,8 @@ function AutoOpsRuntimeSettings() {
       />
       <SettingsRow
         id="autoops-permissions"
-        title="执行权限"
-        description="仅访问当前项目与对话授权的资料及工具。"
+        title={host?.customerAgentsEnabled ? "平台执行权限" : "执行权限"}
+        description={host?.customerAgentsEnabled ? "平台仅访问当前项目与对话授权的资料及工具；客户工作区按客户本机配置执行。" : "仅访问当前项目与对话授权的资料及工具。"}
         control={<span className="text-sm text-muted-foreground">受控执行</span>}
       />
     </SettingsSection>
@@ -2230,7 +2231,7 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       {isAutoOpsLite() ? <AutoOpsRuntimeSettings /> : <ProjectDefaultsSettings category="general" />}
-      {isAutoOpsHosted() ? <AutoOpsSkillsSettings /> : null}
+      {isAutoOpsHosted() ? <><CustomerDevicesSettings /><AutoOpsSkillsSettings /></> : null}
       <SettingsSection id="organization" title="对话整理">
         <SettingsRow
           {...searchableSetting('project-grouping')}

@@ -133,6 +133,10 @@ const SOURCE_CONTROL_HOST_SEARCH_ITEMS = sourceControlClients.definitions.flatMa
 
 export const SETTINGS_SEARCH_ITEMS = [
   {
+    id: 'autoops-customer-devices', title: '我的电脑', to: '/settings/general',
+    searchTerms: ['客户 Agent 远程 设备 配对 连接 本机 工作区 Codex'],
+  },
+  {
     id: 'autoops-skills', title: '技能', to: '/settings/general',
     searchTerms: ['skill skills SKILL.md 导入 启用 停用 项目资料解读 环境健康检查 发布准备报告'],
   },

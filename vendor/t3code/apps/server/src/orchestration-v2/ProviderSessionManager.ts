@@ -1,8 +1,11 @@
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
+import { isCustomerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   isOrchestrationV2WorkActive,
+  type CommandId,
   ModelSelection,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProviderSession,
@@ -17,6 +20,7 @@ import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -151,6 +155,7 @@ export interface ProviderSessionManagerV2Shape {
     readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
     readonly resumeFromSession?: OrchestrationV2ProviderSession;
     readonly initialNativeThreadId?: string;
+    readonly reattachOnly?: boolean;
     readonly initialProviderItemIdentityVersion?: 2;
   }) => Effect.Effect<
     ProviderAdapter.ProviderAdapterV2SessionRuntime,
@@ -203,6 +208,8 @@ interface LiveSessionEntry {
   readonly eventSubscribers: Ref.Ref<
     ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
   >;
+  readonly remoteEvents?: Queue.Queue<ProviderSessionEventSignal, Cause.Done>;
+  readonly remoteTerminalAcks?: WeakMap<object, Deferred.Deferred<void>>;
   readonly requestEventPermit: Semaphore.Semaphore;
   readonly scope: Scope.Closeable;
   readonly idleGeneration: number;
@@ -324,6 +331,9 @@ export const layerWithOptions = (
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
+      const commandReceipts = yield* Effect.serviceOption(
+        CommandReceiptStore.CommandReceiptStoreV2,
+      );
       const commandOutput = yield* CommandOutputHub.CommandOutputHub;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
@@ -436,7 +446,7 @@ export const layerWithOptions = (
         threadId: ThreadId,
         providerInstanceId: ProviderInstanceId,
       ): Effect.Effect<PreparedMcpCredential> =>
-        options.configureMcp === false
+        options.configureMcp === false || isCustomerProviderInstanceId(providerInstanceId)
           ? mcpSessions
               .clear(threadId)
               .pipe(Effect.as<PreparedMcpCredential>({ mcpCredentialId: undefined, issued: false }))
@@ -581,6 +591,7 @@ export const layerWithOptions = (
         readonly threadIds: Iterable<ThreadId>;
         readonly type: "provider-session.attached" | "provider-session.updated";
         readonly payload: OrchestrationV2ProviderSession;
+        readonly commandId?: CommandId;
       }) {
         const now = yield* DateTime.now;
         const events = yield* Effect.forEach(input.threadIds, (threadId) =>
@@ -600,7 +611,10 @@ export const layerWithOptions = (
           }),
         );
         if (events.length > 0) {
-          yield* eventSink.write({ events });
+          yield* eventSink.write({
+            events,
+            ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+          });
         }
       });
 
@@ -1007,6 +1021,16 @@ export const layerWithOptions = (
               onNone: () => Effect.void,
               onSome: (entry) =>
                 Effect.gen(function* () {
+                  if (entry.remoteEvents !== undefined) {
+                    // Closing the center's subscription does not stop the customer's process.
+                    yield* cancelIdleFiber(entry.idleFiber);
+                    yield* Queue.interrupt(entry.remoteEvents);
+                    yield* closeScopeWithin(entry.scope, {
+                      providerSessionId: input.providerSessionId,
+                      reason: input.reason,
+                    });
+                    return;
+                  }
                   const releasedBackgroundTasks = yield* readReleasedBackgroundTasks({
                     entry,
                     reason: input.reason,
@@ -1717,9 +1741,31 @@ export const layerWithOptions = (
         eventSubscribers: Ref.Ref<
           ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
         >,
+        remoteEvents?: Queue.Queue<ProviderSessionEventSignal, Cause.Done>,
+        remoteTerminalAcks?: WeakMap<object, Deferred.Deferred<void>>,
       ): ProviderAdapter.ProviderAdapterV2SessionRuntime => {
         const providerSessionId = runtime.providerSessionId;
-        const subscribeEvents = makeEventSubscription(eventSubscribers);
+        const remoteReader = Semaphore.makeUnsafe(1);
+        const subscribeEvents =
+          remoteEvents === undefined
+            ? makeEventSubscription(eventSubscribers)
+            : Effect.gen(function* () {
+                yield* remoteReader.take(1);
+                const close = yield* Effect.cached(remoteReader.release(1).pipe(Effect.asVoid));
+                return {
+                  // A customer session has exactly one app thread. Preserve pending events
+                  // across root subscriptions; never clear unacknowledged durable input.
+                  events: Stream.fromQueue(remoteEvents).pipe(
+                    Stream.mapEffect((signal) =>
+                      signal.type === "event"
+                        ? Effect.succeed(signal.event)
+                        : Effect.failCause(signal.cause),
+                    ),
+                    Stream.ensuring(close),
+                  ),
+                  close,
+                };
+              });
         const turnMetrics = (operation: string, model?: string) =>
           withMetrics({
             counter: providerTurnsTotal,
@@ -1732,6 +1778,21 @@ export const layerWithOptions = (
           });
         return {
           ...runtime,
+          ...(runtime.acknowledgeEvent === undefined
+            ? {}
+            : {
+                acknowledgeEvent: (event: ProviderAdapter.ProviderAdapterV2Event) =>
+                  runtime.acknowledgeEvent!(event).pipe(
+                    Effect.andThen(
+                      Effect.suspend(() => {
+                        const signal = remoteTerminalAcks?.get(event);
+                        return signal === undefined
+                          ? Effect.void
+                          : Deferred.succeed(signal, undefined);
+                      }),
+                    ),
+                  ),
+              }),
           subscribeEvents,
           events: Stream.unwrap(
             subscribeEvents.pipe(Effect.map((subscription) => subscription.events)),
@@ -1913,118 +1974,285 @@ export const layerWithOptions = (
             threadIds: current.attachedThreadIds,
             type: "provider-session.updated",
             payload: event.providerSession,
+            ...(entry.runtime.eventPersistenceKey?.(event) === undefined
+              ? {}
+              : { commandId: entry.runtime.eventPersistenceKey!(event)! }),
           });
         },
         (effect, entry, _event) =>
-          effect.pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("orchestration-v2.driver-session.status-persist-failed", {
-                providerSessionId: entry.runtime.providerSessionId,
-                cause,
-              }),
-            ),
-          ),
+          entry.runtime.acknowledgeEvent !== undefined
+            ? effect
+            : effect.pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("orchestration-v2.driver-session.status-persist-failed", {
+                    providerSessionId: entry.runtime.providerSessionId,
+                    cause,
+                  }),
+                ),
+              ),
       );
 
       const startEventPump = (entry: LiveSessionEntry) => {
         let stoppedByProvider = false;
+        // Customer routing needs only ownership/status, never historical message bodies.
+        let customerProjection:
+          | ProjectionStore.ProjectionRecords<"runs" | "attempts" | "nodes">
+          | undefined;
         return entry.runtime.events.pipe(
-          Stream.runForEach((event) => {
-            if (shutdownSignal.received) return Effect.void;
-            // Live output skips run subscribers and ingestion entirely: it is
-            // never persisted, and a flood of it must not queue ahead of real events.
-            if (event.type === "command_output.delta") {
-              return commandOutput.append(event);
-            }
-            // A settled item carries its final output, so its live tail can go.
-            const releaseLiveOutput =
-              event.type === "turn_item.updated" &&
-              event.turnItem.type === "command_execution" &&
-              !isOrchestrationV2WorkActive(event.turnItem.status)
-                ? commandOutput.finish({
-                    threadId: event.turnItem.threadId,
-                    itemId: event.turnItem.id,
-                  })
-                : Effect.void;
-            if (
-              event.type === "provider_session.updated" &&
-              event.providerSession.status === "stopped"
-            ) {
-              stoppedByProvider = true;
-            }
-            return observeActivity(
-              entry.runtime.providerSessionId,
-              event.type === "turn.terminal"
-                ? markIdle(
-                    entry.runtime.providerSessionId,
-                    event.providerThreadId,
-                    event.runOrdinal,
-                  )
-                : touchActivity(entry.runtime.providerSessionId, { providerActivity: true }),
-            ).pipe(
-              Effect.andThen(
-                event.type === "provider_session.updated"
-                  ? persistProviderSessionUpdate(entry, event)
-                  : Effect.void,
-              ),
-              Effect.andThen(
-                Effect.gen(function* () {
-                  if (
-                    event.type === "provider_thread.updated" &&
-                    event.providerThread.status === "error"
-                  ) {
-                    const threadId = event.providerThread.appThreadId;
-                    yield* Ref.update(sessions, (sessions) => {
-                      const key = sessionKey(entry.runtime.providerSessionId);
-                      const latest = sessions.get(key);
-                      if (latest?.runtime !== entry.runtime || threadId === null) return sessions;
-                      const loadedProviderThreadKeyByThread = new Map(
-                        latest.loadedProviderThreadKeyByThread,
-                      );
-                      loadedProviderThreadKeyByThread.delete(threadId);
-                      return new Map(sessions).set(key, {
-                        ...latest,
-                        loadedProviderThreadKeyByThread,
-                      });
-                    });
-                  }
-                  // Some providers can block before a run subscriber exists
-                  // (project trust, login, or session-switch hooks). Persist
-                  // their runless request artifacts directly so the normal T3
-                  // request UI can answer them and unblock session setup.
-                  const threadId = sessionScopedRuntimeRequestThreadId(event);
-                  if (threadId !== undefined) {
-                    yield* Effect.gen(function* () {
-                      const current = (yield* Ref.get(sessions)).get(
-                        sessionKey(entry.runtime.providerSessionId),
-                      );
-                      if (current?.runtime !== entry.runtime) return;
-                      yield* providerEventIngestor
-                        .ingestNormalized({
-                          providerSessionId: entry.runtime.providerSessionId,
-                          providerInstanceId: entry.runtime.instanceId,
-                          threadId,
+          Stream.runForEach((event) =>
+            Effect.gen(function* () {
+              if (shutdownSignal.received) return;
+              const persistenceKey = entry.runtime.eventPersistenceKey?.(event);
+              if (
+                persistenceKey !== undefined &&
+                Option.isSome(commandReceipts) &&
+                Option.isSome(yield* commandReceipts.value.getByCommandId(persistenceKey))
+              ) {
+                yield* entry.runtime.acknowledgeEvent?.(event) ?? Effect.void;
+                return;
+              }
+              return yield* Effect.suspend(() => {
+                // Live output skips run subscribers and ingestion entirely: it is
+                // never persisted, and a flood of it must not queue ahead of real events.
+                if (event.type === "command_output.delta") {
+                  return commandOutput
+                    .append(event)
+                    .pipe(Effect.andThen(entry.runtime.acknowledgeEvent?.(event) ?? Effect.void));
+                }
+                // A settled item carries its final output, so its live tail can go.
+                const releaseLiveOutput =
+                  event.type === "turn_item.updated" &&
+                  event.turnItem.type === "command_execution" &&
+                  !isOrchestrationV2WorkActive(event.turnItem.status)
+                    ? commandOutput.finish({
+                        threadId: event.turnItem.threadId,
+                        itemId: event.turnItem.id,
+                      })
+                    : Effect.void;
+                if (
+                  event.type === "provider_session.updated" &&
+                  event.providerSession.status === "stopped"
+                ) {
+                  stoppedByProvider = true;
+                }
+                return observeActivity(
+                  entry.runtime.providerSessionId,
+                  event.type === "turn.terminal"
+                    ? markIdle(
+                        entry.runtime.providerSessionId,
+                        event.providerThreadId,
+                        event.runOrdinal,
+                      )
+                    : touchActivity(entry.runtime.providerSessionId, { providerActivity: true }),
+                ).pipe(
+                  Effect.andThen(
+                    event.type === "provider_session.updated"
+                      ? persistProviderSessionUpdate(entry, event)
+                      : Effect.void,
+                  ),
+                  Effect.andThen(
+                    Effect.gen(function* () {
+                      if (
+                        event.type === "provider_thread.updated" &&
+                        event.providerThread.status === "error"
+                      ) {
+                        const threadId = event.providerThread.appThreadId;
+                        yield* Ref.update(sessions, (sessions) => {
+                          const key = sessionKey(entry.runtime.providerSessionId);
+                          const latest = sessions.get(key);
+                          if (latest?.runtime !== entry.runtime || threadId === null)
+                            return sessions;
+                          const loadedProviderThreadKeyByThread = new Map(
+                            latest.loadedProviderThreadKeyByThread,
+                          );
+                          loadedProviderThreadKeyByThread.delete(threadId);
+                          return new Map(sessions).set(key, {
+                            ...latest,
+                            loadedProviderThreadKeyByThread,
+                          });
+                        });
+                      }
+                      if (
+                        event.type === "provider_session.updated" &&
+                        entry.remoteEvents !== undefined
+                      ) {
+                        yield* entry.runtime.acknowledgeEvent?.(event) ?? Effect.void;
+                        return;
+                      }
+                      // Some providers can block before a run subscriber exists
+                      // (project trust, login, or session-switch hooks). Persist
+                      // their runless request artifacts directly so the normal T3
+                      // request UI can answer them and unblock session setup.
+                      const threadId = sessionScopedRuntimeRequestThreadId(event);
+                      if (threadId !== undefined) {
+                        yield* Effect.gen(function* () {
+                          const current = (yield* Ref.get(sessions)).get(
+                            sessionKey(entry.runtime.providerSessionId),
+                          );
+                          if (current?.runtime !== entry.runtime) return;
+                          yield* providerEventIngestor
+                            .ingestNormalized({
+                              providerSessionId: entry.runtime.providerSessionId,
+                              providerInstanceId: entry.runtime.instanceId,
+                              threadId,
+                              event,
+                              ...(entry.runtime.eventPersistenceKey?.(event) === undefined
+                                ? {}
+                                : { commandId: entry.runtime.eventPersistenceKey!(event)! }),
+                            })
+                            .pipe(
+                              Effect.mapError(
+                                (cause) =>
+                                  new ProviderAdapter.ProviderAdapterEventStreamError({
+                                    driver: entry.runtime.driver,
+                                    providerSessionId: entry.runtime.providerSessionId,
+                                    cause,
+                                  }),
+                              ),
+                            );
+                        }).pipe(entry.requestEventPermit.withPermits(1));
+                        yield* entry.runtime.acknowledgeEvent?.(event) ?? Effect.void;
+                        return;
+                      }
+                      if (entry.remoteEvents !== undefined) {
+                        const threadId = [...entry.attachedThreadIds][0];
+                        if (threadId !== undefined) {
+                          const runHint =
+                            event.type === "message.updated"
+                              ? event.message.runId
+                              : event.type === "node.updated"
+                                ? event.node.runId
+                                : event.type === "turn_item.updated"
+                                  ? event.turnItem.runId
+                                  : undefined;
+                          const refresh =
+                            customerProjection === undefined ||
+                            event.type === "turn.terminal" ||
+                            (runHint != null &&
+                              !customerProjection.runs.some((run) => run.id === runHint)) ||
+                            (event.type === "provider_turn.updated" &&
+                              !customerProjection.attempts.some(
+                                (attempt) => attempt.id === event.providerTurn.runAttemptId,
+                              )) ||
+                            (event.type === "runtime_request.updated" &&
+                              !customerProjection.nodes.some(
+                                (node) => node.id === event.runtimeRequest.nodeId,
+                              )) ||
+                            (event.type === "provider_thread.updated" &&
+                              event.providerThread.lastRunOrdinal !== null &&
+                              !customerProjection.runs.some(
+                                (run) => run.ordinal === event.providerThread.lastRunOrdinal,
+                              ));
+                          if (refresh)
+                            customerProjection = yield* projectionStore.getThreadRecords(threadId, [
+                              "runs",
+                              "attempts",
+                              "nodes",
+                            ]);
+                          const projection = customerProjection!;
+                          const eventRunId =
+                            event.type === "message.updated"
+                              ? event.message.runId
+                              : event.type === "node.updated"
+                                ? event.node.runId
+                                : event.type === "turn_item.updated"
+                                  ? event.turnItem.runId
+                                  : event.type === "provider_turn.updated"
+                                    ? projection.attempts.find(
+                                        (attempt) => attempt.id === event.providerTurn.runAttemptId,
+                                      )?.runId
+                                    : event.type === "runtime_request.updated"
+                                      ? projection.nodes.find(
+                                          (node) => node.id === event.runtimeRequest.nodeId,
+                                        )?.runId
+                                      : event.type === "turn.terminal"
+                                        ? projection.runs.find(
+                                            (run) =>
+                                              run.ordinal === event.runOrdinal &&
+                                              run.providerThreadId === event.providerThreadId,
+                                          )?.id
+                                        : event.type === "provider_thread.updated"
+                                          ? projection.runs.find(
+                                              (run) =>
+                                                run.ordinal ===
+                                                  event.providerThread.lastRunOrdinal &&
+                                                run.providerThreadId === event.providerThread.id,
+                                            )?.id
+                                          : undefined;
+                          const run = projection.runs.find((run) => run.id === eventRunId);
+                          if (
+                            run &&
+                            [
+                              "completed",
+                              "interrupted",
+                              "cancelled",
+                              "failed",
+                              "rolled_back",
+                            ].includes(run.status)
+                          ) {
+                            // The canonical terminal is durable. A delayed older event must
+                            // not reopen its nodes/requests or block draining this old epoch.
+                            yield* entry.runtime.acknowledgeEvent?.(event) ?? Effect.void;
+                            return;
+                          }
+                          if (
+                            event.type === "provider_thread.updated" &&
+                            event.providerThread.lastRunOrdinal === null
+                          ) {
+                            yield* providerEventIngestor.ingestNormalized({
+                              providerSessionId: entry.runtime.providerSessionId,
+                              providerInstanceId: entry.runtime.instanceId,
+                              threadId,
+                              event,
+                              ...(entry.runtime.eventPersistenceKey?.(event) === undefined
+                                ? {}
+                                : { commandId: entry.runtime.eventPersistenceKey!(event)! }),
+                            });
+                            yield* entry.runtime.acknowledgeEvent?.(event) ?? Effect.void;
+                            return;
+                          }
+                        }
+                        const terminalAck =
+                          event.type === "turn.terminal" ? yield* Deferred.make<void>() : undefined;
+                        if (terminalAck !== undefined)
+                          entry.remoteTerminalAcks?.set(event, terminalAck);
+                        yield* Queue.offer(entry.remoteEvents, { type: "event", event });
+                        // A native terminal fences its old epoch. Do not enqueue its late
+                        // tail after the root reader has closed but before canonical commit.
+                        if (terminalAck !== undefined) {
+                          yield* Deferred.await(terminalAck);
+                          customerProjection = undefined;
+                        }
+                      } else {
+                        yield* publishToSubscribers(entry.eventSubscribers, {
+                          type: "event",
                           event,
-                        })
-                        .pipe(
-                          Effect.mapError(
-                            (cause) =>
-                              new ProviderAdapter.ProviderAdapterEventStreamError({
-                                driver: entry.runtime.driver,
-                                providerSessionId: entry.runtime.providerSessionId,
-                                cause,
-                              }),
-                          ),
-                        );
-                    }).pipe(entry.requestEventPermit.withPermits(1));
-                    return;
-                  }
-                  yield* publishToSubscribers(entry.eventSubscribers, { type: "event", event });
-                  yield* releaseLiveOutput;
-                }),
-              ),
-            );
-          }),
+                        });
+                      }
+                      yield* releaseLiveOutput;
+                    }),
+                  ),
+                );
+              });
+            }).pipe(
+              Effect.retry({
+                while: () => entry.runtime.acknowledgeEvent !== undefined,
+                schedule: Schedule.exponential("1 second").pipe(
+                  Schedule.modifyDelay(({ duration }) =>
+                    Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+                  ),
+                ),
+              }),
+            ),
+          ),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapter.ProviderAdapterEventStreamError({
+                driver: entry.runtime.driver,
+                providerSessionId: entry.runtime.providerSessionId,
+                cause,
+              }),
+          ),
           Effect.exit,
           Effect.flatMap((exit) =>
             Effect.gen(function* () {
@@ -2066,7 +2294,7 @@ export const layerWithOptions = (
               }).pipe(logReleaseFailure(entry.runtime.providerSessionId));
             }),
           ),
-          Effect.forkIn(layerScope),
+          Effect.forkIn(entry.remoteEvents === undefined ? layerScope : entry.scope),
         );
       };
 
@@ -2105,7 +2333,7 @@ export const layerWithOptions = (
             input.providerSessionId,
             Effect.gen(function* () {
               const cwd = input.runtimePolicy.cwd;
-              if (cwd !== null) {
+              if (cwd !== null && !isCustomerProviderInstanceId(input.modelSelection.instanceId)) {
                 const workspaceIsDirectory = yield* fileSystem.stat(cwd).pipe(
                   Effect.map((stat) => stat.type === "Directory"),
                   Effect.catch((error) => Effect.succeed(error.reason._tag !== "NotFound")),
@@ -2168,6 +2396,7 @@ export const layerWithOptions = (
                   providerSessionId: input.providerSessionId,
                   modelSelection: input.modelSelection,
                   runtimePolicy: input.runtimePolicy,
+                  ...(input.reattachOnly === undefined ? {} : { reattachOnly: input.reattachOnly }),
                   ...(input.resumeFromSession === undefined
                     ? {}
                     : { resumeFromSession: input.resumeFromSession }),
@@ -2218,7 +2447,20 @@ export const layerWithOptions = (
               const eventSubscribers = yield* Ref.make<
                 ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
               >(new Map());
-              const exposedRuntime = decorateRuntime(runtime, eventSubscribers);
+              const remoteEvents =
+                runtime.acknowledgeEvent === undefined
+                  ? undefined
+                  : yield* Queue.bounded<ProviderSessionEventSignal, Cause.Done>(256);
+              const remoteTerminalAcks =
+                remoteEvents === undefined
+                  ? undefined
+                  : new WeakMap<object, Deferred.Deferred<void>>();
+              const exposedRuntime = decorateRuntime(
+                runtime,
+                eventSubscribers,
+                remoteEvents,
+                remoteTerminalAcks,
+              );
               const now = yield* Clock.currentTimeMillis;
               const entry: LiveSessionEntry = {
                 attachedThreadIds: new Set([input.threadId]),
@@ -2233,6 +2475,8 @@ export const layerWithOptions = (
                 runtime,
                 exposedRuntime,
                 eventSubscribers,
+                ...(remoteEvents === undefined ? {} : { remoteEvents }),
+                ...(remoteTerminalAcks === undefined ? {} : { remoteTerminalAcks }),
                 requestEventPermit: yield* Semaphore.make(1),
                 scope: sessionScope,
                 idleGeneration: 0,

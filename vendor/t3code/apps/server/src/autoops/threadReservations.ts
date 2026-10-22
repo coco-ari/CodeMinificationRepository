@@ -10,7 +10,13 @@ export const isThreadSubmissionActive = (threadId: string) => (activeSubmissions
 export const getThreadSubmissionGeneration = (threadId: string) => submissionGenerations.get(threadId) ?? 0;
 const advanceSubmissionGeneration = (threadId: string) => submissionGenerations.set(threadId, getThreadSubmissionGeneration(threadId) + 1);
 const scopeKeys = ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'] as const;
-const scopeFingerprint = (binding: ThreadBinding) => JSON.stringify(scopeKeys.map((key) => binding[key] ?? null));
+const scopeFingerprint = (binding: ThreadBinding) => JSON.stringify([
+  ...scopeKeys.map((key) => binding[key] ?? null),
+  binding.executionBinding?.kind !== 'customer' ? ['platform'] : [
+    'customer', binding.executionBinding.deviceId, binding.executionBinding.registeredWorkspaceId,
+    binding.executionBinding.workspaceBindingRevision, binding.executionBinding.runtimeId,
+  ],
+]);
 
 /** Runs inside T3's queued command fiber so an HTTP reservation cannot change a launch in flight. */
 export function withThreadLaunchReservation<A, E, R, E2, R2>(

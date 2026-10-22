@@ -1,7 +1,19 @@
-import { chatSubmissionIntentAllowed, chatSlashCommandAllowed, unavailableChatSlashCommand } from "./autoOpsChatPolicy";
-import { autoOpsResourceCwd, autoOpsResourcePathDescription, autoOpsResourceUrl, autoOpsWorkspaceDirectoryCompletion, isAutoOpsWorkspaceResourceCwd } from "~/autoops/resources";
+import { customerInstanceId, customerProviderAvailability } from "~/autoops/customerAgents";
+import { customerComposerText } from "~/autoops/customerComposerText";
+import {
+  chatSubmissionIntentAllowed,
+  chatSlashCommandAllowed,
+  unavailableChatSlashCommand,
+} from "./autoOpsChatPolicy";
+import {
+  autoOpsResourceCwd,
+  autoOpsResourcePathDescription,
+  autoOpsResourceUrl,
+  autoOpsWorkspaceDirectoryCompletion,
+  isAutoOpsWorkspaceResourceCwd,
+} from "~/autoops/resources";
 import { completeWorkspaceCommonPrefix, workspaceRelativePath } from "~/autoops/pathCompletion";
-import { openAutoOpsResource } from '~/autoops/ResourceLink';
+import { openAutoOpsResource } from "~/autoops/ResourceLink";
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { readAutoOpsHost } from "~/autoops/hostConfig";
 import { autoOpsFeature, isAutoOpsHosted } from "~/autoops/capabilities";
@@ -1444,7 +1456,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 });
 
 export interface ChatComposerHandle {
-  stashQueuedEditForRecovery: (records: ReadonlyArray<ComposerContextRecord>) => Promise<string | undefined>;
+  stashQueuedEditForRecovery: (
+    records: ReadonlyArray<ComposerContextRecord>,
+  ) => Promise<string | undefined>;
   restoreStashedPrompt: (entryId: string) => Promise<void>;
   openStashMenu: () => void;
   focusAtEnd: () => void;
@@ -1804,6 +1818,7 @@ function useComposerProviderModel(
     readonly providerStatuses: ReadonlyArray<ServerProvider>;
     readonly settings: UnifiedSettings;
     readonly activeProjectId: ProjectId | null;
+    readonly businessScope?: Parameters<typeof customerProviderAvailability>[1];
     readonly threadRef: ScopedThreadRef | DraftId;
     readonly threadModelSelection: ModelSelection | null | undefined;
     readonly projectModelSelection: ModelSelection | null | undefined;
@@ -1824,10 +1839,13 @@ function useComposerProviderModel(
   } = input;
   const draftModelState = useComposerDraftModelState(threadRef);
   const providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry> = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(
-      deriveProviderInstanceEntries(providerStatuses),
-      settings,
-      activeProjectId,
+    customerProviderAvailability(
+      applyProviderInstanceSettings(
+        deriveProviderInstanceEntries(providerStatuses),
+        settings,
+        activeProjectId,
+      ),
+      input.businessScope,
     ),
   );
   const selection = resolveComposerProviderSelection({
@@ -2125,8 +2143,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const openPrLink = useOpenPrLink(routeThreadRef);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const previewFile = composerFiles.find((file) => file.id === previewFileId);
+  const autoOpsThreadScope = useAutoOpsThreadScope(activeThreadId ?? "");
+  const customerTarget =
+    autoOpsThreadScope?.executionBinding?.kind === "customer"
+      ? autoOpsThreadScope.executionBinding
+      : null;
+  const customerScope = customerTarget !== null;
   const composerContextActions = {
-    environmentId,
+    environmentId: customerScope ? null : environmentId,
+    canPreviewFiles: !customerScope,
     cwd: gitCwd ?? undefined,
     expandImage: (imageId: string) => {
       const preview = buildExpandedImagePreview(composerImages, imageId);
@@ -2134,6 +2159,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     openFile: setPreviewFileId,
     openMention: (path: string) => {
+      if (customerScope) return;
       if (autoOpsResourceUrl(path)) void openAutoOpsResource(path, routeThreadRef);
       else useRightPanelStore.getState().openFile(routeThreadRef, path);
     },
@@ -2326,6 +2352,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerProviderState,
   } = useComposerProviderModel({
     providerStatuses,
+    businessScope: autoOpsThreadScope,
     settings,
     activeProjectId,
     threadRef: composerDraftTarget,
@@ -2333,6 +2360,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     promptInjectionState: getComposerPromptInjectionState(prompt),
     candidateInstanceIds: [
+      customerTarget ? customerInstanceId(customerTarget) : null,
       composerDraft.activeProvider ?? null,
       activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
@@ -2379,12 +2407,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isSendDisabled = sendDisabledReason !== null;
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
   const skillProjects = useProjects();
-  const skillsCwd = isAutoOpsHosted()
-    ? skillProjects.find(project => project.id === activeThread?.projectId && project.environmentId === environmentId)?.workspaceRoot ?? null
-    : gitCwd;
-  const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
+  const skillsCwd = customerScope
+    ? null
+    : isAutoOpsHosted()
+      ? (skillProjects.find(
+          (project) =>
+            project.id === activeThread?.projectId && project.environmentId === environmentId,
+        )?.workspaceRoot ?? null)
+      : gitCwd;
+  const compactCommandAvailable =
+    !customerScope && providerSupportsManualCompaction(selectedProviderEntry);
   const selectedProviderSkills = selectedProviderStatus
-    ? resolveProviderSkillsForCwd(selectedProviderStatus, skillsCwd)
+    ? customerScope
+      ? selectedProviderStatus.skills
+      : resolveProviderSkillsForCwd(selectedProviderStatus, skillsCwd)
     : NO_PROVIDER_SKILLS;
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, skillsCwd)
@@ -2447,7 +2483,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return collapseExpandedComposerCursor(value, value.length, isLiteralPendingAnswer);
   });
   const {
-    trigger: composerTrigger,
+    trigger: rawComposerTrigger,
     setTrigger: setComposerTrigger,
     resolveTrigger: resolveComposerTrigger,
     dismissTrigger: dismissComposerTrigger,
@@ -2455,6 +2491,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   } = useComposerTriggerState(() =>
     isLiteralPendingAnswer ? null : detectComposerTrigger(prompt, prompt.length),
   );
+  const composerTrigger =
+    customerScope &&
+    (rawComposerTrigger?.kind === "path" || rawComposerTrigger?.kind === "pull-request")
+      ? null
+      : rawComposerTrigger;
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const composerSuggestionId = useId();
   const composerSuggestionListId = `${composerSuggestionId}-${encodeURIComponent(draftId ?? activeThreadId ?? "new")}-suggestions`;
@@ -2595,8 +2636,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  const autoOpsThreadScope = useAutoOpsThreadScope(activeThreadId ?? "");
-  const composerReferenceCwd = autoOpsResourceCwd(activeThreadId, activeThread?.projectId, autoOpsThreadScope) ?? gitCwd;
+  const composerReferenceCwd = customerScope
+    ? null
+    : (autoOpsResourceCwd(activeThreadId, activeThread?.projectId, autoOpsThreadScope) ?? gitCwd);
   const workspacePathCompletion = isAutoOpsWorkspaceResourceCwd(composerReferenceCwd);
   const environmentThreadShells = useThreadShells(isPathTrigger && !workspacePathCompletion);
   const workspaceEntries = useComposerPathSearch({
@@ -2676,15 +2718,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = ((): ComposerCommandItem[] => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
-      if (workspacePathCompletion && (workspaceEntries.isPending ||
-        !isPathSuggestionCurrent(workspaceEntries.searchedTarget, composerTrigger, environmentId, composerReferenceCwd))) return [];
+      if (
+        workspacePathCompletion &&
+        (workspaceEntries.isPending ||
+          !isPathSuggestionCurrent(
+            workspaceEntries.searchedTarget,
+            composerTrigger,
+            environmentId,
+            composerReferenceCwd,
+          ))
+      )
+        return [];
       return [
-        ...(workspacePathCompletion ? [] : matchComposerThreadItems({
-          shells: environmentThreadShells,
-          environmentId,
-          excludeThreadId: activeThreadId,
-          query: composerTrigger.query,
-        })),
+        ...(workspacePathCompletion
+          ? []
+          : matchComposerThreadItems({
+              shells: environmentThreadShells,
+              environmentId,
+              excludeThreadId: activeThreadId,
+              query: composerTrigger.query,
+            })),
         ...workspaceEntries.entries.map((entry) => ({
           id: `path:${entry.kind}:${entry.path}`,
           type: "path" as const,
@@ -2752,7 +2805,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           (skill.scope ? `${skill.scope} skill` : ""),
       }));
       const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
-        (item) => chatSlashCommandAllowed(item.command.name) && (item.command.name !== "compact" || compactSlashCommandAvailable),
+        (item) =>
+          chatSlashCommandAllowed(item.command.name) &&
+          (item.command.name !== "compact" || compactSlashCommandAvailable),
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [
@@ -2870,6 +2925,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile && !isComposerApprovalState;
   const showComposerAttachAction =
+    !customerScope &&
     fileStagingLimit !== null &&
     (!activePendingProgress ||
       (supportsQuestionAttachments &&
@@ -2877,7 +2933,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
 
   const isComposerMenuLoading =
-    (composerTriggerKind === "path" && (workspacePathCompletion || pathTriggerQuery.length > 0) && workspaceEntries.isPending) ||
+    (composerTriggerKind === "path" &&
+      (workspacePathCompletion || pathTriggerQuery.length > 0) &&
+      workspaceEntries.isPending) ||
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
       pullRequestRepository !== null &&
@@ -2887,6 +2945,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         exactPullRequestLookup.isPending));
   const composerMenuEmptyState = (() => {
     if (composerTriggerKind === "skill") {
+      if (customerScope)
+        return selectedProviderSkills.length === 0
+          ? "本机尚未发现可用技能，请在连接程序中检查并刷新。"
+          : "未找到匹配的本地技能。";
       return isAutoOpsHosted()
         ? selectedProviderSkills.length === 0
           ? "暂无启用的技能，可在“设置 → 常规 → 技能”查看目录。"
@@ -2907,9 +2969,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ? `没有匹配的拉取请求 ${composerTrigger.query}.`
         : "此仓库中没有拉取请求。";
     }
-    return composerTriggerKind === "path"
-      ? "没有匹配的文件或文件夹。"
-      : "没有匹配的命令。";
+    return composerTriggerKind === "path" ? "没有匹配的文件或文件夹。" : "没有匹配的命令。";
   })();
 
   const setPromptFromTraits = (nextPrompt: string) => {
@@ -2953,7 +3013,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planModeEnabled: settings.planModeEnabled && autoOpsFeature("planMode"),
     isComposerOwned: true,
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
-  const providerTraitsPicker = autoOpsFeature("modelSelection") ? renderProviderTraitsPicker(providerTraitsPickerInput) : null;
+  const providerTraitsPicker = autoOpsFeature("modelSelection")
+    ? renderProviderTraitsPicker(providerTraitsPickerInput)
+    : null;
   const [inlineRestingControlsHost, setInlineRestingControlsHost] = useState<HTMLDivElement | null>(
     null,
   );
@@ -3207,8 +3269,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ) ?? false,
         },
       );
-      if (!accepted.includes(localId))
-        fail("草稿未接受此附件（重复或已达数量上限）。");
+      if (!accepted.includes(localId)) fail("草稿未接受此附件（重复或已达数量上限）。");
     } else {
       const accepted = addComposerFilesToDraft([
         {
@@ -3220,8 +3281,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           file,
         },
       ]);
-      if (!accepted.includes(localId))
-        fail("草稿未接受此附件（重复或已达数量上限）。");
+      if (!accepted.includes(localId)) fail("草稿未接受此附件（重复或已达数量上限）。");
     }
   };
   const importAttachmentRecord = async (
@@ -3244,6 +3304,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     threadDraftTarget = attachmentDraftTarget,
   ): ReadonlyMap<string, string> => {
     const rewritten = new Map<string, string>();
+    if (customerScope) return rewritten;
     const dependentAttachmentLocalIds = new Map<string, string>();
     const skippedDependentAttachmentIds = new Set<string>();
     // Resolve annotations before their dependent screenshot records even if a foreign
@@ -3431,13 +3492,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Workspace Tab distinguishes an explicit choice from the first result's visual highlight.
   // Other menus retain upstream's resolved highlight state.
   const workspacePathMenu = workspacePathCompletion && composerTriggerKind === "path";
-  const hasExplicitWorkspaceHighlight = workspacePathMenu &&
-    composerHighlightedSearchKey === composerMenuSearchKey && composerHighlightedItemId !== null &&
+  const hasExplicitWorkspaceHighlight =
+    workspacePathMenu &&
+    composerHighlightedSearchKey === composerMenuSearchKey &&
+    composerHighlightedItemId !== null &&
     composerMenuItems.some((item) => item.id === composerHighlightedItemId);
-  const resolvedHighlightedItemId = composerMenuOpen && (!workspacePathMenu || hasExplicitWorkspaceHighlight)
-    ? activeComposerMenuItemId : null;
-  const resolvedHighlightedSearchKey = composerMenuOpen && (!workspacePathMenu || hasExplicitWorkspaceHighlight)
-    ? composerMenuSearchKey : null;
+  const resolvedHighlightedItemId =
+    composerMenuOpen && (!workspacePathMenu || hasExplicitWorkspaceHighlight)
+      ? activeComposerMenuItemId
+      : null;
+  const resolvedHighlightedSearchKey =
+    composerMenuOpen && (!workspacePathMenu || hasExplicitWorkspaceHighlight)
+      ? composerMenuSearchKey
+      : null;
   if (composerHighlightedItemId !== resolvedHighlightedItemId) {
     setComposerHighlightedItemId(resolvedHighlightedItemId);
   }
@@ -3872,15 +3939,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const { snapshot, trigger } = resolveActiveComposerTrigger();
     if (!trigger) return;
     if (item.type === "path") {
-      if (!isPathSuggestionCurrent(item.searchTarget, trigger, environmentId, composerReferenceCwd)) return;
-      const directoryCompletion = completeDirectory && item.pathKind === "directory"
-        ? autoOpsWorkspaceDirectoryCompletion(item.path, autoOpsThreadScope) : null;
+      if (!isPathSuggestionCurrent(item.searchTarget, trigger, environmentId, composerReferenceCwd))
+        return;
+      const directoryCompletion =
+        completeDirectory && item.pathKind === "directory"
+          ? autoOpsWorkspaceDirectoryCompletion(item.path, autoOpsThreadScope)
+          : null;
       const replacement = directoryCompletion ?? `${serializeComposerFileLink(item.path)} `;
-      const replacementRangeEnd = directoryCompletion ? trigger.rangeEnd : extendReplacementRangeForTrailingSpace(
-        snapshot.value,
-        trigger.rangeEnd,
-        replacement,
-      );
+      const replacementRangeEnd = directoryCompletion
+        ? trigger.rangeEnd
+        : extendReplacementRangeForTrailingSpace(snapshot.value, trigger.rangeEnd, replacement);
       const applied = applyPromptReplacement(trigger.rangeStart, replacementRangeEnd, replacement, {
         expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
       });
@@ -4062,10 +4130,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     dispatchMode?: ComposerDispatchMode,
     submissionIntent?: ComposerSubmissionIntent,
   ) => {
-    if (!chatSubmissionIntentAllowed(submissionIntent)) { event?.preventDefault(); return; }
+    if (!chatSubmissionIntentAllowed(submissionIntent)) {
+      event?.preventDefault();
+      return;
+    }
     if (!activePendingProgress && unavailableChatSlashCommand(promptRef.current)) {
       event?.preventDefault();
-      toastManager.add({type: "info", title: "当前精简版未开放此命令", description: "输入内容已保留。"});
+      toastManager.add({
+        type: "info",
+        title: "当前精简版未开放此命令",
+        description: "输入内容已保留。",
+      });
       return;
     }
     if (
@@ -4294,13 +4369,32 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         nudgeComposerMenuHighlight("ArrowUp");
         return true;
       }
-      if (workspacePathCompletion && trigger?.kind === "path" && isComposerDirectoryCompletionKey(event)) {
+      if (
+        workspacePathCompletion &&
+        trigger?.kind === "path" &&
+        isComposerDirectoryCompletionKey(event)
+      ) {
         // Pending or stale results must never complete an old directory or another version.
-        if (workspaceEntries.isPending || currentItems.length === 0 || currentItems.some((item) =>
-          item.type !== "path" || !isPathSuggestionCurrent(item.searchTarget, trigger, environmentId, composerReferenceCwd) ||
-          workspaceRelativePath(item.path, autoOpsThreadScope) === null)) return true;
-        const explicitItem = composerHighlightedSearchKey === composerMenuSearchKey
-          ? currentItems.find((item) => item.id === composerHighlightedItemId) : undefined;
+        if (
+          workspaceEntries.isPending ||
+          currentItems.length === 0 ||
+          currentItems.some(
+            (item) =>
+              item.type !== "path" ||
+              !isPathSuggestionCurrent(
+                item.searchTarget,
+                trigger,
+                environmentId,
+                composerReferenceCwd,
+              ) ||
+              workspaceRelativePath(item.path, autoOpsThreadScope) === null,
+          )
+        )
+          return true;
+        const explicitItem =
+          composerHighlightedSearchKey === composerMenuSearchKey
+            ? currentItems.find((item) => item.id === composerHighlightedItemId)
+            : undefined;
         if (explicitItem) {
           onSelectComposerItem(explicitItem, true);
           return true;
@@ -4311,13 +4405,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           onSelectComposerItem(currentItems[0]!, true);
           return true;
         }
-        const entries = currentItems.flatMap((item) => item.type === "path" ? [{ path: item.path, kind: item.pathKind }] : []);
-        const completion = completeWorkspaceCommonPrefix(entries, trigger.query, autoOpsThreadScope, {
-          truncated: workspaceEntries.truncated,
-        });
-        if (completion && applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, completion, {
-          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-        })) setComposerHighlightedItemId(null);
+        const entries = currentItems.flatMap((item) =>
+          item.type === "path" ? [{ path: item.path, kind: item.pathKind }] : [],
+        );
+        const completion = completeWorkspaceCommonPrefix(
+          entries,
+          trigger.query,
+          autoOpsThreadScope,
+          {
+            truncated: workspaceEntries.truncated,
+          },
+        );
+        if (
+          completion &&
+          applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, completion, {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          })
+        )
+          setComposerHighlightedItemId(null);
         return true;
       }
       if ((key === "Enter" || key === "Tab") && selectedItem) {
@@ -4393,6 +4498,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
 
   const restoreStashEntry = async (menuEntry: PromptStashEntry) => {
+    if (
+      customerScope &&
+      ((menuEntry.files?.length ?? 0) > 0 ||
+        menuEntry.attachments.length > 0 ||
+        (menuEntry.records?.length ?? 0) > 0)
+    ) {
+      toastManager.add({
+        type: "info",
+        title: "客户对话仅支持恢复纯文本",
+        description: "此暂存包含平台附件或上下文，已保留原条目；可复制其中的文字再粘贴。",
+      });
+      return;
+    }
     const filesToVerify = menuEntry.files ?? [];
     if (filesToVerify.some((file) => file.environmentId !== environmentId)) {
       toastManager.add({
@@ -4435,8 +4553,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       toastManager.add({
         type: "warning",
         title: "恢复后的内容可能再次出现在暂存中",
-        description:
-          "浏览器存储拒绝了更新，刷新后此条目可能仍然存在。",
+        description: "浏览器存储拒绝了更新，刷新后此条目可能仍然存在。",
         data: { hideCopyButton: true },
       });
     }
@@ -4444,16 +4561,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const rewrittenContextIds = entry.records
       ? importContextRecords(entry.records, null, composerDraftTarget)
       : new Map<string, string>();
-    const restoredPrompt = replaceComposerContextReferences(entry.prompt, (reference) => {
-      const contextId = rewrittenContextIds.get(reference.contextId);
-      return contextId
-        ? formatInlineContextReference({
-            ...reference,
-            contextId,
-            kind: reference.kind === "element" ? "preview-annotation" : reference.kind,
-          })
-        : reference.source;
-    });
+    const restoredPrompt = customerScope
+      ? customerComposerText(entry.prompt)
+      : replaceComposerContextReferences(entry.prompt, (reference) => {
+          const contextId = rewrittenContextIds.get(reference.contextId);
+          return contextId
+            ? formatInlineContextReference({
+                ...reference,
+                contextId,
+                kind: reference.kind === "element" ? "preview-annotation" : reference.kind,
+              })
+            : reference.source;
+        });
     const currentPrompt = promptRef.current;
     const nextPrompt =
       restoredPrompt.length === 0
@@ -4672,8 +4791,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       toastManager.add({
         type: "warning",
         title: "暂存条目可能再次出现",
-        description:
-          "浏览器存储拒绝了删除，刷新后此内容可能再次出现。",
+        description: "浏览器存储拒绝了删除，刷新后此内容可能再次出现。",
         data: { hideCopyButton: true },
       });
     }
@@ -4691,7 +4809,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       return;
     }
-    if (recoveryRecords !== undefined && usePromptStashStore.getState().entries.length >= MAX_STASH_ENTRIES) {
+    if (
+      recoveryRecords !== undefined &&
+      usePromptStashStore.getState().entries.length >= MAX_STASH_ENTRIES
+    ) {
       throw new Error("暂存已满，编辑仍保留。请先恢复或删除一条暂存后重试。");
     }
     const prompt = promptRef.current.trim();
@@ -4710,7 +4831,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
       ),
     ];
-    if (prompt.length === 0 && images.length === 0 && files.length === 0 && (recoveryRecords === undefined || (stashedRecords.length === 0 && !editingQueuedAttachments?.length))) {
+    if (
+      prompt.length === 0 &&
+      images.length === 0 &&
+      files.length === 0 &&
+      (recoveryRecords === undefined ||
+        (stashedRecords.length === 0 && !editingQueuedAttachments?.length))
+    ) {
       const entries = usePromptStashStore.getState().entries;
       const entry = entries.length === 1 ? entries[0] : undefined;
       if (entry && !entry.pendingImageCount) {
@@ -4724,15 +4851,32 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // D12 keeps the original queue attachments as well as newly added files.
     // Reuse the native stash encoder, size limits and restore path below.
     if (recoveryRecords !== undefined) {
-      for (const {attachment, url} of editingQueuedAttachments ?? []) {
+      for (const { attachment, url } of editingQueuedAttachments ?? []) {
         if (attachment.type === "file") {
-          stashedFiles.push({id:attachment.id,name:attachment.name,mimeType:attachment.mimeType,sizeBytes:attachment.sizeBytes,attachmentId:attachment.id,environmentId});
+          stashedFiles.push({
+            id: attachment.id,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+            attachmentId: attachment.id,
+            environmentId,
+          });
         } else {
           if (!url) throw new Error("图片仍在加载，编辑已保留，请稍后重试暂存。");
           const response = await fetch(url);
           if (!response.ok) throw new Error("图片读取失败，编辑已保留，请重试。");
-          const file = new File([await response.blob()], attachment.name, {type:attachment.mimeType});
-          images.push({type:"image",id:attachment.id,name:attachment.name,mimeType:attachment.mimeType,sizeBytes:attachment.sizeBytes,file,previewUrl:url});
+          const file = new File([await response.blob()], attachment.name, {
+            type: attachment.mimeType,
+          });
+          images.push({
+            type: "image",
+            id: attachment.id,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+            file,
+            previewUrl: url,
+          });
         }
       }
     }
@@ -4768,11 +4912,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (recoveryRecords !== undefined) {
       for (const image of images) {
         const encoded = await compressImageForStash(image.file);
-        if (!encoded.ok) throw new Error(`图片 ${image.name} 无法完整暂存；编辑仍保留，请下载或移除该图片后重试。`);
-        recoveredImages.push({id:image.id,name:image.name,mimeType:encoded.image.mimeType,sizeBytes:encoded.image.sizeBytes,dataUrl:encoded.image.dataUrl,...(image.source ? {source:resizeSnapShotSource(image.source,encoded.image.imageSize)} : {})});
+        if (!encoded.ok)
+          throw new Error(
+            `图片 ${image.name} 无法完整暂存；编辑仍保留，请下载或移除该图片后重试。`,
+          );
+        recoveredImages.push({
+          id: image.id,
+          name: image.name,
+          mimeType: encoded.image.mimeType,
+          sizeBytes: encoded.image.sizeBytes,
+          dataUrl: encoded.image.dataUrl,
+          ...(image.source
+            ? { source: resizeSnapShotSource(image.source, encoded.image.imageSize) }
+            : {}),
+        });
       }
-      if (partitionStashAttachments(recoveredImages).droppedNames.length) throw new Error("图片超出暂存容量，编辑仍保留。请下载或移除部分图片后重试。");
-      if (usePromptStashStore.getState().entries.length >= MAX_STASH_ENTRIES) throw new Error("暂存已满，编辑仍保留。请释放一条暂存后重试。");
+      if (partitionStashAttachments(recoveredImages).droppedNames.length)
+        throw new Error("图片超出暂存容量，编辑仍保留。请下载或移除部分图片后重试。");
+      if (usePromptStashStore.getState().entries.length >= MAX_STASH_ENTRIES)
+        throw new Error("暂存已满，编辑仍保留。请释放一条暂存后重试。");
     }
     // A repeat ⌘S on the *same* still-unencoded snapshot would stash it
     // twice. Guard on the snapshot itself rather than a bare boolean: once
@@ -4803,7 +4961,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         droppedImageNames: [],
         unreadableImageNames: [],
         pendingImageCount: recoveryRecords === undefined ? images.length : 0,
-        ...(stashedRecords.length > 0 ? { records: [...new Map(stashedRecords.map((record)=>[record.contextId,record])).values()] } : {}),
+        ...(stashedRecords.length > 0
+          ? {
+              records: [
+                ...new Map(stashedRecords.map((record) => [record.contextId, record])).values(),
+              ],
+            }
+          : {}),
       });
 
       // If it was rejected (quota) the store has already rolled itself back,
@@ -4813,8 +4977,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         toastManager.add({
           type: "error",
           title: "无法暂存此内容",
-          description:
-            "浏览器存储拒绝了写入，输入框内容未变。请释放网站存储空间后重试。",
+          description: "浏览器存储拒绝了写入，输入框内容未变。请释放网站存储空间后重试。",
           data: { hideCopyButton: true },
         });
         return;
@@ -4827,8 +4990,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         toastManager.add({
           type: "warning",
           title: "此次暂存将在刷新后丢失",
-          description:
-            "浏览器存储不可用，此暂存仅保存在当前页面内存中。",
+          description: "浏览器存储不可用，此暂存仅保存在当前页面内存中。",
           data: { hideCopyButton: true },
         });
       }
@@ -4907,8 +5069,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           toastManager.add({
             type: "warning",
             title: "暂存图片未保存",
-            description:
-              "内容已暂存，但浏览器存储拒绝了图片，刷新后图片将丢失。",
+            description: "内容已暂存，但浏览器存储拒绝了图片，刷新后图片将丢失。",
             data: { hideCopyButton: true },
           });
         }
@@ -5258,20 +5419,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
     .map((def) => def.id);
   const composerControls = showProviderUnavailable ? (
-    isAutoOpsHosted() ? <span className="px-2 text-xs text-muted-foreground" role="status">Agent 连接不可用</span> : <ComposerControl
-      type="button"
-      disabled={!providerSetupInstanceId}
-      onClick={() => {
-        if (providerSetupInstanceId) {
-          onOpenProviderSetup(providerSetupInstanceId);
-        }
-      }}
-      data-chat-provider-unavailable="true"
-      className="shrink-0"
-    >
-      <CircleAlertIcon className="size-4" />
-      {providerSetupInstanceId ? "打开运行器设置" : "没有可用的运行器"}
-    </ComposerControl>
+    isAutoOpsHosted() ? (
+      <span className="px-2 text-xs text-muted-foreground" role="status">
+        Agent 连接不可用
+      </span>
+    ) : (
+      <ComposerControl
+        type="button"
+        disabled={!providerSetupInstanceId}
+        onClick={() => {
+          if (providerSetupInstanceId) {
+            onOpenProviderSetup(providerSetupInstanceId);
+          }
+        }}
+        data-chat-provider-unavailable="true"
+        className="shrink-0"
+      >
+        <CircleAlertIcon className="size-4" />
+        {providerSetupInstanceId ? "打开运行器设置" : "没有可用的运行器"}
+      </ComposerControl>
+    )
   ) : (
     <>
       {composerControlsCollapsed &&
@@ -5283,95 +5450,111 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data-resting-controls-separator="true"
         />
       ) : null}
-      {isAutoOpsHosted() && !readAutoOpsHost()?.modelSelectionEnabled ? <span className="shrink-0 px-2 text-xs text-muted-foreground" data-autoops-model>{readAutoOpsHost()?.fixedModel.model || selectedModel || "项目 Agent"}</span> : <ProviderModelPicker
-        environmentId={environmentId}
-        compact={false}
-        isComposerOwned
-        disabled={providerCatalogPending || isSendBusy}
-        {...(routeKind === "draft" && supportsMultipleModels
-          ? {
-              ...(multipleModelSelections !== null
-                ? { selectedModels: multipleModelSelections }
-                : {}),
-              onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
-                const current = multipleModelSelections ?? [selectedModelSelection];
-                const matchesModel = (selection: ModelSelection) => {
-                  if (selection.instanceId !== instanceId) return false;
-                  const entry = providerInstanceEntries.find(
-                    (entry) => entry.instanceId === selection.instanceId,
-                  );
-                  const resolvedModel = resolveModelPickerSelectedModel({
-                    driverKind: entry?.driverKind,
-                    model: selection.model,
-                    options: modelOptionsByInstance.get(selection.instanceId) ?? [],
-                  });
-                  return (resolvedModel?.slug ?? selection.model) === model;
-                };
-                const exists = current.some(matchesModel);
-                const next = exists
-                  ? current.filter((selection) => !matchesModel(selection))
-                  : [...current, createModelSelection(instanceId, model)];
-                if (next.length > 1) {
-                  setMultipleModelSelections(next);
-                } else {
-                  setMultipleModelSelections(null);
-                  const remaining = next[0] ?? selectedModelSelection;
-                  onProviderModelSelect(remaining.instanceId, remaining.model, {
-                    focusComposer: false,
-                  });
-                }
-              },
-            }
-          : {})}
-        activeInstanceId={
-          providerCatalogPending
-            ? (activeThreadModelSelection?.instanceId ?? selectedInstanceId)
-            : selectedInstanceId
-        }
-        model={
-          providerCatalogPending
-            ? (activeThreadModelSelection?.model ?? selectedModelForPickerWithCustomFallback)
-            : selectedModelForPickerWithCustomFallback
-        }
-        lockedProvider={lockedProvider}
-        lockedContinuationGroupKey={lockedContinuationGroupKey}
-        instanceEntries={isAutoOpsHosted() ? providerInstanceEntries.filter(entry => entry.instanceId === readAutoOpsHost()?.fixedModel.instanceId) : providerInstanceEntries}
-        keybindings={keybindings}
-        modelOptionsByInstance={modelOptionsByInstance}
-        size={composerControlsCollapsed ? "xs" : "sm"}
-        triggerClassName={
-          composerControlsCollapsed
-            ? cn(
-                "min-w-13 shrink text-xs!",
-                !showInlineRestingControls &&
-                  "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
-              )
-            : "-ms-2.5 min-w-13"
-        }
-        terminalOpen={terminalOpen}
-        open={isComposerModelPickerOpen}
-        instanceIndicatorBackground={
-          composerControlsCollapsed
-            ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
-            : "var(--contrast-input)"
-        }
-        {...(composerProviderState.modelPickerIconClassName || composerControlsCollapsed
-          ? {
-              activeProviderIconClassName: cn(
-                composerProviderState.modelPickerIconClassName,
-                composerControlsCollapsed &&
-                  "fill-muted-foreground/70! text-muted-foreground/70! [&_path]:fill-muted-foreground/70! [&_rect]:fill-muted-foreground/70! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]]:opacity-70 [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-muted-foreground!",
-              ),
-            }
-          : {})}
-        onOpenChange={setIsComposerModelPickerOpen}
-        getModelDisabledReason={getModelDisabledReason}
-        onInstanceModelChange={(instanceId, model) => {
-          setMultipleModelSelections(null);
-          onProviderModelSelect(instanceId, model);
-        }}
-        {...(autoOpsFeature("providerConfiguration") ? { onOpenProviderSetup } : {})}
-      />}
+      {isAutoOpsHosted() && !customerScope && !readAutoOpsHost()?.modelSelectionEnabled ? (
+        <span className="shrink-0 px-2 text-xs text-muted-foreground" data-autoops-model>
+          {readAutoOpsHost()?.fixedModel.model || selectedModel || "项目 Agent"}
+        </span>
+      ) : (
+        <ProviderModelPicker
+          environmentId={environmentId}
+          compact={false}
+          isComposerOwned
+          disabled={providerCatalogPending || isSendBusy}
+          {...(routeKind === "draft" && supportsMultipleModels
+            ? {
+                ...(multipleModelSelections !== null
+                  ? { selectedModels: multipleModelSelections }
+                  : {}),
+                onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
+                  const current = multipleModelSelections ?? [selectedModelSelection];
+                  const matchesModel = (selection: ModelSelection) => {
+                    if (selection.instanceId !== instanceId) return false;
+                    const entry = providerInstanceEntries.find(
+                      (entry) => entry.instanceId === selection.instanceId,
+                    );
+                    const resolvedModel = resolveModelPickerSelectedModel({
+                      driverKind: entry?.driverKind,
+                      model: selection.model,
+                      options: modelOptionsByInstance.get(selection.instanceId) ?? [],
+                    });
+                    return (resolvedModel?.slug ?? selection.model) === model;
+                  };
+                  const exists = current.some(matchesModel);
+                  const next = exists
+                    ? current.filter((selection) => !matchesModel(selection))
+                    : [...current, createModelSelection(instanceId, model)];
+                  if (next.length > 1) {
+                    setMultipleModelSelections(next);
+                  } else {
+                    setMultipleModelSelections(null);
+                    const remaining = next[0] ?? selectedModelSelection;
+                    onProviderModelSelect(remaining.instanceId, remaining.model, {
+                      focusComposer: false,
+                    });
+                  }
+                },
+              }
+            : {})}
+          activeInstanceId={
+            providerCatalogPending
+              ? (activeThreadModelSelection?.instanceId ?? selectedInstanceId)
+              : selectedInstanceId
+          }
+          model={
+            providerCatalogPending
+              ? (activeThreadModelSelection?.model ?? selectedModelForPickerWithCustomFallback)
+              : selectedModelForPickerWithCustomFallback
+          }
+          lockedProvider={lockedProvider}
+          lockedContinuationGroupKey={lockedContinuationGroupKey}
+          instanceEntries={
+            isAutoOpsHosted()
+              ? providerInstanceEntries.filter(
+                  (entry) =>
+                    entry.instanceId ===
+                    (customerTarget
+                      ? customerInstanceId(customerTarget)
+                      : readAutoOpsHost()?.fixedModel.instanceId),
+                )
+              : providerInstanceEntries
+          }
+          keybindings={keybindings}
+          modelOptionsByInstance={modelOptionsByInstance}
+          size={composerControlsCollapsed ? "xs" : "sm"}
+          triggerClassName={
+            composerControlsCollapsed
+              ? cn(
+                  "min-w-13 shrink text-xs!",
+                  !showInlineRestingControls &&
+                    "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
+                )
+              : "-ms-2.5 min-w-13"
+          }
+          terminalOpen={terminalOpen}
+          open={isComposerModelPickerOpen}
+          instanceIndicatorBackground={
+            composerControlsCollapsed
+              ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
+              : "var(--contrast-input)"
+          }
+          {...(composerProviderState.modelPickerIconClassName || composerControlsCollapsed
+            ? {
+                activeProviderIconClassName: cn(
+                  composerProviderState.modelPickerIconClassName,
+                  composerControlsCollapsed &&
+                    "fill-muted-foreground/70! text-muted-foreground/70! [&_path]:fill-muted-foreground/70! [&_rect]:fill-muted-foreground/70! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]]:opacity-70 [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-muted-foreground!",
+                ),
+              }
+            : {})}
+          onOpenChange={setIsComposerModelPickerOpen}
+          getModelDisabledReason={getModelDisabledReason}
+          onInstanceModelChange={(instanceId, model) => {
+            setMultipleModelSelections(null);
+            onProviderModelSelect(instanceId, model);
+          }}
+          {...(autoOpsFeature("providerConfiguration") ? { onOpenProviderSetup } : {})}
+        />
+      )}
 
       <>
         {restingBlockDefs.map((def, index) => {
@@ -5522,6 +5705,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       readonly skipImageInlineChip?: boolean;
     },
   ): Promise<boolean> => {
+    if (customerScope) {
+      toastManager.add({
+        type: "info",
+        title: "客户工作区首版仅支持文本和本地技能",
+        description: "请直接粘贴文本；Agent 可自行读取登记目录中的文件。",
+      });
+      return false;
+    }
     if (!activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) return false;
     if (
       pendingUserInputs.length > 0 &&
@@ -5777,7 +5968,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     bypassAutoAttachment: boolean,
     selectionOverride?: { start: number; end: number },
   ): boolean => {
-    if (isLiteralPendingAnswer) return false;
+    if (isLiteralPendingAnswer || customerScope) return false;
     const questionCanAttach =
       pendingUserInputs.length === 0 ||
       (supportsQuestionAttachments &&
@@ -5877,6 +6068,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (options?.clipboardData) {
       text = importPastedComposerText(options.clipboardData, importContextFragment);
     }
+    if (customerScope) text = customerComposerText(text);
     const prompt = promptRef.current;
     const cursor = position === "cursor" ? readComposerSnapshot().expandedCursor : prompt.length;
     const needsLeadingSpace =
@@ -5915,6 +6107,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const insertComposerTextAtEndStable = useStableCallback(insertComposerTextAtEnd);
 
   const addComposerFolders = (folders: File[]) => {
+    if (customerScope) {
+      toastManager.add({
+        type: "info",
+        title: "客户工作区首版不支持拖入目录",
+        description: "请在需求中写出相对路径，Agent 会在已登记目录中读取。",
+      });
+      return;
+    }
     const target = folderDropTarget({
       localEnvironmentDisabled: isLocalEnvironmentDisabled(),
       environmentId,
@@ -5956,6 +6156,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
     const { files, folders } = splitTransferredFiles(event.clipboardData);
     const plainText = event.clipboardData.getData("text/plain");
+    if (customerScope && files.length === 0 && folders.length === 0) {
+      const text = customerComposerText(plainText);
+      if (text !== plainText) {
+        event.preventDefault();
+        event.stopPropagation();
+        const selection = composerEditorRef.current?.readSelectionRange();
+        if (selection) applyPromptReplacementStable(selection.start, selection.end, text);
+        return;
+      }
+    }
     const bypassAutoAttachment = consumePasteAsTextShortcut(pasteAsTextShortcutUntilRef);
     if (
       folders.length > 0 ||
@@ -5986,6 +6196,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const insertContextReferencesAtCaret = (
     references: ReadonlyArray<ComposerContextReference>,
   ): boolean =>
+    !customerScope &&
     insertComposerText(`${references.map(formatInlineContextReference).join(" ")} `, "cursor", {
       ensureLeadingBoundary: true,
     });
@@ -6002,8 +6213,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // effect, no eager focus) live in makeComposerMentionDragHandlers.
   const composerMentionDragHandlers = makeComposerMentionDragHandlers({
     insertMentionAtEnd: (text) =>
-      insertComposerTextAtEndStable(text, { ensureLeadingBoundary: true }),
+      !customerScope && insertComposerTextAtEndStable(text, { ensureLeadingBoundary: true }),
     insertPullRequestAtEnd: (pullRequest) => {
+      if (customerScope) return false;
       const comment = buildPullRequestReferenceContext(pullRequest);
       const inserted = insertComposerTextAtEndStable(
         `${formatInlineContextReference(reviewCommentContextReference(comment))} `,
@@ -6019,7 +6231,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       toastManager.add({
         type: "error",
         title: "无法添加到对话",
-        description: "输入框正忙，请就绪后重试。",
+        description: customerScope
+          ? "客户工作区首版不支持引用平台文件或关联记录，请直接粘贴文字。"
+          : "输入框正忙，请就绪后重试。",
       });
     },
   });
@@ -6080,6 +6294,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   useThreadContextDrop(composerFormRef, environmentId, attachmentTargetKey, (refs, isActive) => {
+    if (customerScope) return;
     const records = refs.flatMap((ref) => {
       if (ref.environmentId !== environmentId) {
         void importDroppedThread(
@@ -6230,8 +6445,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerRef,
     () => ({
       stashQueuedEditForRecovery: (records) => stashCurrentPromptStable(records),
-      restoreStashedPrompt: async (entryId) => {const entry=usePromptStashStore.getState().entries.find((item)=>item.id===entryId);if(entry) await restoreStashEntryStable(entry);},
-      openStashMenu: () => {setIsStashMenuOpen(true);focusComposer();},
+      restoreStashedPrompt: async (entryId) => {
+        const entry = usePromptStashStore.getState().entries.find((item) => item.id === entryId);
+        if (entry) await restoreStashEntryStable(entry);
+      },
+      openStashMenu: () => {
+        setIsStashMenuOpen(true);
+        focusComposer();
+      },
       focusAtEnd: () => {
         composerEditorRef.current?.focusAtEnd();
       },
@@ -6649,7 +6870,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <ComposerBanner.Actions>
                       <ComposerPendingApprovalActions
                         requestId={activePendingApproval.requestId}
-                        disabled={!canOperateThread}
+                        disabled={
+                          !canOperateThread || Boolean(customerScope && externalSendDisabledReason)
+                        }
                         isResponding={respondingRequestIds.includes(
                           activePendingApproval.requestId,
                         )}
@@ -6834,7 +7057,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     resolvedTheme={resolvedTheme}
                     isLoading={isComposerMenuLoading}
                     triggerKind={composerTriggerKind}
-                    workspacePathCompletion={workspacePathCompletion && composerTriggerKind === "path"}
+                    workspacePathCompletion={
+                      workspacePathCompletion && composerTriggerKind === "path"
+                    }
                     emptyStateText={composerMenuEmptyState}
                     activeItemId={activeComposerMenuItem?.id ?? null}
                     onHighlightedItemChange={onComposerMenuItemHighlightedStable}
@@ -6988,7 +7213,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   }
                                 />
                                 <TooltipPopup side="top">
-                                  
                                   草稿附件无法保存到本地，离开当前页面后可能丢失。
                                 </TooltipPopup>
                               </Tooltip>
@@ -7321,10 +7545,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             : projectSelectionRequired
                               ? "请先在上方选择项目以开始对话"
                               : showProviderUnavailable
-                                ? isAutoOpsHosted() ? "项目助手暂时不可用，请稍后重试" : "请在设置中启用运行器后发送消息"
-                                : phase === "disconnected"
-                                  ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : isAutoOpsHosted() ? "输入问题，@ 引用项目资料，$ 使用技能，/ 查看命令" : "输入问题，@ 引用文件或文件夹，$ 使用技能，/ 查看命令"
+                                ? customerScope
+                                  ? "客户运行器暂时不可用，草稿会保留"
+                                  : isAutoOpsHosted()
+                                    ? "项目助手暂时不可用，请稍后重试"
+                                    : "请在设置中启用运行器后发送消息"
+                                : customerScope
+                                  ? "输入需求，$ 使用本机技能"
+                                  : phase === "disconnected"
+                                    ? DISCONNECTED_COMPOSER_PLACEHOLDER
+                                    : isAutoOpsHosted()
+                                      ? "输入问题，@ 引用项目资料，$ 使用技能，/ 查看命令"
+                                      : "输入问题，@ 引用文件或文件夹，$ 使用技能，/ 查看命令"
                     }
                     disabled={
                       isConnecting ||

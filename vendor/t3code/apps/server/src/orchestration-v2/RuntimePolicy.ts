@@ -1,3 +1,4 @@
+import { isCustomerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
 import {
   ModelSelection,
   OrchestrationV2AppThread,
@@ -55,7 +56,9 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2
     Effect.succeed({
       runtimeMode: input.thread.runtimeMode,
       interactionMode: input.thread.interactionMode,
-      cwd: input.thread.worktreePath,
+      cwd: isCustomerProviderInstanceId(input.modelSelection.instanceId)
+        ? null
+        : input.thread.worktreePath,
     }),
 });
 
@@ -81,6 +84,13 @@ export const layerFromProjectStore: Layer.Layer<
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
+        if (isCustomerProviderInstanceId(input.modelSelection.instanceId)) {
+          return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            cwd: null,
+          });
+        }
         const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
         const supportedRuntimeModes =
           instance === undefined
@@ -134,7 +144,10 @@ export function layerWithOverride(
             Effect.map((policy) =>
               ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
                 ...policy,
-                ...(override.cwd === undefined ? {} : { cwd: override.cwd }),
+                ...(override.cwd === undefined ||
+                isCustomerProviderInstanceId(input.modelSelection.instanceId)
+                  ? {}
+                  : { cwd: override.cwd }),
                 ...(override.approvalPolicy === undefined
                   ? {}
                   : { approvalPolicy: override.approvalPolicy }),
