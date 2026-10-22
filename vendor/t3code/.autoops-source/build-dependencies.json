@@ -1,0 +1,488 @@
+{
+  "upstreamCommit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
+  "workspacePackages": [
+    {
+      "name": "@t3tools/client-runtime",
+      "path": "packages/client-runtime"
+    },
+    {
+      "name": "@t3tools/contracts",
+      "path": "packages/contracts"
+    },
+    {
+      "name": "@t3tools/desktop",
+      "path": "apps/desktop"
+    },
+    {
+      "name": "@t3tools/marketing",
+      "path": "apps/marketing"
+    },
+    {
+      "name": "@t3tools/mobile",
+      "path": "apps/mobile"
+    },
+    {
+      "name": "@t3tools/oxlint-plugin-t3code",
+      "path": "oxlint-plugin-t3code"
+    },
+    {
+      "name": "@t3tools/provider-acp",
+      "path": "packages/provider-acp"
+    },
+    {
+      "name": "@t3tools/provider-acp-registry",
+      "path": "packages/provider-acp-registry"
+    },
+    {
+      "name": "@t3tools/provider-core",
+      "path": "packages/provider-core"
+    },
+    {
+      "name": "@t3tools/provider-cursor",
+      "path": "packages/provider-cursor"
+    },
+    {
+      "name": "@t3tools/provider-grok",
+      "path": "packages/provider-grok"
+    },
+    {
+      "name": "@t3tools/provider-muse",
+      "path": "packages/provider-muse"
+    },
+    {
+      "name": "@t3tools/provider-opencode",
+      "path": "packages/provider-opencode"
+    },
+    {
+      "name": "@t3tools/provider-pi",
+      "path": "packages/provider-pi"
+    },
+    {
+      "name": "@t3tools/provider-testing",
+      "path": "packages/provider-testing"
+    },
+    {
+      "name": "@t3tools/scripts",
+      "path": "scripts"
+    },
+    {
+      "name": "@t3tools/shared",
+      "path": "packages/shared"
+    },
+    {
+      "name": "@t3tools/source-control-azure-devops",
+      "path": "packages/source-control-azure-devops"
+    },
+    {
+      "name": "@t3tools/source-control-bitbucket",
+      "path": "packages/source-control-bitbucket"
+    },
+    {
+      "name": "@t3tools/source-control-core",
+      "path": "packages/source-control-core"
+    },
+    {
+      "name": "@t3tools/source-control-forgejo",
+      "path": "packages/source-control-forgejo"
+    },
+    {
+      "name": "@t3tools/source-control-gitcafe",
+      "path": "packages/source-control-gitcafe"
+    },
+    {
+      "name": "@t3tools/source-control-github",
+      "path": "packages/source-control-github"
+    },
+    {
+      "name": "@t3tools/source-control-gitlab",
+      "path": "packages/source-control-gitlab"
+    },
+    {
+      "name": "@t3tools/source-control-testing",
+      "path": "packages/source-control-testing"
+    },
+    {
+      "name": "@t3tools/ssh",
+      "path": "packages/ssh"
+    },
+    {
+      "name": "@t3tools/tailscale",
+      "path": "packages/tailscale"
+    },
+    {
+      "name": "@t3tools/web",
+      "path": "apps/web"
+    },
+    {
+      "name": "effect-acp",
+      "path": "packages/effect-acp"
+    },
+    {
+      "name": "effect-codex-app-server",
+      "path": "packages/effect-codex-app-server"
+    },
+    {
+      "name": "t3",
+      "path": "apps/server"
+    },
+    {
+      "name": "t3code-relay",
+      "path": "infra/relay"
+    }
+  ],
+  "scopes": {
+    "web": {
+      "roots": [
+        "@t3tools/web"
+      ],
+      "declaredWorkspaceBuildTestClosure": [
+        {
+          "name": "@t3tools/client-runtime",
+          "path": "packages/client-runtime"
+        },
+        {
+          "name": "@t3tools/contracts",
+          "path": "packages/contracts"
+        },
+        {
+          "name": "@t3tools/provider-acp",
+          "path": "packages/provider-acp"
+        },
+        {
+          "name": "@t3tools/provider-acp-registry",
+          "path": "packages/provider-acp-registry"
+        },
+        {
+          "name": "@t3tools/provider-core",
+          "path": "packages/provider-core"
+        },
+        {
+          "name": "@t3tools/provider-cursor",
+          "path": "packages/provider-cursor"
+        },
+        {
+          "name": "@t3tools/provider-grok",
+          "path": "packages/provider-grok"
+        },
+        {
+          "name": "@t3tools/provider-muse",
+          "path": "packages/provider-muse"
+        },
+        {
+          "name": "@t3tools/provider-opencode",
+          "path": "packages/provider-opencode"
+        },
+        {
+          "name": "@t3tools/provider-pi",
+          "path": "packages/provider-pi"
+        },
+        {
+          "name": "@t3tools/provider-testing",
+          "path": "packages/provider-testing"
+        },
+        {
+          "name": "@t3tools/shared",
+          "path": "packages/shared"
+        },
+        {
+          "name": "@t3tools/source-control-azure-devops",
+          "path": "packages/source-control-azure-devops"
+        },
+        {
+          "name": "@t3tools/source-control-bitbucket",
+          "path": "packages/source-control-bitbucket"
+        },
+        {
+          "name": "@t3tools/source-control-core",
+          "path": "packages/source-control-core"
+        },
+        {
+          "name": "@t3tools/source-control-forgejo",
+          "path": "packages/source-control-forgejo"
+        },
+        {
+          "name": "@t3tools/source-control-gitcafe",
+          "path": "packages/source-control-gitcafe"
+        },
+        {
+          "name": "@t3tools/source-control-github",
+          "path": "packages/source-control-github"
+        },
+        {
+          "name": "@t3tools/source-control-gitlab",
+          "path": "packages/source-control-gitlab"
+        },
+        {
+          "name": "@t3tools/source-control-testing",
+          "path": "packages/source-control-testing"
+        },
+        {
+          "name": "@t3tools/web",
+          "path": "apps/web"
+        },
+        {
+          "name": "effect-acp",
+          "path": "packages/effect-acp"
+        }
+      ],
+      "workspacePackageCount": 22,
+      "note": "Static declared package dependency closure including devDependencies; not proof that install/build has passed or the minimum source-import closure."
+    },
+    "server": {
+      "roots": [
+        "t3"
+      ],
+      "declaredWorkspaceBuildTestClosure": [
+        {
+          "name": "@t3tools/client-runtime",
+          "path": "packages/client-runtime"
+        },
+        {
+          "name": "@t3tools/contracts",
+          "path": "packages/contracts"
+        },
+        {
+          "name": "@t3tools/provider-acp",
+          "path": "packages/provider-acp"
+        },
+        {
+          "name": "@t3tools/provider-acp-registry",
+          "path": "packages/provider-acp-registry"
+        },
+        {
+          "name": "@t3tools/provider-core",
+          "path": "packages/provider-core"
+        },
+        {
+          "name": "@t3tools/provider-cursor",
+          "path": "packages/provider-cursor"
+        },
+        {
+          "name": "@t3tools/provider-grok",
+          "path": "packages/provider-grok"
+        },
+        {
+          "name": "@t3tools/provider-muse",
+          "path": "packages/provider-muse"
+        },
+        {
+          "name": "@t3tools/provider-opencode",
+          "path": "packages/provider-opencode"
+        },
+        {
+          "name": "@t3tools/provider-pi",
+          "path": "packages/provider-pi"
+        },
+        {
+          "name": "@t3tools/provider-testing",
+          "path": "packages/provider-testing"
+        },
+        {
+          "name": "@t3tools/shared",
+          "path": "packages/shared"
+        },
+        {
+          "name": "@t3tools/source-control-azure-devops",
+          "path": "packages/source-control-azure-devops"
+        },
+        {
+          "name": "@t3tools/source-control-bitbucket",
+          "path": "packages/source-control-bitbucket"
+        },
+        {
+          "name": "@t3tools/source-control-core",
+          "path": "packages/source-control-core"
+        },
+        {
+          "name": "@t3tools/source-control-forgejo",
+          "path": "packages/source-control-forgejo"
+        },
+        {
+          "name": "@t3tools/source-control-gitcafe",
+          "path": "packages/source-control-gitcafe"
+        },
+        {
+          "name": "@t3tools/source-control-github",
+          "path": "packages/source-control-github"
+        },
+        {
+          "name": "@t3tools/source-control-gitlab",
+          "path": "packages/source-control-gitlab"
+        },
+        {
+          "name": "@t3tools/source-control-testing",
+          "path": "packages/source-control-testing"
+        },
+        {
+          "name": "@t3tools/ssh",
+          "path": "packages/ssh"
+        },
+        {
+          "name": "@t3tools/tailscale",
+          "path": "packages/tailscale"
+        },
+        {
+          "name": "@t3tools/web",
+          "path": "apps/web"
+        },
+        {
+          "name": "effect-acp",
+          "path": "packages/effect-acp"
+        },
+        {
+          "name": "effect-codex-app-server",
+          "path": "packages/effect-codex-app-server"
+        },
+        {
+          "name": "t3",
+          "path": "apps/server"
+        }
+      ],
+      "workspacePackageCount": 26,
+      "note": "Static declared package dependency closure including devDependencies; not proof that install/build has passed or the minimum source-import closure."
+    },
+    "webAndServer": {
+      "roots": [
+        "@t3tools/web",
+        "t3"
+      ],
+      "declaredWorkspaceBuildTestClosure": [
+        {
+          "name": "@t3tools/client-runtime",
+          "path": "packages/client-runtime"
+        },
+        {
+          "name": "@t3tools/contracts",
+          "path": "packages/contracts"
+        },
+        {
+          "name": "@t3tools/provider-acp",
+          "path": "packages/provider-acp"
+        },
+        {
+          "name": "@t3tools/provider-acp-registry",
+          "path": "packages/provider-acp-registry"
+        },
+        {
+          "name": "@t3tools/provider-core",
+          "path": "packages/provider-core"
+        },
+        {
+          "name": "@t3tools/provider-cursor",
+          "path": "packages/provider-cursor"
+        },
+        {
+          "name": "@t3tools/provider-grok",
+          "path": "packages/provider-grok"
+        },
+        {
+          "name": "@t3tools/provider-muse",
+          "path": "packages/provider-muse"
+        },
+        {
+          "name": "@t3tools/provider-opencode",
+          "path": "packages/provider-opencode"
+        },
+        {
+          "name": "@t3tools/provider-pi",
+          "path": "packages/provider-pi"
+        },
+        {
+          "name": "@t3tools/provider-testing",
+          "path": "packages/provider-testing"
+        },
+        {
+          "name": "@t3tools/shared",
+          "path": "packages/shared"
+        },
+        {
+          "name": "@t3tools/source-control-azure-devops",
+          "path": "packages/source-control-azure-devops"
+        },
+        {
+          "name": "@t3tools/source-control-bitbucket",
+          "path": "packages/source-control-bitbucket"
+        },
+        {
+          "name": "@t3tools/source-control-core",
+          "path": "packages/source-control-core"
+        },
+        {
+          "name": "@t3tools/source-control-forgejo",
+          "path": "packages/source-control-forgejo"
+        },
+        {
+          "name": "@t3tools/source-control-gitcafe",
+          "path": "packages/source-control-gitcafe"
+        },
+        {
+          "name": "@t3tools/source-control-github",
+          "path": "packages/source-control-github"
+        },
+        {
+          "name": "@t3tools/source-control-gitlab",
+          "path": "packages/source-control-gitlab"
+        },
+        {
+          "name": "@t3tools/source-control-testing",
+          "path": "packages/source-control-testing"
+        },
+        {
+          "name": "@t3tools/ssh",
+          "path": "packages/ssh"
+        },
+        {
+          "name": "@t3tools/tailscale",
+          "path": "packages/tailscale"
+        },
+        {
+          "name": "@t3tools/web",
+          "path": "apps/web"
+        },
+        {
+          "name": "effect-acp",
+          "path": "packages/effect-acp"
+        },
+        {
+          "name": "effect-codex-app-server",
+          "path": "packages/effect-codex-app-server"
+        },
+        {
+          "name": "t3",
+          "path": "apps/server"
+        }
+      ],
+      "workspacePackageCount": 26,
+      "note": "Static declared package dependency closure including devDependencies; not proof that install/build has passed or the minimum source-import closure."
+    }
+  },
+  "runtime": {
+    "sourceNode": "^24.13.1",
+    "packageManager": "pnpm@11.10.0",
+    "coreVersions": {
+      "effect": "4.0.5",
+      "vite-plus": "1.0.0",
+      "react": "19.3.0",
+      "typescript": "7.0.2"
+    },
+    "retainedBuildInputs": [
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "patches/",
+      "vite.config.ts",
+      "tsconfig.base.json",
+      "scripts/",
+      "apps/web/vite/",
+      "native/"
+    ],
+    "notes": [
+      "Root prepare patches effect-tsgo and runs vp config --no-agent.",
+      "Server build task is node scripts/cli.ts build and depends on @t3tools/web#build; its build:bundle script invokes vp pack.",
+      "Server uses node:sqlite and native dependencies such as node-pty.",
+      "Workspace package exports resolve .ts source directly; a production-only package install is insufficient to build server.",
+      "The .repos directory is not a workspace glob. Its two nested gitlinks are retained as references, not expanded.",
+      "The frozen lockfile and patchedDependencies must be retained together.",
+      "No dependency installation or build performed by this inventory script."
+    ]
+  }
+}

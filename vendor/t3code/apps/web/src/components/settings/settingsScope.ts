@@ -1,0 +1,150 @@
+import type { EnvironmentId } from "@t3tools/contracts";
+
+import type {
+  SidebarProjectGroupMember,
+  SidebarProjectSnapshot,
+} from "../../sidebarProjectGrouping";
+import type { EnvironmentPresentation } from "../../state/environments";
+
+export interface SettingsScopeSearch {
+  project?: string | undefined;
+  machine?: string | undefined;
+  checkout?: string | undefined;
+}
+
+type ScopeTargets = {
+  label: string;
+  members: readonly SidebarProjectGroupMember[];
+  environmentIds: readonly EnvironmentId[];
+};
+
+export type ResolvedSettingsScope = ScopeTargets &
+  (
+    | { kind: "all" }
+    | { kind: "environment"; environmentId: EnvironmentId }
+    | {
+        kind: "project";
+        group: SidebarProjectSnapshot;
+        environmentId: EnvironmentId | null;
+      }
+    | {
+        kind: "checkout";
+        group: SidebarProjectSnapshot;
+        checkout: SidebarProjectGroupMember;
+        environmentId: EnvironmentId;
+      }
+    | {
+        kind: "unavailable";
+        reason: "project-required" | "project-missing" | "environment-missing" | "checkout-missing";
+        message: string;
+      }
+  );
+
+/** Stale IDs remain visible to the resolver so a removed target reads as unavailable, not as "all". */
+export function validateSettingsScopeSearch(raw: Record<string, unknown>): SettingsScopeSearch {
+  const stringValue = (value: unknown) =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  const project = stringValue(raw.project);
+  const machine = stringValue(raw.machine);
+  const checkout = stringValue(raw.checkout);
+  return {
+    ...(project === undefined ? {} : { project }),
+    ...(machine === undefined ? {} : { machine }),
+    ...(checkout === undefined ? {} : { checkout }),
+  };
+}
+
+/** An unavailable selection never broadens a subsequent write. */
+export function resolveSettingsScope(
+  search: SettingsScopeSearch,
+  groups: readonly SidebarProjectSnapshot[],
+  environments: readonly Pick<EnvironmentPresentation, "environmentId" | "label">[],
+): ResolvedSettingsScope {
+  const unavailable = (
+    reason: Extract<ResolvedSettingsScope, { kind: "unavailable" }>["reason"],
+    message: string,
+  ): ResolvedSettingsScope => ({
+    kind: "unavailable",
+    reason,
+    label: "所选范围不可用",
+    message,
+    members: [],
+    environmentIds: [],
+  });
+
+  if (search.checkout && !search.project) {
+    return unavailable("project-required", "请选择项目，然后选择该项目的检出目录。");
+  }
+
+  const environment = environments.find((candidate) => candidate.environmentId === search.machine);
+  if (search.machine && !environment) {
+    return unavailable("environment-missing", "此环境已不可用。");
+  }
+
+  if (search.project) {
+    const group = groups.find((candidate) => candidate.projectKey === search.project);
+    if (!group) return unavailable("project-missing", "此项目已不可用。");
+    const members = group.memberProjects.filter(
+      (member) =>
+        (search.machine === undefined || member.environmentId === search.machine) &&
+        (search.checkout === undefined || member.physicalProjectKey === search.checkout),
+    );
+    if (members.length === 0) {
+      return unavailable(
+        "checkout-missing",
+        search.checkout
+          ? "此检出目录已不在所选项目和环境中。"
+          : "此项目在该环境中没有检出目录。",
+      );
+    }
+    if (search.checkout) {
+      const checkout = members[0]!;
+      const checkoutEnvironment = environments.find(
+        (candidate) => candidate.environmentId === checkout.environmentId,
+      );
+      if (!checkoutEnvironment) {
+        return unavailable(
+          "environment-missing",
+          "此检出目录所属的环境已不可用。",
+        );
+      }
+      const sharesEnvironment = group.memberProjects.some(
+        (member) =>
+          member.environmentId === checkout.environmentId &&
+          member.physicalProjectKey !== checkout.physicalProjectKey,
+      );
+      return {
+        kind: "checkout",
+        group,
+        checkout,
+        environmentId: checkout.environmentId,
+        label: `${group.displayName} / ${checkoutEnvironment.label}${sharesEnvironment ? ` · ${checkout.workspaceRoot}` : ""}`,
+        members,
+        environmentIds: [checkout.environmentId],
+      };
+    }
+    return {
+      kind: "project",
+      group,
+      environmentId: environment?.environmentId ?? null,
+      label: `${group.displayName} / ${environment?.label ?? "所有检出目录"}`,
+      members,
+      environmentIds: [...new Set(members.map((member) => member.environmentId))],
+    };
+  }
+  if (environment) {
+    return {
+      kind: "environment",
+      environmentId: environment.environmentId,
+      label: environment.label,
+      members: [],
+      environmentIds: [environment.environmentId],
+    };
+  }
+  return {
+    kind: "all",
+    label: "所有环境",
+    members: [],
+    environmentIds: environments.map((candidate) => candidate.environmentId),
+  };
+}

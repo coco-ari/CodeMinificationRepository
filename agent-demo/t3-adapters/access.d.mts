@@ -1,0 +1,72 @@
+import type { ProductProfile } from './product-profile.mjs';
+export interface AutoOpsPrincipal {
+  readonly id: string;
+  readonly displayName: string;
+  readonly role: string;
+  readonly sessionHash: string;
+  readonly csrf: string;
+  readonly expiresAt: number;
+}
+export interface ThreadBinding {
+  readonly threadId: string;
+  readonly projectId: string;
+  readonly environmentId: string;
+  readonly agentId: string;
+  readonly ownerId: string;
+  readonly visibility: 'private' | 'project';
+  readonly createdAt: string;
+  readonly revokedAt?: string;
+  readonly compatibilityReadOnly: boolean;
+  readonly continuationVerified: boolean;
+  readonly nativeThreadId?: string;
+  readonly nativeParentThreadId?: string;
+}
+export interface AutoOpsProject {
+  id: string; name: string; memberIds: string[];
+  environments: {id: string; name: string}[];
+  documents: {id: string; name: string; mime: string; content: string; excerpt?: string}[];
+  resources: {id: string; name: string; type: string; environmentId: string}[];
+}
+export interface AutoOpsAgent { id: string; name: string; description: string; projectIds: string[]; capabilities: string[] }
+export interface ToolScope { binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
+export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
+export interface AutoOpsAccess {
+  authenticateCookie(cookie?: string): AutoOpsPrincipal;
+  refresh(principal: AutoOpsPrincipal): AutoOpsPrincipal;
+  requireProject(principal: AutoOpsPrincipal, projectId: string): AutoOpsProject;
+  getThreadBinding(threadId: string): ThreadBinding | undefined;
+  nativeSubagentParent(threadId: string): string | undefined;
+  canSeeThread(principal: AutoOpsPrincipal, threadId: string, includeDeleted?: boolean): boolean;
+  visibleThreadIds(principal: AutoOpsPrincipal): string[];
+  requireThread(principal: AutoOpsPrincipal, threadId: string): ThreadBinding;
+  markThreadDeleted(threadId: string): void;
+  bindThread(principal: AutoOpsPrincipal, input: Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'>): ThreadBinding;
+  requireAttachment(principal: AutoOpsPrincipal, attachmentId: string, targetThreadId?: string): {id:string; ownerId:string; threadId:string|null;name?:string;mimeType?:string;sizeBytes?:number};
+  recordPendingAttachment(principal: AutoOpsPrincipal, attachmentId: string, metadata?: {name:string;mimeType:string;sizeBytes:number}): void;
+  recordClaimedAttachment(principal: AutoOpsPrincipal, sourceId: string, finalId: string, threadId: string): void;
+  recordThreadAttachment(principal: AutoOpsPrincipal, attachmentId: string, threadId: string, metadata?: {name:string;mimeType:string;sizeBytes:number}): void;
+  recordGeneratedAttachment(threadId: string, attachmentId: string, metadata: {name:string;mimeType:string;sizeBytes:number}): void;
+  forkBinding(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;
+  recordLegacyNativeFork(sourceThreadId: string, targetThreadId: string, sourceNativeId: string, targetNativeId: string): void;
+  requireToolThread(threadId: string): ToolScope;
+  requireReference(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;
+  requireCsrf(principal: AutoOpsPrincipal, presented: unknown): void;
+  recordNativeSession(principal: AutoOpsPrincipal, nativeSessionId: string): void;
+  principalForNativeSession(nativeSessionId: string): AutoOpsPrincipal;
+  bootstrap(principal: AutoOpsPrincipal): {
+    principal: {id: string; displayName: string}; csrfToken: string; gatewayBasePath: string;
+    fixedModel: {instanceId: 'codex'; model: string}; runtimeMode: 'approval-required';
+    modelSelectionEnabled:boolean;
+    projects: (Pick<AutoOpsProject, 'id'|'name'|'environments'> & {agents: {id:string; name:string}[]})[];
+    agents: AutoOpsAgent[];
+    productProfile: {id: ProductProfile['id']};
+    capabilities: ProductProfile['capabilities'];
+    clientSettingsOverrides: ProductProfile['clientSettingsOverrides'];
+  };
+}
+export function autoOpsAccessEnabled(): boolean;
+export const isAutoOpsEnabled: typeof autoOpsAccessEnabled;
+export function configuredAutoOpsProjects(): AutoOpsProject[];
+export function configuredAutoOpsAccess(): AutoOpsAccess | undefined;
+export function getThreadBinding(threadId: string): ThreadBinding | undefined;
+export function requireToolThread(threadId: string): ToolScope;

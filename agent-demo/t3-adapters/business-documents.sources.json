@@ -1,0 +1,47 @@
+{
+  "font": {
+    "name": "Noto Sans CJK SC Regular",
+    "version": "Sans2.004",
+    "commit": "523d033d6cb47f4a80c58a35753646f5c3608a78",
+    "source": "https://github.com/notofonts/noto-cjk/blob/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "license": "SIL Open Font License 1.1",
+    "licenseSource": "https://github.com/notofonts/noto-cjk/blob/523d033d6cb47f4a80c58a35753646f5c3608a78/LICENSE",
+    "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"
+  },
+  "libraries": {
+    "officeparser": {
+      "version": "8.2.0",
+      "license": "MIT",
+      "source": "https://github.com/harshankur/officeParser"
+    },
+    "pdfkit": {
+      "version": "0.20.2",
+      "license": "MIT",
+      "source": "https://github.com/foliojs/pdfkit"
+    },
+    "fflate": {
+      "version": "0.8.3",
+      "license": "MIT",
+      "source": "https://github.com/101arrowz/fflate"
+    }
+  },
+  "runtimeResources": [
+    "business-documents.worker.mjs",
+    "business-documents.font.otf",
+    "business-documents.font.LICENSE",
+    "business-documents.sources.json",
+    "../attachments.mjs",
+    "../attachment-pdf-worker.mjs"
+  ],
+  "runtimeDependencies": [
+    "officeparser@8.2.0",
+    "pdfkit@0.20.2",
+    "fflate@0.8.3",
+    "pdfjs-dist@6.4.299"
+  ],
+  "bundling": "Set AUTOOPS_BUSINESS_RESOURCES_DIR to the absolute deployed agent-demo/t3-adapters directory. Keep worker unbundled with its original relative paths. Include runtimeDependencies and full production transitive closure. OCR remains disabled; do not run Tesseract postinstall downloads.",
+  "fixtures": {
+    "producer": "python-docx 1.2.0 / openpyxl 3.1.5 / python-pptx 1.0.2",
+    "contents": "Synthetic AutoOps Chinese release checklist, workbook rows/sheets, slides/speaker notes. No personal data or macros."
+  }
+}

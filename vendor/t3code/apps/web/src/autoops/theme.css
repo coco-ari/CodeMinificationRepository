@@ -1,0 +1,3 @@
+/* The hosted application uses T3's native themePalette/index.css tokens.
+ * Keep business integration styles here only when no upstream slot can express
+ * them; do not reintroduce the legacy Solid Glass surface overrides. */

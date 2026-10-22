@@ -1,0 +1,24 @@
+[Unit]
+Description=AutoOps Agent demo Codex provider bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tao/autoops-agent-demo/app
+ExecStart=/home/tao/autoops-agent-demo/runtime/current/bin/node agent-demo/codex-bridge.mjs
+Environment=NODE_ENV=production
+Environment=AGENT_DEMO_RUNNER_STATE_DIR=/home/tao/autoops-agent-demo/data/runner
+Environment=AGENT_DEMO_MATERIALS_URL=http://127.0.0.1:8787
+EnvironmentFile=/home/tao/autoops-agent-demo/bridge.env
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0077
+MemoryMax=1G
+TasksMax=128
+
+[Install]
+WantedBy=default.target

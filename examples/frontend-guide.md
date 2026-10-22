@@ -1,6 +1,8 @@
 # 前端维护说明
 
-控制台使用 React 19、Vite、Tailwind CSS 4 与 Radix 版 shadcn/ui。官方组件来自 https://ui.shadcn.com/docs/components，通过官方 CLI 生成后保存在 `web/src/components/ui/`；`components.json` 记录样式、路径别名和组件配置。后端继续使用 Node.js 与 SQLite。
+后续 UI 开发统一遵循 [T3 UI 规范与开发提示词](t3-ui-standard.md)，以锁定版本 T3 Code 为组件、主题和交互基准，默认简体中文。该规范替代本文下方旧控制台的 Solid Glass 与 Radix 外观约束。当前 Agent 入口直接复用 T3 Web；旧控制台实现说明保留用于维护既有页面，不能据此扩展另一套设计系统。
+
+旧控制台使用 React 19、Vite、Tailwind CSS 4 与 Radix 版 shadcn/ui，组件保存在 `web/src/components/ui/`；`components.json` 记录原组件配置。后端继续使用 Node.js 与 SQLite。
 
 ## 开发与构建
 
@@ -38,7 +40,7 @@ pnpm run test:deploy-browser
 - `web/src/index.css`：Tailwind、基础变量和业务布局，使用系统字体，无远程字体依赖。
 - `web/src/styles/solid-glass.css`：在基础样式后加载的浅色玻璃主题，适配 Radix 状态与 Portal 浮层；保留实色表格、日志和嵌套卡片，并支持减少透明效果及高对比度模式。
 
-新增组件使用 `pnpm dlx shadcn@latest add <component>`。核对组件 import 指向 `@/lib/utils`，不要引入重复的样式工具。提交源码与锁文件，随后运行 `pnpm format:ui` 和检查。保留组件的键盘操作、焦点管理与 ARIA 语义；共享表单在关闭时将焦点返回触发控件，秘密字段随弹窗卸载清除。
+新功能优先复用锁定版本 T3 的组件，不通过 latest CLI 引入另一套风格。维护旧控制台组件时核对 import 指向现有工具，不引入重复样式工具。保留键盘操作、焦点管理与 ARIA 语义；共享表单在关闭时将焦点返回触发控件，秘密字段随弹窗卸载清除。
 
 ## 标题与文案
 
@@ -46,9 +48,9 @@ pnpm run test:deploy-browser
 
 实际任务状态、版本、环境、资料更新时间等业务信息按其语义展示。必要的表单帮助、错误提示、空态操作指引和弹窗无障碍描述仍应保留，不通过全局隐藏段落或 `CardDescription` 的方式处理。此约定适用于正式控制台和原型页面。
 
-## Solid Glass 材质规范
+## 旧控制台 Solid Glass 实现（历史维护参考）
 
-后续 UI 修改以 [Solid Glass](https://github.com/deeplethe/solid-glass) 为浅色材质参考，通过本仓库 `web/src/styles/solid-glass.css` 适配 Radix。保留 shadcn/ui 组件、现有布局和业务行为，不直接复制上游针对其他组件状态的选择器。上游 MIT 许可保存在 `web/public/third-party/solid-glass-LICENSE.txt`。
+本节记录旧页面的材质实现，后续新增和重构以 T3 UI 规范为准。旧实现以 [Solid Glass](https://github.com/deeplethe/solid-glass) 为浅色材质参考，通过 `web/src/styles/solid-glass.css` 适配 Radix。维护旧实现时保留现有业务行为，不直接复制上游针对其他组件状态的选择器。上游 MIT 许可保存在 `web/public/third-party/solid-glass-LICENSE.txt`。
 
 | 区域 | 材质与圆角 |
 | --- | --- |

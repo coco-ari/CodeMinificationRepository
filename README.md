@@ -4,21 +4,28 @@
 
 ## 项目工作台交互原型
 
-完整需求、模块设计、实现边界及跨电脑开发步骤见 [项目工作台设计与开发交接](examples/project-workbench-design.md)。当前工作台开发分支为 `feat/project-workbench-prototype`，尚未合并到 `main`。
+设计以 [项目工作台设计文档及配套图](examples/project-workbench-design.md)、[前端维护说明](examples/frontend-guide.md) 为依据；后续业务变化记录在 [需求补充](examples/workbench-v2-requirements.md)。当前开发分支为 `feat/t3-ui-standard-zh-cn`，UI 与 Agent 交互按锁定版本 T3 规范适配。原型仍在根据反馈修正，[工程检查记录](examples/workbench-v2-validation.md) 不代表 UI 或需求已获用户验收。
 
-在仓库根目录运行 `pnpm install`、`pnpm dev:prototype`，然后打开 [交互原型](http://127.0.0.1:5173/prototype.html)。原型采用现有 Solid Glass 与 shadcn/ui，提供两个隔离的示例项目，配置、文档、产物和对话保存在当前浏览器中。左下角重置按钮可恢复初始数据。
+未来项目工作区采用已确认的 [两种 Agent 工作区＋部署包出口](examples/project-workbench-design.md#工作区与部署包)：内部原始工作区保留 Git，外部工作区单向生成脱敏且去 Git 历史的版本，前后端部署 ZIP 直接从内部固定版本导出。该业务方案已保存，完整工作区尚未实现。
 
-推荐按以下顺序体验：
+在仓库根目录运行 `pnpm install --frozen-lockfile`、`pnpm dev:prototype`，打开 [交互原型](http://127.0.0.1:5173/prototype.html)。使用虚构账号 `admin`（管理员）、`lin` 或 `chen`（成员），密码均为 `Demo123!`。左下角可重置演示。数据保存在当前浏览器 `autoops:interactive-prototype:v2`，与旧版演示分开。
 
-1. **资料与配置 → 插件配置**：开启日志分析，填写配置，保存草稿，再应用配置；到项目工具打开插件。
-2. **研发资料 / 仓库与源码**：新增、编辑或上传 Markdown / 文本资料，修改仓库配置并模拟同步。
-3. **源码与产物**：查看文件与来源，生成去 Git、脱敏、ZIP 或报告等独立产物；下载 ZIP 可实际解压。
-4. **Agent 对话**：从资料或产物进入问答，输入“检查项目设备并生成报告”，完成范围澄清，查看流式输出、工具轨迹、引用和报告；支持停止、继续及排队补充。
-5. **服务与部署 / MCP 与连接 / 我的主机**：体验模拟发布、连接状态检查和个人 Agent 登记。
+可按以下顺序体验：
 
-数据与执行结果均为模拟，不会连接真实仓库、服务器、数据库或模型。正式控制台仍从原入口访问。原型入口随 `pnpm build` 输出到 `dist/web/prototype.html`；浏览器验收使用 `pnpm test:prototype`，运行前需启动原型服务，可通过 `PROTOTYPE_URL` 指定地址。
+1. **项目 / 项目设置**：创建空项目、自由创建环境、添加已有成员；机柜基础地址会自动成为全局鉴权目标。
+2. **资料与配置**：研发资料、仓库与源码、处理产物、环境资源统一入口；阅读资料、核对产物来源，从产物直接进入问答或发布。
+3. **服务与部署**：核对当前和候选版本、目标主机及配置后发布；Java/静态/镜像、多主机、批量独立结果、失败自动回退及版本操作。
+4. **Agent 对话**：本轮仅平台内置 Agent，围绕项目资料进行只读问答分析；保留会话历史、正文与上下文工作区、私有或指定项目共享、附件、流式步骤、队列及断线恢复。
+5. **全局机柜迁移**：全局池、目标分配、模拟下一次鉴权、二维码和照片、完整 IMEI 确认删除、预览后重置及异常场景。
+6. **任务与审计 / 通知 / 平台账号**：任务展示执行进度、结果和日志；操作记录记下谁在何时对什么对象做了什么、结果如何。管理员维护账号，切换账号核验不同可见范围。
 
-首版静态设计资料保存在 [原型图集](output/imagegen/workbench-prototype-20261020-v1/index.html)，包含四张 PNG 和生成提示词。静态图作为设计过程存档，最新界面以交互原型为准。
+2026-10-21 范围调整：外部用户主机 Agent、接入认证、心跳与能力上报、中继转发以及相关主机执行隔离后置，不属于第一轮。项目权限、私有会话隔离及现有部署 Agent 不受此调整影响。“任务与审计”入口包含“任务”和“操作审计”两个页签。
+
+当前先验证 Agent 会话交互。在「Agent 对话」打开现有会话，通过右上角「更多操作 → 演示场景」选择「延迟回复」，发送问题后体验“引导本轮 / 排队”、队列编辑、停止保留和继续；切换会话可检查个人草稿及附件保留。独立检查命令为 `pnpm test:prototype:agent-interaction`。页面明确标注交互演示，暂未连接真实运行器。
+
+外部连接、Git 获取、构建发布、Agent 分析和机柜业务全部模拟，不访问真实基础设施。上传、编辑、本地状态和下载文件可实际交互。浏览器中的权限呈现用于需求验证，正式服务端鉴权尚未实现。正式控制台保持原入口，以下原有部署说明只描述既有产品，不是新工作台的架构约束。
+
+原型构建入口为 `dist/web/prototype.html`；运行 `pnpm build:ui` 验证构建。启动开发服务后，`pnpm test:prototype` 运行六个端到端套件，支持 `PROTOTYPE_URL` 和 `BROWSER_PATH`。`pnpm test:prototype:design` 检查资料到发布/问答的跳转、刷新恢复、各屏幕尺寸并输出设计审阅截图；截图需人工对照设计图审阅。`pnpm test:prototype:logic` 运行源码处理和机柜重置边界测试。旧在线站点未在本次更新。
 
 ---
 
@@ -297,3 +304,24 @@ docker compose config --quiet
 两个浏览器命令需要 Chrome/Chromium/Edge，可通过 `BROWSER_PATH` 指定路径。原浏览器测试验证源码管理流程；部署浏览器测试使用真实中心和模拟 Agent 回报验证管理配置、资源归属隔离、发布/回退页面、SSE 日志和移动布局。截图保存到被 Git 忽略的 `.test-artifacts`。
 
 `test:docker` 是单独执行的真实集成验收，需要可用的 **Linux Docker 引擎**、镜像拉取和 Maven 依赖访问能力。它使用本地 Java 演示项目、临时中心与两个 Agent，创建独立容器和网络，验证编译、发布、重启、失败回退及资源归属隔离；不会操作现有业务容器。输出报告位于 `.test-artifacts/docker-verification.json`。运行命令和验收方法不表示当前环境已经验收或上线，结果以实际命令输出与报告为准。
+
+## Agent 交互验证
+
+独立入口 `/agent-demo.html` 已按批准方案迁入并部署 T3 Code v0.1.1 的对话模块，和 `/prototype.html` 的业务原型分开。新前端直接使用 T3 AppRoot、输入区、状态、RPC、时间线、Markdown、虚拟列表与历史操作；项目、环境、成员及业务工具由 AutoOps 授权接口接入。逐项完成状态与真实证据见下列覆盖表，不能以源码已导入推定全部验收通过；实体手机项目等待设备连接。
+
+部署须同时启动原生 T3 worker 和同源网关：`pnpm start:agent-demo:t3` 负责 worker；网关使用 `AGENT_DEMO_ENGINE=t3` 与 `AUTOOPS_T3_INTERNAL_URL=http://127.0.0.1:8788` 启动 `pnpm start:agent-demo`。具体固定模型、密钥文件、构建依赖、数据导入和停写切换见部署文档。新模式不启动旧 bridge 或旧 SSE/场景执行链。测试账号仍为 `admin`、`lin`、`chen`。
+
+- [T3 UI 统一规范与可复用开发提示词](examples/t3-ui-standard.md)（后续 UI 开发必读，默认简体中文）
+- [批准的完整迁移方案](examples/agent-demo-t3-migration-plan.md)
+- [43 项模块、业务差异与证据](examples/agent-demo-t3-module-coverage.md)
+- [T3 协议与后续工作台复用边界](examples/agent-demo-t3-protocol.md)
+- [T3 运行、迁移与恢复](examples/agent-demo-t3-deployment.md)
+
+以下为迁移前 Demo 的契约和历史记录，保留用于旧数据核对与回退审查：
+
+- [交互与 API 契约](examples/agent-demo-contract.md)
+- [Demo 体验说明](examples/agent-demo-walkthrough.md)
+- [技术方案](examples/agent-demo-technical-plan.md)
+- [验收记录与证据](examples/agent-demo-validation.md)
+- [部署与恢复](agent-demo/DEPLOYMENT.md)
+- [真实运行器桥接](agent-demo/bridge.md)

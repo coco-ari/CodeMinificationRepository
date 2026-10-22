@@ -1,0 +1,47 @@
+{
+  "repository": "https://github.com/openai/codex",
+  "ref": "rust-v0.159.2",
+  "license": "Apache-2.0",
+  "changes": [
+    "AutoOps native-catalog.mjs adapts ModelInfo schema/default shape for one administrator-fixed CPA model; unknown capacity remains null.",
+    "skills.mjs uses native skill configuration rules and actual native SKILL.md discovery.",
+    "Child permissions and model-selection reasoning verified against native child_config/role; Codex source is not replaced."
+  ],
+  "sources": [
+    {
+      "path": "codex-rs/core/src/agent/child_config.rs",
+      "url": "https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/core/src/agent/child_config.rs",
+      "sha256": "33d4dd6f70e6640af1059398272c48b88e16e0005105fbd1ef13e30456d39a39"
+    },
+    {
+      "path": "codex-rs/core/src/agent/role.rs",
+      "url": "https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/core/src/agent/role.rs",
+      "sha256": "0311e6438eda278ac5800327beb035c70d8e531bc69b397f85117907aa2bb31a"
+    },
+    {
+      "path": "codex-rs/config/src/skills_config.rs",
+      "url": "https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/config/src/skills_config.rs",
+      "sha256": "bc2eb9fcb92c2c99fedaa25d1ca4bbff6d69a009499ba34762249bdc3b05cc8c"
+    },
+    {
+      "path": "codex-rs/ext/skills/src/host_roots.rs",
+      "url": "https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/ext/skills/src/host_roots.rs",
+      "sha256": "d4290ba4d783110e7533586ad19719536aa9b23f517b43e3147d3afb40c91d56"
+    },
+    {
+      "path": "codex-rs/models-manager/src/model_info.rs",
+      "url": "https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/models-manager/src/model_info.rs",
+      "sha256": "4c08962f50658d48723c49016a0a7be4d5ad98f7ab4cc80876a953e18c9a7f09"
+    },
+    {
+      "path": "codex-rs/protocol/src/openai_models.rs",
+      "url": "https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/protocol/src/openai_models.rs",
+      "sha256": "4c8b5cafd8c55db269f669e352321f787fcaf83785bce4476cb887abfce75dc6"
+    },
+    {
+      "path": "codex-rs/config/src/mcp_types.rs",
+      "url": "https://github.com/openai/codex/blob/rust-v0.159.2/codex-rs/config/src/mcp_types.rs",
+      "sha256": "08bdfe6bcc0ca607b1ead8b373029f895528604290f94bf1ba18c2dc83db8fd8"
+    }
+  ]
+}

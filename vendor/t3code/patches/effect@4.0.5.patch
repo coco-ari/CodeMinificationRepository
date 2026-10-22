@@ -1,0 +1,26 @@
+diff --git a/dist/ai/internal/mcpSchema/v2025_06_18.js b/dist/ai/internal/mcpSchema/v2025_06_18.js
+index 47355c37ca5121d7e363e21d889a2ad06323d097..1111a8cf18265953c098c3e4229371a851e5e551 100644
+--- a/dist/ai/internal/mcpSchema/v2025_06_18.js
++++ b/dist/ai/internal/mcpSchema/v2025_06_18.js
+@@ -424,7 +424,7 @@ const EnumSchema = /*#__PURE__*/Schema.Struct({
+ });
+ const RequestedSchema = /*#__PURE__*/Schema.Struct({
+   type: /*#__PURE__*/Schema.Literal("object"),
+-  properties: /*#__PURE__*/Schema.Record(Schema.String, /*#__PURE__*/Schema.Union([StringSchema, NumberSchema, BooleanSchema, EnumSchema])),
++  properties: /*#__PURE__*/Schema.Record(Schema.String, /*#__PURE__*/Schema.Union([EnumSchema, StringSchema, NumberSchema, BooleanSchema])),
+   required: /*#__PURE__*/optional(/*#__PURE__*/Schema.Array(Schema.String))
+ });
+ /**
+diff --git a/src/ai/internal/mcpSchema/v2025_06_18.ts b/src/ai/internal/mcpSchema/v2025_06_18.ts
+index 6fa204820e87b5aadc3d29eda77cb024100d4a20..086da81b1dcf227d90c0236a0a1bff24281d3437 100644
+--- a/src/ai/internal/mcpSchema/v2025_06_18.ts
++++ b/src/ai/internal/mcpSchema/v2025_06_18.ts
+@@ -481,7 +481,7 @@ const RequestedSchema = Schema.Struct({
+   type: Schema.Literal("object"),
+   properties: Schema.Record(
+     Schema.String,
+-    Schema.Union([StringSchema, NumberSchema, BooleanSchema, EnumSchema])
++    Schema.Union([EnumSchema, StringSchema, NumberSchema, BooleanSchema])
+   ),
+   required: optional(Schema.Array(Schema.String))
+ })

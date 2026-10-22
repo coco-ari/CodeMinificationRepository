@@ -2,9 +2,9 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/index.css'
 import '@/styles/solid-glass.css'
-import './prototype.css'
-import PrototypeApp from './App'
-import { PrototypeProvider } from './context'
+import './v2/v2.css'
+import PrototypeApp from './v2/App'
+import { WorkbenchProvider as PrototypeProvider } from './v2/store'
 import { Button } from '@/components/ui/button'
 
 class PrototypeBoundary extends React.Component {
@@ -25,7 +25,7 @@ class PrototypeBoundary extends React.Component {
             <Button
               variant="outline"
               onClick={() => {
-                localStorage.removeItem('autoops:interactive-prototype:v1')
+                localStorage.removeItem('autoops:interactive-prototype:v2')
                 location.hash = '/overview'
                 location.reload()
               }}

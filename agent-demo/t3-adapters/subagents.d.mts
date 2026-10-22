@@ -1,0 +1,2 @@
+export function createNativeSubagentBindings(dataDirectory:string,access:{requireToolThread(threadId:string):{binding:{projectId:string;environmentId:string;agentId:string;ownerId:string;visibility:string}};getThreadBinding(threadId:string):unknown}):{register(parentThreadId:string,childThreadId:string,nativeThreadId:string):unknown;close():void};
+export function registerNativeSubagent(parentThreadId:string,childThreadId:string,nativeThreadId:string):unknown;

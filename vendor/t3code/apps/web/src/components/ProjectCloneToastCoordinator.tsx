@@ -1,0 +1,227 @@
+import { useParams } from "@tanstack/react-router";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  type AtomCommandResult,
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import {
+  projectCloneDisplayName,
+  projectCloneProgressSummary,
+  type EnvironmentId,
+  type ProjectCloneSnapshot,
+  type ProjectId,
+} from "@t3tools/contracts";
+import { useEffect, useRef } from "react";
+
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
+import { useEnvironments } from "../state/environments";
+import {
+  isProjectCloneToastSilenced,
+  silenceProjectCloneToasts,
+  useEnvironmentProjectClones,
+} from "../state/projectClones";
+import { sourceControlEnvironment } from "../state/sourceControl";
+import { useAtomCommand } from "../state/use-atom-command";
+import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
+import { toastManager } from "./ui/toast";
+import { stackedThreadToast } from "./ui/toastHelpers";
+
+export function ProjectCloneToastCoordinator() {
+  const { environments } = useEnvironments();
+  return environments.map((environment) => (
+    <EnvironmentCloneToasts
+      key={environment.environmentId}
+      environmentId={environment.environmentId}
+    />
+  ));
+}
+
+interface TrackedToast {
+  readonly toastId: ReturnType<typeof toastManager.add>;
+  readonly renderedKey: string;
+  readonly phase: ProjectCloneSnapshot["phase"];
+}
+
+function renderKey(clone: ProjectCloneSnapshot): string {
+  return `${clone.phase}:${clone.stage}:${clone.percent ?? ""}:${clone.detail ?? ""}:${clone.error ?? ""}`;
+}
+
+async function runCloneAction(
+  title: string,
+  action: () => Promise<AtomCommandResult<unknown, unknown>>,
+) {
+  const result = await action();
+  if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+    const error = squashAtomCommandFailure(result);
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title,
+        description: error instanceof Error ? error.message : "发生错误。",
+      }),
+    );
+  }
+}
+
+function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentId }) {
+  const clones = useEnvironmentProjectClones(environmentId);
+  const handleNewThread = useNewThreadHandler();
+  const { draftId: routeDraftId } = useParams({ strict: false });
+  const cancelClone = useAtomCommand(sourceControlEnvironment.cancelProjectClone, {
+    reportFailure: false,
+  });
+  const retryClone = useAtomCommand(sourceControlEnvironment.retryProjectClone, {
+    reportFailure: false,
+  });
+  const removeClonedProject = useRemoveClonedProject();
+  const toasts = useRef(new Map<ProjectId, TrackedToast>());
+
+  const isViewingProjectDraft = (projectId: ProjectId) => {
+    if (!routeDraftId) return false;
+    const draft = useComposerDraftStore.getState().getDraftSession(routeDraftId as DraftId);
+    return draft?.environmentId === environmentId && draft.projectId === projectId;
+  };
+
+  const openProject = (projectId: ProjectId) => {
+    void handleNewThread(scopeProjectRef(environmentId, projectId));
+  };
+
+  useEffect(() => {
+    const seen = new Set<ProjectId>();
+    for (const clone of clones) {
+      seen.add(clone.projectId);
+      const key = renderKey(clone);
+      const tracked = toasts.current.get(clone.projectId);
+      const name = projectCloneDisplayName(clone);
+      const closeToast = () => {
+        const current = toasts.current.get(clone.projectId);
+        if (!current) return;
+        toastManager.close(current.toastId);
+        toasts.current.delete(clone.projectId);
+      };
+      const ref = { environmentId, projectId: clone.projectId };
+      if (isViewingProjectDraft(clone.projectId)) {
+        silenceProjectCloneToasts(ref);
+        closeToast();
+        continue;
+      }
+      if (tracked?.renderedKey === key) continue;
+      if (
+        isProjectCloneToastSilenced(ref) &&
+        (clone.phase === "running" || clone.phase === "done")
+      ) {
+        closeToast();
+        continue;
+      }
+
+      if (clone.phase === "running") {
+        const options = stackedThreadToast({
+          type: "loading",
+          title: `正在克隆 ${name}`,
+          description: projectCloneProgressSummary(clone),
+          timeout: 0,
+          actionProps: {
+            children: "取消",
+            onClick: () => {
+              void runCloneAction("取消克隆失败", () =>
+                cancelClone({ environmentId, input: { projectId: clone.projectId } }),
+              );
+            },
+          },
+          data: { hideCopyButton: true },
+        });
+        if (tracked) {
+          toastManager.update(tracked.toastId, options);
+          toasts.current.set(clone.projectId, { ...tracked, renderedKey: key, phase: "running" });
+        } else {
+          const toastId = toastManager.add(options);
+          toasts.current.set(clone.projectId, { toastId, renderedKey: key, phase: "running" });
+        }
+        continue;
+      }
+
+      if (clone.phase === "done") {
+        const options = stackedThreadToast({
+          type: "success",
+          title: `已克隆 ${name}`,
+          description: clone.destinationPath,
+          timeout: 8_000,
+          actionProps: {
+            children: "打开项目",
+            onClick: () => {
+              closeToast();
+              openProject(clone.projectId);
+            },
+          },
+          data: { hideCopyButton: true },
+        });
+        if (tracked) {
+          toastManager.update(tracked.toastId, options);
+          toasts.current.set(clone.projectId, { ...tracked, renderedKey: key, phase: "done" });
+        } else {
+          const toastId = toastManager.add(options);
+          toasts.current.set(clone.projectId, { toastId, renderedKey: key, phase: "done" });
+        }
+        continue;
+      }
+
+      const cancelled = clone.phase === "cancelled";
+      const options = stackedThreadToast({
+        type: cancelled ? "info" : "error",
+        title: cancelled ? `已取消克隆 ${name}` : `克隆 ${name} 失败`,
+        description: cancelled ? clone.destinationPath : (clone.error ?? "克隆失败。"),
+        timeout: 0,
+        actionProps: {
+          children: "重试",
+          onClick: () => {
+            void runCloneAction("重新克隆失败", () =>
+              retryClone({ environmentId, input: { projectId: clone.projectId } }),
+            );
+          },
+        },
+        data: {
+          ...(cancelled ? { hideCopyButton: true } : {}),
+          secondaryActionProps: {
+            children: "移除项目",
+            onClick: () => {
+              void removeClonedProject({ environmentId, projectId: clone.projectId });
+            },
+          },
+        },
+      });
+      if (tracked) {
+        toastManager.update(tracked.toastId, options);
+        toasts.current.set(clone.projectId, { ...tracked, renderedKey: key, phase: clone.phase });
+      } else {
+        const toastId = toastManager.add(options);
+        toasts.current.set(clone.projectId, { toastId, renderedKey: key, phase: clone.phase });
+      }
+    }
+
+    for (const [projectId, tracked] of toasts.current) {
+      if (seen.has(projectId)) continue;
+      if (tracked.phase !== "done") toastManager.close(tracked.toastId);
+      toasts.current.delete(projectId);
+    }
+  }, [
+    cancelClone,
+    clones,
+    environmentId,
+    isViewingProjectDraft,
+    openProject,
+    removeClonedProject,
+    retryClone,
+  ]);
+
+  useEffect(
+    () => () => {
+      for (const tracked of toasts.current.values()) toastManager.close(tracked.toastId);
+      toasts.current.clear();
+    },
+    [],
+  );
+
+  return null;
+}

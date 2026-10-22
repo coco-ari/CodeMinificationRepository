@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "upstreamRepository": "https://github.com/pingdotgg/t3code",
+  "upstreamVersion": "v0.1.1",
+  "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
+  "gitTree": "19bc1716027653cb24dede84c851f6d2211df86b",
+  "archiveUrl": "https://codeload.github.com/pingdotgg/t3code/tar.gz/fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
+  "archiveSha256": "178a2c1ffcbbfc261be4908e7fc3d9a4d8f130c2231df9bcec57a49518e0cf0a",
+  "archiveBytes": 116395785,
+  "importedAt": "2026-10-21T10:58:58.569975+00:00",
+  "verification": "Every archived tracked blob matched the official recursive Git tree SHA-1 and size; local SHA-256 recorded separately",
+  "trackedBlobCount": 28439,
+  "trackedBlobBytes": 330801215,
+  "upstreamTrackedFilesModified": false,
+  "sourceInventory": ".autoops-source/files.jsonl",
+  "sourceInventorySha256": "41df487cca06cd16a43d98e0b91549ed74ee3c37e30bc5138aaa6d9fc0b28756",
+  "license": {
+    "identifier": "MIT",
+    "path": "LICENSE",
+    "sha256": "935d8f2af0c703f9c39517ee57cc4930b19d02d533be930b63f0e82f93614b43",
+    "copyright": "Copyright (c) 2026 T3 Tools Inc.",
+    "notice": "Nested dependencies, reference repositories and assets retain their own licenses; the root MIT license does not replace them."
+  },
+  "gitlinks": [
+    {
+      "path": ".repos/alchemy-effect/submodules/distilled",
+      "commit": "e02e9d405b8848909f4f746b61b12a663f631c7c",
+      "expanded": false
+    },
+    {
+      "path": ".repos/alchemy-effect/submodules/floci",
+      "commit": "493909133db04153348eabc503f4e30cf0033d96",
+      "expanded": false
+    }
+  ],
+  "excludedGeneratedContent": [
+    ".git metadata",
+    "untracked node_modules",
+    "untracked build outputs"
+  ],
+  "notes": [
+    "Imported the complete official tracked source archive, including .repos reference source and upstream fixtures; no dependency installation or build was performed.",
+    "A small number of upstream tracked test fixtures use node_modules in their paths. They are verified source fixtures, not an installed dependency tree.",
+    "Gitlinks are recorded as upstream commit references. Their contents are not included in GitHub source archives and have not been represented as downloaded source.",
+    "The .autoops-source directory is AutoOps provenance metadata and is not upstream application code."
+  ]
+}

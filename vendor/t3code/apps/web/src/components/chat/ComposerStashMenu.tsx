@@ -1,0 +1,234 @@
+import { BookmarkIcon, FileIcon, FileTextIcon } from "lucide-react";
+import { memo, useEffect, useRef, useState, type RefObject } from "react";
+import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+
+import { RelativeTime } from "../RelativeTime";
+import { cn } from "~/lib/utils";
+import { type PromptStashEntry } from "../../promptStashStore";
+import { ComposerBanner } from "./ComposerBanner";
+
+const SNIPPET_MAX_CHARS = 90;
+
+function missingImageCount(entry: PromptStashEntry): number {
+  return entry.droppedImageNames.length + (entry.unreadableImageNames?.length ?? 0);
+}
+
+function stashEntrySnippet(entry: PromptStashEntry): string {
+  const trimmed = assistantCitationsToPlainText(entry.prompt).trim().replace(/\s+/g, " ");
+  if (trimmed.length > 0) {
+    return trimmed.length > SNIPPET_MAX_CHARS ? `${trimmed.slice(0, SNIPPET_MAX_CHARS)}…` : trimmed;
+  }
+  const imageCount = entry.attachments.length + entry.droppedImageNames.length;
+  const fileCount = entry.files?.length ?? 0;
+  const attachmentCount = imageCount + fileCount;
+  if (attachmentCount === 0) {
+    return "（空）";
+  }
+  const label = imageCount > 0 && fileCount > 0 ? "个附件" : fileCount > 0 ? "个文件" : "张图片";
+  return `（${attachmentCount} ${label}）`;
+}
+
+/**
+ * The listener runs capture-phase on window so it wins over the composer's handlers while the
+ * menu is open.
+ */
+export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
+  entries: ReadonlyArray<PromptStashEntry>;
+  stashShortcutLabel: string | null;
+  composerFormRef: RefObject<HTMLFormElement | null>;
+  onRestore: (entry: PromptStashEntry) => void;
+  onDelete: (entry: PromptStashEntry) => void;
+  onClose: () => void;
+}) {
+  const { entries, stashShortcutLabel, composerFormRef, onRestore, onDelete, onClose } = props;
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(entries[0]?.id ?? null);
+
+  const highlightedEntry = entries.find((entry) => entry.id === highlightedId) ?? entries[0];
+
+  useEffect(() => {
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const drawer = drawerRef.current;
+      if (
+        (drawer && event.composedPath().includes(drawer)) ||
+        (event.target instanceof Element &&
+          event.target.closest('[data-prompt-stash-badge="true"]'))
+      ) {
+        return;
+      }
+      onClose();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+  }, [onClose]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        !(target instanceof Node) ||
+        (target !== document.body &&
+          !(target instanceof Element && target.closest('[data-prompt-stash-badge="true"]')) &&
+          !drawerRef.current?.contains(target) &&
+          !composerFormRef.current?.querySelector('textarea, [role="textbox"]')?.contains(target))
+      ) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (entries.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const currentIndex = entries.findIndex((entry) => entry.id === highlightedEntry?.id);
+        const offset = event.key === "ArrowDown" ? 1 : -1;
+        const normalizedIndex = currentIndex >= 0 ? currentIndex : offset === 1 ? -1 : 0;
+        const nextIndex = (normalizedIndex + offset + entries.length) % entries.length;
+        setHighlightedId(entries[nextIndex]?.id ?? null);
+        const nextButton =
+          drawerRef.current?.querySelectorAll<HTMLButtonElement>("[data-stash-restore]")[nextIndex];
+        nextButton?.scrollIntoView({ block: "nearest" });
+        if (drawerRef.current?.contains(document.activeElement)) {
+          nextButton?.focus({ preventScroll: true });
+        }
+        return;
+      }
+      if (event.key === "Enter") {
+        // A focused control inside the row (the delete button) owns its own
+        // activation; swallowing Enter here would restore instead of delete.
+        if (event.target instanceof HTMLElement && event.target.closest("button[aria-label]")) {
+          return;
+        }
+        if (!highlightedEntry) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onRestore(highlightedEntry);
+        return;
+      }
+      if (event.key === "Backspace" && (event.metaKey || event.ctrlKey)) {
+        if (!highlightedEntry) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onDelete(highlightedEntry);
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [composerFormRef, entries, highlightedEntry, onClose, onDelete, onRestore]);
+
+  return (
+    <ComposerBanner.Root ref={drawerRef} data-composer-stash-drawer="true">
+      <ComposerBanner.Row
+        render={<button type="button" />}
+        aria-label="关闭暂存"
+        aria-expanded="true"
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={onClose}
+      >
+        <ComposerBanner.Icon>
+          <BookmarkIcon />
+        </ComposerBanner.Icon>
+        <ComposerBanner.Content className="text-muted-foreground">暂存</ComposerBanner.Content>
+        <ComposerBanner.Actions>
+          <ComposerBanner.Count>{entries.length}</ComposerBanner.Count>
+          <ComposerBanner.ToggleIcon expanded />
+        </ComposerBanner.Actions>
+      </ComposerBanner.Row>
+      <ComposerBanner.Scroll>
+        <ComposerBanner.Children render={<ul role="list" />} aria-label="暂存内容">
+          {entries.length === 0 ? (
+            <ComposerBanner.Row render={<li />}>
+              <ComposerBanner.Icon />
+              <ComposerBanner.Content className="text-muted-foreground">
+                
+                暂无暂存内容。
+                {stashShortcutLabel
+                  ? ` 在输入框有内容时按 ${stashShortcutLabel} 即可暂存。`
+                  : null}
+              </ComposerBanner.Content>
+            </ComposerBanner.Row>
+          ) : (
+            entries.map((entry) => (
+              <ComposerBanner.Row
+                render={<li />}
+                key={entry.id}
+                data-stash-entry={entry.id}
+                data-highlighted={highlightedEntry?.id === entry.id || undefined}
+                className={cn(
+                  "relative rounded-sm",
+                  highlightedEntry?.id === entry.id && "bg-accent text-accent-foreground",
+                )}
+                onMouseMove={() => {
+                  if (highlightedId !== entry.id) setHighlightedId(entry.id);
+                }}
+                onFocus={() => setHighlightedId(entry.id)}
+              >
+                <ComposerBanner.Icon>
+                  <FileTextIcon />
+                </ComposerBanner.Icon>
+                <ComposerBanner.Content>
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-foreground/80 outline-none before:absolute before:inset-0 before:rounded-sm focus-visible:before:ring-2 focus-visible:before:ring-inset focus-visible:before:ring-ring"
+                    data-stash-restore={entry.id}
+                    aria-label={`恢复暂存内容： ${stashEntrySnippet(entry)}`}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => onRestore(entry)}
+                  >
+                    {stashEntrySnippet(entry)}
+                  </button>
+                </ComposerBanner.Content>
+                <ComposerBanner.Actions>
+                  {entry.pendingImageCount ? (
+                    <span className="shrink-0 text-muted-foreground">
+                      正在保存 {entry.pendingImageCount} 张图片…
+                    </span>
+                  ) : missingImageCount(entry) > 0 ? (
+                    <span className="shrink-0 text-warning-foreground">
+                      {missingImageCount(entry)} 张图片未保存
+                    </span>
+                  ) : null}
+                  {entry.attachments.length > 0 ? (
+                    <span className="flex shrink-0 items-center -space-x-1.5">
+                      {entry.attachments.slice(0, 3).map((attachment) => (
+                        <img
+                          key={attachment.id}
+                          src={attachment.dataUrl}
+                          alt=""
+                          aria-hidden="true"
+                          className="size-4 rounded border border-border/70 object-cover"
+                        />
+                      ))}
+                    </span>
+                  ) : null}
+                  {(entry.files?.length ?? 0) > 0 ? (
+                    <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                      <FileIcon className="size-3" aria-hidden />
+                      {entry.files!.length}
+                    </span>
+                  ) : null}
+                  <time
+                    dateTime={entry.createdAt}
+                    className="shrink-0 text-muted-foreground tabular-nums max-sm:hidden"
+                  >
+                    <RelativeTime timestamp={entry.createdAt} />
+                  </time>
+                  <ComposerBanner.Dismiss
+                    className="z-10"
+                    aria-label="删除暂存内容"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => onDelete(entry)}
+                  />
+                </ComposerBanner.Actions>
+              </ComposerBanner.Row>
+            ))
+          )}
+        </ComposerBanner.Children>
+      </ComposerBanner.Scroll>
+    </ComposerBanner.Root>
+  );
+});

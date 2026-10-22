@@ -1,0 +1,8 @@
+/* Radix Collapsible's documented height animation; T3's outer AnimatedHeight remains authoritative. */
+@keyframes t3-radix-collapse-open { from { height: 0; } to { height: var(--radix-collapsible-content-height); } }
+@keyframes t3-radix-collapse-close { from { height: var(--radix-collapsible-content-height); } to { height: 0; } }
+.t3-radix-collapsible-panel[data-state="open"] { animation: t3-radix-collapse-open 200ms ease-out; }
+.t3-radix-collapsible-panel[data-state="closed"]:not([hidden]) { animation: t3-radix-collapse-close 200ms ease-out; }
+[data-slot="animated-height"] .t3-radix-collapsible-panel { animation: none; }
+:root[data-reduced-motion="true"] .t3-radix-collapsible-panel { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-reduced-motion]) .t3-radix-collapsible-panel { animation: none !important; } }

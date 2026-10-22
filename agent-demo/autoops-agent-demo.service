@@ -1,0 +1,25 @@
+[Unit]
+Description=AutoOps Agent interaction demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tao/autoops-agent-demo/app
+ExecStart=/home/tao/autoops-agent-demo/runtime/current/bin/node agent-demo/server.mjs
+Environment=NODE_ENV=production
+Environment=HOST=0.0.0.0
+Environment=PORT=8787
+Environment=DATA_DIR=/home/tao/autoops-agent-demo/data
+EnvironmentFile=-/home/tao/autoops-agent-demo/demo.env
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0077
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,75 @@
+/* OpenChamber MessageBody pointer/touch action policy; see message-actions.jsx. */
+.workbench-demo-answer-actions {
+  min-height: 26px;
+  align-items: center;
+  gap: 6px;
+}
+.workbench-demo-message-action-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+.workbench-demo-message:hover .workbench-demo-message-action-icons,
+.workbench-demo-message-action-icons:focus-within,
+.workbench-demo-message-action-icons[data-open='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+.workbench-demo-message-action-icons [data-ui='button'] {
+  height: 26px;
+  width: 26px;
+  padding: 0;
+}
+.workbench-demo-message-action-icons svg {
+  width: 14px;
+  height: 14px;
+}
+.workbench-demo-message.is-user .workbench-demo-answer-actions {
+  justify-content: flex-end;
+}
+.workbench-demo-answer-actions > .workbench-demo-usage {
+  margin-left: 0;
+  margin-right: auto;
+  width: auto;
+}
+.workbench-demo-answer-actions .workbench-demo-message-more[data-ui='button'] {
+  min-height: 44px;
+  height: 44px;
+  width: 44px;
+  margin-left: auto;
+}
+.workbench-demo-message-sheet[data-ui='sheet'] {
+  gap: 0;
+  max-height: 80dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 16px 16px 0 0;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.workbench-demo-message-sheet-actions {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px;
+}
+.workbench-demo-message-sheet > [data-ui='button'] {
+  width: 44px;
+  height: 44px;
+}
+/* Beat the theme's four-selector coarse-pointer minimum (40px): the upstream
+   labelled sheet uses at least 44px, including on wide touch-only devices. */
+.workbench-demo-message-sheet[data-ui='sheet']
+  .workbench-demo-message-sheet-actions
+  [data-ui='button'][data-variant='ghost'] {
+  min-height: 44px;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .workbench-demo-message-action-icons {
+    transition: none;
+  }
+}

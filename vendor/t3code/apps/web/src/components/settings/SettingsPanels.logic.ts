@@ -1,0 +1,324 @@
+import { autoOpsStorage } from "~/autoops/hostConfig";
+import type {
+  BackgroundActivityProfile,
+  BackgroundActivitySettings,
+  ProviderInstanceConfig,
+  PreviewViewportSetting,
+  ProviderInstanceId,
+  ServerSettings,
+  SidebarProjectGroupingMode,
+  UnifiedSettings,
+} from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  getBackgroundActivityBaseProfile,
+  normalizeBackgroundActivitySettings,
+  normalizeServerBackgroundActivitySettings,
+  resolveServerBackgroundActivitySettings,
+} from "@t3tools/shared/backgroundActivitySettings";
+import * as Duration from "effect/Duration";
+import * as Equal from "effect/Equal";
+
+export function isProjectGroupingEnabled(mode: SidebarProjectGroupingMode): boolean {
+  return mode !== "separate";
+}
+
+export function projectGroupingModeFromToggle(
+  enabled: boolean,
+  lastEnabledMode: SidebarProjectGroupingMode = "repository",
+): SidebarProjectGroupingMode {
+  if (!enabled) return "separate";
+  return lastEnabledMode === "repository_path" ? "repository_path" : "repository";
+}
+
+const LAST_ENABLED_PROJECT_GROUPING_MODE_KEY = "t3code:last-enabled-project-grouping-mode";
+
+export function readLastEnabledProjectGroupingMode(): SidebarProjectGroupingMode {
+  try {
+    return autoOpsStorage(localStorage).getItem(LAST_ENABLED_PROJECT_GROUPING_MODE_KEY) === "repository_path"
+      ? "repository_path"
+      : "repository";
+  } catch {
+    return "repository";
+  }
+}
+
+export function rememberEnabledProjectGroupingMode(mode: SidebarProjectGroupingMode): void {
+  if (mode === "separate") return;
+  try {
+    autoOpsStorage(localStorage).setItem(LAST_ENABLED_PROJECT_GROUPING_MODE_KEY, mode);
+  } catch {}
+}
+
+export function hasChangedBackgroundActivitySettings(
+  settings: Pick<
+    UnifiedSettings,
+    | "backgroundActivity"
+    | "backgroundActivityProfile"
+    | "automaticGitFetchInterval"
+    | "providerHealthRefreshInterval"
+  >,
+): boolean {
+  return (
+    !Equal.equals(settings.backgroundActivity, DEFAULT_UNIFIED_SETTINGS.backgroundActivity) ||
+    settings.backgroundActivityProfile !== DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile ||
+    !Equal.equals(
+      settings.automaticGitFetchInterval,
+      DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
+    ) ||
+    !Equal.equals(
+      settings.providerHealthRefreshInterval,
+      DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
+    )
+  );
+}
+
+type TypographySettings = Pick<
+  UnifiedSettings,
+  | "fontFamilySans"
+  | "fontFamilyComposer"
+  | "fontFamilyCode"
+  | "fontFamilyTerminal"
+  | "fontSizeInterface"
+  | "fontSizePrompt"
+  | "fontSizeCode"
+  | "fontSizeTerminal"
+>;
+
+export function getChangedTypographySettingLabels(settings: TypographySettings): string[] {
+  return [
+    ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans ||
+    settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface
+      ? ["界面字体"]
+      : []),
+    ...(settings.fontFamilyComposer !== DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer ||
+    settings.fontSizePrompt !== DEFAULT_UNIFIED_SETTINGS.fontSizePrompt
+      ? ["输入字体"]
+      : []),
+    ...(settings.fontFamilyCode !== DEFAULT_UNIFIED_SETTINGS.fontFamilyCode ||
+    settings.fontSizeCode !== DEFAULT_UNIFIED_SETTINGS.fontSizeCode
+      ? ["代码字体"]
+      : []),
+    ...(settings.fontFamilyTerminal !== DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal ||
+    settings.fontSizeTerminal !== DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal
+      ? ["终端字体"]
+      : []),
+  ];
+}
+
+export type BrowserDefaultSettings = Pick<
+  UnifiedSettings,
+  | "browserDefaultViewport"
+  | "browserDefaultZoomFactor"
+  | "browserDefaultAppearance"
+  | "browserRecordingFrameRate"
+  | "browserRecordingShowKeyPresses"
+  | "browserRecordingShowMousePresses"
+  | "browserLinkTarget"
+  | "browserSearchEngine"
+  | "browserCustomSearchUrl"
+  | "browserAutoShowFloatingPreview"
+  | "pullRequestLinksOpenInApp"
+>;
+
+function isSamePreviewViewport(
+  left: PreviewViewportSetting,
+  right: PreviewViewportSetting,
+): boolean {
+  if (left._tag !== right._tag) return false;
+  if (left._tag === "fill" || right._tag === "fill") return true;
+  if (left.width !== right.width || left.height !== right.height) return false;
+  return left._tag === "preset" && right._tag === "preset"
+    ? left.presetId === right.presetId
+    : true;
+}
+
+export function getChangedBrowserSettingLabels(settings: BrowserDefaultSettings): string[] {
+  return [
+    ...(isSamePreviewViewport(
+      settings.browserDefaultViewport,
+      DEFAULT_UNIFIED_SETTINGS.browserDefaultViewport,
+    )
+      ? []
+      : ["浏览器视口"]),
+    ...(settings.browserDefaultZoomFactor !== DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor
+      ? ["浏览器缩放"]
+      : []),
+    ...(settings.browserDefaultAppearance !== DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance
+      ? ["浏览器外观"]
+      : []),
+    ...(settings.browserRecordingFrameRate !== DEFAULT_UNIFIED_SETTINGS.browserRecordingFrameRate
+      ? ["录制帧率"]
+      : []),
+    ...(settings.browserRecordingShowKeyPresses ? ["录制按键显示"] : []),
+    ...(settings.browserRecordingShowMousePresses ? ["录制鼠标点击显示"] : []),
+    ...(settings.browserLinkTarget !== DEFAULT_UNIFIED_SETTINGS.browserLinkTarget
+      ? ["链接打开位置"]
+      : []),
+    ...(settings.browserSearchEngine !== DEFAULT_UNIFIED_SETTINGS.browserSearchEngine ||
+    settings.browserCustomSearchUrl !== DEFAULT_UNIFIED_SETTINGS.browserCustomSearchUrl
+      ? ["搜索引擎"]
+      : []),
+    ...(settings.browserAutoShowFloatingPreview !==
+    DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview
+      ? ["悬浮预览"]
+      : []),
+    ...(settings.pullRequestLinksOpenInApp !== DEFAULT_UNIFIED_SETTINGS.pullRequestLinksOpenInApp
+      ? ["在 T3 Code 中打开拉取请求"]
+      : []),
+  ];
+}
+
+export function resolveBackgroundActivityProfileOption(
+  settings: ServerSettings,
+): BackgroundActivityProfile | "advanced" {
+  const resolved = resolveServerBackgroundActivitySettings(settings);
+  const normalized = normalizeBackgroundActivitySettings({
+    schemaVersion: 1,
+    profile: "custom",
+    baseProfile: resolved.profile,
+    overrides: {
+      automaticGitFetchInterval: resolved.automaticGitFetchInterval,
+      providerHealthRefreshInterval: resolved.providerHealthRefreshInterval,
+      hostPowerMonitorActiveInterval: resolved.hostPowerMonitorActiveInterval,
+      hostPowerMonitorIdleInterval: resolved.hostPowerMonitorIdleInterval,
+      idleClientTtl: resolved.idleClientTtl,
+      pauseWhenHostLocked: resolved.pauseWhenHostLocked,
+      pauseWhenHostLowPower: resolved.pauseWhenHostLowPower,
+      pauseWhenClientLowPower: resolved.pauseWhenClientLowPower,
+      pauseWhenOnBattery: resolved.pauseWhenOnBattery,
+    },
+  });
+  return normalized.profile === "custom" ? "advanced" : normalized.profile;
+}
+
+export function backgroundActivitySharedPolicySettings(
+  settings: ServerSettings,
+  profile: BackgroundActivityProfile,
+): BackgroundActivitySettings {
+  const normalized = normalizeServerBackgroundActivitySettings(settings);
+  return {
+    schemaVersion: 1,
+    profile: "custom",
+    baseProfile: profile,
+    overrides: normalized.profile === "custom" ? normalized.overrides : {},
+  };
+}
+
+function collapseOtelSignalsUrl(input: {
+  readonly tracesUrl: string;
+  readonly metricsUrl: string;
+}): string | null {
+  const tracesSuffix = "/traces";
+  const metricsSuffix = "/metrics";
+  if (!input.tracesUrl.endsWith(tracesSuffix) || !input.metricsUrl.endsWith(metricsSuffix)) {
+    return null;
+  }
+
+  const tracesBase = input.tracesUrl.slice(0, -tracesSuffix.length);
+  const metricsBase = input.metricsUrl.slice(0, -metricsSuffix.length);
+  if (tracesBase !== metricsBase) {
+    return null;
+  }
+
+  return `${tracesBase}/{traces,metrics}`;
+}
+
+export function formatDiagnosticsDescription(input: {
+  readonly localTracingEnabled: boolean;
+  readonly otlpTracesEnabled: boolean;
+  readonly otlpTracesUrl?: string | undefined;
+  readonly otlpMetricsEnabled: boolean;
+  readonly otlpMetricsUrl?: string | undefined;
+}): string {
+  const mode = input.localTracingEnabled ? "本地跟踪文件" : "仅终端日志";
+  const tracesUrl = input.otlpTracesEnabled ? input.otlpTracesUrl : undefined;
+  const metricsUrl = input.otlpMetricsEnabled ? input.otlpMetricsUrl : undefined;
+
+  if (tracesUrl && metricsUrl) {
+    const collapsedUrl = collapseOtelSignalsUrl({ tracesUrl, metricsUrl });
+    return collapsedUrl
+      ? `${mode}。将 OTEL 导出到 ${collapsedUrl}。`
+      : `${mode}。将 OTEL 跟踪导出到 ${tracesUrl}，指标导出到 ${metricsUrl}。`;
+  }
+
+  if (tracesUrl) {
+    return `${mode}。将 OTEL 跟踪导出到 ${tracesUrl}。`;
+  }
+
+  if (metricsUrl) {
+    return `${mode}。将 OTEL 指标导出到 ${metricsUrl}。`;
+  }
+
+  return `${mode}。`;
+}
+
+export function buildProviderInstanceUpdatePatch(input: {
+  readonly settings: Pick<ServerSettings, "providerInstances">;
+  readonly instanceId: ProviderInstanceId;
+  readonly instance: ProviderInstanceConfig;
+  readonly textGenerationModelSelection?:
+    | ServerSettings["textGenerationModelSelection"]
+    | undefined;
+}): Partial<UnifiedSettings> {
+  return {
+    providerInstances: {
+      ...input.settings.providerInstances,
+      [input.instanceId]: input.instance,
+    },
+    ...(input.textGenerationModelSelection !== undefined
+      ? { textGenerationModelSelection: input.textGenerationModelSelection }
+      : {}),
+  };
+}
+
+export const PROVIDER_HEALTH_INTERVAL_STEP_SECONDS = 30;
+
+type BackgroundActivityOverridePatch = Partial<{
+  [K in keyof BackgroundActivitySettings["overrides"]]:
+    | BackgroundActivitySettings["overrides"][K]
+    | undefined;
+}>;
+
+export function durationToSeconds(duration: Duration.Duration): number {
+  return Math.round(Duration.toMillis(duration) / 1_000);
+}
+
+export function normalizeIntervalSeconds(value: number | null, minimum = 0): number {
+  if (value === null || !Number.isFinite(value)) {
+    return minimum;
+  }
+  return Math.max(minimum, Math.round(value));
+}
+
+export function backgroundActivityOverrideSettings(
+  current: BackgroundActivitySettings,
+  resolved: ReturnType<typeof resolveServerBackgroundActivitySettings>,
+  overrides: BackgroundActivityOverridePatch,
+) {
+  const nextOverrides: BackgroundActivityOverridePatch = {
+    automaticGitFetchInterval: resolved.automaticGitFetchInterval,
+    providerHealthRefreshInterval: resolved.providerHealthRefreshInterval,
+    hostPowerMonitorActiveInterval: resolved.hostPowerMonitorActiveInterval,
+    hostPowerMonitorIdleInterval: resolved.hostPowerMonitorIdleInterval,
+    idleClientTtl: resolved.idleClientTtl,
+    pauseWhenHostLocked: resolved.pauseWhenHostLocked,
+    pauseWhenHostLowPower: resolved.pauseWhenHostLowPower,
+    pauseWhenClientLowPower: resolved.pauseWhenClientLowPower,
+    pauseWhenOnBattery: resolved.pauseWhenOnBattery,
+    ...overrides,
+  };
+  for (const [key, value] of Object.entries(nextOverrides)) {
+    if (value === undefined) {
+      delete nextOverrides[key as keyof typeof nextOverrides];
+    }
+  }
+  return {
+    backgroundActivity: {
+      schemaVersion: 1 as const,
+      profile: "custom" as const,
+      baseProfile: getBackgroundActivityBaseProfile(current),
+      overrides: nextOverrides as BackgroundActivitySettings["overrides"],
+    },
+  };
+}
