@@ -1,3 +1,4 @@
+import { requireToolThread, isAutoOpsEnabled } from "../../../../../../../agent-demo/t3-adapters/access.mjs";
 import { legacyDynamicToolResponse } from "../../provider/CodexLegacyDynamicTools.ts";
 import { requireLegacyBusinessTool, recordLegacyNativeFork } from "../../../../../../../agent-demo/t3-adapters/legacy-tools.mjs";
 import { registerNativeSubagent } from "../../../../../../../agent-demo/t3-adapters/subagents.mjs";
@@ -1360,7 +1361,7 @@ function codexThreadRuntimeParams(input: {
   const business = mcpSession === undefined ? {} : businessThreadParameters(mcpSession.threadId);
   return {
     ...(business.baseInstructions === undefined ? {} : { baseInstructions: business.baseInstructions }),
-    ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
+    ...(business.cwd ? {cwd:business.cwd} : input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
@@ -3221,11 +3222,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           turnInput: Pick<
             | ProviderAdapter.ProviderAdapterV2TurnInput
             | ProviderAdapter.ProviderAdapterV2SteerInput,
-            "message"
+            "message" | "threadId"
           >,
         ) {
           const inputItems: Array<CodexSchema.V2TurnStartParams__UserInput> = [];
-          inputItems.push(...resolveBusinessSkillMentions(codexSkillMentionText(turnInput.message.text)));
+          inputItems.push(...resolveBusinessSkillMentions(codexSkillMentionText(turnInput.message.text),process.env,isAutoOpsEnabled() ? requireToolThread(turnInput.threadId).binding : undefined));
           const text = providerMessageTextWithAttachmentPaths({
             text: codexSkillMentionText(turnInput.message.text),
             attachments: turnInput.message.attachments,
@@ -6397,10 +6398,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           ) {
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+            const business = businessThreadParameters(turnInput.threadId);
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
               codexInput,
-              runtimePolicy: turnInput.runtimePolicy,
+              runtimePolicy: business.cwd ? {...turnInput.runtimePolicy,cwd:business.cwd} : turnInput.runtimePolicy,
               modelSelection: turnInput.modelSelection,
               hasT3Mcp: mcpSession !== undefined,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,

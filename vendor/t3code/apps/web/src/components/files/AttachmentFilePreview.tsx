@@ -1,4 +1,5 @@
-import { autoOpsResourceFromAttachmentId, autoOpsResourceRequestUrl } from "~/autoops/resources";
+import { autoOpsResourceFromAttachmentId, autoOpsResourceRequestUrl, autoOpsSkillResourceLink } from "~/autoops/resources";
+import { openAutoOpsResource } from "~/autoops/ResourceLink";
 import { filePreviewDelimiter } from "@t3tools/shared/delimitedPreview";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
@@ -222,7 +223,7 @@ export function AttachmentFilePreview(props: {
       <DelimitedTablePreview name={props.name} text={content.text} delimiter={delimiter} />
     ) : kind === "markdown" && rendered ? (
       <ScrollArea className="min-h-0 flex-1">
-        <ChatMarkdown text={content.text} cwd={undefined} className="mx-auto max-w-4xl px-6 py-5" />
+        <ChatMarkdown text={content.text} cwd={undefined} threadRef={props.threadRef} className="mx-auto max-w-4xl px-6 py-5" />
       </ScrollArea>
     ) : (
       <ReadOnlySourcePreview name={props.name} text={content.text} />
@@ -268,7 +269,24 @@ export function AttachmentFilePreview(props: {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
+      onClickCapture={(event) => {
+        // Match the read-only skill library's Markdown link interception; only
+        // scoped packages are adapted here, leaving ordinary attachments alone.
+        const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>(".chat-markdown a[href]") : null;
+        const href = anchor?.getAttribute("href");
+        if (!href) return;
+        const target = autoOpsSkillResourceLink(businessResource, href);
+        if (!target) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if ("error" in target || !props.threadRef) {
+          toastManager.add({ type: "error", title: "无法打开文件", description: "error" in target ? target.error : "请在当前对话中重新打开技能说明。" });
+        } else {
+          void openAutoOpsResource(target.url, props.threadRef);
+        }
+      }}
+    >
       <div className={cn(FILE_SURFACE_SUBHEADER_CLASS)} data-surface-subheader>
         <div className="flex min-w-0 flex-1 items-center overflow-hidden text-xs">
           {props.header ?? <>

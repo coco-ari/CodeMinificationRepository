@@ -2,6 +2,7 @@ import { chatSubmissionIntentAllowed, chatSlashCommandAllowed, unavailableChatSl
 import { autoOpsResourceCwd, autoOpsResourcePathDescription, autoOpsResourceUrl, autoOpsWorkspaceDirectoryCompletion, isAutoOpsWorkspaceResourceCwd } from "~/autoops/resources";
 import { completeWorkspaceCommonPrefix, workspaceRelativePath } from "~/autoops/pathCompletion";
 import { openAutoOpsResource } from '~/autoops/ResourceLink';
+import { useAutoOpsSkillContext } from "~/autoops/useSkillContext";
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { readAutoOpsHost } from "~/autoops/hostConfig";
 import { autoOpsFeature, isAutoOpsHosted } from "~/autoops/capabilities";
@@ -274,7 +275,7 @@ import {
 } from "~/lib/copiedComposerAttachments";
 import { matchComposerThreadItems } from "@t3tools/client-runtime/composerThreadItems";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
-import { readThreadShell, useProjects, useThreadShells } from "~/state/entities";
+import { readThreadShell, useThreadShells } from "~/state/entities";
 import { requestConfirmDialog } from "~/confirmDialog";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import type {
@@ -2378,13 +2379,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (multipleModelSelections === null ? providerSendBlockReason : null)));
   const isSendDisabled = sendDisabledReason !== null;
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
-  const skillProjects = useProjects();
-  const skillsCwd = isAutoOpsHosted()
-    ? skillProjects.find(project => project.id === activeThread?.projectId && project.environmentId === environmentId)?.workspaceRoot ?? null
-    : gitCwd;
+  const autoOpsThreadScope = useAutoOpsThreadScope(activeThreadId ?? "");
+  const autoOpsSkillContext = useAutoOpsSkillContext(activeThreadId, activeThread?.projectId, autoOpsThreadScope);
+  const skillsCwd = isAutoOpsHosted() ? autoOpsSkillContext?.context?.cwd ?? null : gitCwd;
   const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
   const selectedProviderSkills = selectedProviderStatus
-    ? resolveProviderSkillsForCwd(selectedProviderStatus, skillsCwd)
+    ? isAutoOpsHosted()
+      ? selectedProviderStatus.workspaceSnapshots?.find(snapshot => snapshot.cwd === skillsCwd)?.skills.filter(skill => autoOpsSkillContext?.context?.skills.some(allowed => allowed.name === skill.name)) ?? NO_PROVIDER_SKILLS
+      : resolveProviderSkillsForCwd(selectedProviderStatus, skillsCwd)
     : NO_PROVIDER_SKILLS;
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, skillsCwd)
@@ -2595,7 +2597,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  const autoOpsThreadScope = useAutoOpsThreadScope(activeThreadId ?? "");
   const composerReferenceCwd = autoOpsResourceCwd(activeThreadId, activeThread?.projectId, autoOpsThreadScope) ?? gitCwd;
   const workspacePathCompletion = isAutoOpsWorkspaceResourceCwd(composerReferenceCwd);
   const environmentThreadShells = useThreadShells(isPathTrigger && !workspacePathCompletion);
@@ -2888,9 +2889,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuEmptyState = (() => {
     if (composerTriggerKind === "skill") {
       return isAutoOpsHosted()
-        ? selectedProviderSkills.length === 0
-          ? "暂无启用的技能，可在“设置 → 常规 → 技能”查看目录。"
-          : "未找到匹配的技能，请更换名称。"
+        ? autoOpsSkillContext?.error ?? (!autoOpsSkillContext
+          ? "正在读取当前范围的技能…"
+          : selectedProviderSkills.length === 0
+            ? autoOpsSkillContext.context?.skills.length
+              ? "正在同步当前范围的技能，请稍候…"
+              : "当前助手与项目暂无可用技能，可在侧栏“技能库”查看分配。"
+            : "未找到匹配的技能，请更换名称。")
         : "没有找到技能。可输入 / 浏览运行器命令。";
     }
     if (composerTriggerKind === "pull-request") {

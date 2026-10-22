@@ -2,6 +2,8 @@
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as ByteSize from "effect/ByteSize";
+import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -9,6 +11,8 @@ import { hasAcceptedUserMessage, isThreadSubmissionActive, getThreadSubmissionGe
 import { configuredBusinessArtifactStore } from "../../../../../../agent-demo/t3-adapters/business-tools.mjs";
 import { configuredBusinessResourceCatalog } from "../../../../../../agent-demo/t3-adapters/resources.mjs";
 import { configuredWorkspaceStore } from "../../../../../../agent-demo/t3-adapters/workspaces.mjs";
+import { handleSkillLibraryRequest } from '../../../../../../agent-demo/t3-adapters/skill-library-http.mjs';
+import { resolveBusinessSkillContext, readScopedSkillResource } from '../../../../../../agent-demo/t3-adapters/scoped-skills.mjs';
 import { handleWorkspaceRequest } from "../../../../../../agent-demo/t3-adapters/workspace-http.mjs";
 import { configuredDeploymentStore } from "../../../../../../agent-demo/t3-adapters/deployments.mjs";
 import { handleDeploymentRequest } from "../../../../../../agent-demo/t3-adapters/deployment-http.mjs";
@@ -16,8 +20,6 @@ import { readImportedDrafts } from "../../../../../../agent-demo/t3-adapters/leg
 import { saveAuthorizedPlan } from "../../../../../../agent-demo/t3-adapters/plan-materials.mjs";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
-import { businessSkillsResponse, parseBusinessSkillMarkdown } from './skills.ts';
-import { readBusinessSkillRegistry, manageBusinessSkills } from '../../../../../../agent-demo/t3-adapters/skills.mjs';
 import {
   configuredAutoOpsAccess,
   type ThreadBinding,
@@ -29,8 +31,10 @@ const resourceHeaders = (url: URL, name: string, mime: string) => ({
   "content-type": safeMimes.has(mime) ? mime : "application/octet-stream",
   "content-disposition": `${url.searchParams.get("inline") === "1" && safeMimes.has(mime) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
 });
-const resourceMetadata = (url: URL, file: {id:string;name:string;mime:string;size:number}) =>
-  HttpServerResponse.jsonUnsafe({ ...file, sourceUrl: `/api/agent-demo/t3${url.pathname}` }, { headers: { "cache-control": "no-store" } });
+const resourceMetadata = (url: URL, file: {id:string;name:string;mime:string;size:number}) => {
+  const source = new URL(url); source.searchParams.delete('metadata'); source.searchParams.delete('inline');
+  return HttpServerResponse.jsonUnsafe({ ...file, sourceUrl: `/api/agent-demo/t3${source.pathname}${source.search}` }, { headers: { "cache-control": "no-store" } });
+};
 
 export const responseError = (error: unknown) => {
   const wrapped = error as { cause?: unknown; _tag?: string };
@@ -89,6 +93,28 @@ export const layer = Layer.unwrap(Effect.sync(() => {
       status: result.status, headers: { 'cache-control': 'private, no-store' },
     });
   }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))));
+  const skillLibraryRequest = Effect.gen(function* () {
+    const current = yield* principal;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    if (request.method !== 'GET') yield* Effect.try(() => access.requireCsrf(current, request.headers['x-demo-csrf']));
+    const input = request.method === 'GET' ? undefined : yield* request.json.pipe(
+      Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.mebibytes(24)),
+      Effect.mapError(() => ({status:400,code:'SKILL_REQUEST_INVALID',message:'技能请求正文无效或超过大小限制，请上传不超过 16 MiB 的 ZIP。'})),
+    );
+    const url = new URL(request.url, 'http://localhost');
+    const result = yield* Effect.tryPromise(() => handleSkillLibraryRequest({access, principal:current, url, method:request.method, input, dataDirectory:process.env.AUTOOPS_T3_DATA_DIR!}));
+    if (result.file) return HttpServerResponse.uint8Array(result.file.bytes, {status:result.status, headers:resourceHeaders(url,result.file.name,result.file.mime)});
+    return HttpServerResponse.jsonUnsafe(result.body, {status:result.status, headers:{'cache-control':'private, no-store'}});
+  }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))));
+  const scopedSkillFile = Effect.gen(function* () {
+    const current = yield* principal;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = new URL(request.url, 'http://localhost');
+    const parts = url.pathname.split('/');
+    const file = yield* Effect.try(() => readScopedSkillResource(process.env.AUTOOPS_T3_DATA_DIR!, decodeURIComponent(parts[4] ?? ''), decodeURIComponent(parts[6] ?? ''), url.searchParams.get('path') ?? 'SKILL.md', {access, principal:current}));
+    if (url.searchParams.get('metadata') === '1') return resourceMetadata(url, {id:file.path,name:file.name,mime:file.mime,size:file.bytes.byteLength});
+    return HttpServerResponse.uint8Array(file.bytes, {headers:resourceHeaders(url,file.name,file.mime)});
+  }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))));
   return Layer.mergeAll(
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments', deploymentRequest),
     HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),
@@ -96,6 +122,25 @@ export const layer = Layer.unwrap(Effect.sync(() => {
     HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/tasks', deploymentRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/tasks/:taskId', deploymentRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/targets/:targetId/releases', deploymentRequest),
+    HttpRouter.add('GET', '/autoops/skill-library', skillLibraryRequest),
+    HttpRouter.add('POST', '/autoops/skill-library', skillLibraryRequest),
+    HttpRouter.add('GET', '/autoops/skill-library/:id/versions/:versionId/content', skillLibraryRequest),
+    HttpRouter.add('GET', '/autoops/skill-library/contexts/:snapshotId/files/:name', scopedSkillFile),
+    HttpRouter.add('GET', '/autoops/skill-library/context', Effect.gen(function* () {
+      const current = yield* principal;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = new URL(request.url, 'http://localhost');
+      const query = Object.fromEntries(url.searchParams);
+      if (query.workspaceType && query.workspaceType !== 'internal' && query.workspaceType !== 'external') return HttpServerResponse.jsonUnsafe({error:'工作区类型无效'}, {status:400});
+      const input = query.threadId ? {threadId:query.threadId} : {
+        ...(query.projectId ? {projectId:query.projectId} : {}), ...(query.agentId ? {agentId:query.agentId} : {}),
+        ...(query.environmentId ? {environmentId:query.environmentId} : {}),
+        ...(query.workspaceType ? {workspaceType:query.workspaceType as 'internal' | 'external'} : {}),
+        ...(query.workspaceVersionId ? {workspaceVersionId:query.workspaceVersionId} : {}),
+      };
+      const value = yield* Effect.try(() => resolveBusinessSkillContext(process.env.AUTOOPS_T3_DATA_DIR!, input, {access,principal:current}));
+      return HttpServerResponse.jsonUnsafe(value, {headers:{'cache-control':'private, no-store'}});
+    }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/tree', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/search', workspaceRequest),
@@ -123,39 +168,21 @@ export const layer = Layer.unwrap(Effect.sync(() => {
         headers: { "cache-control": "no-store" },
       });
     }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
-    HttpRouter.add("GET", "/autoops/skills", Effect.gen(function* () {
+    ...(['GET','POST'] as const).map(method => HttpRouter.add(method, '/autoops/skills', Effect.gen(function* () {
       const current = yield* principal;
-      const value = yield* Effect.try(() => businessSkillsResponse(process.env.AUTOOPS_T3_DATA_DIR!, current.role === 'admin'));
-      return HttpServerResponse.jsonUnsafe(value, {headers:{'cache-control':'no-store'}});
-    }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
-    HttpRouter.add("POST", "/autoops/skills", Effect.gen(function* () {
-      const current = yield* principal;
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      yield* Effect.try(() => access.requireCsrf(current, request.headers['x-demo-csrf']));
-      const raw = yield* request.json;
-      if(typeof raw !== 'object' || raw === null || Array.isArray(raw)) return HttpServerResponse.empty({status:400});
-      const input = raw as Record<string, unknown>;
-      const directory = process.env.AUTOOPS_T3_DATA_DIR!;
-      yield* Effect.try(() => {
-        const action = input.action === 'import'
-          ? {action:'import' as const,revision:String(input.revision ?? ''),skill:parseBusinessSkillMarkdown(input.contents)}
-          : {action:'toggle' as const,revision:String(input.revision ?? ''),name:String(input.name ?? ''),enabled:input.enabled as boolean};
-        if(input.action !== 'import' && input.action !== 'toggle') throw {status:400,code:'INVALID_SKILL_ACTION',message:'技能操作无效'};
-        manageBusinessSkills(directory, process.env.AUTOOPS_T3_CODEX_HOME || `${directory}/t3/codex-home`, access, current, action);
-      });
-      return HttpServerResponse.jsonUnsafe(businessSkillsResponse(directory,current.role==='admin'), {headers:{'cache-control':'no-store'}});
-    }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
+      if (method === 'POST') { const request = yield* HttpServerRequest.HttpServerRequest; yield* Effect.try(() => access.requireCsrf(current,request.headers['x-demo-csrf'])); }
+      return HttpServerResponse.jsonUnsafe({error:'技能管理已迁移，请刷新页面并打开技能库。',code:'SKILL_LIBRARY_MIGRATED'}, {status:410,headers:{'cache-control':'no-store'}});
+    }).pipe(Effect.catch(error => Effect.succeed(responseError(error)))))),
     HttpRouter.add("GET", "/autoops/skills/:name", Effect.gen(function* () {
-      yield* principal;
+      const current = yield* principal;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const url = new URL(request.url,'http://localhost');
-      const name = decodeURIComponent(url.pathname.split('/').at(-1) ?? '').replace(/^autoops-/,'');
-      const skill = yield* Effect.try(() => readBusinessSkillRegistry(process.env.AUTOOPS_T3_DATA_DIR!).skills.find((entry)=>entry.name===name));
-      if(!skill) return HttpServerResponse.empty({status:404});
-      const contents = `# ${skill.displayName ?? name}\n\n${skill.description}\n\n${skill.instructions.replace(/^# ([^\n]+)/u, '## $1')}\n\n> 此技能沿用当前会话的项目、环境与工具权限，不执行附带脚本或安装依赖。\n`;
-      const bytes = new TextEncoder().encode(contents);
-      if(url.searchParams.get('metadata')==='1') return resourceMetadata(url,{id:`autoops-${name}`,name:`${skill.displayName ?? name}.md`,mime:'text/markdown',size:bytes.byteLength});
-      return HttpServerResponse.uint8Array(bytes,{headers:resourceHeaders(url,`${skill.displayName ?? name}.md`,'text/markdown')});
+      const name = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
+      const contextId = url.searchParams.get('contextId');
+      if (!contextId) return HttpServerResponse.jsonUnsafe({error:'请从当前对话的技能菜单打开说明',code:'SKILL_SCOPE_REQUIRED'},{status:403});
+      const file = yield* Effect.try(() => readScopedSkillResource(process.env.AUTOOPS_T3_DATA_DIR!,contextId,name,'SKILL.md',{access,principal:current}));
+      if (url.searchParams.get('metadata') === '1') return resourceMetadata(url,{id:file.path,name:file.name,mime:file.mime,size:file.bytes.byteLength});
+      return HttpServerResponse.uint8Array(file.bytes,{headers:resourceHeaders(url,file.name,file.mime)});
     }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
     HttpRouter.add("GET", "/autoops/thread-bindings/:threadId", Effect.gen(function* () {
       const current = yield* principal;

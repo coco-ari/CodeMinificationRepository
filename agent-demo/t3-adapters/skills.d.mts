@@ -6,9 +6,9 @@ export function readBusinessSkillRegistry(dataDirectory:string):BusinessSkillReg
 export function businessSkillsRevision(registry:BusinessSkillRegistry):string;
 export function businessSkillContents(skill:BusinessSkill):string;
 export function manageBusinessSkills(dataDirectory:string,codexHome:string,access:AutoOpsAccess,principal:AutoOpsPrincipal,input:{action:'toggle';revision:string;name:string;enabled:boolean}|{action:'import';revision:string;skill:BusinessSkill}):BusinessSkillRegistry;
-export function resolveBusinessSkillMentions(text:string,env?:Record<string,string|undefined>):{type:'skill';name:string;path:string}[];
+export function resolveBusinessSkillMentions(text:string,env?:Record<string,string|undefined>,binding?:import('./scoped-skills.mjs').SkillScope):{type:'skill';name:string;path:string}[];
 export function readBusinessSkills(dataDirectory:string):BusinessSkill[];
 export function prepareBusinessSkills(dataDirectory:string,codexHome:string):{name:string;path:string;description:string;enabled:true}[];
-export function filterBusinessSkills<T extends {name:string;path:string;enabled:boolean}>(skills:readonly T[],env?:Record<string,string|undefined>):readonly T[];
+export function filterBusinessSkills<T extends {name:string;path:string;enabled:boolean}>(skills:readonly T[],env?:Record<string,string|undefined>,cwd?:string):readonly T[];
 export function businessSlashCommands<T extends {name:string}>(commands:readonly T[],env?:Record<string,string|undefined>):readonly T[];
 export function businessSkillRules(dataDirectory:string,codexHome:string,options?:{userHome?:string;extraRoots?:string[]}):{path:string;enabled:boolean}[];

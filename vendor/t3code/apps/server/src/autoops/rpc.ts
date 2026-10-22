@@ -1,3 +1,4 @@
+import { filterBusinessProviderResult } from "../../../../../../agent-demo/t3-adapters/scoped-skills.mjs";
 import { resourceRequest } from "./resources.ts";
 import { withCommandPrincipal } from "./RequestScope.ts";
 import * as Personal from "./personalPreferences.ts";
@@ -32,7 +33,7 @@ export const authorize = (sessionId: string, method: string, payload: unknown) =
     ...authScopeRequiredResponse(AuthOrchestrationReadScope),
     message: typeof cause === "object" && cause !== null && "code" in cause && cause.code === PRODUCT_CAPABILITY_DISABLED
       ? PRODUCT_CAPABILITY_MESSAGE
-      : typeof cause === "object" && cause !== null && "code" in cause && cause.code === "SKILL_NOT_AVAILABLE" && "message" in cause
+      : typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string" && cause.code.startsWith("SKILL_") && "message" in cause
         ? String(cause.message)
         : "AutoOps access denied or session expired.",
   }),
@@ -49,6 +50,8 @@ function projectResult(sessionId: string, method: string, payload: unknown, resu
   if (!access) return result;
   const principal = access.principalForNativeSession(sessionId);
   authorizeAutoOpsRpc(access, principal, method, payload);
+  if (["server.getConfig", "server.refreshProviders", "subscribeServerConfig"].includes(method))
+    return filterBusinessProviderResult(process.env.AUTOOPS_T3_DATA_DIR!,result,{access,principal});
   if (method === "orchestration.dispatchCommand" && (payload as {type: string}).type === "thread.delete")
     access.markThreadDeleted((payload as {threadId: string}).threadId);
   if (method === "orchestration.subscribeShell" || method === "orchestration.subscribeArchivedShell")

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildT3WorkerConfiguration, prepareT3Worker } from '../agent-demo/t3-adapters/launcher.mjs'
 import { prepareAutoOpsCodexRequest, businessMcpApprovals } from '../agent-demo/t3-adapters/codex-policy.mjs'
+import { prepareScopedBusinessSkills } from '../agent-demo/t3-adapters/scoped-skills.mjs'
 import { tokenizeCliArgs } from '../vendor/t3code/packages/shared/src/cliArgs.ts'
 
 test('启动参数沿 T3 tokenizer 完整传递固定权限和 CPA 配置，设置不含密钥', () => {
@@ -32,10 +33,12 @@ test('启动参数沿 T3 tokenizer 完整传递固定权限和 CPA 配置，设�
 
 test('原生请求编码后仍强制固定权限，保留原生 MCP 通道，不能由输入覆盖', () => {
   const previous = { data: process.env.AUTOOPS_T3_DATA_DIR, model: process.env.AUTOOPS_T3_MODEL }
-  process.env.AUTOOPS_T3_DATA_DIR = '/tmp/policy-only'
+  const directory = mkdtempSync(join(tmpdir(), 't3-request-scope-'))
+  process.env.AUTOOPS_T3_DATA_DIR = directory
   process.env.AUTOOPS_T3_MODEL = 'grok-4.6'
   try {
-    const original = { model: 'grok-4.6', sandbox: 'danger-full-access', config: { 'features.shell_tool': true, 'mcp_servers.t3-code': { url: 'http://127.0.0.1:8788/mcp' } } }
+    const scoped=prepareScopedBusinessSkills(directory,{threadId:'policy',projectId:'p-autoops',agentId:'a-project',workspaceType:'internal'})
+    const original = { cwd:scoped.physicalCwd,model: 'grok-4.6', sandbox: 'danger-full-access', config: { 'features.shell_tool': true, 'mcp_servers.t3-code': { url: 'http://127.0.0.1:8788/mcp' } } }
     assert.throws(()=>prepareAutoOpsCodexRequest('turn/start',{model:'unregistered'}),/模型/)
     const result = prepareAutoOpsCodexRequest('thread/start', original)
     assert.equal(result.permissions, 'agent_demo')
@@ -46,7 +49,7 @@ test('原生请求编码后仍强制固定权限，保留原生 MCP 通道，不
     assert.equal(result.config['features.shell_tool'], false)
     assert.deepEqual(result.config.mcp_servers, { 't3-code': original.config['mcp_servers.t3-code'] })
     assert.equal(result.config['mcp_servers.t3-code'], undefined)
-    const hostile = prepareAutoOpsCodexRequest('thread/resume', { config: { ...original.config, mcp_servers: { unknown: { command: 'sh' } }, 'mcp_servers.unknown': { command: 'sh' } } })
+    const hostile = prepareAutoOpsCodexRequest('thread/resume', { cwd:scoped.physicalCwd,config: { ...original.config, mcp_servers: { unknown: { command: 'sh' } }, 'mcp_servers.unknown': { command: 'sh' } } })
     assert.deepEqual(hostile.config.mcp_servers, { 't3-code': original.config['mcp_servers.t3-code'] })
     assert.equal(hostile.config['mcp_servers.unknown'], undefined)
     assert.equal(original.config['features.shell_tool'], true)
@@ -58,6 +61,7 @@ test('原生请求编码后仍强制固定权限，保留原生 MCP 通道，不
     assert.equal(approvals.tools.shell,undefined)
     assert.ok(!approvals.enabled_tools.includes('shell'))
   } finally {
+    rmSync(directory,{recursive:true,force:true})
     for (const [key, value] of [['AUTOOPS_T3_DATA_DIR', previous.data], ['AUTOOPS_T3_MODEL', previous.model]]) value === undefined ? delete process.env[key] : process.env[key] = value
   }
 })

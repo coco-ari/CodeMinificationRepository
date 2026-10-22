@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { ArchiveIcon, ChevronDownIcon, FolderGit2Icon, Grid2X2Icon, LogOutIcon, MessageSquareIcon, PaletteIcon, RocketIcon, SettingsIcon, type LucideIcon } from 'lucide-react'
+import { ArchiveIcon, ChevronDownIcon, FolderGit2Icon, Grid2X2Icon, LogOutIcon, MessageSquareIcon, PaletteIcon, RocketIcon, SettingsIcon, SparklesIcon, type LucideIcon } from 'lucide-react'
 import { readAutoOpsHost } from './hostConfig'
 import {
   autoOpsAreaFromPath, autoOpsProjectHref, rememberAutoOpsChatLocation,
   selectAutoOpsProject, useAutoOpsProjectId, type AutoOpsArea,
 } from './projectNavigation'
+import { AUTOOPS_AREAS } from './projectNavigation.logic'
 import { useThreadRouteTarget } from '~/hooks/useThreadRouteTarget'
 import { useThreadSelectionStore } from '~/threadSelectionStore'
 import { Button } from '~/components/ui/button'
@@ -19,11 +20,8 @@ import {
   ComboboxPopup, ComboboxSearchInput, ComboboxTrigger, useComboboxFilter,
 } from '~/components/ui/combobox'
 
-const areas = [
-  { id: 'chat', label: '问答', icon: MessageSquareIcon },
-  { id: 'workspaces', label: '工作区', icon: FolderGit2Icon },
-  { id: 'deployments', label: '部署发布', icon: RocketIcon },
-] as const
+const areaIcons = { message: MessageSquareIcon, folder: FolderGit2Icon, rocket: RocketIcon, sparkles: SparklesIcon }
+const areas = AUTOOPS_AREAS.map((area) => ({ ...area, icon: areaIcons[area.icon] }))
 
 /** Native route identity wins over browser preferences and page filter queries. */
 export function AutoOpsProjectRouteSync() {
@@ -75,7 +73,8 @@ export function ProjectAreaTopbar() {
   const settings = pathname === '/settings' || pathname.startsWith('/settings/')
   const canDeploy = selected?.membership?.workspaceAccess === 'internal' && selected.membership.role === 'manager'
   const filtered = host.projects.filter((project) => filter.contains(project.name, query))
-  const availableAreas = areas.filter((area) => area.id !== 'deployments' || canDeploy)
+  const availableAreas = areas.filter((area) => area.read !== 'internal-manager' || canDeploy)
+  const commonAreas = availableAreas.filter((area) => area.common)
   const items: FunctionItem[] = [
     ...availableAreas.map((area) => ({ value: area.id, label: area.label, icon: area.icon, kind: 'area' as const, area: area.id })),
     { value: 'settings-general', label: '常规设置', icon: SettingsIcon, kind: 'settings', href: '/settings/general' },
@@ -91,9 +90,14 @@ export function ProjectAreaTopbar() {
   const reportFailure = (error: unknown) => toastManager.add({ type: 'error', title: '操作未完成', description: error instanceof Error ? error.message : '请重试。' })
   const navigateTo = (href: string) => { void navigate({ href }).catch(reportFailure) }
   const go = (area: AutoOpsArea, nextProjectId = projectId) => {
-    if (!nextProjectId) return
+    if (!nextProjectId) {
+      const definition = areas.find((entry) => entry.id === area)
+      if (definition?.scope === 'global') navigateTo(definition.path)
+      return
+    }
     selectAutoOpsProject(nextProjectId)
-    navigateTo(autoOpsProjectHref(area, nextProjectId))
+    navigateTo(autoOpsProjectHref(area, nextProjectId,
+      area === 'skills' && currentArea === 'skills' ? location.search : undefined))
   }
   const chooseFunction = (item: FunctionItem) => {
     if (item.kind === 'area') go(item.area)
@@ -109,7 +113,7 @@ export function ProjectAreaTopbar() {
   }
   return (
     <WorkspacePageHeader reserveSidebarControl={false} className="relative z-30 w-full min-w-0 gap-2 border-b border-border/60 pl-3! pr-3!" data-testid="project-area-navigation" aria-label="项目与功能导航">
-      {settings || currentArea === 'chat' ? <SidebarTrigger aria-label="切换主侧栏" /> : null}
+      {settings || areas.find((area) => area.id === currentArea)?.sidebar ? <SidebarTrigger aria-label="切换主侧栏" /> : null}
       <span className="hidden shrink-0 text-sm font-semibold sm:block">AutoOps</span>
       <div className="min-w-0 flex-1 sm:max-w-56">
       <Combobox
@@ -148,8 +152,8 @@ export function ProjectAreaTopbar() {
       </Combobox>
       </div>
       {wide ? <nav aria-label="常用模块" className="min-w-0 shrink-0">
-        <ToggleGroup variant="segmented" aria-label="项目功能" value={settings ? [] : [currentArea]} onValueChange={(value) => { const area = availableAreas.find((entry) => entry.id === value[0]); if (area) go(area.id) }}>
-          {availableAreas.map((area) => <Toggle key={area.id} value={area.id} aria-label={area.label} aria-current={!settings && currentArea === area.id ? 'page' : undefined} disabled={!projectId}><area.icon /><span>{area.label}</span></Toggle>)}
+        <ToggleGroup variant="segmented" aria-label="项目功能" value={settings || !commonAreas.some((area) => area.id === currentArea) ? [] : [currentArea]} onValueChange={(value) => { const area = commonAreas.find((entry) => entry.id === value[0]); if (area) go(area.id) }}>
+          {commonAreas.map((area) => <Toggle key={area.id} value={area.id} aria-label={area.label} aria-current={!settings && currentArea === area.id ? 'page' : undefined} disabled={!projectId}><area.icon /><span>{area.label}</span></Toggle>)}
         </ToggleGroup>
       </nav> : null}
       <div className="hidden flex-1 sm:block" />
@@ -164,7 +168,7 @@ export function ProjectAreaTopbar() {
         <ComboboxPopup align="end" className="w-64 max-w-(--available-width)">
           <ComboboxSearchInput aria-label="搜索功能" placeholder="搜索功能…" value={functionQuery} onChange={(event) => setFunctionQuery(event.target.value)} />
           <ComboboxEmpty>没有匹配的功能。</ComboboxEmpty>
-          <ComboboxList>{(item: FunctionItem) => <ComboboxItem key={item.value} value={item} disabled={item.kind === 'area' && !projectId}>
+          <ComboboxList>{(item: FunctionItem) => <ComboboxItem key={item.value} value={item} disabled={item.kind === 'area' && !projectId && areas.find((area) => area.id === item.area)?.scope !== 'global'}>
             <item.icon className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{item.label}</span>
           </ComboboxItem>}</ComboboxList>
         </ComboboxPopup>

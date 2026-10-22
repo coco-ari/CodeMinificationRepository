@@ -1,4 +1,4 @@
-import { normalizeAutoOpsChatHref, type AutoOpsArea } from '../../autoops/projectNavigation.logic.ts'
+import { AUTOOPS_AREAS, normalizeAutoOpsChatHref, type AutoOpsArea } from '../../autoops/projectNavigation.logic.ts'
 
 export interface SettingsReturnProject {
   readonly id: string
@@ -18,8 +18,8 @@ function areaFromHref(href: string): AutoOpsArea | null {
   if (!href.startsWith('/') || href.startsWith('//') || /[\\\s\u0000-\u001f\u007f]/u.test(href)) return null
   try {
     const url = new URL(href, 'https://autoops.invalid')
-    if (url.pathname === '/workspaces') return 'workspaces'
-    if (url.pathname === '/deployments') return 'deployments'
+    const area = AUTOOPS_AREAS.find((entry) => entry.path !== '/' && entry.path === url.pathname)
+    if (area) return area.id
     return normalizeAutoOpsChatHref(href) ? 'chat' : null
   } catch { return null }
 }
@@ -42,7 +42,7 @@ export function resolveAutoOpsSettingsReturnHref(input: {
   readonly location: AutoOpsMainLocation | null
   readonly projectId: string
   readonly projects: ReadonlyArray<SettingsReturnProject>
-  readonly projectHref: (area: AutoOpsArea, projectId: string) => string
+  readonly projectHref: (area: AutoOpsArea, projectId: string, search?: unknown) => string
   readonly chatProjectId: (href: string) => string | null
 }): string {
   const project = input.projects.find((entry) => entry.id === input.projectId)
@@ -61,5 +61,6 @@ export function resolveAutoOpsSettingsReturnHref(input: {
     (allowedArea !== 'chat' || input.chatProjectId(validPrevious.href) === project.id)) {
     return validPrevious.href
   }
-  return input.projectHref(allowedArea, project.id)
+  return input.projectHref(allowedArea, project.id,
+    allowedArea === 'skills' ? validPrevious?.href : undefined)
 }

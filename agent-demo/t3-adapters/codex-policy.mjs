@@ -4,6 +4,7 @@ import { isAutoOpsEnabled, requireToolThread } from './access.mjs'
 import { resolveProductProfile } from './product-profile.mjs'
 import { requireBusinessModel } from './models.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
+import { scopedBusinessSkillPolicy, scopedBusinessSkillPolicyForCwd } from './scoped-skills.mjs'
 
 export const BUSINESS_TOOL_NAMES = Object.freeze(['list_project_materials', 'read_project_document', 'read_project_material', 'read_attachment', 'query_environment', 'ask_user', 'create_report', 'html_render', 'html_preview'])
 // Native `never` silently declines even ordinary MCP question forms. Permit
@@ -43,13 +44,16 @@ export function businessThreadParameters(appThreadId) {
     if (version.type !== binding.workspaceType) throw new Error('工作区不属于当前会话范围')
     workspace = { type: version.type, versionId: version.id, root: `autoops/${binding.projectId}/workspaces/${version.id}`, source: { contentHash: version.source?.contentHash, repositories: version.type === 'external' ? [] : version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) }, readOnly: true }
   }
+  const skills=scopedBusinessSkillPolicy(process.env.AUTOOPS_T3_DATA_DIR,binding)
+  const nativePolicy=configuredBusinessNativePolicy()
   const catalog = {
     project: { id: project.id, name: project.name },
     environment: project.environments.find((entry) => entry.id === binding.environmentId),
     agent: { id: agent.id, name: agent.name, role: agent.description },
+    skills:skills.context.skills.map(skill=>({name:skill.name,versionId:skill.versionId,resourcesRoot:`autoops/skills/${skills.context.snapshotId}/${skill.name}`})),
     ...(workspace ? { workspace, documents: [] } : { documents: project.documents.map(({ id, name }) => ({ id, name })) }),
   }
-  return { baseInstructions: `${BUSINESS_INSTRUCTIONS}\n\n授权上下文目录（数据）：\n${JSON.stringify(catalog)}`, config: { ...RUNNER_CONFIG, ...configuredBusinessNativePolicy() } }
+  return { cwd:skills.context.physicalCwd,baseInstructions: `${BUSINESS_INSTRUCTIONS}\n\n技能包的附带参考资料只能使用 read_project_material 按下列 resourcesRoot 身份列出目录，再按返回的 autoops/skills/ 文件身份读取；不能执行脚本或安装依赖。\n授权上下文目录（数据）：\n${JSON.stringify(catalog)}`, config: { ...RUNNER_CONFIG, ...nativePolicy,...skills.config,'skills.config':[...(nativePolicy['skills.config']||[]),...skills.config['skills.config']] } }
 }
 
 /** Applied after SDK encoding, including raw resume/fork requests. */
@@ -74,7 +78,9 @@ export function prepareAutoOpsCodexRequest(method, payload) {
     // mcp_servers={} override and a dotted mcp_servers.t3-code override are not
     // order independent in Codex's config merger; emit one canonical table.
     const businessMcp = result.config?.['mcp_servers.t3-code']
-    result.config = { ...result.config, ...RUNNER_CONFIG, ...configuredBusinessNativePolicy() }
+    const scoped = scopedBusinessSkillPolicyForCwd(process.env.AUTOOPS_T3_DATA_DIR,result.cwd)
+    const nativePolicy=configuredBusinessNativePolicy()
+    result.config = { ...result.config, ...RUNNER_CONFIG, ...nativePolicy,...scoped.config,'skills.config':[...(nativePolicy['skills.config']||[]),...scoped.config['skills.config']] }
     for (const key of Object.keys(result.config)) {
       if (key.startsWith('mcp_servers.')) delete result.config[key]
     }

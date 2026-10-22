@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { isAutoOpsHosted } from "../../autoops/capabilities";
 import { readAutoOpsHost } from "../../autoops/hostConfig";
+import { AUTOOPS_AREAS } from "../../autoops/projectNavigation.logic";
 import {
   autoOpsProjectHref,
   readAutoOpsChatProjectId,
@@ -22,6 +23,7 @@ export function isSidebarUtilityPage(pathname: string) {
     pathname === "/usage" ||
     pathname === "/workspaces" ||
     pathname === "/deployments" ||
+    pathname === "/skills" ||
     pathname === "/pull-requests"
   );
 }
@@ -34,7 +36,7 @@ export function MainAppLocationTracker() {
   const href = useLocation({
     select: (location) => (
       isSidebarUtilityPage(location.pathname) &&
-      !(isAutoOpsHosted() && (location.pathname === '/workspaces' || location.pathname === '/deployments'))
+      !(isAutoOpsHosted() && AUTOOPS_AREAS.some((area) => area.path !== '/' && area.path === location.pathname))
         ? null : location.href
     ),
   });

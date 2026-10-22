@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react'
 import type { ScopedThreadRef } from '@t3tools/contracts'
 import { useRightPanelStore } from '~/rightPanelStore'
 import { toastManager } from '~/components/ui/toast'
+import { readAutoOpsHost } from './hostConfig'
 import {
   autoOpsResourceAttachmentId,
   autoOpsResourceUrl,
@@ -14,8 +15,11 @@ export async function openAutoOpsResource(
 ): Promise<void> {
   const url = autoOpsResourceUrl(sourceUrl)
   if (!url) return
-  const resourcePath = new URL(url, window.location.origin).searchParams.get('path')
-  if (resourcePath) {
+  const resource = new URL(url, window.location.origin)
+  const resourcePath = resource.searchParams.get('path')
+  // Only the business resource endpoint carries workspace file identities.
+  // Skill packages use their own relative path and the native attachment viewer.
+  if (resource.pathname === `${readAutoOpsHost()?.gatewayBasePath}/autoops/resources` && resourcePath) {
     useRightPanelStore.getState().openFile(threadRef, resourcePath)
     return
   }

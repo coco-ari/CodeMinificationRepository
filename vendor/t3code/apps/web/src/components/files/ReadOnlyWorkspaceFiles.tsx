@@ -72,14 +72,31 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
   }}><MessageSquarePlusIcon className="size-3.5" /></FileSurfaceAction> : null;
   const actions = <>{addToChat}{explorerAction}</>;
   return <ReadOnlyFileSourceContext.Provider value={props.source}>
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background" data-readonly-workspace={props.source.id}>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background" data-readonly-workspace={props.source.id}
+      onClickCapture={(event) => {
+        const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>(".chat-markdown a[href]") : null;
+        const href = anchor?.getAttribute("href");
+        if (!href || !props.relativePath || !props.source.resolveLink) return;
+        const target = props.source.resolveLink(props.relativePath, href);
+        if (!target) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if ("error" in target) {
+          toastManager.add({ type: "error", title: "无法打开文件", description: target.error });
+        } else if (target.kind === "directory") {
+          props.onNavigateFolder(target.path, target.path, false);
+        } else {
+          props.onOpenFile(target.path);
+        }
+      }}
+    >
       {folder || !resource ? <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>{breadcrumbs}{actions}</div> : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {previewPath ? <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {current?.error ? <FileSurfaceFailure message={current.error} onRetry={() => setRevision((value) => value + 1)} /> : resource ?
             <AttachmentFilePreview
               key={`${props.source.id}:${previewPath}:${revision}`} name={resource.name} mimeType={resource.mimeType} sizeBytes={resource.sizeBytes}
-              resourceUrl={resource.url} header={breadcrumbs} toolbarEnd={actions} origin="项目资料"
+              resourceUrl={resource.url} header={breadcrumbs} toolbarEnd={actions} origin={props.source.origin ?? "项目资料"}
               {...(props.threadRef ? { threadRef: props.threadRef } : {})}
             /> : <FileSurfaceLoading />}
         </div> : null}

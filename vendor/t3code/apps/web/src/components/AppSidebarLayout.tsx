@@ -58,6 +58,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { isAutoOpsHosted } from "../autoops/capabilities";
 import { AutoOpsProjectRouteSync, ProjectAreaTopbar } from "../autoops/ProjectAreaNavigation";
+import { AUTOOPS_AREAS, autoOpsAreaFromPath } from "../autoops/projectNavigation.logic";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
 const AUTOOPS_TOPBAR_HEIGHT = 52;
@@ -277,7 +278,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const hosted = isAutoOpsHosted();
-  const showSidebar = !hosted || !/^\/(?:workspaces|deployments)(?:\/|$)/.test(pathname);
+  const showSidebar = !hosted || isOnSettings ||
+    AUTOOPS_AREAS.find((area) => area.id === autoOpsAreaFromPath(pathname))?.sidebar === true;
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,

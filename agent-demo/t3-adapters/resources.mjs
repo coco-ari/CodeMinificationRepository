@@ -7,6 +7,7 @@ import { configuredAutoOpsAccess, AutoOpsAccessError } from './access.mjs'
 import { configuredBusinessArtifactStore } from './business-tools.mjs'
 import { extractBusinessAttachment } from './business-documents.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
+import { readScopedSkillResourceForThread } from './scoped-skills.mjs'
 import { resolveAttachmentPathById } from '../../vendor/t3code/apps/server/src/attachmentStore.ts'
 
 const fail = (message) => { throw new AutoOpsAccessError(404, 'RESOURCE_NOT_FOUND', message || '资料不存在或无权访问') }
@@ -222,6 +223,7 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     },
     async readForThread(threadId, path) {
       assertPath(path)
+      if(path.startsWith('autoops/skills/'))return readScopedSkillResourceForThread(process.env.AUTOOPS_T3_DATA_DIR,threadId,path,access)
       const resources = forThread(threadId)
       const resource = resources.find((entry) => entry.path === path)
       if (resource) {

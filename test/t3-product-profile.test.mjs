@@ -1,3 +1,4 @@
+import {prepareScopedBusinessSkills} from '../agent-demo/t3-adapters/scoped-skills.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
@@ -102,7 +103,7 @@ test('精简原生配置真实禁 multi_agent，不能通过旧配置重新启�
   const home = join(directory, 't3/codex-home')
   const env = { ...lite, AUTOOPS_T3_DATA_DIR: directory, AUTOOPS_T3_MODEL: 'grok-4.6' }
   const { policy } = prepareBusinessNativePolicy(directory, home, 'grok-4.6', env)
-  const config = { model: 'grok-4.6', model_catalog_json: policy.model_catalog_json, features: { multi_agent: false }, agents: { enabled: false, max_depth: 1, default_subagent_model: 'grok-4.6', ...Object.fromEntries(['default', 'explorer', 'worker'].map(role => [role, policy[`agents.${role}`]])) } }
+  const config = { permissions:{agent_demo:{filesystem:{':root':'deny'}}},model: 'grok-4.6', model_catalog_json: policy.model_catalog_json, features: { multi_agent: false }, agents: { enabled: false, max_depth: 1, default_subagent_model: 'grok-4.6', ...Object.fromEntries(['default', 'explorer', 'worker'].map(role => [role, policy[`agents.${role}`]])) } }
   assert.equal(policy['features.multi_agent'], false)
   assert.equal(policy['agents.enabled'], false)
   assert.doesNotThrow(() => assertBusinessNativeConfig({ config }, env))
@@ -122,7 +123,8 @@ test('精简 MCP 不授权 HTML 工具；原生恢复请求重加受限配置', 
   assert.equal(approvals.enabled_tools.includes('html_preview'), false)
   assert.equal(approvals.enabled_tools.includes('ask_user'), true)
   assert.equal(approvals.enabled_tools.includes('create_report'), true)
-  const request = prepareAutoOpsCodexRequest('thread/resume', { config: { 'features.multi_agent': true, 'agents.enabled': true, 'mcp_servers.t3-code': { url: 'http://127.0.0.1/mcp' } } })
+  const scoped=prepareScopedBusinessSkills(directory,{threadId:'profile',projectId:'p-autoops',agentId:'a-project',workspaceType:'internal'})
+  const request = prepareAutoOpsCodexRequest('thread/resume', { cwd:scoped.physicalCwd,config: { 'features.multi_agent': true, 'agents.enabled': true, 'mcp_servers.t3-code': { url: 'http://127.0.0.1/mcp' } } })
   assert.equal(request.config['features.multi_agent'], false)
   assert.equal(request.config['agents.enabled'], false)
   assert.equal(request.permissions, 'agent_demo')

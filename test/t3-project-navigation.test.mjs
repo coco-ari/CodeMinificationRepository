@@ -153,13 +153,44 @@ test('区域链接使用独立路径和完整项目查询，路径前缀不会�
   const f = fixture()
   assert.equal(f.store.projectHref('workspaces', 'project-b'), '/workspaces?projectId=project-b')
   assert.equal(f.store.projectHref('deployments', 'project-b'), '/deployments?projectId=project-b')
+  assert.equal(f.store.projectHref('skills', 'project-b'), '/skills?projectId=project-b')
   assert.equal(f.store.projectHref('chat', 'project-b'), '/?projectId=project-b')
   assert.equal(autoOpsAreaFromPath('/workspaces'), 'workspaces')
   assert.equal(autoOpsAreaFromPath('/workspaces/version'), 'workspaces')
   assert.equal(autoOpsAreaFromPath('/deployments'), 'deployments')
   assert.equal(autoOpsAreaFromPath('/deployments/task'), 'deployments')
+  assert.equal(autoOpsAreaFromPath('/skills'), 'skills')
+  assert.equal(autoOpsAreaFromPath('/skills/skill-a'), 'skills')
   assert.equal(autoOpsAreaFromPath('/draft/draft-a'), 'chat')
   assert.equal(autoOpsAreaFromPath('/workspaces-other'), 'chat')
+  assert.equal(autoOpsAreaFromPath('/skills-other'), 'chat')
+})
+
+test('技能切项目仅保留已知视图与授权助手，清除旧项目资源和动作参数', () => {
+  const f = fixture()
+  f.setHost({ principal: { id: 'alice' }, projects: [
+    { id: 'project-a', agents: [{ id: 'agent-a' }] },
+    { id: 'project-b', agents: [{ id: 'agent-b' }] },
+  ] })
+  const oldHref = '/skills?projectId=project-a&skillView=agent&agentId=agent-a&skillId=old&versionId=v1&action=assign'
+  assert.equal(f.store.projectHref('skills', 'project-b', oldHref), '/skills?projectId=project-b&skillView=agent&agentId=agent-a')
+  assert.equal(f.store.readProjectId(), 'project-a', '生成链接不能改变当前项目或既有任务绑定')
+  for (const view of ['library', 'project']) {
+    assert.equal(f.store.projectHref('skills', 'project-b', { skillView: view, agentId: 'agent-a', skillId: 'old' }), `/skills?projectId=project-b&skillView=${view}`)
+  }
+  for (const search of [
+    '?skillView=agent&agentId=unknown', '?skillView=agent&agentId=agent-a&agentId=agent-a',
+    { skillView: 'agent', agentId: ['agent-a'] },
+  ]) assert.equal(f.store.projectHref('skills', 'project-b', search), '/skills?projectId=project-b&skillView=agent')
+  for (const search of [
+    '?skillView=unknown&agentId=agent-a', '?skillView=agent&skillView=project&agentId=agent-a',
+    { skillView: ['agent'], agentId: 'agent-a' }, { agentId: 'agent-a' },
+  ]) assert.equal(f.store.projectHref('skills', 'project-b', search), '/skills?projectId=project-b')
+  f.setHost({ principal: { id: 'alice' }, projects: [{ id: 'project-b', agents: [{ id: 'agent-b' }] }] })
+  assert.equal(f.store.projectHref('skills', 'project-b', oldHref), '/skills?projectId=project-b&skillView=agent')
+  assert.throws(() => f.store.projectHref('skills', 'project-a', oldHref), /无权/)
+  f.setSearch({ projectId: 'project-a', skillView: 'project' })
+  assert.equal(f.store.readProjectId(), '', '失效技能深链不能回退到另一个项目')
 })
 
 test('只保存原生聊天路径，拒绝外链、控制页面、路径转义与不安全字符', () => {
@@ -168,7 +199,7 @@ test('只保存原生聊天路径，拒绝外链、控制页面、路径转义�
   assert.equal(normalizeAutoOpsChatHref('/env/thread-a/'), '/env/thread-a')
   for (const value of [
     null, {}, 'https://example.test/env/thread', '//example.test/thread', '/settings/general',
-    '/projects/project-a', '/workspaces/version', '/deployments/task', '/api/delete',
+    '/projects/project-a', '/workspaces/version', '/deployments/task', '/skills/skill-a', '/%73kills/skill-a', '/api/delete',
     '/draft', '/env/thread/extra', '/env/..', '/env/%2e%2e', '/env/%2fother', '/env/%5cother',
     '/env/%0athread', '/env/thread\n', '/env\\thread/x', '/env/%zz',
   ]) assert.equal(normalizeAutoOpsChatHref(value), null, String(value))

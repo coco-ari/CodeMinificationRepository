@@ -1,6 +1,4 @@
 import { isProviderSkillUserInvocable } from "@t3tools/client-runtime/providerSkills";
-import { isAutoOpsHosted } from '~/autoops/capabilities';
-import { readAutoOpsHost } from '~/autoops/hostConfig';
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import {
   Extension,
@@ -365,7 +363,7 @@ function ComposerSkillNodeView({ node }: NodeViewProps) {
           <p className="font-medium">{skillLabel}</p>
           <p>{description || "此技能暂无说明。"}</p>
           {skill?.path && actions.environmentId ? (
-            <Button variant="outline" size="sm" onClick={() => actions.openMention(isAutoOpsHosted() ? `${readAutoOpsHost()!.gatewayBasePath}/autoops/skills/${encodeURIComponent(skill.name)}` : skill.path)}>
+            <Button variant="outline" size="sm" onClick={() => actions.openMention(skill.path)}>
               
               查看使用说明
             </Button>

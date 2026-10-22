@@ -24,7 +24,7 @@ const read = Tool.make("read_project_document", {
   parameters: Schema.Struct({ id }),
 }).annotate(Tool.Title, "读取项目资料").annotate(Tool.Readonly, true);
 const material = Tool.make("read_project_material", {
-  ...shared, description: "读取 @ 引用的授权业务资料或列出资料文件夹。path 必须是 picker 返回的完整 autoops/ 资料身份，包含版本及来源会话；不接受宿主文件路径。",
+  ...shared, description: "读取 @ 引用的授权业务资料或列出资料文件夹。path 必须是 picker 返回的完整 autoops/ 资料身份，包含版本及来源会话；也支持授权上下文列出的 autoops/skills/ 技能包参考资料身份；不接受宿主文件路径，不执行脚本。",
   parameters: Schema.Struct({ path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048)) }),
 }).annotate(Tool.Title, "读取引用资料").annotate(Tool.Readonly, true);
 const attachment = Tool.make("read_attachment", {

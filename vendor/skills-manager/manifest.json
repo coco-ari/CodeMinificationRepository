@@ -1,0 +1,69 @@
+{
+  "repository": "https://github.com/xingkongliang/skills-manager",
+  "version": "1.43.0",
+  "commit": "7a2219219287f4ef4c543fc169ebcc5b0bff085c",
+  "license": "MIT",
+  "adaptation": "Node Web management port and skill-centric interactions; T3 visual components; original desktop CLI is not executed",
+  "files": [
+    {
+      "path": "upstream/Cargo.toml",
+      "sha256": "33289a81801901ed6c4c2ff238820f13dc96805b95b82ea8e238a18f673c7de6"
+    },
+    {
+      "path": "upstream/commands/projects.rs",
+      "sha256": "859992bd7ef09b60eaa47f6ad76fc420a0735ce14f9abcd5faa3950ce78d76c5"
+    },
+    {
+      "path": "upstream/core/content_hash.rs",
+      "sha256": "8721baded55b237add5a64eb2f651812cb1b7b74a7080ee1fad6dbac46d1ca5e"
+    },
+    {
+      "path": "upstream/core/installer.rs",
+      "sha256": "938d3845635a05c7eb256bc7722a1188d4a6f4767c624823345d25c9728a96a4"
+    },
+    {
+      "path": "upstream/core/repo_lock.rs",
+      "sha256": "7039a220013042ec813f87c851919a5d5cdff3ae185697176022d4add643b4af"
+    },
+    {
+      "path": "upstream/core/skill_metadata.rs",
+      "sha256": "b923f2efbb020efadc7e414ab4bcf63b2f6db0e8709b9525ffb0ad075ac34e8f"
+    },
+    {
+      "path": "upstream/core/skill_store.rs",
+      "sha256": "fca49c512ecaf9fc77af5c00bbdbad3b791e35cc5d78662a8bcd71b8d98481b8"
+    },
+    {
+      "path": "upstream/core/sync_engine.rs",
+      "sha256": "777ed19ed00e58028f9f5798fbafd09ef6f15c2ea43e7b1e5c7f7cc71ffacd4b"
+    },
+    {
+      "path": "upstream/core/sync_metadata.rs",
+      "sha256": "fc5b9e4dbb3ce4aa57d5232b29f17920ade399bfdaa56f112282303445c229db"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "85296e22a24b1af83b2f8e859052f71999dbdf0d631a1d118004b56c21e2f50d"
+    },
+    {
+      "path": "upstream/src/views/MySkills.tsx",
+      "sha256": "6c3fedb6a8a2472ee7717a9b95a014cc4ffea159dd173a91be079d093c54c021"
+    },
+    {
+      "path": "upstream/src/components/SyncDots.tsx",
+      "sha256": "1f60134861684708125f6fb72751784cb70986210631e884169628f8b926c1ba"
+    },
+    {
+      "path": "upstream/src/components/AgentToggleSection.tsx",
+      "sha256": "8f99a908a9612782d195929e5886a9a74bbd84ac6a52537f3c242407da1c5b4e"
+    },
+    {
+      "path": "upstream/src/components/SkillProjectsSection.tsx",
+      "sha256": "74fe828bdc5d1dcae332dbdca52d7fb8b86c257e8d62bc9aab76a1487de686eb"
+    },
+    {
+      "path": "upstream/src/components/SkillDetailPanel.tsx",
+      "sha256": "554b8524421963b3f441ddf70f2e68feda6ca3c52b536af6c0b25293b0b3fbc3"
+    }
+  ]
+}

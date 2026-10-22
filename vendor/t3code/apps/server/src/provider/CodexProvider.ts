@@ -352,7 +352,7 @@ function parseCodexSkillsListResponse(
     }
 
     return parsedSkill;
-  }));
+  }), process.env, cwd);
 }
 
 const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (

@@ -1,8 +1,19 @@
-export type AutoOpsArea = 'chat' | 'workspaces' | 'deployments'
+/** One module definition feeds navigation, route identity and the shared shell. */
+export const AUTOOPS_AREAS = [
+  { id: 'chat', label: '问答', icon: 'message', path: '/', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
+  { id: 'workspaces', label: '工作区', icon: 'folder', path: '/workspaces', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: false },
+  { id: 'deployments', label: '部署发布', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'internal-manager', manage: 'server', sidebar: false },
+  { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: false },
+] as const
+
+export type AutoOpsArea = typeof AUTOOPS_AREAS[number]['id']
 
 export interface NavigationHost {
   readonly principal: { readonly id: string }
-  readonly projects: ReadonlyArray<{ readonly id: string }>
+  readonly projects: ReadonlyArray<{
+    readonly id: string
+    readonly agents?: ReadonlyArray<{ readonly id: string }>
+  }>
 }
 
 export type RouteProjectSelection =
@@ -63,15 +74,42 @@ export function resolveAutoOpsRouteProjectId(
 }
 
 export function autoOpsAreaFromPath(pathname: string): AutoOpsArea {
-  if (pathname === '/workspaces' || pathname.startsWith('/workspaces/')) return 'workspaces'
-  if (pathname === '/deployments' || pathname.startsWith('/deployments/')) return 'deployments'
-  return 'chat'
+  return AUTOOPS_AREAS.find((area) => area.path !== '/' &&
+    (pathname === area.path || pathname.startsWith(`${area.path}/`)))?.id ?? 'chat'
 }
 
 const CONTROL_ROUTES = new Set([
-  'settings', 'projects', 'workspaces', 'deployments', 'usage', 'pull-requests',
+  'settings', 'projects', 'workspaces', 'deployments', 'skills', 'usage', 'pull-requests',
   'connect', 'connect-agent', 'pair', 'welcome', 'new', 'api', 'autoops',
 ])
+
+/** A project change keeps only global skill browsing, never a resource or pending action. */
+function skillNavigationSearch(search: unknown, host: NavigationHost): URLSearchParams {
+  let params: URLSearchParams
+  if (search instanceof URLSearchParams) params = search
+  else if (typeof search === 'string' || search instanceof URL) {
+    try { params = new URL(String(search), 'https://autoops.invalid/').searchParams }
+    catch { return new URLSearchParams() }
+  } else {
+    params = new URLSearchParams()
+    if (search && typeof search === 'object') {
+      for (const key of ['skillView', 'agentId'] as const) {
+        const value = (search as Record<string, unknown>)[key]
+        if (typeof value === 'string') params.set(key, value)
+      }
+    }
+  }
+  const result = new URLSearchParams()
+  const views = params.getAll('skillView')
+  const view = views.length === 1 ? views[0] : undefined
+  if (view !== 'library' && view !== 'agent' && view !== 'project') return result
+  result.set('skillView', view)
+  const agents = params.getAll('agentId')
+  const agentId = agents.length === 1 ? agents[0] : undefined
+  if (view === 'agent' && agentId && host.projects.some((project) =>
+    project.agents?.some((agent) => agent.id === agentId))) result.set('agentId', agentId)
+  return result
+}
 
 /** Keep only a native chat pathname; never restore saved query commands or external URLs. */
 export function normalizeAutoOpsChatHref(href: unknown): string | null {
@@ -162,11 +200,15 @@ export function createAutoOpsProjectNavigation(options: {
       remembered.set(projectId, normalized)
       writeStored(chatKey(host, projectId), normalized)
     },
-    projectHref(area: AutoOpsArea, projectId: string): string {
+    projectHref(area: AutoOpsArea, projectId: string, search?: unknown): string {
       const host = hostNow()
       if (!host) return '/'
       if (!allowed(host, projectId)) throw new Error('当前项目不可用或无权访问。')
-      const query = new URLSearchParams({ projectId }).toString()
+      const params = new URLSearchParams({ projectId })
+      if (area === 'skills') {
+        for (const [key, value] of skillNavigationSearch(search, host)) params.set(key, value)
+      }
+      const query = params.toString()
       if (area !== 'chat') return `/${area}?${query}`
       const storageKey = chatKey(host, projectId)
       const candidate = remembered.get(projectId) ?? readStored(storageKey)

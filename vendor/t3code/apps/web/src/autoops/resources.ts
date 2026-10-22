@@ -91,6 +91,13 @@ export function autoOpsResourceUrl(value: string | undefined): string | null {
       const path = autoOpsBusinessPath(url.searchParams.get('path') ?? undefined)
       return path ? `${url.pathname}?path=${encodeURIComponent(path)}` : null
     }
+    const scopedSkill = new RegExp(`^${host.gatewayBasePath}/autoops/skill-library/contexts/([a-f0-9]{64})/files/(autoops-[a-z][a-z0-9-]*)$`).exec(url.pathname)
+    if (scopedSkill) {
+      if ([...url.searchParams.keys()].some((key) => key !== 'path') || url.searchParams.getAll('path').length !== 1) return null
+      const path = url.searchParams.get('path') ?? ''
+      if (!path || path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..' || /[\\\x00-\x1f?#]/u.test(part))) return null
+      return `${url.pathname}?path=${encodeURIComponent(path)}`
+    }
     if (url.search) return null
     const segment = '[a-zA-Z0-9_-]+'
     const legacy = new RegExp(
@@ -102,7 +109,7 @@ export function autoOpsResourceUrl(value: string | undefined): string | null {
       ? url.pathname.slice(`${host.gatewayBasePath}/autoops/`.length)
       : ''
     return new RegExp(
-      `^(?:files/${segment}|attachments/${segment}|skills/${segment}|projects/${segment}/documents/${segment})$`,
+      `^(?:files/${segment}|attachments/${segment}|projects/${segment}/documents/${segment})$`,
     ).test(suffix)
       ? url.pathname
       : null
@@ -120,4 +127,50 @@ export function autoOpsResourceFromAttachmentId(id: string | undefined): string 
   } catch {
     return null
   }
+}
+
+/** Shared package-relative Markdown semantics for the library and native tabs. */
+export function autoOpsSkillPackageLink(
+  fromPath: string,
+  href: string,
+): { path: string } | { error: string } | null {
+  // Same-document anchors and explicit external URLs retain T3's native behavior.
+  if (!href || href.startsWith('#') || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return null
+  let path: string
+  try {
+    path = decodeURIComponent(href.split(/[?#]/, 1)[0] ?? '')
+  } catch {
+    return { error: '文件链接编码无效。' }
+  }
+  if (!path || path.startsWith('/') || /[\\\u0000-\u001f]/.test(path))
+    return { error: '此链接不属于当前技能包。' }
+  const parts = fromPath.split('/').slice(0, -1)
+  for (const part of path.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (!parts.length) return { error: '此链接超出了当前技能包。' }
+      parts.pop()
+    } else parts.push(part)
+  }
+  return { path: parts.join('/') }
+}
+
+/** The authorized metadata endpoint verifies existence before a tab opens. */
+export function autoOpsSkillResourceLink(
+  sourceUrl: string | null | undefined,
+  href: string,
+): { url: string; path: string } | { error: string } | null {
+  const source = autoOpsResourceUrl(sourceUrl ?? undefined)
+  const host = readAutoOpsHost()
+  if (!source || !host) return null
+  const resource = new URL(source, host.httpBaseUrl)
+  if (!new RegExp(`^${host.gatewayBasePath}/autoops/skill-library/contexts/[a-f0-9]{64}/files/autoops-[a-z][a-z0-9-]*$`).test(resource.pathname)) return null
+  // Complete business identities are handled by ChatMarkdown's resource link,
+  // including root-relative URLs. Its native opener rechecks server permission.
+  if (autoOpsResourceUrl(href)) return null
+  const resolved = autoOpsSkillPackageLink(resource.searchParams.get('path') ?? '', href)
+  if (!resolved || 'error' in resolved) return resolved
+  const target = resolved.path
+  const url = autoOpsResourceUrl(`${resource.pathname}?path=${encodeURIComponent(target)}`)
+  return url ? { url, path: target } : { error: '此链接不属于当前技能包。' }
 }

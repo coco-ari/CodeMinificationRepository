@@ -3,6 +3,7 @@ import { assertPersonalSettingsPatch } from './settings-preferences.mjs'
 import { isPersonalPreferenceCommand } from './preferences.mjs'
 import { AutoOpsAccessError } from './access.mjs'
 import { resolveBusinessSkillMentions } from './skills.mjs'
+import { authorizeBusinessSkillCwd } from './scoped-skills.mjs'
 import { assertBusinessModelSelection } from './models.mjs'
 import { resolve } from 'node:path'
 import { resolveProductProfile, PRODUCT_CAPABILITY_DISABLED, PRODUCT_CAPABILITY_MESSAGE } from './product-profile.mjs'
@@ -101,6 +102,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if(Object.keys(payload).some(key=>!['instanceId','cwd','fresh'].includes(key)) || (payload.instanceId!==undefined&&payload.instanceId!=='codex') || (payload.fresh!==undefined&&typeof payload.fresh!=='boolean'))denied()
     if(payload.cwd!==undefined) {
       const data=process.env.AUTOOPS_T3_DATA_DIR
+      if(typeof payload.cwd==='string'&&data&&payload.cwd.startsWith('autoops/skill-context/')) {authorizeBusinessSkillCwd(data,payload.cwd,{access,principal});return}
       if(typeof payload.cwd!=='string'||!data||!access.bootstrap(principal).projects.some(project=>payload.cwd===`autoops/${project.id}/workspaces` || (project.membership.workspaceAccess==='internal' && payload.cwd===resolve(data,'t3/workspaces',project.id))))denied('技能目录只能刷新当前账号获授权的项目')
     }
     return
@@ -111,8 +113,8 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     return
   }
   if (method === 'orchestration.launchThread') {
-    resolveBusinessSkillMentions(payload.initialMessage?.text)
     const binding = access.requireThread(principal, payload.threadId)
+    resolveBusinessSkillMentions(payload.initialMessage?.text,process.env,binding)
     if (binding.nativeParentThreadId) denied('原生子任务由父会话控制，仅供查看')
     if (binding.compatibilityReadOnly) denied('兼容历史仅供查看，不能继续执行')
     if (binding.projectId !== payload.projectId) denied('会话项目与已确认的授权绑定不一致')
@@ -143,7 +145,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     checkRuntime(payload)
     checkReferences(access, principal, payload, binding.threadId)
     if (payload.type === 'message.dispatch') {
-      resolveBusinessSkillMentions(payload.text)
+      resolveBusinessSkillMentions(payload.text,process.env,binding)
       configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context)
     }
     return
@@ -175,6 +177,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
 export function prepareAutoOpsRpcPayload(access, principal, method, payload = {}) {
   if (method !== 'server.refreshProviders' || typeof payload.cwd !== 'string') return payload
   authorizeAutoOpsRpc(access, principal, method, payload)
+  if(payload.cwd.startsWith('autoops/skill-context/'))return {...payload,cwd:authorizeBusinessSkillCwd(process.env.AUTOOPS_T3_DATA_DIR,payload.cwd,{access,principal})}
   const project = access.bootstrap(principal).projects.find((entry) => payload.cwd === `autoops/${entry.id}/workspaces`)
   return project ? { ...payload, cwd: resolve(process.env.AUTOOPS_T3_DATA_DIR, 't3/workspaces', project.id) } : payload
 }
