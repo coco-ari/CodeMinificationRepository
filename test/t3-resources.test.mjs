@@ -78,6 +78,7 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   const internalReport = artifacts.create({ binding: access.getThreadBinding('internal'), runId: 'r1', name: '内部报告.md', mime: 'text/markdown', bytes: Buffer.from('原始报告') })
   const externalReport = artifacts.create({ binding: access.getThreadBinding('external'), runId: 'r2', name: '脱敏报告.md', mime: 'text/markdown', bytes: Buffer.from('外部报告') })
   access.recordThreadAttachment(principal, 'internal-attachment', 'internal', { name: '内部附件.txt', mimeType: 'text/plain', sizeBytes: 10 })
+  access.recordThreadAttachment(principal, 'external-attachment', 'external', { name: '脱敏附件.txt', mimeType: 'text/plain', sizeBytes: 12 })
   const catalog = createBusinessResourceCatalog({ access, bindingDb: bindings, artifactStore: artifacts, attachmentsDir: join(directory, 'attachments'), workspaceStore })
   const cwd = 'autoops://projects/p-autoops/environments/env-test/threads/external'
   const externalPath = 'autoops/p-autoops/workspaces/external-v1/docs/需求.md'
@@ -86,6 +87,20 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   assert.ok(listing.entries.some(({path}) => path === externalPath))
   assert.ok(!listing.entries.some(({path}) => path.includes('/documents/') || path.includes('/environments/') || path.includes('internal-v1') || path.includes(internalReport.id) || path.includes('internal-attachment')))
   assert.ok(listing.entries.some(({path}) => path.includes(externalReport.id)))
+  assert.ok(listing.entries.some(({path}) => path.includes('external-attachment')))
+  const workspaceRoot = 'autoops/p-autoops/workspaces/external-v1'
+  for (const ancestor of ['autoops', 'autoops/p-autoops', 'autoops/p-autoops/workspaces', workspaceRoot])
+    assert.ok(!listing.entries.some(({path}) => path === ancestor))
+  assert.deepEqual(listing.entries.filter(({path}) => path.startsWith(workspaceRoot + '/')), [
+    { path: workspaceRoot + '/docs', kind: 'directory' },
+    { path: externalPath, kind: 'file' },
+  ])
+  assert.deepEqual(catalog.search(principal, { cwd, query: 'docs/需', limit: 100 }).entries, [{ path: externalPath, kind: 'file' }])
+  assert.deepEqual(catalog.search(principal, { cwd, query: '需求', limit: 100, kind: 'file' }).entries, [{ path: externalPath, kind: 'file' }])
+  assert.deepEqual(catalog.search(principal, { cwd, query: 'docs', limit: 100, kind: 'directory' }).entries, [{ path: workspaceRoot + '/docs', kind: 'directory' }])
+  assert.deepEqual(catalog.search(principal, { cwd, query: 'external-v1', limit: 100 }).entries, [])
+  assert.ok(catalog.search(principal, { cwd, query: '脱敏报告', limit: 100 }).entries.some(({path}) => path.includes(externalReport.id)))
+  assert.ok(catalog.search(principal, { cwd, query: '脱敏附件', limit: 100 }).entries.some(({path}) => path.includes('external-attachment')))
   const read = await catalog.read(principal, { cwd, relativePath: externalPath })
   assert.equal(read.contents, '已经脱敏资料'); assert.equal(read.byteLength, file.size); assert.equal(read.truncated, true)
   assert.equal((await catalog.readForThread('external', externalPath)).content, read.contents)

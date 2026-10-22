@@ -1,5 +1,6 @@
 import { AuthFilesystemReadScope, EnvironmentId, type AuthSessionState } from "@t3tools/contracts";
 import { beforeEach, expect, it, vi } from "vite-plus/test";
+import { installAutoOpsHost } from "../autoops/hostConfig";
 
 const state = vi.hoisted(() => ({
   session: null as Pick<AuthSessionState, "authenticated" | "scopes"> | null,
@@ -8,6 +9,7 @@ const state = vi.hoisted(() => ({
   phase: "connected" as "connected" | "offline",
   sessionAtom: {},
   searchAtom: {},
+  searchRequests: vi.fn(),
   contentAtom: {},
   contentRequests: vi.fn(),
   contentError: null as string | null,
@@ -34,7 +36,10 @@ vi.mock("./presentation", () => ({
   }),
 }));
 vi.mock("./projects", () => ({
-  projectEnvironment: { searchEntries: () => state.searchAtom },
+  projectEnvironment: { searchEntries: (target: unknown) => {
+    state.searchRequests(target);
+    return state.searchAtom;
+  } },
   projectContentSearch: (target: unknown) => {
     state.contentRequests(target);
     return state.contentAtom;
@@ -67,10 +72,7 @@ vi.mock("./query", () => ({
   }),
 }));
 
-import { useProjectContentSearch, useProjectPathSearch } from "./queries";
-
-const useComposerPathSearch = (input: Parameters<typeof useProjectPathSearch>[0]) =>
-  useProjectPathSearch(input, 20);
+import { useComposerPathSearch, useProjectContentSearch } from "./queries";
 
 const target = {
   environmentId: EnvironmentId.make("test-environment"),
@@ -79,10 +81,20 @@ const target = {
 };
 
 beforeEach(() => {
+  installAutoOpsHost({
+    principal: { id: "path-search-test", displayName: "Test" },
+    gatewayBasePath: "/api/agent-demo/t3",
+    csrfToken: "test",
+    projects: [],
+    capabilities: {},
+    fixedModel: { instanceId: "codex", model: "test" },
+    runtimeMode: "approval-required",
+  }, "https://work.test");
   state.session = null;
   state.sessionError = null;
   state.sessionWaiting = false;
   state.phase = "connected";
+  state.searchRequests.mockClear();
   state.contentRequests.mockClear();
   state.contentError = null;
 });
@@ -123,6 +135,28 @@ it("leaves an inactive search idle while its grant loads", () => {
     error: null,
     isPending: false,
   });
+});
+
+it("lists scoped business candidates for a bare @ without requesting host-file access", () => {
+  state.session = { authenticated: true, scopes: [] };
+  const cwd = "autoops://projects/p-autoops/environments/env-test/threads/thread-1?workspaceType=internal&workspaceVersionId=version-1";
+  expect(useComposerPathSearch({ ...target, cwd, query: "" })).toMatchObject({
+    entries: [{ path: "src/index.ts", kind: "file" }],
+    error: null,
+    isPending: false,
+  });
+  expect(state.searchRequests).toHaveBeenCalledExactlyOnceWith({
+    environmentId: target.environmentId,
+    input: { cwd, query: "", limit: 80 },
+  });
+});
+
+it("keeps bare @ in a native host directory idle even with a filesystem grant", () => {
+  state.session = { authenticated: true, scopes: [AuthFilesystemReadScope] };
+  expect(useComposerPathSearch({ ...target, query: "" })).toMatchObject({
+    entries: [], error: null, isPending: false,
+  });
+  expect(state.searchRequests).not.toHaveBeenCalled();
 });
 
 const contentTarget = {

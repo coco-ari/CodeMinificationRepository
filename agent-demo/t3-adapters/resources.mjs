@@ -142,8 +142,14 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     search(principal, input) {
       const scope = scopeAtCwd(principal, input.cwd), { project } = scope
       const needle = input.query.toLocaleLowerCase()
+      const workspacePrefix = scope.binding.workspaceVersionId ? `autoops/${project.id}/workspaces/${scope.binding.workspaceVersionId}/` : undefined
+      const workspaceAncestors = workspacePrefix ? new Set(['autoops', `autoops/${project.id}`, `autoops/${project.id}/workspaces`, workspacePrefix.slice(0, -1)]) : undefined
       const files = visible(principal, project, scope.binding).filter((file) => (file.environmentId === undefined || file.environmentId === scope.environmentId) && (!input.imageOnly || file.mime.startsWith('image/')))
-      const matches = entriesWithFolders(files).filter((entry) => (!input.kind || entry.kind === input.kind) && entry.path.toLocaleLowerCase().includes(needle))
+      const matches = entriesWithFolders(files).filter((entry) => {
+        if (workspaceAncestors?.has(entry.path)) return false
+        const relativePath = workspacePrefix && entry.path.startsWith(workspacePrefix) ? entry.path.slice(workspacePrefix.length) : entry.path
+        return (!input.kind || entry.kind === input.kind) && relativePath.toLocaleLowerCase().includes(needle)
+      })
       return { entries: matches.slice(0, input.limit), truncated: matches.length > input.limit }
     },
     list(principal, input) {

@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T10:15:50.097696+00:00",
+  "generatedAt": "2026-10-22T10:48:53.115380+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -2459,10 +2459,16 @@
       "localSha256": "fe27ae301f2254b068ba6353170a4ce6f970328d341409e53f72db1cd18a9e7b"
     },
     {
+      "path": "apps/web/src/state/queries.filesystem.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "fd7ee5ba6f88594b51dd9fba982435d14eafe5e14ae139613396f1fad929f972",
+      "localSha256": "c4b2e7512e8e461d49a55fb60905a6d6c0d236bb4597d126de43f32d700dc18c"
+    },
+    {
       "path": "apps/web/src/state/queries.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "c05e91ea269f81aa0cf3239eefbe1270c6212b938e5607da7ca35bfae3e2391d",
-      "localSha256": "1c20650206f763187d2bcd7e68a1e9c892e0a81e8fb3e2008ddb1862ef6235e1"
+      "localSha256": "ebe3709db8a28ea3b37a6b4329c9bbd2e4323abc946740ac58cdffc461ecaa0b"
     },
     {
       "path": "apps/web/src/state/usage.ts",
