@@ -1,7 +1,7 @@
 import { resolveProductProfile } from './product-profile.mjs'
 import { existsSync, lstatSync, mkdirSync, writeFileSync, realpathSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { readBusinessSkills, prepareBusinessSkills, businessSkillRules } from './skills.mjs'
+import { prepareBusinessSkills, businessSkillRules } from './skills.mjs'
 import { readBusinessModels } from './models.mjs'
 
 // Port of the schema/default shape in Codex rust-v0.159.2
@@ -41,7 +41,7 @@ export function businessNativeModelCatalog(dataDirectory, defaultModel) {
 export function businessNativePolicy(dataDirectory,codexHome,model,env=process.env) {
   const subagents=resolveProductProfile(env).capabilities.subagents
   const root=join(dataDirectory,'t3','native-policy')
-  const skillPaths=readBusinessSkills(dataDirectory).map(skill=>join(codexHome,'skills',skill.name,'SKILL.md'))
+  // Skills are enabled only by a thread's authorized immutable context.
   const role={description:'在同一项目、环境和权限范围内完成只读分析，继承父会话业务工具。',config_file:join(root,'readonly-agent.toml')}
   return {
     model_catalog_json:join(root,'models.json'),
@@ -49,10 +49,10 @@ export function businessNativePolicy(dataDirectory,codexHome,model,env=process.e
     'agents.max_threads':2,'agents.max_depth':1,
     'agents.default':role,'agents.explorer':role,'agents.worker':role,
     'agents.default_subagent_model':model,
-    'skills.include_instructions':skillPaths.length>0,
+    'skills.include_instructions':false,
     'skills.bundled.enabled':false,
     'skills.config':businessSkillRules(dataDirectory,codexHome),
-    'permissions.agent_demo.filesystem':{':root':'deny',[join(codexHome,'skills')]:'read',...Object.fromEntries(skillPaths.map(path=>[path,'read']))},
+    'permissions.agent_demo.filesystem':{':root':'deny'},
   }
 }
 
@@ -96,6 +96,8 @@ export function assertBusinessNativeConfig(response,env=process.env) {
   const canonical=path=>typeof path==='string'&&(existsSync(path)?realpathSync(path):resolve(path))
   const config=response?.config
   if(!config||config.model!==model||canonical(config.model_catalog_json)!==canonical(join(root,'models.json')))throw new Error('原生模型配置未匹配管理员固定目录')
+  const filesystem=config.permissions?.agent_demo?.filesystem
+  if(!filesystem||filesystem[':root']!=='deny'||Object.keys(filesystem).some(key=>key!==':root'&&key!=='glob_scan_max_depth'))throw new Error('原生全局文件权限必须保持全部拒绝；技能只由当前会话单独授权')
   const catalog=JSON.parse(readFileSync(join(root,'models.json'),'utf8'))
   if(JSON.stringify(catalog)!==JSON.stringify(businessNativeModelCatalog(env.AUTOOPS_T3_DATA_DIR,model)))throw new Error('原生模型目录未匹配当前 CPA 能力目录')
   const subagents=resolveProductProfile(env).capabilities.subagents

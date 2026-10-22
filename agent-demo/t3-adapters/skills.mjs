@@ -4,6 +4,7 @@ import { join, resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { BUILTIN_BUSINESS_SKILLS } from './builtin-skills.mjs'
 import { AutoOpsAccessError } from './access.mjs'
+import { prepareScopedBusinessSkills, scopedBusinessSkillsForCwd } from './scoped-skills.mjs'
 
 export const BUSINESS_SKILL_TOOLS = Object.freeze(['list_project_materials','read_project_document','read_project_material','read_attachment','query_environment','ask_user','create_report'])
 const allowedTools = new Set(BUSINESS_SKILL_TOOLS)
@@ -69,46 +70,34 @@ export function manageBusinessSkills(dataDirectory,codexHome,access,principal,in
   return readBusinessSkillRegistry(dataDirectory)
 }
 
-export function resolveBusinessSkillMentions(text,env=process.env) {
+export function resolveBusinessSkillMentions(text,env=process.env,binding) {
   if(!env.AUTOOPS_T3_DATA_DIR)return []
-  const names=[...new Set([...String(text||'').matchAll(/(?:^|\s)\p{Sc}(autoops-[a-z][a-z0-9-]*)(?=\s|$)/gu)].map(match=>match[1]))]
-  const available=readBusinessSkills(env.AUTOOPS_T3_DATA_DIR)
+  const names=[...new Set([...String(text||'').matchAll(/(?:^|\s)\p{Sc}(autoops-[a-z][a-z0-9-]*)(?![a-z0-9-])/gu)].map(match=>match[1]))]
+  if(!binding) {if(names.length)throw new AutoOpsAccessError(403,'SKILL_SCOPE_REQUIRED','请先选择项目、助手与工作区后使用技能');return []}
+  const context=prepareScopedBusinessSkills(env.AUTOOPS_T3_DATA_DIR,binding,{lock:false,strict:true})
   return names.map(name=>{
-    if(!available.some(skill=>skill.name===name))throw new AutoOpsAccessError(409,'SKILL_NOT_AVAILABLE','所选技能已停用或不可用，请重新选择')
-    return {type:'skill',name,path:join(env.AUTOOPS_T3_CODEX_HOME||join(env.AUTOOPS_T3_DATA_DIR,'t3','codex-home'),'skills',name,'SKILL.md')}
+    const skill=context.skills.find(skill=>skill.name===name)
+    if(!skill)throw new AutoOpsAccessError(409,'SKILL_NOT_AVAILABLE','所选技能已停用或不属于当前助手、项目和工作区，请重新选择')
+    return {type:'skill',name,path:skill.path}
   })
 }
 
-export function prepareBusinessSkills(dataDirectory, codexHome) {
-  const skills = readBusinessSkills(dataDirectory)
-  const root = join(codexHome,'skills')
+/** Retire the old globally-readable namespace. Scoped copies are created only
+ * after a scope is authorized; legacy library data itself remains untouched. */
+export function prepareBusinessSkills(_dataDirectory, codexHome) {
+  const root=join(codexHome,'skills')
   mkdirSync(root,{recursive:true,mode:0o700})
-  if (lstatSync(root).isSymbolicLink()) throw new Error('原生技能目录不能是符号链接')
-  const expected = new Set(skills.map(skill=>skill.name))
-  for (const item of readdirSync(root,{withFileTypes:true})) {
-    // Only this adapter's generated namespace may be replaced or retired.
-    if (item.name.startsWith('autoops-') && !expected.has(item.name)) rmSync(join(root,item.name),{recursive:true,force:true})
-  }
-  return skills.map(skill => {
-    const directory = join(root,skill.name)
-    if (existsSync(directory) && lstatSync(directory).isSymbolicLink()) throw new Error('管理员技能目录不能是符号链接')
-    mkdirSync(directory,{recursive:true,mode:0o700})
-    const path=join(directory,'SKILL.md')
-    if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error('技能文件不能是符号链接')
-    const content=businessSkillContents(skill)
-    writeFileSync(path,content,{mode:0o600})
-    return {name:skill.name,path,description:skill.description,enabled:true}
-  })
+  if(lstatSync(root).isSymbolicLink())throw new Error('原生技能目录不能是符号链接')
+  for(const item of readdirSync(root,{withFileTypes:true}))if(item.name.startsWith('autoops-'))rmSync(join(root,item.name),{recursive:true,force:true})
+  return []
 }
 
-/** Metadata is an intersection with native skills/list, never a fabricated native skill. */
-export function filterBusinessSkills(nativeSkills, env=process.env) {
-  if (!env.AUTOOPS_T3_DATA_DIR) return nativeSkills
-  const registered = readBusinessSkills(env.AUTOOPS_T3_DATA_DIR)
-  const approved = new Set(registered.map(skill=>skill.name))
+/** Metadata remains an intersection with the actual upstream skills/list. */
+export function filterBusinessSkills(nativeSkills, env=process.env,cwd) {
+  if(!env.AUTOOPS_T3_DATA_DIR)return nativeSkills
+  const registered=scopedBusinessSkillsForCwd(env.AUTOOPS_T3_DATA_DIR,cwd)
   const canonical=path=>existsSync(path)?realpathSync(path):resolve(path)
-  const home = canonical(env.AUTOOPS_T3_CODEX_HOME || join(env.AUTOOPS_T3_DATA_DIR,'t3','codex-home'))
-  return nativeSkills.filter(skill=>approved.has(skill.name) && skill.enabled && canonical(skill.path)===join(home,'skills',skill.name,'SKILL.md')).map(skill=>{
+  return nativeSkills.filter(skill=>registered.some(entry=>entry.name===skill.name&&canonical(entry.path)===canonical(skill.path))&&skill.enabled).map(skill=>{
     const metadata=registered.find(entry=>entry.name===skill.name)
     return metadata?.displayName?{...skill,displayName:metadata.displayName}:skill
   })
@@ -120,11 +109,11 @@ export const businessSlashCommands = (commands, env=process.env) => env.AUTOOPS_
  * Business workspace files are admin-owned; model tools cannot write new skills.
  */
 export function businessSkillRules(dataDirectory, codexHome, options={}) {
-  const approved=readBusinessSkills(dataDirectory).map(skill=>join(codexHome,'skills',skill.name,'SKILL.md'))
+  // Scoped cwd roots are never scanned or globally enabled here.
   const roots=new Set([join(codexHome,'skills'),join(options.userHome||homedir(),'.agents','skills'),'/etc/codex/skills'])
   const workspaceRoot=join(dataDirectory,'t3','workspaces')
   const workspaces=existsSync(workspaceRoot)?readdirSync(workspaceRoot,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>join(workspaceRoot,item.name)):[]
-  for(const start of [process.cwd(),workspaceRoot,...workspaces]) {
+  for(const start of [process.cwd(),workspaceRoot,join(dataDirectory,'t3','skill-contexts'),...workspaces]) {
     let directory=resolve(start)
     while(true){ roots.add(join(directory,'.agents','skills'));roots.add(join(directory,'.codex','skills'));const parent=dirname(directory);if(parent===directory)break;directory=parent }
   }
@@ -141,5 +130,5 @@ export function businessSkillRules(dataDirectory, codexHome, options={}) {
     if(stat.isDirectory())for(const item of readdirSync(canonical))visit(join(canonical,item),depth+1)
   }
   for(const root of roots)visit(root)
-  return [...Array.from(found,path=>({path,enabled:false})),...approved.map(path=>({path,enabled:true}))]
+  return Array.from(found,path=>({path,enabled:false}))
 }

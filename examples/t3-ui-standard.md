@@ -41,6 +41,7 @@
 | --- | --- | --- |
 | 页面与工具栏 | `WorkspacePageHeader`、`SidebarInset`、`files/fileSurfaceChrome` | 项目、内部/外部固定版本、真实发布状态 |
 | 目录与内容 | `FileBrowserPanel`、`AttachmentFilePreview`、`ReadOnlySourcePreview`，经共用 `ReadOnlyWorkspaceFiles` 组合 | 授权只读数据源；管理页不新增输入引用入口 |
+| 技能管理与调用 | 同一文件工作区骨架、紧凑列表、原生 Dialog/菜单，以及输入区 `$` 候选、标签与说明预览 | 中央库／助手／项目范围、不可变版本与内部／外部授权；Skills Manager 仅提供管理机制参考，不引入其桌面 UI |
 | 业务操作 | `AddProjectToMachineDialog`、设置弹窗的 `DialogHeader/Panel/Footer`，原生 `Select`、`Menu`、`Checkbox` | 公开 Git 导入、脱敏、逐项复核、部署包与任务取消 |
 | 响应式 | 原生文件面板分栏、窄屏目录/预览切换、菜单焦点边界 | 缩小窗口后操作仍可达，弹窗内容滚动且底部动作可见 |
 

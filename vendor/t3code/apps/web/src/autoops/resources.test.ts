@@ -165,3 +165,39 @@ it('uses the explicit subscribed scope when a workspace version arrives after th
   })!)
   expect(nextCwd.searchParams.get('workspaceVersionId')).toBe('version-2')
 })
+
+it('uses only scoped skill package URLs and preserves reference resource identities', async () => {
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost({principal:{id:'skill-url',displayName:'Test'},gatewayBasePath:'/api/agent-demo/t3',csrfToken:'x',projects:[],capabilities:{},fixedModel:{instanceId:'codex',model:'test'},runtimeMode:'approval-required'},'https://work.test')
+  const {autoOpsResourceUrl,autoOpsResourceRequestUrl}=await import('./resources')
+  const path='/api/agent-demo/t3/autoops/skill-library/contexts/'+ 'a'.repeat(64)+'/files/autoops-sample'
+  expect(autoOpsResourceUrl(path+'?path=references%2Fcheck.md')).toBe(path+'?path=references%2Fcheck.md')
+  expect(autoOpsResourceRequestUrl(path+'?path=SKILL.md','metadata')).toBe(path+'?path=SKILL.md&metadata=1')
+  for(const invalid of [path,path+'?path=../secret',path+'?path=%2Fetc%2Fpasswd',path+'?path=references%5Ccheck.md',path+'?path=SKILL.md&path=other',path+'?path=SKILL.md&other=x','/api/agent-demo/t3/autoops/skills/autoops-sample'])expect(autoOpsResourceUrl(invalid)).toBeNull()
+})
+
+it('resolves draft skill preview references within the same snapshot and package', async () => {
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost({principal:{id:'skill-links',displayName:'Test'},gatewayBasePath:'/api/agent-demo/t3',csrfToken:'x',projects:[],capabilities:{},fixedModel:{instanceId:'codex',model:'test'},runtimeMode:'approval-required'},'https://work.test')
+  const {autoOpsSkillResourceLink,autoOpsResourceAttachmentId,autoOpsResourceFromAttachmentId}=await import('./resources')
+  const packageUrl='/api/agent-demo/t3/autoops/skill-library/contexts/'+'b'.repeat(64)+'/files/autoops-example'
+  const source=packageUrl+'?path=SKILL.md'
+  const restored=autoOpsResourceFromAttachmentId(autoOpsResourceAttachmentId(source))
+  expect(autoOpsSkillResourceLink(restored,'references/%E8%B5%84%E6%96%99%20%E6%96%87%E4%BB%B6.md')).toEqual({
+    url:packageUrl+'?path=references%2F%E8%B5%84%E6%96%99%20%E6%96%87%E4%BB%B6.md',path:'references/资料 文件.md',
+  })
+  expect(autoOpsSkillResourceLink(packageUrl+'?path=references%2Fnested%2Fdetail.md','../../SKILL.md#header')).toEqual({url:source,path:'SKILL.md'})
+  expect(autoOpsSkillResourceLink(packageUrl+'?path=references%2Fnested%2Fdetail.md','../other.md?download=1')).toEqual({url:packageUrl+'?path=references%2Fother.md',path:'references/other.md'})
+  for(const href of ['../SKILL.md','%2E%2E/secret.md','/autoops/other/secret.md','references/%00hidden.md','references/%not-valid','references\\secret.md','references/../../outside.md']) {
+    expect(autoOpsSkillResourceLink(source,href)).toHaveProperty('error')
+  }
+  // Complete authorized-resource identities continue through ChatMarkdown and
+  // its server-checked native opener, rather than being treated as relative paths.
+  for(const href of [source,packageUrl+'?path=references%2Fcheck.md',packageUrl.replace('b'.repeat(64),'c'.repeat(64))+'?path=SKILL.md','/api/agent-demo/t3/autoops/files/report-1']) {
+    expect(autoOpsSkillResourceLink(source,href)).toBeNull()
+  }
+  for(const href of ['#section','https://example.com/reference','//example.com/reference',''])expect(autoOpsSkillResourceLink(source,href)).toBeNull()
+  for(const ordinary of ['/api/agent-demo/t3/autoops/attachments/file-1','/api/agent-demo/t3/autoops/files/report-1',null]) {
+    expect(autoOpsSkillResourceLink(ordinary,'references/check.md')).toBeNull()
+  }
+})
