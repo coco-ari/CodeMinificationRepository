@@ -321,6 +321,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   state: Ref.Ref<TestProviderRuntimeState>,
   options: {
     readonly failEventStream?: boolean;
+    readonly acknowledgeEvent?: ProviderAdapter.ProviderAdapterV2SessionRuntime["acknowledgeEvent"];
     readonly capabilities?: OrchestrationV2ProviderCapabilities;
     readonly mcpConfigs?: Ref.Ref<
       ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
@@ -403,6 +404,9 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
           driver: CODEX_DRIVER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
+          ...(options.acknowledgeEvent === undefined
+            ? {}
+            : { acknowledgeEvent: options.acknowledgeEvent }),
           events: options.failEventStream
             ? Stream.fail(
                 new ProviderAdapter.ProviderAdapterEventStreamError({
@@ -462,6 +466,7 @@ function layerTest(input: {
   readonly idleTimeoutMs: number;
   readonly maxIdlePinMs?: number;
   readonly failEventStream?: boolean;
+  readonly acknowledgeEvent?: ProviderAdapter.ProviderAdapterV2SessionRuntime["acknowledgeEvent"];
   readonly capabilities?: OrchestrationV2ProviderCapabilities;
   readonly mcpConfigs?: Ref.Ref<
     ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
@@ -502,6 +507,7 @@ function layerTest(input: {
   const layerRegistry = Layer.unwrap(
     makeProviderAdapter(input.state, {
       failEventStream: input.failEventStream ?? false,
+      ...(input.acknowledgeEvent === undefined ? {} : { acknowledgeEvent: input.acknowledgeEvent }),
       ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
       ...(input.mcpConfigs === undefined ? {} : { mcpConfigs: input.mcpConfigs }),
       ...(input.beforeOpen === undefined ? {} : { beforeOpen: input.beforeOpen }),
@@ -5027,5 +5033,78 @@ it.effect(
         projectExists: false,
       });
       assert.isFalse(denied?.capabilities?.has("device"));
+    }),
+);
+
+it.effect(
+  "buffers durable remote events before subscription without acknowledging unconsumed data",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const persistedSession = yield* Deferred.make<void>();
+      const acknowledgements = yield* Ref.make<ReadonlyArray<string>>([]);
+      yield* Effect.gen(function* () {
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const ids = yield* IdAllocator.IdAllocatorV2;
+        const sink = yield* EventSink.EventSinkV2;
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const threadId = ThreadId.make("thread_remote_pre_subscription");
+        const now = yield* DateTime.now;
+        const providerSessionId = ids.derive.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+        });
+        yield* sink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator: ids, threadId, now })],
+        });
+        const runtime = yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy,
+        });
+        const queue = (yield* Ref.get(state)).eventQueues.get(providerSessionId)!;
+        const providerThread = makeProviderThread({
+          idAllocator: ids,
+          threadId,
+          providerSessionId,
+          now,
+        });
+        const first: ProviderAdapter.ProviderAdapterV2Event = {
+          type: "provider_thread.updated",
+          driver: CODEX_DRIVER,
+          providerThread: { ...providerThread, lastRunOrdinal: 1 },
+        };
+        yield* Queue.offer(queue, first);
+        yield* Queue.offer(queue, {
+          type: "provider_session.updated",
+          driver: CODEX_DRIVER,
+          providerSession: runtime.providerSession,
+        });
+        // The following session event is acknowledged only after the earlier event was
+        // placed in the bounded queue. No timers or scheduler guesses are required.
+        yield* Deferred.await(persistedSession);
+        assert.deepEqual(yield* Ref.get(acknowledgements), ["provider_session.updated"]);
+        const subscription = yield* runtime.subscribeEvents!;
+        assert.deepEqual(yield* Stream.runHead(subscription.events), Option.some(first));
+        yield* subscription.close;
+        yield* manager.shutdown;
+        const projection = yield* projections.getThreadProjection(threadId);
+        assert.equal(projection.providerSessions[0]?.status, "ready");
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 60_000,
+            acknowledgeEvent: (event) =>
+              Ref.update(acknowledgements, (entries) => [...entries, event.type]).pipe(
+                Effect.andThen(
+                  event.type === "provider_session.updated"
+                    ? Deferred.succeed(persistedSession, undefined)
+                    : Effect.void,
+                ),
+              ),
+          }),
+        ),
+      );
     }),
 );

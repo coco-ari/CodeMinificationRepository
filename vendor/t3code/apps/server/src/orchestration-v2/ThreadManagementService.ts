@@ -56,6 +56,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { ProviderInstanceAvailability } from "../provider/ProviderInstanceAvailability.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -514,6 +515,23 @@ const make = Effect.gen(function* () {
   const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
+  const availability = yield* Effect.serviceOption(ProviderInstanceAvailability);
+  const resolveEnabled = (input: { projectId: ProjectId; instanceId: ProviderInstanceId }) =>
+    (Option.isSome(availability)
+      ? availability.value.resolve(input)
+      : Effect.succeed(undefined)
+    ).pipe(
+      Effect.flatMap((override) =>
+        override === undefined
+          ? serverSettings.getSettings.pipe(
+              Effect.orDie,
+              Effect.map((current) =>
+                resolveProjectProviderInstanceEnabled(current, input.projectId, input.instanceId),
+              ),
+            )
+          : Effect.succeed(override),
+      ),
+    );
 
   const assertProviderInstanceEnabled: ThreadManagementServiceShape["assertProviderInstanceEnabled"] =
     (input) =>
@@ -522,10 +540,9 @@ const make = Effect.gen(function* () {
         Effect.flatMap((receipt) =>
           Option.isSome(receipt)
             ? Effect.void
-            : serverSettings.getSettings.pipe(
-                Effect.orDie,
-                Effect.flatMap((current) =>
-                  resolveProjectProviderInstanceEnabled(current, input.projectId, input.instanceId)
+            : resolveEnabled(input).pipe(
+                Effect.flatMap((enabled) =>
+                  enabled
                     ? Effect.void
                     : new ThreadManagementProviderInstanceDisabledError({
                         projectId: input.projectId,
@@ -537,13 +554,7 @@ const make = Effect.gen(function* () {
       );
 
   const isProviderInstanceEnabledForProject: ThreadManagementServiceShape["isProviderInstanceEnabledForProject"] =
-    (input) =>
-      serverSettings.getSettings.pipe(
-        Effect.orDie,
-        Effect.map((current) =>
-          resolveProjectProviderInstanceEnabled(current, input.projectId, input.instanceId),
-        ),
-      );
+    (input) => resolveEnabled(input);
 
   const hasReceipt: ThreadManagementServiceShape["hasReceipt"] = (commandId) =>
     receipts.getByCommandId(commandId).pipe(

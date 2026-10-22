@@ -624,7 +624,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
 ) {
   // The host owns execution permissions; catalog-backed hosts leave model and
   // reasoning selections to T3's existing draft/turn configuration.
-  input = { ...input, ...readHostTurnConfiguration() };
+  input = { ...input, ...readHostTurnConfiguration({threadId:input.threadId}) };
   const commandId = yield* allocateCommandId(input);
   if (input.bootstrap?.createThread) {
     yield* Effect.tryPromise(() => prepareHostThreadLaunch({

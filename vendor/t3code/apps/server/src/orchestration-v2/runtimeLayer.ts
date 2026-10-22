@@ -1,3 +1,4 @@
+import * as RemoteRunRecovery from "../autoops/RemoteRunRecovery.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
@@ -135,6 +136,7 @@ const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerCommandOutputHubProvided,
+      layerCommandReceiptStoreProvided,
       layerProviderAdapterRegistryProvided,
       layerEventSinkProvided,
       IdAllocator.layer,
@@ -327,6 +329,7 @@ const layerProviderRuntimeRecoveryProvided = ProviderRuntimeRecoveryService.laye
   Layer.provide(
     Layer.mergeAll(
       layerEffectWorkerProvided,
+      RemoteRunRecovery.layer.pipe(Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerEventSinkProvided, IdAllocator.layer, layerProviderSessionManagerProvided, layerRunExecutionServiceProvided))),
       layerStores,
       layerEventSinkProvided,
       IdAllocator.layer,

@@ -264,9 +264,9 @@ function ComposerMentionNodeView({ node }: NodeViewProps) {
   const chip = (
     <ContextChip
       kind="mention"
-      render={<button type="button" />}
-      onClick={() => actions.openMention(path)}
-      aria-label={`预览 ${path}`}
+      render={actions.canPreviewFiles === false ? <span /> : <button type="button" />}
+      onClick={actions.canPreviewFiles === false ? undefined : () => actions.openMention(path)}
+      aria-label={actions.canPreviewFiles === false ? path : `预览 ${path}`}
       contentEditable={false}
       spellCheck={false}
       data-composer-mention-chip="true"
@@ -362,9 +362,10 @@ function ComposerSkillNodeView({ node }: NodeViewProps) {
         <div className="space-y-3 p-2 text-sm">
           <p className="font-medium">{skillLabel}</p>
           <p>{description || "此技能暂无说明。"}</p>
-          {skill?.path && actions.environmentId ? (
+          {skill?.path &&
+          !skill.path.startsWith("autoops-customer-skill:") &&
+          actions.environmentId ? (
             <Button variant="outline" size="sm" onClick={() => actions.openMention(skill.path)}>
-              
               查看使用说明
             </Button>
           ) : null}

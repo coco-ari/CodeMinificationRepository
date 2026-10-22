@@ -3,6 +3,7 @@ export const AUTOOPS_AREAS = [
   { id: 'chat', label: '问答', icon: 'message', path: '/', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'workspaces', label: '工作区', icon: 'folder', path: '/workspaces', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: false },
   { id: 'deployments', label: '部署发布', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'internal-manager', manage: 'server', sidebar: false },
+  { id: 'devices', label: '我的电脑', icon: 'laptop', path: '/devices', scope: 'global', common: false, enabled: 'customer-agents', read: 'owner', manage: 'owner', sidebar: false },
   { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: false },
 ] as const
 
@@ -10,10 +11,24 @@ export type AutoOpsArea = typeof AUTOOPS_AREAS[number]['id']
 
 export interface NavigationHost {
   readonly principal: { readonly id: string }
+  readonly customerAgentsEnabled?: boolean
   readonly projects: ReadonlyArray<{
     readonly id: string
+    readonly membership?: { readonly workspaceAccess: string; readonly role: string }
     readonly agents?: ReadonlyArray<{ readonly id: string }>
   }>
+}
+
+/** Entry and direct-route guards share the registry's feature and role rules. */
+export function autoOpsAreaAvailable(areaId: AutoOpsArea, host: NavigationHost | undefined, projectId = ''): boolean {
+  if (!host?.principal.id) return false
+  const area = AUTOOPS_AREAS.find((entry) => entry.id === areaId)
+  if (!area || (area.enabled === 'customer-agents' && host.customerAgentsEnabled !== true)) return false
+  if (area.scope === 'global') return true
+  const project = host.projects.find((entry) => entry.id === projectId)
+  if (!project) return false
+  return area.read !== 'internal-manager' ||
+    (project.membership?.workspaceAccess === 'internal' && project.membership.role === 'manager')
 }
 
 export type RouteProjectSelection =
@@ -79,7 +94,7 @@ export function autoOpsAreaFromPath(pathname: string): AutoOpsArea {
 }
 
 const CONTROL_ROUTES = new Set([
-  'settings', 'projects', 'workspaces', 'deployments', 'skills', 'usage', 'pull-requests',
+  'settings', 'projects', 'workspaces', 'deployments', 'skills', 'devices', 'usage', 'pull-requests',
   'connect', 'connect-agent', 'pair', 'welcome', 'new', 'api', 'autoops',
 ])
 

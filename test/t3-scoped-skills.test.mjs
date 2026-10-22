@@ -162,3 +162,14 @@ test('脚本/依赖技能保留在仓库但不进入可调用目录',t=>{
  assert.deepEqual(prepareScopedBusinessSkills(f.directory,f.binding).skills,[])
  assert.throws(()=>resolveBusinessSkillMentions('$autoops-scripted',f.env,f.binding),e=>e.code==='SKILL_NOT_AVAILABLE')
 })
+
+test('平台技能投影不覆盖客户本机目录，平台仍只输出授权快照',t=>{
+ const f=fixture(t),skill=f.importSkill();f.assign(skill);const c=prepareScopedBusinessSkills(f.directory,f.binding)
+ const customer={instanceId:'customer-owned-codex',skills:[{name:'local-check',path:'autoops-customer-skill:opaque',enabled:true}],workspaceSnapshots:[{cwd:'customer-local',skills:[{name:'local-check',path:'autoops-customer-skill:opaque',enabled:true}]}]}
+ const platform={instanceId:'codex',skills:c.skills,workspaceSnapshots:[{cwd:c.physicalCwd,skills:c.skills}]}
+ const projected=filterBusinessProviderResult(f.directory,{config:{providers:[platform,customer]}},{access:f.access,principal:f.principal}).config.providers
+ assert.deepEqual(projected[1],customer)
+ assert.deepEqual(projected[0].skills,[])
+ assert.match(projected[0].workspaceSnapshots[0].cwd,/^autoops\/skill-context\//)
+ assert.match(projected[0].workspaceSnapshots[0].skills[0].path,/skill-library\/contexts/)
+})

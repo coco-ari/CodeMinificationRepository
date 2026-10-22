@@ -3,7 +3,7 @@ import * as Stream from "effect/Stream";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({ principal: { id: "actor-a", username: "actor-a" }, authorize: vi.fn() }));
-vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ principalForNativeSession: () => mocks.principal }) }));
+vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ principalForNativeSession: () => mocks.principal, customerRegistry: { listDevices: () => [{ id: "owned" }] } }) }));
 vi.mock("../../../../../../agent-demo/t3-adapters/rpc-policy.mjs", () => ({
   authorizeAutoOpsRpc: mocks.authorize,
   filterAutoOpsShell: (_access: unknown, _principal: unknown, value: unknown) => value,
@@ -44,5 +44,20 @@ describe("AutoOps signed attachment RPC identity", () => {
     const handlers = protectHandlers({ "assets.createUrl": (_payload: object) => Effect.sync(resolve) }, "native-session", () => Stream.empty);
     await expect(Effect.runPromise(handlers["assets.createUrl"]({}))).rejects.toThrow("expired host session");
     expect(resolve).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("AutoOps provider projection", () => {
+  it("keeps owned customer skills and filters foreign devices at every config nesting", async () => {
+    mocks.authorize.mockReset();
+    const owned = { instanceId: "customer-owned-codex", skills: [{ name: "local-check", path: "autoops-customer-skill:opaque", enabled: true }] };
+    const foreign = { instanceId: "customer-other-codex", skills: [{ name: "private" }] };
+    const platform = { instanceId: "codex", skills: [{ name: "global-not-authorized" }] };
+    for (const wrap of [(providers: unknown[]) => ({ providers }), (providers: unknown[]) => ({ config: { providers } }), (providers: unknown[]) => ({ payload: { config: { providers } } })]) {
+      const handlers = protectHandlers({ "server.getConfig": () => Effect.succeed(wrap([platform, owned, foreign])) }, "native-session", () => Stream.empty);
+      const projected = await Effect.runPromise(handlers["server.getConfig"]());
+      expect(projected).toEqual(wrap([{ ...platform, skills: [] }, owned]));
+    }
   });
 });

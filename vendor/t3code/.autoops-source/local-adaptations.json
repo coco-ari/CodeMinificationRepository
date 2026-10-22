@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T16:21:27.114425+00:00",
+  "generatedAt": "2026-10-22T17:46:38.589421+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -92,13 +92,13 @@
       "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "34a383d02051f3cac9119878f407cc8c8d7475b3e3608fbc9a3cb4f41f77d176",
-      "localSha256": "7e5da823fb2e22665dab1490908010406cc5365fb62a00fccd3d317d1735f692"
+      "localSha256": "6f8c2c02268fff224b6a6c0cebc8127ab2a2f577b2ea69cecefaf7aa303c63f9"
     },
     {
       "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "6868f502cd515693a6c1a8c5a1d54e5012daefe75eb8677c644c17fd0f7e45e9",
-      "localSha256": "f8770f9cdd553c3dffba35ddab2c2779d72e1cecfa8de5996c93aac4d317fb11"
+      "localSha256": "52e1c785fe82e3d7bfae413f61e3d6b1e74bfb9d674765d8198cb0779d3fe09e"
     },
     {
       "path": "apps/server/src/orchestration-v2/AttachmentClaims.ts",
@@ -131,6 +131,12 @@
       "localSha256": "31c877032a1ed324f3563ff39ac72e313ddd9fc9ac4ba3160cf5a958b22271c0"
     },
     {
+      "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "a71dd53323a332f76255370e70264cdbf165d4af8c7739c38e4e3ab7c620e98e",
+      "localSha256": "f2a512f876f8a8c79ccb0c47eb04024cba5893d5022a6ec11cd1afb65cae399b"
+    },
+    {
       "path": "apps/server/src/orchestration-v2/EffectWorker.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "0f567ffb1899c638b71effc97dcd9d679fa18a90f7efb69de9361d4a7e83976d",
@@ -146,13 +152,37 @@
       "path": "apps/server/src/orchestration-v2/Orchestrator.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "7f065c1582b7a9adf3760fcc76ab19640ac54ed7dda3c9d7cd4813eadae72823",
-      "localSha256": "83c9a9bfed02e9ee21716a3b4bc11e64c878f5b0a0a5cb471beafe51ac6dd1b4"
+      "localSha256": "1c07a5933730e77847db1eba1c26c620e91a60dfa9cfd51e4aab5aaf2c656b1e"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "b4344b5b5f15985e4dbd1882a60255d246760b08ea24ee3a2f7f9f261f905836",
+      "localSha256": "e809ec712f673d4e09088b94f2fd288cc8002f505b6899393bcb7b1a8082e654"
     },
     {
       "path": "apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "f225c35568924a4596fe41a9de64f519c20b423c183f8926398cd7402944d300",
-      "localSha256": "602c0a64834adc52ff3b782ab99d62183414c6361ba2747f0bc20015220fe071"
+      "localSha256": "9810135cffb6b523120bcfd5e280f09b576194ad7848ce749a5fa8d00922c53b"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderSessionManager.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "fbb05e52edb768b44196da9347b9d43b9c4d2899e1862da5a6630d8f10d631d9",
+      "localSha256": "57b8d0fba2c68941147f7be9132ccc96974990ef02d2219e446d096c7bf011f9"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "7cb7cde77cfb6477ac121df1c0982638cab15e414890b4970bb801ab7db47bf0",
+      "localSha256": "5678448c45cce1c6effdad8eaf4e19be43d099b98b04e6bd3c4a9e80bd36112c"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderTurnStartService.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "3a7388a45176010ea8a1b64c78d5120c2641a503a67164462643211da2d96834",
+      "localSha256": "4304a731c3c9c516a12e454e620b81bffe5b7c84469e59c34f090777e2ea1c1d"
     },
     {
       "path": "apps/server/src/orchestration-v2/RestartContinuation.ts",
@@ -161,10 +191,22 @@
       "localSha256": "04ab18627447d3b33f1e5a32345f029cedf6d9895fee11f8eb55fe2fda3a5b47"
     },
     {
+      "path": "apps/server/src/orchestration-v2/RunExecutionService.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "147d673444a196055a862519977ed666dd8e3982a15da729215c1db11fb5ec65",
+      "localSha256": "3094a8a9bf5264083ab412c23a05d704e10076e61d0994abc985c097f40eed09"
+    },
+    {
       "path": "apps/server/src/orchestration-v2/RunExecutionService.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "480865026f4bd01f3421c359bebc738d09b01eb3b3bfe3ebf079d44854997a98",
-      "localSha256": "420371e206572b373ba86bb83955f31e25d83349ef711c73d5de9045cd5bbe65"
+      "localSha256": "46dbaa44982de950c98e04c727639c7020af1d01375e558036f4875bb00475e7"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RuntimePolicy.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "0c85021aa589895b948c03303b9c38e17feb5cb8424a17839f7a1a6f7ee6f36f",
+      "localSha256": "ef1d7f070f0154fd54278d71bf97f3d5b682ea454c7e215084b8f52d496e59eb"
     },
     {
       "path": "apps/server/src/orchestration-v2/ThreadForkService.ts",
@@ -183,6 +225,18 @@
       "reason": "local content differs from upstream",
       "upstreamSha256": "26b7d870a3c0baf202349b8dce5ef89f2058a3a68c07af4542863cb4a8f4a46a",
       "localSha256": "5097ee885a809f9473e1f294c5a50355ebe971629de27eec54828bee4f223a1f"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadManagementService.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "51adac3656317ad10af9d415ad3409544f399d1491fb5dfb3ad1aca0c097e789",
+      "localSha256": "0148131f30f6a4fc6230f705fd9fc982bbe8f6776b0022ce591558927808d01f"
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadManagementService.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "35fef5f671786fc4dfddc03fe59305b6aaecd0923684826dcc520fe55509f942",
+      "localSha256": "35629655437dfc797e20ffb32c06b82f3ae7778ce05505fd7e54cc48010bb5ce"
     },
     {
       "path": "apps/server/src/orchestration-v2/ThreadMessageIntake.ts",
@@ -209,6 +263,12 @@
       "localSha256": "683893f1a7f06bf1e773642fca4892cad73a70240b2fd3c9943bf150a282114d"
     },
     {
+      "path": "apps/server/src/orchestration-v2/ThreadStop.test.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "0a2d1a18376316ed3af80e6bea7342f82389ea54bb425e83170e8cc448ae196e",
+      "localSha256": "5d51e7166948107f4ce7fa7bd8472ea4de231e94e2b0ed55576f700fdbe2242f"
+    },
+    {
       "path": "apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "f6d3e6cbbedd2409ad487096981f04967a20b0cdab9cf9818fde768dc2000e54",
@@ -233,6 +293,12 @@
       "localSha256": "d2932bb8855b3c829c7749a4708a48f2f7ce79eb4cea4ae5883e730cca11f3e6"
     },
     {
+      "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "4b5fcc7135b553050f180115f7d64c533bc5bcd72424ad031de08c076d67c8a5",
+      "localSha256": "f6d39bf32bead5f25ac717666f1b90c3e3c9232cc829d47e933cddfd01630928"
+    },
+    {
       "path": "apps/server/src/project/http.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "d53826dcdc30bd5306c8432a90787dba0ce77955aad1226781fc968277a2b107",
@@ -242,7 +308,7 @@
       "path": "apps/server/src/provider/CodexDeveloperInstructions.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "d7fa4e284681ee48cc7bc460b35151913497954599782f9ccc115fcca2cf3fb6",
-      "localSha256": "4002ec2978503754e88b3fe2d7d8d1493f9fea2853e6653214dcd11f73c6c2b0"
+      "localSha256": "e0aeed7935b51300b5186309f56578f8e758e96d88c0514af229601ef004a8ee"
     },
     {
       "path": "apps/server/src/provider/CodexMcpElicitation.test.ts",
@@ -260,19 +326,25 @@
       "path": "apps/server/src/provider/CodexProvider.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "db7517c03bb55506ccf3146e9741aed3b57fb3ca2da55fd01e250f28078d7ef7",
-      "localSha256": "308ae8c146078eeaf02417c9fa5166f3f6d175d89e9cc08c3087e2e5a180592a"
+      "localSha256": "d2949f29e130eab8223c8625d88aaba206ec46211cb58048340a5a507a7b6ab7"
+    },
+    {
+      "path": "apps/server/src/provider/EventNdjsonLogger.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "e282348ba89f786c7f50302a84ec756de450bd07c637d4958c17ffe4c4048554",
+      "localSha256": "1ee7884271d94374c46107c06f42fcdced204cabc636f28e25574e2ae60cd877"
     },
     {
       "path": "apps/server/src/provider/codexLaunchArgs.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "21782cccf76b0102f6f36a41114422b83970cc09060f54e90e4c1ba43b138f08",
-      "localSha256": "553cbb7dae36954f2cc4144aa4e34888ce9fb1cdfc90a15a623540c46a9e32ed"
+      "localSha256": "47a0be485de762d968bd0fe5ee662e9ee0be3497bd3a98218f34af2573e77e65"
     },
     {
       "path": "apps/server/src/server.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "fd82b3ef47204913bb9c923cc3aaca6b0d5999b45513c47a8ffec28ee22a45ad",
-      "localSha256": "df50fe1bedfa66ed796f9cafd48785483e85b94750ff0cb35864e76e39b8ac76"
+      "localSha256": "30a12dc7c0a40fae7203e4422b579f29e70e886367d5108569e81dbaeb952222"
     },
     {
       "path": "apps/server/src/serverRuntimeStartup.ts",
@@ -350,7 +422,7 @@
       "path": "apps/web/src/components/AppSidebarLayout.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "e5e5bb8296029c0136887b8d05e7ba79055430cccd9dfb6a40515221d1acd91d",
-      "localSha256": "ddc4cdf3b36275e92ba24eaff85084bde79b00173d1a1a4a24a4801c4d1caaac"
+      "localSha256": "a777273e327462555d5d1f357199437e89351b4f32865741bdb6851f5e8ac7c7"
     },
     {
       "path": "apps/web/src/components/BranchToolbar.tsx",
@@ -362,7 +434,7 @@
       "path": "apps/web/src/components/ChatMarkdown.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "ef05ec2c2ede293b8ca53660f94b6fbbd8b8d4f5ad76e928476ae8b87ea057fb",
-      "localSha256": "8e08dcf963d1347f51fbf9a7580e03a4e4d2e0f3562c121eac55de7b44742fef"
+      "localSha256": "c225811e16cb7a3df9ad5bc449a394fc7444d305d6c146950149c6ea5791e761"
     },
     {
       "path": "apps/web/src/components/ChatView.logic.test.ts",
@@ -380,7 +452,7 @@
       "path": "apps/web/src/components/ChatView.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "cfbdfc9832cc66c42ca2976b735c051b4e7d02834f3e6a4c513e98e4e86e8816",
-      "localSha256": "559024eb9c0decfe315ae90d1ce023d4e11fe0ce27c97d0313e9549f46617c5d"
+      "localSha256": "606563e81d60362f60cf90544dae42a49f5797ceac25b69a670ebb615ba2d4e9"
     },
     {
       "path": "apps/web/src/components/CommandPalette.logic.test.ts",
@@ -416,7 +488,7 @@
       "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "2e628f8336ee10f04e26c13911193c09fbf62dda2f0c8fd44848f2b9479592c3",
-      "localSha256": "b740a780f43eb8de8a5c71365236146e57b15f0ea24b9ae09f30122058a1486c"
+      "localSha256": "2356d2e62b569b3ef067435d2fa8ab5667246f2ec5d40c91ee0c1ce861bed5c1"
     },
     {
       "path": "apps/web/src/components/ConfirmDialogHost.tsx",
@@ -620,7 +692,7 @@
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "14077585aed8edbdc289b4e397c45c2201b1d2bf6f5520e77b91726672ea42ee",
-      "localSha256": "6986caa407fec475b439cb7bd3aadfce72e48a1f8fddddfa295e33f1d4128697"
+      "localSha256": "d4fc3a1e50dc4bf3ca66b4c177d61c47c05438799fa517e87a23b99035ae819d"
     },
     {
       "path": "apps/web/src/components/chat/ChatGptSharingControl.tsx",
@@ -692,7 +764,7 @@
       "path": "apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "4cb6325118f7ac9213a3167f48780a8b4a8cc6f68003076a9dd27057d210b477",
-      "localSha256": "67eba314a2672630db47cfd81cd616c3723f0f462203b4fc9e399587f0625fc0"
+      "localSha256": "682cf3606a00929331c58bb7c13e9b54a990a2498c6566be20819323fbe84abf"
     },
     {
       "path": "apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx",
@@ -1187,10 +1259,16 @@
       "localSha256": "c87f80ca6ce04cf509afb8188a5caec5d4c63e19cd1ab041d8f0abc8c325e8a3"
     },
     {
-      "path": "apps/web/src/components/chat/workspaceFileDrop.ts",
+      "path": "apps/web/src/components/chat/workspaceFileDrop.test.ts",
       "reason": "local content differs from upstream",
-      "upstreamSha256": "b4df3263f86a018497d44a37dd5465be0fdde0c75db5553156de39a5499155bf",
-      "localSha256": "1f9a75fdbe4ffe62d174384a32def38138dcf61d426359b43581348d0c7105ba"
+      "upstreamSha256": "0a674f1dcbcbd5e7aba421445e6e530b661fa76b69d856f9a2ce3ca7f0df7474",
+      "localSha256": "9dc1ef29f24f275d4f0a66dc34ed2410c22634731764d4007c7ba9b096fef727"
+    },
+    {
+      "path": "apps/web/src/components/composerContextPresentation.tsx",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "53e635f4b72447c86307d7120c3329e72b704ea293e6230df7354098efe4a145",
+      "localSha256": "f206cfd20fae8b1cc58a520cdae6c8b63e0357f2578b0a3e53a974bda8ca5872"
     },
     {
       "path": "apps/web/src/components/contextChipParts.tsx",
@@ -1226,7 +1304,7 @@
       "path": "apps/web/src/components/files/AttachmentFilePreview.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "7cf61afcd3cb87977e918d6f5f9573faa13204015ee48845f7041f594aa8cd38",
-      "localSha256": "5ee13acc550bf7f581a868e294dab5a4d96295fd95a87cd00cee2bf67156ed7f"
+      "localSha256": "8d9fcc97de5bfe63a3abf9fa7726393d4d3ac4e67b77ddcd584a9d68290487a9"
     },
     {
       "path": "apps/web/src/components/files/BrowserDocumentFrame.tsx",
@@ -1664,7 +1742,7 @@
       "path": "apps/web/src/components/settings/SettingsPanels.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "7d7c9dd4df41fcf23f0e26c5151b5fc8d6903c2a4bdffba3f7316822bc65a951",
-      "localSha256": "899543d50dd4ee40ba6abba562d3ae3ea77b4f1103d80f05bebed561282015d0"
+      "localSha256": "27ef2206bb6cdee81ea529080669d8aa1e03110b08d70d65cce9ad2c71012e06"
     },
     {
       "path": "apps/web/src/components/settings/SettingsScopeContext.tsx",
@@ -1916,7 +1994,7 @@
       "path": "apps/web/src/components/sidebar/mainAppLocation.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "93e05aaa48632bae2451a504beb207b3ed31c72f295ad5b3841b8479138707ad",
-      "localSha256": "62428afa39c9058144a3fedec88d64e387a5f17a0d0475593d881bc694f0030e"
+      "localSha256": "53ba0831cb9741e9852083698435d90b4ba883c3ae2fe7b358aef95e1aedd833"
     },
     {
       "path": "apps/web/src/components/sidebar/updateEverything.logic.ts",
@@ -2450,7 +2528,7 @@
       "path": "apps/web/src/routeTree.gen.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "637927f06c042b65684a65855355d73683bbdabf0e5fb6ea7458e2648b2d6656",
-      "localSha256": "290f4e94472770b2356f905ecfe1e7d373e5eb0a8f2b3966a24f1f0402db0019"
+      "localSha256": "584e3b11d58a9481bc61ba25cc5e06191b6bc2e6a5a4f13a8d3bcaa0063983dc"
     },
     {
       "path": "apps/web/src/router.ts",
@@ -2624,7 +2702,7 @@
       "path": "packages/client-runtime/src/operations/commands.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "830407028713dd9367c07ed44ba2a93936cce6d8b756212572dc5bf4554d658c",
-      "localSha256": "56840106a008f18f0048b917d3f1f62b64941b809aa17326d754136eafe3597d"
+      "localSha256": "c1bac86faf9c5d2d6cd91c506a8552d14ce6a205b6aae87bab0a123d14b733b4"
     },
     {
       "path": "packages/client-runtime/src/rpc/http.ts",
@@ -2711,6 +2789,12 @@
       "localSha256": "7f341c7792818451ab61a2134856795ece961ca4d876f11401d3435dade8c3d3"
     },
     {
+      "path": "packages/provider-core/src/server/ProviderAdapter.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "97e35c0038c2f32f9ea2bc3566240ba14e8182d2a668451614e6767709962548",
+      "localSha256": "3b9f43e693ad02e9a080c361322910b8b12f66b211bf89aba29e4be298d856b7"
+    },
+    {
       "path": "packages/shared/src/composerTrigger.test.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "d2edd811c8d995150d69090ca30432331a0e1672939f7f4c89914ac719004cc9",
@@ -2781,6 +2865,7 @@
     ".generated/third-party-licenses/spdx/v3.28.0/BSD-2-Clause.json",
     ".generated/third-party-licenses/spdx/v3.28.0/OFL-1.1.json",
     ".generated/third-party-licenses/spdx/v3.28.0/MIT.json",
+    "packages/contracts/src/autoopsRemote.ts",
     "packages/client-runtime/src/hostIntegration.ts",
     "apps/web/tsconfig.tsbuildinfo",
     "apps/web/src/motionPreference.ts",
@@ -2789,7 +2874,10 @@
     "apps/web/src/autoops/workspaces.ts",
     "apps/web/src/autoops/pathCompletion.ts",
     "apps/web/src/autoops/materialPreviewScope.test.ts",
+    "apps/web/src/autoops/SkillLibraryPage.tsx",
     "apps/web/src/autoops/clientSettings.test.ts",
+    "apps/web/src/autoops/CustomerDevicesSettings.tsx",
+    "apps/web/src/autoops/CustomerDevicesSettings.test.tsx",
     "apps/web/src/autoops/theme.css",
     "apps/web/src/autoops/pathCompletion.test.ts",
     "apps/web/src/autoops/capabilities.test.ts",
@@ -2799,21 +2887,33 @@
     "apps/web/src/autoops/resources.ts",
     "apps/web/src/autoops/deployments.ts",
     "apps/web/src/autoops/hostConfig.test.ts",
+    "apps/web/src/autoops/skillLibrary.test.ts",
     "apps/web/src/autoops/MaterialPreview.tsx",
+    "apps/web/src/autoops/useSkillContext.test.ts",
     "apps/web/src/autoops/projectNavigation.ts",
+    "apps/web/src/autoops/CustomerExecutionStatus.tsx",
     "apps/web/src/autoops/capabilities.ts",
     "apps/web/src/autoops/legacyDrafts.test.ts",
+    "apps/web/src/autoops/skillLibrary.ts",
     "apps/web/src/autoops/DeploymentsPanel.tsx",
+    "apps/web/src/autoops/useSkillContext.ts",
     "apps/web/src/autoops/resources.test.ts",
     "apps/web/src/autoops/legacyDrafts.ts",
+    "apps/web/src/autoops/customerComposerText.ts",
+    "apps/web/src/autoops/SkillLibraryDialogs.tsx",
+    "apps/web/src/autoops/ConversationWorkspaceControl.tsx",
     "apps/web/src/autoops/planMaterials.ts",
     "apps/web/src/autoops/ProjectAreaNavigation.tsx",
+    "apps/web/src/autoops/customerComposerText.test.ts",
+    "apps/web/src/autoops/customerAgents.test.ts",
     "apps/web/src/autoops/LegacyDraftRecovery.tsx",
+    "apps/web/src/autoops/SkillLibraryCard.tsx",
     "apps/web/src/autoops/clientSettings.ts",
     "apps/web/src/autoops/DeploymentsPage.tsx",
     "apps/web/src/autoops/useThreadScope.ts",
     "apps/web/src/autoops/ThreadScopeControl.tsx",
     "apps/web/src/autoops/WorkspaceConversationLauncher.tsx",
+    "apps/web/src/autoops/customerAgents.ts",
     "apps/web/src/autoops/WorkspaceScopeControl.tsx",
     "apps/web/src/autoops/SkillsSettings.tsx",
     "apps/web/src/autoops/projectNavigation.logic.ts",
@@ -2837,22 +2937,32 @@
     "apps/web/src/components/chat/autoOpsChatPolicy.test.ts",
     "apps/web/src/components/chat/displayLabels.ts",
     "apps/web/src/components/chat/autoOpsChatPolicy.ts",
+    "apps/web/src/components/chat/ComposerPendingApprovalActions.test.tsx",
     "apps/web/src/components/files/ReadOnlyWorkspaceFiles.tsx",
     "apps/web/src/components/files/readOnlyFileSource.ts",
     "apps/web/src/hooks/useReducedMotion.ts",
     "apps/web/src/routes/_chat.deployments.tsx",
+    "apps/web/src/routes/_chat.devices.tsx",
+    "apps/web/src/routes/_chat.skills.tsx",
     "apps/web/src/routes/_chat.workspaces.tsx",
     "apps/server/src/autoops/personalPreferences.ts",
+    "apps/server/src/autoops/RemoteDeviceService.lifecycle.test.ts",
     "apps/server/src/autoops/legacyImport.test.ts",
     "apps/server/src/autoops/httpError.test.ts",
     "apps/server/src/autoops/personalSettings.ts",
+    "apps/server/src/autoops/RemoteProviderAdapter.ts",
+    "apps/server/src/autoops/CustomerEventValidation.ts",
     "apps/server/src/autoops/usage.ts",
+    "apps/server/src/autoops/customerHttp.test.ts",
     "apps/server/src/autoops/legacyImport.ts",
     "apps/server/src/autoops/projects.ts",
+    "apps/server/src/autoops/RemoteRunRecovery.ts",
     "apps/server/src/autoops/rollbackSafety.ts",
     "apps/server/src/autoops/skills.test.ts",
     "apps/server/src/autoops/resources.ts",
     "apps/server/src/autoops/productProfile.livePayloads.test.ts",
+    "apps/server/src/autoops/customerSocket.ts",
+    "apps/server/src/autoops/CustomerRunStop.ts",
     "apps/server/src/autoops/http.ts",
     "apps/server/src/autoops/nativePolicy.metadata.test.ts",
     "apps/server/src/autoops/rpc.ts",
@@ -2861,12 +2971,29 @@
     "apps/server/src/autoops/productProfile.runtime.test.ts",
     "apps/server/src/autoops/wireMetadata.test.ts",
     "apps/server/src/autoops/threadReservations.ts",
+    "apps/server/src/autoops/RemoteRunRecovery.test.ts",
+    "apps/server/src/autoops/RemoteDeviceService.ts",
     "apps/server/src/autoops/legacyImportCli.ts",
     "apps/server/src/autoops/skills.ts",
+    "apps/server/src/autoops/RemoteProviderRegistry.ts",
     "apps/server/src/autoops/nativePolicy.ts",
+    "apps/server/src/autoops/customerHttp.ts",
     "apps/server/src/autoops/threadReservations.test.ts",
+    "apps/server/src/autoops/RemoteProviderAdapter.test.ts",
     "apps/server/src/autoops/RequestScope.ts",
+    "apps/server/src/autoops/RemoteDeviceService.security.test.ts",
+    "apps/server/src/autoops/customerStatusHttp.ts",
+    "apps/server/src/orchestration-v2/Adapters/CodexExecution.ts",
+    "apps/server/src/provider/CodexProviderCore.ts",
+    "apps/server/src/provider/HeadlessCodexProtocol.ts",
+    "apps/server/src/provider/CodexExecutionHost.ts",
+    "apps/server/src/provider/HeadlessCodexRunner.ts",
+    "apps/server/src/provider/ProviderInstanceAvailability.ts",
+    "apps/server/src/provider/HeadlessCodexRunner.test.ts",
+    "apps/server/src/provider/CodexDeveloperInstructionsCore.ts",
+    "apps/server/src/provider/codexLaunchArgsCore.ts",
     "apps/server/src/provider/CodexLegacyDynamicTools.ts",
+    "apps/server/src/provider/ProviderEventSanitization.ts",
     "apps/server/src/mcp/AutoOpsElicitation.test.ts",
     "apps/server/src/mcp/toolkits/autoops/handlers.ts",
     "apps/server/src/mcp/toolkits/autoops/tools.ts"

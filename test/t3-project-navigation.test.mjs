@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   autoOpsAreaFromPath,
+  autoOpsAreaAvailable,
+  AUTOOPS_AREAS,
   createAutoOpsProjectNavigation,
   normalizeAutoOpsChatHref,
   resolveAutoOpsNativeThreadProjectId,
@@ -242,4 +244,35 @@ test('工作区项目 ID 的特殊字符保持完整编码，用户键不会发�
   f.store.selectProject('项目 A/1')
   assert.equal(f.store.projectHref('deployments', '项目 A/1'), '/deployments?projectId=%E9%A1%B9%E7%9B%AE+A%2F1')
   assert.equal(f.saved.get('autoops:project-navigation:a%3Ab:project'), '项目 A/1')
+})
+
+
+test('我的电脑是独立个人模块，入口和直链共用开关，不依赖当前项目角色', () => {
+  const owner = { principal: { id: 'alice' }, customerAgentsEnabled: true, projects: [
+    { id: 'project-a', membership: { workspaceAccess: 'external', role: 'member' } },
+  ] }
+  assert.equal(autoOpsAreaAvailable('devices', owner, 'project-a'), true)
+  assert.equal(autoOpsAreaAvailable('devices', owner, 'removed-project'), true)
+  assert.equal(autoOpsAreaAvailable('devices', { ...owner, projects: [] }), true)
+  assert.equal(autoOpsAreaAvailable('devices', { ...owner, customerAgentsEnabled: false }), false)
+  assert.equal(autoOpsAreaAvailable('devices', undefined), false)
+  assert.equal(autoOpsAreaAvailable('deployments', owner, 'project-a'), false)
+  assert.equal(autoOpsAreaAvailable('deployments', { ...owner, projects: [{ id: 'project-a', membership: { workspaceAccess: 'internal', role: 'manager' } }] }, 'project-a'), true)
+  assert.equal(autoOpsAreaFromPath('/devices'), 'devices')
+  assert.equal(normalizeAutoOpsChatHref('/devices/other'), null)
+  const definition = AUTOOPS_AREAS.find(area => area.id === 'devices')
+  assert.equal(definition.scope, 'global')
+  assert.equal(definition.common, false)
+  assert.equal(definition.sidebar, false)
+})
+
+test('电脑模块切项目只更新返回上下文，不保留资源命令或改绑已有对话', () => {
+  const f = fixture()
+  f.chatOwners.set('/env/thread-a', 'project-a')
+  f.store.rememberChatLocation('project-a', '/env/thread-a')
+  assert.equal(f.store.projectHref('devices', 'project-a', { deviceId: 'other', action: 'revoke' }), '/devices?projectId=project-a')
+  f.store.selectProject('project-b')
+  assert.equal(f.store.projectHref('devices', 'project-b'), '/devices?projectId=project-b')
+  assert.equal(f.store.projectHref('chat', 'project-a'), '/env/thread-a')
+  assert.equal(f.store.projectHref('chat', 'project-b'), '/?projectId=project-b')
 })

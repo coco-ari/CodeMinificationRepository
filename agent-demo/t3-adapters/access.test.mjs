@@ -208,3 +208,54 @@ test('verified legacy native forks inherit tools only after trusted success and 
  access.markThreadDeleted('legacy-source')
  assert.throws(()=>access.recordLegacyNativeFork('legacy-source','native-fork','native-source','native-new'))
 })
+
+function customerScope(t, ownerId = 'u-guest') {
+  const previous = process.env.AUTOOPS_CUSTOMER_AGENTS
+  process.env.AUTOOPS_CUSTOMER_AGENTS = '1'
+  t.after(() => { if (previous === undefined) delete process.env.AUTOOPS_CUSTOMER_AGENTS; else process.env.AUTOOPS_CUSTOMER_AGENTS = previous })
+  const setupResult = setup(t), {access,principal} = setupResult, registry = access.customerRegistry
+  const paired = registry.consumePairing(registry.createPairing(ownerId).pairingCode,{label:'本机'})
+  const devicePrincipal = registry.authenticateToken(paired.deviceToken)
+  registry.registerWorkspace(devicePrincipal,{registeredWorkspaceId:'local-project',projectId:'p-autoops',label:'客户项目',workspaceBindingRevision:1,runtimeId:'codex'})
+  const executionBinding = {kind:'customer',deviceId:paired.device.id,registeredWorkspaceId:'local-project',workspaceBindingRevision:1,runtimeId:'codex'}
+  return {...setupResult,owner:principal(ownerId),registry,paired,devicePrincipal,executionBinding}
+}
+
+test('external members can bind their own customer directory without platform internal access', t => {
+  const {access,owner,principal,executionBinding} = customerScope(t)
+  const binding = access.reserveThread(owner,{...scope,threadId:'customer-draft',executionBinding})
+  assert.equal(binding.executionBinding.kind,'customer')
+  assert.equal(binding.scopeState,'draft')
+  assert.equal(access.canSeeThread(owner,'customer-draft'),true)
+  assert.equal(access.canSeeThread(principal('u-admin'),'customer-draft'),false)
+  assert.deepEqual(access.threadAudience(binding),[owner.id])
+  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'shared-customer',visibility:'project',executionBinding}),{code:'CUSTOMER_OWNER_REQUIRED'})
+  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'report-customer',agentId:'a-report',executionBinding}),{code:'INVALID_CUSTOMER_SCOPE'})
+  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'prod-customer',environmentId:'env-prod',executionBinding}),{code:'ENVIRONMENT_FORBIDDEN'})
+  assert.throws(()=>access.requireToolThread('customer-draft'),{code:'CUSTOMER_BUSINESS_TOOLS_DISABLED'})
+})
+
+test('customer conversation locks exact execution target after acceptance and history survives revoke', t => {
+  const {access,owner,registry,devicePrincipal,executionBinding,paired} = customerScope(t)
+  access.reserveThread(owner,{...scope,threadId:'customer-history',executionBinding})
+  assert.throws(()=>access.beginThreadSubmission(owner,'customer-history','cmd-1'),{code:'CUSTOMER_DEVICE_OFFLINE'})
+  registry.markConnected(devicePrincipal)
+  assert.equal(access.beginThreadSubmission(owner,'customer-history','cmd-1').scopeState,'submitting')
+  registry.registerWorkspace(devicePrincipal,{registeredWorkspaceId:'local-other',projectId:'p-autoops',label:'其他目录',workspaceBindingRevision:1,runtimeId:'codex'})
+  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'customer-history',executionBinding:{...executionBinding,registeredWorkspaceId:'local-other'}}),{code:'THREAD_SCOPE_LOCKED'})
+  access.finishThreadSubmission('customer-history','cmd-1',true)
+  registry.revokeWorkspace(devicePrincipal,'local-project')
+  registry.revokeCredential(owner.id,paired.device.id)
+  assert.equal(access.requireThread(owner,'customer-history').scopeState,'locked')
+  assert.throws(()=>access.requireThreadExecution(owner,'customer-history'),{code:'CUSTOMER_DEVICE_DISABLED'})
+  delete process.env.AUTOOPS_CUSTOMER_AGENTS
+  assert.equal(access.requireThread(owner,'customer-history').threadId,'customer-history')
+  assert.throws(()=>access.requireThreadExecution(owner,'customer-history'),{code:'CUSTOMER_AGENTS_DISABLED'})
+})
+
+test('old bindings normalize to platform and do not gain remote capabilities', t => {
+  const {access,principal,bindingDb} = setup(t)
+  access.bindThread(principal('u-admin'),{...scope,threadId:'old-platform'})
+  bindingDb.prepare('UPDATE t3_thread_bindings SET execution_binding_json=NULL WHERE thread_id=?').run('old-platform')
+  assert.deepEqual(access.getThreadBinding('old-platform').executionBinding,{kind:'platform'})
+})

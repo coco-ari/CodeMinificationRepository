@@ -4,7 +4,9 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
-import { verifyT3Release } from '../scripts/verify-t3-release.mjs'
+import { zipSync } from 'fflate'
+import { verifyT3Release, verifyCustomerAgentBundle } from '../scripts/verify-t3-release.mjs'
+import { addCustomerAgentBundle, packageT3Release } from '../scripts/package-t3-release.mjs'
 
 const commit = 'fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92'
 const nativePath = 'vendor/t3code/apps/server/node_modules'
@@ -34,6 +36,37 @@ function fixture(t) {
   mkdirSync(dirname(native), { recursive: true })
   cpSync(source, native, { recursive: true, verbatimSymlinks: true })
   return { base, release, source, native, manifest, record: join(release, 'native-dependencies-manifest.json') }
+}
+
+function customerBundle(f, mutate = () => {}, name = 'customer-agent.zip') {
+  const payload = {
+    'autoops-customer-agent.mjs': 'import "./runner.mjs";\n',
+    'runner.mjs': 'export const runner = true;\n',
+    'README.md': 'Node.js 24.10+ and a local Codex installation are required.\n',
+    'LICENSE-T3-Code': 'MIT\n',
+    'THIRD-PARTY-NOTICES.txt': 'example: MIT\n',
+    'third-party-licenses.json': JSON.stringify({ entries: [{ name: 'example', license: 'MIT' }] }),
+    'dependency-audit.json': JSON.stringify({ schemaVersion: 1, entry: 'agent-demo/customer-agent/cli.ts', sourceModules: 2, auditedAllChunks: true, prohibitedPlatformDependencies: [], bundledThirdPartyNotices: 1 }),
+  }
+  const manifest = { schemaVersion: 1, connectorVersion: '0.1.0', protocolVersion: 1, node: '>=24.10', files: Object.fromEntries(Object.entries(payload).map(([path, contents]) => [path, { bytes: Buffer.byteLength(contents), sha256: hash(contents) }])) }
+  const entries = Object.fromEntries(Object.entries(payload).map(([path, contents]) => [`customer-agent/${path}`, Buffer.from(contents)]))
+  mutate({ entries, manifest })
+  entries['customer-agent/manifest.json'] = Buffer.from(JSON.stringify(manifest))
+  const archive = zipSync(entries), path = join(f.base, name)
+  put(path, archive)
+  put(`${path}.sha256`, `${hash(archive)}  ${name}\n`)
+  return path
+}
+
+function recordCustomer(f, bundlePath, { metadata = true } = {}) {
+  const result = addCustomerAgentBundle(f.release, bundlePath)
+  for (const path of [result.path, result.checksumPath]) {
+    const contents = readFileSync(join(f.release, path))
+    f.manifest.files.push({ path, bytes: contents.length, sha256: hash(contents) })
+  }
+  if (metadata) f.manifest.customerAgent = result
+  put(join(f.release, 'release-manifest.json'), JSON.stringify(f.manifest))
+  return result
 }
 
 test('records only a matching independent official tree, then verifies without rewriting the record', (t) => {
@@ -127,4 +160,96 @@ test('does not accept a native root symlink or use the target as its own baselin
   assert.throws(() => verifyT3Release(f.release, { nativeSource: f.native }), /必须独立/)
   rmSync(f.native, { recursive: true }); symlinkSync(f.source, f.native)
   assert.throws(() => verifyT3Release(f.release, { nativeSource: f.source }), /实际目录/)
+})
+
+test('customer bundle is opt-in even when a complete local ZIP exists, without changing feature flags', (t) => {
+  const f = fixture(t)
+  customerBundle(f)
+  const flag = process.env.AUTOOPS_CUSTOMER_AGENTS
+  assert.equal(addCustomerAgentBundle(f.release), undefined)
+  assert.equal(existsSync(join(f.release, 'dist/customer-agent.zip')), false)
+  assert.equal(process.env.AUTOOPS_CUSTOMER_AGENTS, flag)
+  const result = verifyT3Release(f.release, { nativeSource: f.source })
+  assert.equal(Object.hasOwn(result, 'customerAgent'), false)
+})
+
+test('explicit customer artifact is fully verified, copied under a stable name and bound into release identity', (t) => {
+  const f = fixture(t), path = customerBundle(f, undefined, 'custom-release.zip')
+  const metadata = recordCustomer(f, path)
+  assert.equal(readFileSync(join(f.release, metadata.checksumPath), 'utf8'), `${metadata.sha256}  customer-agent.zip\n`)
+  const result = verifyT3Release(f.release, { nativeSource: f.source })
+  assert.deepEqual(result.customerAgent, metadata)
+  assert.equal(verifyT3Release(f.release).recorded, false)
+  assert.equal(readFileSync(path).equals(readFileSync(join(f.release, metadata.path))), true)
+})
+
+test('explicit missing or invalid ZIP fails before creating a release directory', (t) => {
+  const f = fixture(t), target = join(f.base, 'new-release')
+  assert.throws(() => packageT3Release(target, { customerAgentBundle: join(f.base, 'absent.zip') }), /ENOENT/)
+  assert.equal(existsSync(target), false)
+  const path = customerBundle(f)
+  put(`${path}.sha256`, `${'0'.repeat(64)}  customer-agent.zip\n`)
+  assert.throws(() => packageT3Release(target, { customerAgentBundle: path }), /SHA-256/)
+  assert.equal(existsSync(target), false)
+  assert.throws(() => addCustomerAgentBundle(f.release, path), /SHA-256/)
+  assert.equal(existsSync(join(f.release, 'dist/customer-agent.zip')), false)
+})
+
+test('customer ZIP requires sidecar identity, actual files and no symlink source', (t) => {
+  const f = fixture(t), path = customerBundle(f)
+  put(`${path}.sha256`, `${hash(readFileSync(path))}  wrong.zip\n`)
+  assert.throws(() => verifyCustomerAgentBundle(path), /SHA-256/)
+  rmSync(`${path}.sha256`)
+  assert.throws(() => verifyCustomerAgentBundle(path), /ENOENT/)
+  const alias = join(f.base, 'alias.zip')
+  symlinkSync('customer-agent.zip', alias)
+  assert.throws(() => verifyCustomerAgentBundle(alias), /常规文件/)
+})
+
+test('customer ZIP rejects missing chunks, tampered payload and unlisted files even with a valid archive hash', (t) => {
+  const f = fixture(t)
+  let path = customerBundle(f, ({ entries }) => { delete entries['customer-agent/runner.mjs'] })
+  assert.throws(() => verifyCustomerAgentBundle(path), /清单文件缺失/)
+  path = customerBundle(f, ({ entries }) => { entries['customer-agent/runner.mjs'] = Buffer.from('changed') })
+  assert.throws(() => verifyCustomerAgentBundle(path), /清单或哈希不符/)
+  path = customerBundle(f, ({ entries }) => { entries['customer-agent/extra.txt'] = Buffer.from('unlisted') })
+  assert.throws(() => verifyCustomerAgentBundle(path), /清单或哈希不符/)
+  path = customerBundle(f, ({ entries, manifest }) => { delete entries['customer-agent/LICENSE-T3-Code']; delete manifest.files['LICENSE-T3-Code'] })
+  assert.throws(() => verifyCustomerAgentBundle(path), /缺少文件.*LICENSE/)
+})
+
+test('customer ZIP rejects path traversal, nested modules and source maps before expansion', (t) => {
+  const f = fixture(t)
+  for (const name of ['../outside', '/absolute', 'customer-agent/../outside', 'customer-agent/node_modules/secret.txt', 'customer-agent/runner.mjs.map', 'customer-agent/C:secret']) {
+    const path = customerBundle(f, ({ entries }) => { entries[name] = Buffer.from('unexpected') })
+    assert.throws(() => verifyCustomerAgentBundle(path), /文件路径/)
+  }
+})
+
+test('customer ZIP requires supported protocol and complete dependency isolation evidence', (t) => {
+  const f = fixture(t)
+  let path = customerBundle(f, ({ manifest }) => { manifest.protocolVersion = 2 })
+  assert.throws(() => verifyCustomerAgentBundle(path), /清单版本或格式/)
+  path = customerBundle(f, ({ entries, manifest }) => {
+    const name = 'dependency-audit.json'
+    const value = JSON.parse(entries[`customer-agent/${name}`].toString())
+    value.prohibitedPlatformDependencies = ['platform/secrets.ts']
+    const contents = Buffer.from(JSON.stringify(value))
+    entries[`customer-agent/${name}`] = contents
+    manifest.files[name] = { bytes: contents.length, sha256: hash(contents) }
+  })
+  assert.throws(() => verifyCustomerAgentBundle(path), /依赖审计/)
+})
+
+test('release verifier refuses unregistered customer ZIP and incorrect module metadata', (t) => {
+  const f = fixture(t), path = customerBundle(f)
+  const metadata = recordCustomer(f, path, { metadata: false })
+  assert.throws(() => verifyT3Release(f.release, { nativeSource: f.source }), /缺少模块清单/)
+  f.manifest.customerAgent = { ...metadata, connectorVersion: '9.9.9' }
+  put(join(f.release, 'release-manifest.json'), JSON.stringify(f.manifest))
+  assert.throws(() => verifyT3Release(f.release, { nativeSource: f.source }), /发布模块清单不符/)
+  f.manifest.customerAgent = { ...metadata, path: '../customer-agent.zip' }
+  put(join(f.release, 'release-manifest.json'), JSON.stringify(f.manifest))
+  assert.throws(() => verifyT3Release(f.release, { nativeSource: f.source }), /发布路径/)
+  assert.equal(existsSync(f.record), false)
 })

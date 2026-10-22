@@ -17,7 +17,7 @@ export function autoOpsFeature(
 ): boolean {
   const host = readAutoOpsHost()
   if (!host) return true
-  if (feature === 'modelSelection') return host.modelSelectionEnabled === true
+  if (feature === 'modelSelection') return host.modelSelectionEnabled === true || host.customerAgentsEnabled === true
   if (['workspace', 'externalAgents', 'projectAdministration', 'providerConfiguration'].includes(feature)) return false
   if (feature === 'scheduledTasks') return host.capabilities.scheduledTasks === true
   // The hosted CSP deliberately does not allow a third-party theme marketplace.
@@ -137,7 +137,7 @@ const liteShortcuts = new Set([
 ])
 export function autoOpsShortcutAllowed(command?: string | null): boolean {
   if (!isAutoOpsHosted() || !command) return true
-  if (['composer.effort','composer.increaseEffort','composer.decreaseEffort','modelPicker.toggle'].includes(command)) return readAutoOpsHost()?.modelSelectionEnabled === true
+  if (['composer.effort','composer.increaseEffort','composer.decreaseEffort','modelPicker.toggle'].includes(command)) return readAutoOpsHost()?.modelSelectionEnabled === true || readAutoOpsHost()?.customerAgentsEnabled === true
   if (isAutoOpsLite()) return liteShortcuts.has(command)
   return (
     !['terminal.', 'diff.', 'editor.', 'filePicker.', 'projectSearch.', 'script.'].some((prefix) =>

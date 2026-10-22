@@ -1,4 +1,6 @@
 import {vi} from "vite-plus/test";
+import * as BusinessPolicy from "../../../../../../../agent-demo/t3-adapters/codex-policy.mjs";
+import * as BusinessSkills from "../../../../../../../agent-demo/t3-adapters/skills.mjs";
 import * as LegacyBusinessTools from "../../../../../../../agent-demo/t3-adapters/legacy-tools.mjs";
 import * as NodeOS from "node:os";
 
@@ -2139,6 +2141,29 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  it.effect("keeps the platform host's scoped skill cwd through thread and turn start", () =>
+    Effect.gen(function* () {
+      const cwd = "/authorized/skill-snapshot";
+      const skill = { type: "skill" as const, name: "autoops-scoped-check", path: `${cwd}/.agents/skills/autoops-scoped-check/SKILL.md` };
+      using _policy = vi.spyOn(BusinessPolicy, "businessThreadParameters").mockReturnValue({ cwd });
+      using _skills = vi.spyOn(BusinessSkills, "resolveBusinessSkillMentions").mockReturnValue([skill]);
+      const prompt = "$autoops-scoped-check inspect";
+      const requests: Array<{ method: string; params: unknown }> = [];
+      const transcript = makeCodexReplayTranscript({
+        scenario: "platform-scoped-skills",
+        entries: codexReplayPreamble({ nativeThreadId: "scoped-native", nativeTurnId: "scoped-turn", prompt }).map((entry) => {
+          if (entry.type !== "expect_outbound" || !["thread/start", "turn/start"].includes(entry.label ?? "") || !Predicate.isObject(entry.frame)) return entry;
+          const params = Predicate.isObject(entry.frame.params) ? entry.frame.params : {};
+          return { ...entry, frame: { ...entry.frame, params: { ...params, cwd, ...(entry.label === "turn/start" ? { input: [skill, { type: "text", text: prompt }] } : {}) } } };
+        }),
+      });
+      const harness = yield* makeCodexReplayHarness(transcript, () => Effect.void, (method, params) => Effect.sync(() => { requests.push({ method, params }); }));
+      yield* harness.runtime.startTurn(makeCodexTestTurnInput({ threadId: harness.threadId, providerThread: harness.providerThread, now: yield* DateTime.now, attemptId: RunAttemptId.make("scoped-attempt"), text: prompt }));
+      for (const method of ["thread/start", "turn/start"]) assert.propertyVal(requests.find((entry) => entry.method === method)?.params, "cwd", cwd);
+      assert.equal(_skills.mock.calls[0]?.[0], prompt);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer))),
+  );
 
   it.effect.each(["supported", "unsupported", "invalid"] as const)(
     "delivers native history with %s app-server protocol",

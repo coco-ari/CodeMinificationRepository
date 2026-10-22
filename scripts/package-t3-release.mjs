@@ -2,10 +2,28 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, re
 import { createHash } from 'node:crypto'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { verifyCustomerAgentBundle } from './verify-t3-release.mjs'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const destination = resolve(process.argv[2] || join(root, '.deployment/t3-release'))
+
+export function addCustomerAgentBundle(destination, bundlePath) {
+  if (bundlePath === undefined) return undefined
+  const metadata = verifyCustomerAgentBundle(bundlePath)
+  const target = join(destination, metadata.path)
+  mkdirSync(dirname(target), { recursive: true })
+  cpSync(bundlePath, target)
+  writeFileSync(join(destination, metadata.checksumPath), `${metadata.sha256}  customer-agent.zip\n`, { mode: 0o600 })
+  // Revalidate the copied bytes rather than trusting a source that might change
+  // between verification and copying. Never emit a manifest for a partial ZIP.
+  verifyCustomerAgentBundle(target)
+  return metadata
+}
+
+export function packageT3Release(destination, { customerAgentBundle } = {}) {
+destination = resolve(destination)
 if (existsSync(destination)) throw new Error('发布目录已存在，请选择新的发布目录；不会覆盖')
+if (customerAgentBundle !== undefined) verifyCustomerAgentBundle(customerAgentBundle)
 mkdirSync(destination, { recursive: true, mode: 0o700 })
+destination = realpathSync(destination)
 for (const path of ['agent-demo', 'agent', 'src', 'dist/web', 'vendor/t3code/apps/server/dist', 'vendor/t3code/.autoops-source', 'vendor/t3code/LICENSE', 'vendor/t3code/package.json', 'vendor/t3code/pnpm-lock.yaml', 'vendor/t3code/pnpm-workspace.yaml', 'vendor/t3code/patches', 'vendor/skills-manager', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/start-t3-worker.mjs', 'scripts/t3-migrate-data.mjs', 'scripts/t3-recovery-data.mjs', 'scripts/t3-storage-audit.mjs', 'scripts/verify-t3-release.mjs']) {
   cpSync(join(root, path), join(destination, path), { recursive: true, verbatimSymlinks: true, filter: (source) => !/\/(?:data|node_modules|\.DS_Store)(?:\/|$)/.test(relative(root, source)) })
 }
@@ -44,7 +62,8 @@ for (const name of ['officeparser', 'pdfkit', 'fflate', 'pdfjs-dist']) {
 const yamlPackage = realpathSync(join(root, 'node_modules/yaml'))
 cpSync(yamlPackage, join(destination, 'node_modules/yaml'), { recursive: true })
 copied.add(`yaml@${JSON.parse(readFileSync(join(yamlPackage, 'package.json'), 'utf8')).version}`)
-const manifest = { sourceCommit: 'fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92', createdAt: new Date().toISOString(), nativeDependencies: 'Attach Linux x64 external packages from the same official T3 0.1.1 release; validate package identities before startup.', dynamicBusinessPackages: [...copied].sort(), files: [], symlinks: [] }
+const customerAgent = addCustomerAgentBundle(destination, customerAgentBundle)
+const manifest = { sourceCommit: 'fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92', createdAt: new Date().toISOString(), nativeDependencies: 'Attach Linux x64 external packages from the same official T3 0.1.1 release; validate package identities before startup.', dynamicBusinessPackages: [...copied].sort(), ...(customerAgent ? { customerAgent } : {}), files: [], symlinks: [] }
 function inventory(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name)
@@ -59,4 +78,13 @@ function inventory(directory) {
 }
 inventory(destination)
 writeFileSync(join(destination, 'release-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 })
-console.log(JSON.stringify({ destination, files: manifest.files.length, dynamicPackages: copied.size }))
+return { destination, files: manifest.files.length, dynamicPackages: copied.size, ...(customerAgent ? { customerAgent } : {}) }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const [destination = join(root, '.deployment/t3-release'), ...args] = process.argv.slice(2)
+    if (destination.startsWith('--') || (args.length !== 0 && (args.length !== 2 || args[0] !== '--customer-agent-bundle' || args[1].startsWith('--')))) throw new Error('用法：node scripts/package-t3-release.mjs [DESTINATION] [--customer-agent-bundle PATH.zip]')
+    console.log(JSON.stringify(packageT3Release(destination, args.length ? { customerAgentBundle: args[1] } : {})))
+  } catch (error) { console.error(error.message); process.exitCode = 1 }
+}

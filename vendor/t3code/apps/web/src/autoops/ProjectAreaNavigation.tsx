@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { ArchiveIcon, ChevronDownIcon, FolderGit2Icon, Grid2X2Icon, LogOutIcon, MessageSquareIcon, PaletteIcon, RocketIcon, SettingsIcon, SparklesIcon, type LucideIcon } from 'lucide-react'
+import { ArchiveIcon, ChevronDownIcon, FolderGit2Icon, Grid2X2Icon, LogOutIcon, LaptopIcon, MessageSquareIcon, PaletteIcon, RocketIcon, SettingsIcon, SparklesIcon, type LucideIcon } from 'lucide-react'
 import { readAutoOpsHost } from './hostConfig'
 import {
   autoOpsAreaFromPath, autoOpsProjectHref, rememberAutoOpsChatLocation,
   selectAutoOpsProject, useAutoOpsProjectId, type AutoOpsArea,
 } from './projectNavigation'
-import { AUTOOPS_AREAS } from './projectNavigation.logic'
+import { AUTOOPS_AREAS, autoOpsAreaAvailable } from './projectNavigation.logic'
 import { useThreadRouteTarget } from '~/hooks/useThreadRouteTarget'
 import { useThreadSelectionStore } from '~/threadSelectionStore'
 import { Button } from '~/components/ui/button'
@@ -20,7 +20,7 @@ import {
   ComboboxPopup, ComboboxSearchInput, ComboboxTrigger, useComboboxFilter,
 } from '~/components/ui/combobox'
 
-const areaIcons = { message: MessageSquareIcon, folder: FolderGit2Icon, rocket: RocketIcon, sparkles: SparklesIcon }
+const areaIcons = { message: MessageSquareIcon, folder: FolderGit2Icon, rocket: RocketIcon, sparkles: SparklesIcon, laptop: LaptopIcon }
 const areas = AUTOOPS_AREAS.map((area) => ({ ...area, icon: areaIcons[area.icon] }))
 
 /** Native route identity wins over browser preferences and page filter queries. */
@@ -71,9 +71,8 @@ export function ProjectAreaTopbar() {
   const selected = host.projects.find((project) => project.id === projectId) ?? null
   const currentArea = autoOpsAreaFromPath(pathname)
   const settings = pathname === '/settings' || pathname.startsWith('/settings/')
-  const canDeploy = selected?.membership?.workspaceAccess === 'internal' && selected.membership.role === 'manager'
   const filtered = host.projects.filter((project) => filter.contains(project.name, query))
-  const availableAreas = areas.filter((area) => area.read !== 'internal-manager' || canDeploy)
+  const availableAreas = areas.filter((area) => autoOpsAreaAvailable(area.id, host, projectId))
   const commonAreas = availableAreas.filter((area) => area.common)
   const items: FunctionItem[] = [
     ...availableAreas.map((area) => ({ value: area.id, label: area.label, icon: area.icon, kind: 'area' as const, area: area.id })),

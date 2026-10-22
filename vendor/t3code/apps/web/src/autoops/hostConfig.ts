@@ -11,6 +11,7 @@ export interface AutoOpsT3Bootstrap {
   /** Legacy wire name: the default model when modelSelectionEnabled is true. */
   readonly fixedModel: { readonly instanceId: string; readonly model: string }
   readonly modelSelectionEnabled?: boolean
+  readonly customerAgentsEnabled?: boolean
   readonly runtimeMode: 'approval-required'
   readonly productProfile?: { readonly id: 't3-demo-full-v1' | 'project-assistant-lite-v1' }
   readonly clientSettingsOverrides?: Readonly<Partial<ClientSettings>>
@@ -95,8 +96,8 @@ export function installAutoOpsHost(input: AutoOpsT3Bootstrap, origin: string): A
   }
   installClientHostIntegration({
     beforeThreadLaunch: authorizeThreadLaunch,
-    turnConfiguration: () => ({
-      ...(input.modelSelectionEnabled ? {} : { modelSelection: {
+    turnConfiguration: (context) => ({
+      ...((input.modelSelectionEnabled || (context && pendingScopes.get(context.threadId)?.executionBinding?.kind === 'customer')) ? {} : { modelSelection: {
         ...input.fixedModel,
         instanceId: ProviderInstanceId.make(input.fixedModel.instanceId),
       } }),
@@ -151,13 +152,15 @@ export function autoOpsStorage(storage: Storage): Storage {
   return scoped
 }
 
+export type AutoOpsExecutionBinding = { kind: 'platform' } | { kind: 'customer'; deviceId: string; registeredWorkspaceId: string; workspaceBindingRevision: number; runtimeId: 'codex' }
 export interface AutoOpsThreadScope {
+  executionBinding?: AutoOpsExecutionBinding
   projectId: string
   environmentId: string
   agentId: string
   visibility: 'private' | 'project'
-  workspaceType?: 'internal' | 'external'
-  workspaceVersionId?: string
+  workspaceType?: 'internal' | 'external' | undefined
+  workspaceVersionId?: string | undefined
   compatibilityReadOnly?: boolean
   continuationVerified?: boolean
   nativeThreadId?: string
@@ -183,17 +186,26 @@ function publishThreadScope(threadId: string, scope: AutoOpsThreadScope) {
   }
   for (const listener of scopeListeners) listener()
 }
+function sameExecutionBinding(left: AutoOpsExecutionBinding | undefined, right: AutoOpsExecutionBinding | undefined) {
+  if (left?.kind !== 'customer') return right?.kind !== 'customer'
+  return right?.kind === 'customer' && left.deviceId === right.deviceId &&
+    left.registeredWorkspaceId === right.registeredWorkspaceId &&
+    left.workspaceBindingRevision === right.workspaceBindingRevision && left.runtimeId === right.runtimeId
+}
 export function sameAutoOpsThreadScope(left: AutoOpsThreadScope, right: AutoOpsThreadScope) {
   return left.projectId === right.projectId && left.environmentId === right.environmentId &&
     left.agentId === right.agentId && left.visibility === right.visibility &&
     (left.workspaceType ?? null) === (right.workspaceType ?? null) &&
-    (left.workspaceVersionId ?? null) === (right.workspaceVersionId ?? null)
+    (left.workspaceVersionId ?? null) === (right.workspaceVersionId ?? null) &&
+    sameExecutionBinding(left.executionBinding, right.executionBinding)
 }
 function scopeAllowed(scope: AutoOpsThreadScope, project: AutoOpsT3Bootstrap['projects'][number]) {
   return project.environments.some((entry) => entry.id === scope.environmentId) &&
     project.agents.some((entry) => entry.id === scope.agentId) &&
     (!project.membership || project.membership.environmentIds.includes(scope.environmentId)) &&
-    (project.membership?.workspaceAccess !== 'external' || scope.workspaceType === 'external')
+    (scope.executionBinding?.kind === 'customer'
+      ? scope.visibility === 'private' && scope.agentId === 'a-project' && !scope.workspaceType && !scope.workspaceVersionId
+      : project.membership?.workspaceAccess !== 'external' || scope.workspaceType === 'external')
 }
 export function readAutoOpsThreadScope(
   threadId: string,
@@ -251,6 +263,7 @@ export async function inheritAutoOpsThreadScope(
   if (source.projectId !== projectId || source.compatibilityReadOnly || source.nativeParentThreadId)
     throw new Error('The source conversation cannot start an implementation thread.')
   setAutoOpsThreadScope(nextThreadId, {
+    ...(source.executionBinding ? {executionBinding:source.executionBinding} : {}),
     projectId: source.projectId,
     environmentId: source.environmentId,
     agentId: source.agentId,
@@ -297,6 +310,7 @@ export async function reserveAutoOpsThreadScope(threadId: string, desired: AutoO
     headers: { 'Content-Type': 'application/json', 'X-Demo-CSRF': host.csrfToken },
     body: JSON.stringify({ threadId, projectId: desired.projectId, environmentId: desired.environmentId,
       agentId: desired.agentId, visibility: desired.visibility,
+      ...(desired.executionBinding ? {executionBinding:desired.executionBinding} : {}),
       ...(desired.workspaceType ? { workspaceType: desired.workspaceType, workspaceVersionId: desired.workspaceVersionId } : {}) }),
   }).catch(() => { throw new Error('未收到本次发送的确认，请恢复连接后重试。') })
   if (!response.ok)

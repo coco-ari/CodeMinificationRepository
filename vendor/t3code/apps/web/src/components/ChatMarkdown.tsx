@@ -1,4 +1,5 @@
 import { autoOpsFeature } from "~/autoops/capabilities";
+import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { AutoOpsResourceLink } from "~/autoops/ResourceLink";
 import { autoOpsResourceUrl } from "~/autoops/resources";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
@@ -304,9 +305,7 @@ export function markdownFileCopyMenuItems({
   targetPath,
   workspaceRelativePath,
 }: Pick<MarkdownFileLinkMeta, "targetPath" | "workspaceRelativePath">) {
-  const items = [
-    { id: "copy-full", label: "复制完整路径", value: targetPath, title: "完整路径" },
-  ];
+  const items = [{ id: "copy-full", label: "复制完整路径", value: targetPath, title: "完整路径" }];
   if (workspaceRelativePath !== null) {
     const position = targetPath.slice(splitFilePathPosition(targetPath).path.length);
     items.unshift({
@@ -379,7 +378,8 @@ function CodexArtifactTemplateCard(props: {
           <div className="text-xs text-muted-foreground">{presentationLabel}</div>
         </div>
       </div>
-      {props.onUse && (props.template.artifactKind !== "site" || autoOpsFeature("interactiveArtifacts")) ? (
+      {props.onUse &&
+      (props.template.artifactKind !== "site" || autoOpsFeature("interactiveArtifacts")) ? (
         <Button
           data-thread-find-ignore
           type="button"
@@ -387,10 +387,10 @@ function CodexArtifactTemplateCard(props: {
           variant="outline"
           className="shrink-0"
           onClick={() => {
-            if (props.template.artifactKind !== "site" || autoOpsFeature("interactiveArtifacts")) props.onUse?.(props.template);
+            if (props.template.artifactKind !== "site" || autoOpsFeature("interactiveArtifacts"))
+              props.onUse?.(props.template);
           }}
         >
-          
           使用模板
         </Button>
       ) : null}
@@ -2390,6 +2390,8 @@ function useChatMarkdownState({
   headingLevelOffset = 0,
   githubMedia = false,
 }: ChatMarkdownProps) {
+  const businessScope = useAutoOpsThreadScope(threadRef?.threadId ?? "");
+  const customerScope = businessScope?.executionBinding?.kind === "customer";
   const resolvedTheme = useRenderedAppearance();
   const markdownRef = useRef<HTMLElement>(null);
   const mediaRequestId = useRef(0);
@@ -2446,6 +2448,7 @@ function useChatMarkdownState({
   const canOperatePreview = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
   const remoteOpen = useRemoteOpenResolution(environmentId);
   const canUseShellActions =
+    !customerScope &&
     canOperateHost &&
     canUseMarkdownFileShellActions(environmentId, remoteOpen.state.mode, remoteOpen.isResolved);
   const openMarkdownMedia = (
@@ -2453,6 +2456,7 @@ function useChatMarkdownState({
     resolvedFilePath?: string,
     clickedImage?: HTMLImageElement | null,
   ) => {
+    if (customerScope && (resolvedFilePath || !/^(?:https?:|data:|blob:)/i.test(source))) return;
     const requestId = ++mediaRequestId.current;
     void resolveMarkdownMediaPreview({
       source,
@@ -2481,9 +2485,7 @@ function useChatMarkdownState({
       (error: unknown) => {
         if (mediaRequestId.current !== requestId) return;
         let description =
-          error instanceof Error
-            ? error.message
-            : "无法加载文件，可能已移动或删除。";
+          error instanceof Error ? error.message : "无法加载文件，可能已移动或删除。";
         if (
           isAssetNotFoundError(error) &&
           error.resource._tag === "media-file" &&
@@ -2533,9 +2535,7 @@ function useChatMarkdownState({
     }
     if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) {
       return Promise.resolve(
-        AsyncResult.failure<void, Error>(
-          Cause.fail(new Error("当前连接无法显示此环境的文件。")),
-        ),
+        AsyncResult.failure<void, Error>(Cause.fail(new Error("当前连接无法显示此环境的文件。"))),
       );
     }
     return openInEditor({
@@ -2720,7 +2720,7 @@ function useChatMarkdownState({
     return metadata._tag === "Success" && metadata.value.entries[0] === null ? match : null;
   };
   const openFileInPanel = (fileLinkMeta: MarkdownFileLinkMeta, panelPath: string) => {
-    if (!threadRef) return;
+    if (!threadRef || customerScope) return;
     // Claimed on every open so a synchronous one supersedes a lookup already
     // in flight.
     const isLatestLookup = claimWorkspaceBasenameLookup();
@@ -2763,12 +2763,12 @@ function useChatMarkdownState({
 
     return (
       <MarkdownFileLink
-        environmentId={environmentId}
+        environmentId={customerScope ? null : environmentId}
         href={fileLinkMeta.targetPath}
         targetPath={fileLinkMeta.targetPath}
         iconPath={fileLinkMeta.filePath}
         workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
-        panelPath={panelPath}
+        panelPath={customerScope ? null : panelPath}
         line={fileLinkMeta.line}
         label={fileLinkLabel(
           {
@@ -2790,11 +2790,13 @@ function useChatMarkdownState({
             : undefined
         }
         resolveCopyPaths={async () =>
-          markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
+          customerScope
+            ? { fullPath: fileLinkMeta.targetPath, relativePath: fileLinkMeta.targetPath }
+            : markdownFileCopyPaths(fileLinkMeta, await resolveHostPath(), cwd)
         }
         onOpenInPanel={(path) => openFileInPanel(fileLinkMeta, path)}
         onOpenMedia={
-          threadRef && canPreviewMedia
+          !customerScope && threadRef && canPreviewMedia
             ? () => openMarkdownMedia(mediaPath, fileLinkMeta.filePath)
             : undefined
         }
@@ -2806,6 +2808,7 @@ function useChatMarkdownState({
         }
         revealLabel={revealInFileManagerLabel}
         onOpenInBrowser={
+          !customerScope &&
           threadRef &&
           canOperatePreview &&
           isPreviewAvailableFor(threadRef.environmentId) &&
@@ -2818,6 +2821,7 @@ function useChatMarkdownState({
   };
 
   const componentState = {
+    customerScope,
     canOperateHost,
     canOperatePreview,
     cwd,
@@ -2837,8 +2841,8 @@ function useChatMarkdownState({
     linkTargetPreference,
     markdownFileLinkMetaByHref,
     onTaskListChange,
-    onUseArtifactTemplate,
-    onRunShellCommand,
+    onUseArtifactTemplate: customerScope ? undefined : onUseArtifactTemplate,
+    onRunShellCommand: customerScope ? undefined : onRunShellCommand,
     openChangeRequestLink,
     openDeferredMarkdownLink,
     openExternalLinkInPreview,
@@ -2981,6 +2985,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
   a: function MarkdownAnchor({ node, href, children, title: _title, ...props }) {
     const {
+      customerScope,
       canOperateHost,
       canOperatePreview,
       cwd,
@@ -3007,7 +3012,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const linkedThreadId = href ? parseThreadLinkHref(href) : null;
     if (linkedThreadId) {
       const label = hastPlainTextDeep(node) || linkedThreadId;
-      return environmentId ? (
+      return environmentId && !customerScope ? (
         <MarkdownThreadLink environmentId={environmentId} threadId={linkedThreadId} label={label} />
       ) : (
         <span>{label}</span>
@@ -3016,14 +3021,19 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const contextReference = href ? parseComposerContextHref(href) : null;
     if (contextReference) {
       const label = hastPlainTextDeep(node) || contextReference.contextId;
-      return renderContextReference ? (
+      return renderContextReference && !customerScope ? (
         renderContextReference({ ...contextReference, label })
       ) : (
         <span>{label}</span>
       );
     }
     if (href && autoOpsResourceUrl(href)) {
-      return <AutoOpsResourceLink {...props} sourceUrl={href} {...(threadRef ? {threadRef} : {})}>{children}</AutoOpsResourceLink>;
+      if (customerScope) return <span>{children}</span>;
+      return (
+        <AutoOpsResourceLink {...props} sourceUrl={href} {...(threadRef ? { threadRef } : {})}>
+          {children}
+        </AutoOpsResourceLink>
+      );
     }
     const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
     const fileLinkMeta = normalizedHref
@@ -3286,6 +3296,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
   },
   img: function MarkdownImage({ node, title, src, alt, ...props }) {
     const {
+      customerScope,
       expandMedia,
       cwd,
       environmentId,
@@ -3299,7 +3310,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const contextReference = typeof src === "string" ? parseComposerContextHref(src) : null;
     if (contextReference) {
       const label = alt || contextReference.contextId;
-      return renderContextReference ? (
+      return renderContextReference && !customerScope ? (
         renderContextReference({ ...contextReference, label })
       ) : (
         <span>{label}</span>
@@ -3319,6 +3330,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const { className, style: _style, width, height, ...imageProps } = props;
     const authoredSizeStyle = authoredImageSizeStyle(width, height);
     const imageSource = classifyMarkdownImageSource(classifiedSrc, imageBaseDir ?? cwd);
+    if (customerScope && imageSource._tag !== "Direct")
+      return <span title="客户本机文件暂不支持网页预览">{altText || srcString}</span>;
     const kind = mediaKindFromPath(classifiedSrc) ?? "image";
     const directUri = imageSource._tag === "Direct" ? imageSource.uri : null;
     const githubMediaUrl =

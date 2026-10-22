@@ -25,6 +25,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as EventStore from "./EventStore.ts";
+import * as EventSink from "./EventSink.ts";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -1404,4 +1405,36 @@ it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)
         "running",
       );
     }).pipe(Effect.provide(layerTest)),
+);
+
+
+it.effect.each(["before-first-turn", "manager-not-restored"] as const)(
+  "Stop never claims a customer process ended when its center runtime is unavailable (%s)",
+  scenario => Effect.gen(function* () {
+    const threadId = ThreadId.make(`customer-stop-${scenario}`);
+    yield* createWatchingThread(threadId, 1999);
+    yield* send(threadId, "remote running", "start_immediately");
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sink = yield* EventSink.EventSinkV2;
+    const projection = yield* orchestrator.getThreadProjection(threadId);
+    const original = projection.runs.at(-1)!;
+    const remoteId = ProviderInstanceId.make("customer-11111111-1111-1111-1111-111111111111-codex");
+    const run = {...original, providerInstanceId: remoteId, status:"running" as const};
+    const providerThread = {...projection.providerThreads.find(row => row.id === run.providerThreadId)!, providerInstanceId:remoteId, providerSessionId:ProviderSessionId.make("customer-process-session")};
+    const now = yield* DateTime.now;
+    const events: OrchestrationV2DomainEvent[] = [
+      {id:EventId.make(`${scenario}-run`),type:"run.updated",threadId,runId:run.id,providerInstanceId:remoteId,occurredAt:now,payload:run},
+      {id:EventId.make(`${scenario}-thread`),type:"provider-thread.updated",threadId,providerInstanceId:remoteId,occurredAt:now,payload:providerThread},
+    ];
+    if(scenario === "manager-not-restored") events.push({
+      id:EventId.make(`${scenario}-turn`),type:"provider-turn.updated",threadId,runId:run.id,providerInstanceId:remoteId,occurredAt:now,
+      payload:{id:ProviderTurnId.make("customer-native-turn"),providerThreadId:providerThread.id,nodeId:run.rootNodeId!,runAttemptId:run.activeAttemptId,nativeTurnRef:{driver:ProviderDriverKind.make("codex"),nativeId:"native-turn",strength:"strong"},ordinal:1,status:"running",startedAt:now,completedAt:null},
+    });
+    yield* sink.writeWithEffects({events,effects:[]});
+    yield* orchestrator.dispatch({type:"thread.stop",threadId,commandId:CommandId.make(`customer-stop:${scenario}`)});
+    const stopped = yield* orchestrator.getThreadProjection(threadId);
+    assert.equal(stopped.runs.find(row=>row.id===run.id)?.status,"running");
+    assert.isFalse(stopped.turnItems.some(row=>row.runId===run.id && row.type === "run_interrupt_result"));
+    assert.isTrue(stopped.turnItems.some(row=>row.runId===run.id && row.type === "run_interrupt_request" && row.title === "停止结果待核实"));
+  }).pipe(Effect.provide(layerTest)),
 );

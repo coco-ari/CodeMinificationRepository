@@ -224,10 +224,11 @@ export function readScopedSkillResourceForThread(directory,threadId,path,access=
 }
 
 /** Provider caches are process-wide. Project every emission for its viewer and
- * keep physical roots out of the browser; never authorize by cached metadata. */
+ * keep physical roots out of the browser; never authorize by cached metadata.
+ * Customer catalogs are owner-filtered by RPC and retain their independent local skills. */
 export function filterBusinessProviderResult(directory,value,{access=configuredAutoOpsAccess(),principal}={}) {
   if(!value||typeof value!=='object')return value
-  const projectProvider=provider=>({...provider,skills:[],...(Array.isArray(provider.workspaceSnapshots)?{workspaceSnapshots:provider.workspaceSnapshots.flatMap(snapshot=>{
+  const projectProvider=provider=>provider.instanceId?.startsWith('customer-')?provider:({...provider,skills:[],...(Array.isArray(provider.workspaceSnapshots)?{workspaceSnapshots:provider.workspaceSnapshots.flatMap(snapshot=>{
     try {
       const id=relative(contextRoot(directory),resolve(String(snapshot.cwd||'')))
       if(!idPattern.test(id))return []

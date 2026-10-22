@@ -33,7 +33,7 @@ export const authorize = (sessionId: string, method: string, payload: unknown) =
     ...authScopeRequiredResponse(AuthOrchestrationReadScope),
     message: typeof cause === "object" && cause !== null && "code" in cause && cause.code === PRODUCT_CAPABILITY_DISABLED
       ? PRODUCT_CAPABILITY_MESSAGE
-      : typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string" && cause.code.startsWith("SKILL_") && "message" in cause
+      : typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string" && (cause.code.startsWith("SKILL_") || cause.code.startsWith("CUSTOMER_")) && "message" in cause
         ? String(cause.message)
         : "AutoOps access denied or session expired.",
   }),
@@ -50,8 +50,17 @@ function projectResult(sessionId: string, method: string, payload: unknown, resu
   if (!access) return result;
   const principal = access.principalForNativeSession(sessionId);
   authorizeAutoOpsRpc(access, principal, method, payload);
-  if (["server.getConfig", "server.refreshProviders", "subscribeServerConfig"].includes(method))
-    return filterBusinessProviderResult(process.env.AUTOOPS_T3_DATA_DIR!,result,{access,principal});
+  if (['server.getConfig','subscribeServerConfig','server.refreshProviders'].includes(method)) {
+    const owned=new Set(access.customerRegistry.listDevices(principal.id).map(device=>`customer-${device.id}-codex`));
+    const allowed=(provider: {instanceId?:string})=>!provider.instanceId?.startsWith('customer-')||owned.has(provider.instanceId);
+    const filter=(value:unknown):unknown=>{
+      if(Array.isArray(value))return value.filter(allowed);
+      if(!value || typeof value!=='object')return value;
+      const row=value as {providers?:Array<{instanceId?:string}>;payload?:unknown;config?:unknown};
+      return {...row,...(row.providers?{providers:row.providers.filter(allowed)}:{}),...(row.payload?{payload:filter(row.payload)}:{}),...(row.config?{config:filter(row.config)}:{})};
+    };
+    return filterBusinessProviderResult(process.env.AUTOOPS_T3_DATA_DIR!,filter(result),{access,principal});
+  }
   if (method === "orchestration.dispatchCommand" && (payload as {type: string}).type === "thread.delete")
     access.markThreadDeleted((payload as {threadId: string}).threadId);
   if (method === "orchestration.subscribeShell" || method === "orchestration.subscribeArchivedShell")

@@ -4331,6 +4331,11 @@ it.effect("stops pending recovery at service shutdown", () =>
 
 function captureRootRunTermination(input: {
   readonly key: string;
+  readonly providerInstanceId?: ProviderInstanceId;
+  readonly resumeOnly?: boolean;
+  readonly acknowledgeEvent?: ProviderAdapter.ProviderAdapterV2SessionRuntime["acknowledgeEvent"];
+  readonly eventPersistenceKey?: ProviderAdapter.ProviderAdapterV2SessionRuntime["eventPersistenceKey"];
+  readonly captureBaseline?: Effect.Effect<void>;
   readonly shouldFinalizeRun: () => Effect.Effect<boolean, ProjectionStore.ProjectionStoreV2Error>;
   readonly rejectTerminalWrite?: boolean;
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
@@ -4357,7 +4362,7 @@ function captureRootRunTermination(input: {
 }) {
   return Effect.gen(function* () {
     const ids = backgroundScenarioIds(input.key);
-    const providerInstanceId = ProviderInstanceId.make("codex");
+    const providerInstanceId = input.providerInstanceId ?? ProviderInstanceId.make("codex");
     const runningSubagent = makeRunOwnedSubagentFixture({
       ids,
       providerInstanceId,
@@ -4391,7 +4396,9 @@ function captureRootRunTermination(input: {
           Layer.mock(McpAppModelContext.McpAppModelContext)({
             forThread: () => input.appContext ?? Effect.succeed([]),
           }),
-          Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
+          Layer.mock(CheckpointService.CheckpointServiceV2)({
+            captureBaseline: () => input.captureBaseline ?? Effect.void,
+          }),
           layerTurnItemPositionsTest,
           Layer.mock(EventSink.EventSinkV2)({
             write: (payload) =>
@@ -4450,6 +4457,12 @@ function captureRootRunTermination(input: {
         providerSessionId: ProviderSessionId.make(`session:${input.key}`),
         session: {
           events: Stream.empty,
+          ...(input.acknowledgeEvent === undefined
+            ? {}
+            : { acknowledgeEvent: input.acknowledgeEvent }),
+          ...(input.eventPersistenceKey === undefined
+            ? {}
+            : { eventPersistenceKey: input.eventPersistenceKey }),
           subscribeEvents: Effect.succeed({
             events:
               input.events?.(ids) ??
@@ -4506,6 +4519,7 @@ function captureRootRunTermination(input: {
         } as OrchestrationV2RunAttempt,
         attemptId: ids.attemptId,
         providerTurnOrdinal: 1,
+        ...(input.resumeOnly === undefined ? {} : { resumeOnly: input.resumeOnly }),
         shouldFinalizeRun: input.shouldFinalizeRun,
         ...(input.shouldStartProviderTurn === undefined
           ? {}
@@ -5080,5 +5094,108 @@ it.effect("releases ingestion after idle subagent rows and items settle", () =>
       "turn_item:idle",
       "root-finalized",
     ]);
+  }),
+);
+
+it.effect(
+  "reattaches customer events without replaying the prompt and ACKs only after terminal commit",
+  () =>
+    Effect.gen(function* () {
+      const order: string[] = [];
+      const key = CommandId.make("customer:event:terminal:1");
+      const captured = yield* captureRootRunTermination({
+        key: "customer-reattach",
+        providerInstanceId: ProviderInstanceId.make(
+          "customer-11111111-1111-1111-1111-111111111111-codex",
+        ),
+        resumeOnly: true,
+        shouldFinalizeRun: () => Effect.succeed(true),
+        captureBaseline: Effect.die("Customer files must not be checkpointed on the center."),
+        appContext: Effect.die("Platform context must not be bridged."),
+        startTurn: () => Effect.die("Reattachment must not send the prompt again."),
+        events: (ids) => Stream.make(rootTerminalEvent(ids, "completed")),
+        eventPersistenceKey: () => key,
+        beforeTerminalWrite: (request) =>
+          Effect.sync(() => {
+            assert.equal(request.commandId, key);
+            order.push("committed");
+            return true;
+          }),
+        acknowledgeEvent: () =>
+          Effect.sync(() => {
+            order.push("acknowledged");
+          }),
+      });
+      assert.deepEqual(order, ["committed", "acknowledged"]);
+      assert.deepEqual(captured.observed, ["run:completed"]);
+      assert.isEmpty(captured.submittedEffects);
+      const finished = captured.finalEvents.find((event) => event.type === "run.updated");
+      assert.isNotNull(finished?.type === "run.updated" ? finished.payload.completedAt : null);
+    }),
+);
+
+it.effect(
+  "retains a dispatched customer run on an unknown receipt and accepts its later terminal",
+  () =>
+    Effect.gen(function* () {
+      const allowTerminal = yield* Deferred.make<void>();
+      const captured = yield* captureRootRunTermination({
+        key: "customer-unknown-receipt",
+        providerInstanceId: ProviderInstanceId.make(
+          "customer-11111111-1111-1111-1111-111111111111-codex",
+        ),
+        shouldFinalizeRun: () => Effect.succeed(true),
+        startTurn: () =>
+          Effect.fail(
+            new ProviderAdapter.ProviderAdapterProtocolError({
+              driver,
+              detail: "Customer receipt timed out",
+              cause: { code: "CUSTOMER_OUTCOME_UNKNOWN" },
+            }),
+          ),
+        events: (ids) =>
+          Stream.fromEffect(Deferred.await(allowTerminal)).pipe(
+            Stream.map(() => rootTerminalEvent(ids, "completed")),
+          ),
+        afterStart: () => Deferred.succeed(allowTerminal, undefined).pipe(Effect.asVoid),
+        onStartFailure: () => Effect.die("Unknown delivery cannot fail a customer run."),
+      });
+      assert.deepEqual(captured.observed, ["run:completed"]);
+      assert.isFalse(
+        captured.finalEvents.some(
+          (event) => event.type === "run.updated" && event.payload.status === "failed",
+        ),
+      );
+    }),
+);
+
+it.effect("settles an explicitly not-started customer command as failed", () =>
+  Effect.gen(function* () {
+    const subscribed = yield* Deferred.make<void>();
+    const captured = yield* captureRootRunTermination({
+      key: "customer-not-started",
+      providerInstanceId: ProviderInstanceId.make(
+        "customer-11111111-1111-1111-1111-111111111111-codex",
+      ),
+      shouldFinalizeRun: () => Effect.succeed(true),
+      startTurn: () =>
+        Deferred.await(subscribed).pipe(
+          Effect.andThen(
+            Effect.fail(
+              new ProviderAdapter.ProviderAdapterProtocolError({
+                driver,
+                detail: "Model selection no longer available",
+                cause: { outcome: "not_started" },
+              }),
+            ),
+          ),
+        ),
+      events: () =>
+        Stream.fromEffect(Deferred.succeed(subscribed, undefined)).pipe(
+          Stream.flatMap(() => Stream.never),
+        ),
+      onStartFailure: () => Effect.void,
+    });
+    assert.deepEqual(captured.observed, ["run:failed"]);
   }),
 );

@@ -89,6 +89,20 @@ function makeHost() {
 }
 
 describe("makeWorkspaceFileDropHandlers", () => {
+  it("consumes the browser's Files drop even when customer mode refuses attaching it", () => {
+    const file = new File(["contents"], "customer.txt", { type: "text/plain" });
+    const addFiles = vi.fn();
+    const { event, preventDefault } = makeDragEvent({ types: ["Files"], files: [file] });
+    const handlers = makeWorkspaceFileDropHandlers({
+      setDragActive: vi.fn(),
+      addFiles,
+      addFolders: vi.fn(),
+    });
+    handlers.onDrop(event);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(addFiles).toHaveBeenCalledExactlyOnceWith([file]);
+  });
+
   it("activates the target for an external file drag", () => {
     const { host, setDragActive } = makeHost();
     const { event, preventDefault } = makeDragEvent();

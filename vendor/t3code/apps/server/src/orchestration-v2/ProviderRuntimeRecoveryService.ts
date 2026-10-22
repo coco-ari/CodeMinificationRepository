@@ -1,3 +1,4 @@
+import { isCustomerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
 import { resolveProductProfile } from "../../../../../../agent-demo/t3-adapters/product-profile.mjs";
 import { forThread as autoOpsThreadSettings } from "../autoops/personalSettings.ts";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
@@ -77,6 +78,14 @@ export class ProviderRuntimeRecoveryService extends Context.Service<
     readonly recover: Effect.Effect<ProviderRuntimeRecoverySummary, ProviderRuntimeRecoveryError>;
   }
 >()("t3/orchestration-v2/ProviderRuntimeRecoveryService") {}
+
+export const CustomerRuntimeRecovery = Context.Reference<{
+  readonly recover: (
+    projection: ProjectionStore.ProjectionRuntimeRecoveryState,
+  ) => Effect.Effect<void>;
+}>("t3/orchestration-v2/CustomerRuntimeRecovery", {
+  defaultValue: () => ({ recover: () => Effect.void }),
+});
 
 function nonterminalRuns(projection: ProjectionStore.ProjectionRuntimeRecoveryState) {
   return projection.runs.filter((run) => {
@@ -172,6 +181,7 @@ function latestStartedRun(
 
 export const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
+  const customerRecovery = yield* CustomerRuntimeRecovery;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const eventSink = yield* EventSink.EventSinkV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
@@ -725,11 +735,18 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
+      if (isCustomerProviderInstanceId(projection.thread.providerInstanceId)) {
+        if (trigger === "startup") yield* customerRecovery.recover(projection);
+        continue;
+      }
       const enabled =
-        (!process.env.AUTOOPS_T3_DATA_DIR || resolveProductProfile().capabilities.automaticRecovery) &&
+        (!process.env.AUTOOPS_T3_DATA_DIR ||
+          resolveProductProfile().capabilities.automaticRecovery) &&
         continueAfterRestart !== null &&
-        resolveProjectSettings(autoOpsThreadSettings(threadId,continueAfterRestart), projection.thread.projectId).settings
-          .continueThreadsAfterServerUpdate;
+        resolveProjectSettings(
+          autoOpsThreadSettings(threadId, continueAfterRestart),
+          projection.thread.projectId,
+        ).settings.continueThreadsAfterServerUpdate;
       const result = yield* reconcileProjection(projection, trigger, enabled, stoppedThisPass);
       for (const session of projection.providerSessions) {
         if (session.status !== "stopped" && session.status !== "error") {
@@ -756,16 +773,20 @@ export const make = Effect.gen(function* () {
   });
 
   const prepareForShutdown = Effect.gen(function* () {
-    if (process.env.AUTOOPS_T3_DATA_DIR && !resolveProductProfile().capabilities.automaticRecovery) return;
+    if (process.env.AUTOOPS_T3_DATA_DIR && !resolveProductProfile().capabilities.automaticRecovery)
+      return;
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     if (!enabled) return;
     const threadIds = yield* projections.getRecoveryThreadIds("runtime");
     for (const threadId of threadIds) {
       yield* Effect.gen(function* () {
         const projection = yield* projections.getRuntimeRecoveryProjection(threadId);
+        if (isCustomerProviderInstanceId(projection.thread.providerInstanceId)) return;
         if (
-          !resolveProjectSettings(autoOpsThreadSettings(threadId,enabled), projection.thread.projectId).settings
-            .continueThreadsAfterServerUpdate
+          !resolveProjectSettings(
+            autoOpsThreadSettings(threadId, enabled),
+            projection.thread.projectId,
+          ).settings.continueThreadsAfterServerUpdate
         )
           return;
         const run = restartContinuationRun(projection, yield* DateTime.now);

@@ -62,6 +62,7 @@ export type ComposerDraftContextRecord =
 
 export interface ComposerContextActions {
   environmentId: EnvironmentId | null;
+  canPreviewFiles?: boolean;
   cwd?: string | undefined;
   expandImage: (imageId: string) => void;
   expandVideo: (fileId: string) => void;

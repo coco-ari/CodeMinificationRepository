@@ -21,6 +21,11 @@ export const forThread = (threadId:string, settings:ServerSettings):ServerSettin
   if (!access) return settings;
   const binding=access.getThreadBinding(threadId);
   if (!binding || binding.revokedAt || binding.compatibilityReadOnly) return {...settings,continueThreadsAfterServerUpdate:false,compactIdleThreads:false,autoResumeLimitedThreads:false,snoozeLimitedThreads:false};
+  if (binding.executionBinding.kind === 'customer') {
+    access.customerRegistry.validateTarget(binding.ownerId,binding.projectId,binding.executionBinding,{requireOnline:false});
+    // These platform background workers cannot own the customer's process lifecycle.
+    return {...forPrincipal(binding.ownerId,settings),continueThreadsAfterServerUpdate:false,compactIdleThreads:false,autoResumeLimitedThreads:false,snoozeLimitedThreads:false};
+  }
   access.requireToolThread(threadId);
   return forPrincipal(binding.ownerId,settings);
 };

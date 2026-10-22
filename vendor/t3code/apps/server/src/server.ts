@@ -122,6 +122,11 @@ import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as AuthHttp from "./auth/http.ts";
 import * as AutoOpsHttp from "./autoops/http.ts";
+import * as CustomerHttp from './autoops/customerHttp.ts';
+import * as CustomerSocket from './autoops/customerSocket.ts';
+import * as CustomerStatusHttp from './autoops/customerStatusHttp.ts';
+import * as RemoteDevices from './autoops/RemoteDeviceService.ts';
+import * as RemoteProviders from './autoops/RemoteProviderRegistry.ts';
 import * as ReplayMarkers from "./auth/replayMarkers.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as WebhookRoute from "./scheduledTasks/webhookRoute.ts";
@@ -617,7 +622,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.mergeAll(Keybindings.layer, EnvironmentTheme.layer, UsageLimitSources.layer),
   ),
   Layer.provideMerge(ProviderRegistry.layer),
-  Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
+  Layer.provideMerge(RemoteProviders.layer.pipe(Layer.provideMerge(ProviderInstanceRegistryHydration.layer))),
+  Layer.provideMerge(RemoteProviders.availabilityLayer),
+  Layer.provideMerge(RemoteDevices.layer),
   Layer.provideMerge(
     Layer.mergeAll(
       AntigravityInstallation.AntigravityInstallation.layer,
@@ -704,6 +711,9 @@ const layerMakeRoutes = Layer.mergeAll(
     ),
     ServerHttp.layerOtlpTracesProxyRoute,
     AutoOpsHttp.layer,
+    CustomerHttp.layer,
+    CustomerSocket.layer,
+    CustomerStatusHttp.layer,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     DeviceHubProxy.layer,

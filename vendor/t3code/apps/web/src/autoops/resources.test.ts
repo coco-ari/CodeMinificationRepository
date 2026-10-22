@@ -164,6 +164,11 @@ it('uses the explicit subscribed scope when a workspace version arrives after th
     ...scope, workspaceVersionId: 'version-2',
   })!)
   expect(nextCwd.searchParams.get('workspaceVersionId')).toBe('version-2')
+  // A stale platform workspace selection cannot expose its resources after choosing a customer target.
+  expect(autoOpsResourceCwd('thread-1', 'p-autoops', {
+    ...scope,
+    executionBinding: { kind: 'customer', deviceId: 'device-one', registeredWorkspaceId: 'workspace-one', workspaceBindingRevision: 1, runtimeId: 'codex' },
+  })).toBeNull()
 })
 
 it('uses only scoped skill package URLs and preserves reference resource identities', async () => {

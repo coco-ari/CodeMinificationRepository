@@ -1,0 +1,267 @@
+import { createHash } from "node:crypto";
+import type { CustomerAgentCommand, CustomerAgentReceipt, CustomerAgentClientFrame } from "../../vendor/t3code/packages/contracts/src/autoopsRemote.ts";
+import { ConnectorError, CustomerAgentStore, type LocalSession, type LocalWorkspace } from "./store.ts";
+import type { HeadlessCodexRunner, HeadlessCodexRunnerOptions } from "../../vendor/t3code/apps/server/src/provider/HeadlessCodexRunner.ts";
+import { SKILL_MENTION_PATTERN } from "../../vendor/t3code/packages/shared/src/composerInlineTokens.ts";
+
+export type RunnerFactory = (options: HeadlessCodexRunnerOptions) => Promise<HeadlessCodexRunner>;
+export const customerSkillId = (workspaceId: string, localPath: string): string =>
+  createHash("sha256").update(`${workspaceId}:${localPath}`).digest("hex");
+const object = (value: unknown): Record<string, any> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ConnectorError("invalid_input", "命令输入格式不正确");
+  return value as Record<string, any>;
+};
+const errorReceipt = (command: CustomerAgentCommand, error: unknown, state: "failed" | "unknown" = "failed"): CustomerAgentReceipt => ({
+  type: "receipt", commandId: command.commandId, sessionId: command.sessionId, state,
+  error: { code: error instanceof ConnectorError ? error.code : "runtime_error",
+    // Provider errors may contain command arguments or credentials: keep operations logs and wire errors generic.
+    message: error instanceof ConnectorError ? error.message : "客户运行器未能完成操作，请在本机查看运行状态" },
+});
+
+export class CustomerAgentExecutor {
+  readonly store: CustomerAgentStore;
+  readonly deviceId: string;
+  readonly runners = new Map<string, HeadlessCodexRunner>();
+  private readonly opening = new Set<string>();
+  private readonly requests = new Map<string, Set<string>>();
+  private readonly providerTurns = new Map<string, string>();
+  private readonly providerThreads = new Map<string, unknown>();
+  private readonly stopping = new Set<string>();
+  private executing = 0;
+  private readonly discoveryRunners = new Set<HeadlessCodexRunner>();
+  private readonly notify: (frame: CustomerAgentClientFrame) => void;
+  private readonly runnerFactory: RunnerFactory;
+  private readonly onState: (message: string) => void;
+  constructor(options: {
+    store: CustomerAgentStore; deviceId: string; runnerFactory: RunnerFactory;
+    notify: (frame: CustomerAgentClientFrame) => void; onState?: (message: string) => void;
+  }) {
+    this.store = options.store; this.deviceId = options.deviceId; this.runnerFactory = options.runnerFactory;
+    this.notify = options.notify; this.onState = options.onState ?? (() => {});
+  }
+  private async runner(sessionId: string, workspace: LocalWorkspace): Promise<HeadlessCodexRunner> {
+    const existing = this.runners.get(sessionId);
+    if (existing) return existing;
+    if (this.opening.has(sessionId)) throw new ConnectorError("session_opening", "本机会话正在建立");
+    if (this.runners.size + this.opening.size >= 32) throw new ConnectorError("runtime_capacity", "本机已达到 32 个受管会话上限，请先停止活动任务并重启连接程序释放空闲会话");
+    const saved = this.store.session(sessionId);
+    if (saved && saved.workspaceId !== workspace.registeredWorkspaceId) throw new ConnectorError("binding_changed", "已有会话不能切换登记目录");
+    if (saved?.state === "unknown" || saved?.state === "active") throw new ConnectorError("execution_unknown", "旧执行尚未确认结束，请先在本机核实");
+    this.opening.add(sessionId);
+    try {
+      let epoch = "";
+      const runner = await this.runnerFactory({
+        instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath, localPolicy: workspace.policy,
+        onEvent: (event) => this.handleEvent(sessionId, epoch, event),
+        onError: () => this.markUnknown(sessionId, "客户运行器连接异常，结果待核实", "runtime_lost"),
+      });
+      epoch = runner.processGeneration;
+      this.store.saveSession({ sessionId, runtimeEpoch: epoch, workspaceId: workspace.registeredWorkspaceId,
+        state: "idle", nativeThreadId: saved?.nativeThreadId ?? null, nativeTurnId: null, runId: null, attemptId: null,
+        ...(saved?.resolution ? { resolution: saved.resolution } : {}) });
+      this.runners.set(sessionId, runner); return runner;
+    } finally { this.opening.delete(sessionId); }
+  }
+  private markUnknown(sessionId: string, message: string, reason: "runtime_lost" | "journal_unavailable" | "outcome_unknown" = "outcome_unknown"): void {
+    const session = this.store.session(sessionId);
+    // A recovery poll may report the same lost runtime repeatedly. The persisted state
+    // already appears in every reconnect hello; do not flood controls or terminal logs.
+    if (session?.state === "unknown") return;
+    if (session) {
+      try { this.store.saveSession({ ...session, state: "unknown" }); }
+      catch { reason = "journal_unavailable"; }
+      this.notify({ type: "runtimeState", sessionId, runtimeEpoch: session.runtimeEpoch, state: "unknown", reason });
+    }
+    this.onState(`${sessionId}: ${message}`);
+  }
+  private handleEvent(sessionId: string, epoch: string, value: unknown): void {
+    const event = object(value);
+    const current = this.store.session(sessionId);
+    if (!current || current.runtimeEpoch !== epoch) return;
+    if (event.type === "command_output.delta") {
+      const chunk = typeof event.chunk === "string" ? event.chunk : "";
+      // Live log fragments are explicitly lossy; final turn-item output uses the reliable stream.
+      this.notify({ type: "delta", sessionId, runtimeEpoch: epoch, event: { ...event, chunk: chunk.slice(-32 * 1024) } });
+      return;
+    }
+    try {
+      this.store.appendEvent(sessionId, epoch, event);
+      if (event.type === "provider_thread.updated" && event.providerThread?.nativeThreadRef?.nativeId) {
+        this.providerThreads.set(sessionId, event.providerThread);
+        this.store.saveSession({ ...current, nativeThreadId: String(event.providerThread.nativeThreadRef.nativeId) });
+      }
+      if (event.type === "provider_turn.updated" && event.providerTurn?.runAttemptId === current.attemptId) {
+        this.providerTurns.set(sessionId, String(event.providerTurn.id));
+        this.store.saveSession({ ...this.store.session(sessionId)!, nativeTurnId: event.providerTurn.nativeTurnRef?.nativeId ?? null });
+      }
+      if (event.type === "runtime_request.updated") {
+        const requests = this.requests.get(sessionId) ?? new Set<string>();
+        if (event.runtimeRequest?.status === "pending") requests.add(event.runtimeRequest.id);
+        else requests.delete(event.runtimeRequest?.id);
+        this.requests.set(sessionId, requests);
+      }
+      if (event.type === "turn.terminal" && this.providerTurns.get(sessionId) === event.providerTurnId) {
+        const session = this.store.session(sessionId)!;
+        if (session.runId) this.store.releaseWorkspace(session.workspaceId, sessionId, session.runId);
+        this.store.saveSession({ ...session, state: "idle", runId: null, attemptId: null });
+        this.providerTurns.delete(sessionId); this.requests.delete(sessionId);
+        this.stopping.delete(sessionId);
+      }
+      if (this.store.logBytes() >= this.store.maxLogBytes - this.store.reserveBytes) {
+        void this.requestLocalStop(sessionId, "待回传日志接近容量上限，正在请求本机停止");
+      }
+    } catch (error) {
+      this.markUnknown(sessionId, error instanceof ConnectorError ? error.message : "无法保存恢复日志，执行结果待核实", "journal_unavailable");
+      // Do not continue unjournaled work; closing is a best-effort local stop, never a fabricated terminal.
+      void this.runners.get(sessionId)?.close().catch(() => {});
+    }
+  }
+  async execute(command: CustomerAgentCommand): Promise<CustomerAgentReceipt> {
+    this.executing++;
+    try { return await this.executeCommand(command); } finally { this.executing--; }
+  }
+  private async executeCommand(command: CustomerAgentCommand): Promise<CustomerAgentReceipt> {
+    let nativeAttempted = false;
+    try {
+      const previous = this.store.receipt(command);
+      if (previous) { this.notify(previous); return previous; }
+      const workspace = this.store.resolveWorkspace(command.target, command.method === "interruptTurn" || command.method === "readThreadSnapshot");
+      const session = this.store.session(command.sessionId);
+      if (session && session.workspaceId !== workspace.registeredWorkspaceId) throw new ConnectorError("binding_changed", "已有会话不能更换工作区");
+      const control = ["steerTurn", "interruptTurn", "respondToRuntimeRequest"].includes(command.method);
+      if (control && (!command.runtimeEpoch || command.runtimeEpoch !== session?.runtimeEpoch || !this.runners.has(command.sessionId))) {
+        throw new ConnectorError("stale_runtime", "控制指令对应的本机运行已失效，正在核实执行状态");
+      }
+      const input = command.method === "catalog" ? {} : object(command.input);
+      if (control && ["steerTurn", "interruptTurn"].includes(command.method) && this.providerTurns.get(command.sessionId) !== input.providerTurnId) {
+        throw new ConnectorError("stale_turn", "这条控制指令不属于本机当前轮次");
+      }
+      if (command.method === "respondToRuntimeRequest" && !this.requests.get(command.sessionId)?.has(String(input.requestId))) {
+        throw new ConnectorError("stale_request", "审批请求已失效或已经处理");
+      }
+      if (command.method === "startTurn") {
+        this.store.assertCapacity();
+        if (!input.runId || !input.attemptId) throw new ConnectorError("missing_execution_identity", "新轮次缺少执行身份");
+        if (session?.state !== "idle" || !this.runners.has(command.sessionId)) throw new ConnectorError("session_not_ready", "本机会话尚未准备好或旧执行待核实");
+      }
+      const accepted = this.store.accept(command); this.notify(accepted);
+      let dispatched = false;
+      try {
+        const runner = command.method === "openSession" || command.method === "catalog"
+          ? await this.runner(command.sessionId, workspace) : this.runners.get(command.sessionId);
+        if (!runner) throw new ConnectorError("session_not_open", "请先建立或恢复本机会话");
+        if (command.method === "openSession") {
+          const epochReceipt: CustomerAgentReceipt = { ...accepted, runtimeEpoch: runner.processGeneration };
+          this.store.finish(epochReceipt); this.notify(epochReceipt);
+        }
+        if (command.method === "startTurn" || command.method === "steerTurn") {
+          const names = [...new Set([...String(input.message?.text ?? "").matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!))];
+          if (names.length) {
+            const { skills } = await runner.catalog();
+            for (const name of names) {
+              const expected = command.skillBindings?.filter((skill) => skill.name === name) ?? [];
+              const actual = skills.filter((skill) => skill.enabled && skill.name === name);
+              if (expected.length !== 1 || actual.length !== 1 || expected[0]!.id !== customerSkillId(workspace.registeredWorkspaceId, actual[0]!.path)) {
+                throw new ConnectorError("skill_catalog_changed", "所选本机技能已变更或有重名，请刷新能力目录后重新选择");
+              }
+            }
+          }
+        }
+        if (command.method === "startTurn") {
+          if (input.providerThread?.nativeThreadRef?.nativeId) {
+            this.providerThreads.set(command.sessionId, input.providerThread);
+          }
+          this.store.transaction(() => {
+            this.store.acquireWorkspace(workspace.registeredWorkspaceId, command.sessionId, String(input.runId));
+            this.store.saveSession({ ...this.store.session(command.sessionId)!, state: "active", runId: String(input.runId), attemptId: String(input.attemptId) });
+          });
+        }
+        dispatched = true;
+        nativeAttempted = true;
+        const result = command.method === "catalog" ? await this.catalogSnapshot(workspace, runner) : await runner.dispatch(command.method, input);
+        if (Buffer.byteLength(JSON.stringify(result)) > 900 * 1024) throw new ConnectorError("result_too_large", "运行结果超过首版单次传输上限；原执行不会被自动重做");
+        if (["ensureThread", "resumeThread"].includes(command.method) && result && typeof result === "object") {
+          const thread = result as { nativeThreadRef?: { nativeId?: string } };
+          if (thread.nativeThreadRef?.nativeId) {
+            this.providerThreads.set(command.sessionId, result);
+            this.store.saveSession({ ...this.store.session(command.sessionId)!, nativeThreadId: thread.nativeThreadRef.nativeId });
+          }
+        }
+        if (command.method === "respondToRuntimeRequest") this.requests.get(command.sessionId)?.delete(String(input.requestId));
+        const receipt: CustomerAgentReceipt = { type: "receipt", commandId: command.commandId, sessionId: command.sessionId,
+          runtimeEpoch: runner.processGeneration, state: "completed", result };
+        this.store.finish(receipt); this.notify(receipt); return receipt;
+      } catch (error) {
+        const notStarted = typeof error === "object" && error !== null && "outcome" in error && error.outcome === "not_started";
+        if (notStarted) nativeAttempted = false;
+        const uncertain = dispatched && !notStarted && !["catalog", "readThreadSnapshot"].includes(command.method);
+        if (command.method === "startTurn" && notStarted) {
+          const active = this.store.session(command.sessionId);
+          if (active && active.runId === input.runId) {
+            this.store.releaseWorkspace(active.workspaceId, command.sessionId, active.runId!);
+            this.store.saveSession({ ...active, state: "idle", runId: null, attemptId: null });
+          }
+        }
+        if (uncertain) this.markUnknown(command.sessionId, "原生命令结果待确认，不自动重发");
+        const receipt = errorReceipt(command, error, uncertain ? "unknown" : "failed");
+        this.store.finish(receipt); this.notify(receipt); return receipt;
+      }
+    } catch (error) {
+      // A second journal failure after a native call must not downgrade unknown execution
+      // into a preflight failure: the center uses failed as safe-to-release evidence.
+      const uncertain = nativeAttempted && !["catalog", "readThreadSnapshot"].includes(command.method);
+      if (uncertain) {
+        try { this.markUnknown(command.sessionId, "原生操作后恢复日志未能完整保存，执行结果待核实", "journal_unavailable"); } catch { /* Preserve unknown in the receipt even if storage is unavailable. */ }
+      }
+      const receipt = errorReceipt(command, error, uncertain ? "unknown" : "failed"); this.notify(receipt); return receipt;
+    }
+  }
+  async capabilities(workspace: LocalWorkspace): Promise<Record<string, unknown>> {
+    this.store.resolveWorkspace(workspace);
+    // Discovery does not leave a permanent app-server per registered directory.
+    const runner = await this.runnerFactory({ instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath,
+      localPolicy: workspace.policy, onEvent: () => {} });
+    this.discoveryRunners.add(runner);
+    try { return await this.catalogSnapshot(workspace, runner); } finally { this.discoveryRunners.delete(runner); await runner.close(); }
+  }
+  private async catalogSnapshot(workspace: LocalWorkspace, runner: HeadlessCodexRunner): Promise<Record<string, unknown>> {
+    const catalog = await runner.catalog();
+    return {
+      registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
+      runtimeId: "codex", protocolVersion: 1,
+      revision: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
+      models: catalog.models.map((model) => {
+        const effort = model.capabilities?.optionDescriptors?.find((option) => option.id === "reasoningEffort");
+        return { id: model.slug, name: model.name,
+          supportedReasoningEfforts: effort?.type === "select" ? effort.options.map((option) => option.id) : [] };
+      }),
+      skills: catalog.skills.filter((skill) => skill.enabled).map((skill) => ({
+        id: customerSkillId(workspace.registeredWorkspaceId, skill.path),
+        name: skill.name, description: skill.description,
+      })),
+      permissions: { approvalPolicy: workspace.policy.approvalPolicy, sandboxMode: workspace.policy.sandboxMode },
+    };
+  }
+  private async requestLocalStop(sessionId: string, message: string): Promise<void> {
+    if (this.stopping.has(sessionId)) return;
+    const runner = this.runners.get(sessionId), providerTurnId = this.providerTurns.get(sessionId), providerThread = this.providerThreads.get(sessionId);
+    if (!runner || !providerTurnId || !providerThread) return;
+    this.stopping.add(sessionId); this.onState(message);
+    try { await runner.dispatch("interruptTurn", { providerTurnId, providerThread }); }
+    catch { this.markUnknown(sessionId, "本机停止结果待确认"); }
+  }
+  enforceLocalRevocations(): void {
+    const revoked = new Set(this.store.workspaces().filter((workspace) => workspace.revoked).map((workspace) => workspace.registeredWorkspaceId));
+    for (const session of this.store.sessions()) {
+      if (revoked.has(session.workspaceId) && session.state === "active") void this.requestLocalStop(session.sessionId, "本机目录授权已撤销，正在请求停止活动执行");
+    }
+  }
+  hasActivity(): boolean {
+    return this.executing > 0 || this.store.sessions().some((session) => session.state !== "idle" && this.runners.has(session.sessionId));
+  }
+  async close(): Promise<void> {
+    await Promise.allSettled([...this.runners.values(), ...this.discoveryRunners].map((runner) => runner.close()));
+    for (const session of this.store.sessions()) if (session.state === "active") this.markUnknown(session.sessionId, "连接程序退出，旧执行需核实");
+    this.runners.clear();
+  }
+}

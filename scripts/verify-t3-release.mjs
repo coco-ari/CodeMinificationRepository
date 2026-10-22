@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto'
 import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, writeFileSync, existsSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { unzipSync } from 'fflate'
 
 const SOURCE_COMMIT = 'fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92'
 const UPSTREAM_VERSION = 'v0.1.1'
 const NATIVE_PATH = 'vendor/t3code/apps/server/node_modules'
 const NATIVE_MANIFEST = 'native-dependencies-manifest.json'
+const CUSTOMER_BUNDLE_PATH = 'dist/customer-agent.zip'
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const fail = (message) => { throw new Error(message) }
 const inside = (root, path) => { const rel = relative(root, path); return rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel) }
@@ -28,6 +30,57 @@ function directory(path) {
 }
 
 function readJson(root, name) { return JSON.parse(readFileSync(regularFile(root, name), 'utf8')) }
+
+// The customer runner is an explicit, self-contained optional artifact. Its
+// presence never enables AUTOOPS_CUSTOMER_AGENTS or configures a download URL.
+export function verifyCustomerAgentBundle(bundlePath, checksumPath = `${bundlePath}.sha256`) {
+  const archivePath = resolve(bundlePath), hashPath = resolve(checksumPath)
+  const stat = lstatSync(archivePath)
+  if (!stat.isFile() || stat.size > 64 * 1024 * 1024 || !lstatSync(hashPath).isFile()) fail('客户安装包和校验文件必须为常规文件，ZIP 不得超过 64 MiB')
+  const archive = readFileSync(archivePath), digest = sha256(archive)
+  const checksum = readFileSync(hashPath, 'utf8').trim().match(/^([a-f0-9]{64})  ([^/\\\r\n]+)$/)
+  if (!checksum || checksum[1] !== digest || checksum[2] !== basename(archivePath)) fail('客户安装包 SHA-256 校验不符')
+  const names = new Set()
+  let expandedBytes = 0
+  const files = unzipSync(archive, { filter: (entry) => {
+    // This distribution has only regular, flat files in customer-agent/.
+    // Reject duplicate/path entries before extraction or decompression.
+    if (!/^customer-agent\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entry.name) || entry.name.endsWith('.map') || names.has(entry.name)) fail('客户安装包包含不安全、重复或不应发布的文件路径')
+    names.add(entry.name)
+    expandedBytes += entry.originalSize
+    if (names.size > 256 || entry.originalSize > 32 * 1024 * 1024 || expandedBytes > 64 * 1024 * 1024) fail('客户安装包展开大小或文件数量超过限制')
+    return true
+  } })
+  const get = (name) => files[`customer-agent/${name}`] ?? fail(`客户安装包缺少文件：${name}`)
+  const json = (name) => JSON.parse(Buffer.from(get(name)).toString('utf8'))
+  const manifest = json('manifest.json')
+  if (manifest.schemaVersion !== 1 || manifest.protocolVersion !== 1 || manifest.node !== '>=24.10' || typeof manifest.connectorVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.connectorVersion) || !manifest.files || typeof manifest.files !== 'object' || Array.isArray(manifest.files)) fail('客户安装包清单版本或格式不符')
+  for (const name of ['autoops-customer-agent.mjs', 'README.md', 'LICENSE-T3-Code', 'THIRD-PARTY-NOTICES.txt', 'third-party-licenses.json', 'dependency-audit.json']) get(name)
+  const expected = new Set(Object.keys(manifest.files))
+  for (const [path, bytes] of Object.entries(files)) {
+    const name = path.slice('customer-agent/'.length)
+    if (name === 'manifest.json') continue
+    const entry = manifest.files[name]
+    if (!expected.delete(name) || !entry || entry.bytes !== bytes.length || entry.sha256 !== sha256(bytes)) fail(`客户安装包文件清单或哈希不符：${name}`)
+  }
+  if (expected.size) fail(`客户安装包清单文件缺失：${expected.values().next().value}`)
+  const audit = json('dependency-audit.json'), notices = json('third-party-licenses.json')
+  if (audit.schemaVersion !== 1 || audit.entry !== 'agent-demo/customer-agent/cli.ts' || audit.auditedAllChunks !== true || !Number.isInteger(audit.sourceModules) || audit.sourceModules < 1 || !Array.isArray(audit.prohibitedPlatformDependencies) || audit.prohibitedPlatformDependencies.length !== 0 || !Array.isArray(notices.entries) || notices.entries.length < 1 || audit.bundledThirdPartyNotices !== notices.entries.length) fail('客户安装包缺少有效的全部分块依赖审计或第三方许可清单')
+  return { format: 'autoops-customer-agent-v1', path: CUSTOMER_BUNDLE_PATH, checksumPath: `${CUSTOMER_BUNDLE_PATH}.sha256`, sha256: digest, bytes: archive.length, connectorVersion: manifest.connectorVersion, protocolVersion: manifest.protocolVersion, node: manifest.node }
+}
+
+function verifyOptionalCustomerBundle(root, manifest) {
+  const present = existsSync(join(root, CUSTOMER_BUNDLE_PATH)) || existsSync(join(root, `${CUSTOMER_BUNDLE_PATH}.sha256`))
+  if (!Object.hasOwn(manifest, 'customerAgent')) {
+    if (present) fail('发布目录包含客户安装包但缺少模块清单')
+    return undefined
+  }
+  const metadata = manifest.customerAgent
+  if (!metadata || metadata.path !== CUSTOMER_BUNDLE_PATH || metadata.checksumPath !== `${CUSTOMER_BUNDLE_PATH}.sha256`) fail('客户安装包发布路径或模块清单不符')
+  const verified = verifyCustomerAgentBundle(regularFile(root, metadata.path), regularFile(root, metadata.checksumPath))
+  if (Object.keys(metadata).length !== Object.keys(verified).length || Object.entries(verified).some(([key, value]) => metadata[key] !== value)) fail('客户安装包与发布模块清单不符')
+  return verified
+}
 
 // Do not follow directory links. Record both the relative link text and its
 // resolved in-tree target, so a different link chain cannot silently pass.
@@ -75,7 +128,7 @@ function verifyReleaseFiles(root, manifest) {
   if (expected.size) fail(`发布清单文件缺失：${expected.keys().next().value}`)
   const provenance = readJson(root, 'vendor/t3code/.autoops-source/manifest.json')
   if (provenance.commit !== SOURCE_COMMIT || provenance.upstreamVersion !== UPSTREAM_VERSION) fail('发布包的上游来源身份不符')
-  return { files: actual.files.length, symlinks: actual.symlinks.length }
+  return { files: actual.files.length, symlinks: actual.symlinks.length, customerAgent: verifyOptionalCustomerBundle(root, manifest) }
 }
 
 function packageIdentities(root, entries) {
@@ -124,7 +177,7 @@ export function verifyT3Release(releaseDirectory, { nativeSource } = {}) {
       recorded = true
     }
   }
-  return { verified: true, release: root, sourceCommit: SOURCE_COMMIT, releaseManifestSha256, releaseFiles: release.files, releaseSymlinks: release.symlinks, nativeFiles: actual.files.length, nativeSymlinks: actual.symlinks.length, nativePackages: identities.length, nativeManifestSha256: sha256(readFileSync(regularFile(root, NATIVE_MANIFEST))), recorded }
+  return { verified: true, release: root, sourceCommit: SOURCE_COMMIT, releaseManifestSha256, releaseFiles: release.files, releaseSymlinks: release.symlinks, ...(release.customerAgent ? { customerAgent: release.customerAgent } : {}), nativeFiles: actual.files.length, nativeSymlinks: actual.symlinks.length, nativePackages: identities.length, nativeManifestSha256: sha256(readFileSync(regularFile(root, NATIVE_MANIFEST))), recorded }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

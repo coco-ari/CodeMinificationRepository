@@ -6,6 +6,7 @@ import { users, projects, agents } from '../fixtures.mjs'
 import { resolveProductProfile } from './product-profile.mjs'
 import { configuredBusinessModels } from './models.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
+import { createCustomerRegistry, normalizeExecutionBinding, requireCustomerAgentsEnabled, isCustomerAgentsEnabled } from './customer-registry.mjs'
 
 // AutoOps business authorization only. T3 remains the sole owner of runs,
 // commands, queues, events and native-provider session state.
@@ -27,7 +28,10 @@ const identifier = (value, name) => {
     fail(400, 'INVALID_ID', `${name}无效`)
   return value
 }
+const sameExecutionBinding = (source, target) => JSON.stringify(normalizeExecutionBinding(source.executionBinding)) === JSON.stringify(normalizeExecutionBinding(target.executionBinding))
 const requireMatchingWorkspaces = (source, target) => {
+  if (!sameExecutionBinding(source, target) || source.executionBinding?.kind === 'customer')
+    fail(403, 'REFERENCE_WORKSPACE_MISMATCH', '客户工作区首版不支持跨对话引入资料')
   if ((source.workspaceType || target.workspaceType) &&
       ['projectId', 'workspaceType', 'workspaceVersionId'].some((key) => source[key] !== target[key]))
     fail(403, 'REFERENCE_WORKSPACE_MISMATCH', '不同工作区或版本的历史资料不能带入此会话，请使用独立新对话')
@@ -40,6 +44,7 @@ const fromRow = (row) => row && ({
   ownerId: row.owner_id,
   visibility: row.visibility,
   createdAt: row.created_at,
+  executionBinding: normalizeExecutionBinding(row.execution_binding_json ? JSON.parse(row.execution_binding_json) : undefined),
   scopeState: row.scope_state || 'locked',
   scopeLocked: (row.scope_state || 'locked') === 'locked',
   ...(row.workspace_type ? { workspaceType: row.workspace_type, workspaceVersionId: row.workspace_version_id } : {}),
@@ -79,14 +84,14 @@ export function initializeAutoOpsAccessSchema(db) {
   `)
   if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === 'revoked_at'))
     db.exec('ALTER TABLE t3_thread_bindings ADD COLUMN revoked_at TEXT')
-  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT'],['scope_state',"TEXT NOT NULL DEFAULT 'locked'"],['submission_command_id','TEXT']]) {
+  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT'],['scope_state',"TEXT NOT NULL DEFAULT 'locked'"],['submission_command_id','TEXT'],['execution_binding_json','TEXT']]) {
     if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === name)) db.exec(`ALTER TABLE t3_thread_bindings ADD COLUMN ${name} ${type}`)
   }
   if (!db.prepare('PRAGMA table_info(t3_attachment_access)').all().some((column) => column.name === 'metadata_json'))
     db.exec('ALTER TABLE t3_attachment_access ADD COLUMN metadata_json TEXT')
 }
 
-export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, projects, agents }, now = Date.now, workspaceStore }) {
+export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, projects, agents }, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry }) {
   const lookupSession = (sessionHash) => {
     const row = sessionDb.prepare('SELECT token,uid,csrf,expires FROM sessions WHERE token=? AND expires>?').get(sessionHash, now())
     const user = row && catalog.users.find((entry) => entry.id === row.uid)
@@ -109,6 +114,21 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
         !Array.isArray(membership.environmentIds) || membership.environmentIds.some((id) => !project.environments.some((environment) => environment.id === id)))
       fail(404, 'PROJECT_NOT_FOUND', '项目不存在或无权访问')
     return { userId, workspaceAccess: membership.workspaceAccess, role: membership.role, environmentIds: [...new Set(membership.environmentIds)], status: 'active' }
+  }
+  const customerRegistry = suppliedCustomerRegistry || createCustomerRegistry({
+    db: bindingDb, now,
+    requireOwner(userId) {
+      const user = catalog.users.find((entry) => entry.id === userId)
+      if (!user || (user.status !== undefined && user.status !== 'active')) fail(401, 'CUSTOMER_OWNER_INACTIVE', '设备所属用户已停用')
+    },
+    requireProjectForUser: membershipForUser,
+  })
+  const bindingAudienceForUser = (userId, binding) => {
+    if (binding.executionBinding?.kind !== 'customer') return workspaceForUser(userId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
+    if (userId !== binding.ownerId || binding.visibility !== 'private') fail(403, 'CUSTOMER_OWNER_REQUIRED', '客户工作区对话仅限设备所有者访问')
+    const membership = membershipForUser(userId, binding.projectId)
+    if (!membership.environmentIds.includes(binding.environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
+    return membership
   }
   const requireMembership = (principal, projectId) => membershipForUser(refresh(principal).id, projectId)
   const requireEnvironment = (principal, projectId, environmentId) => {
@@ -149,10 +169,15 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     ancestors.add(binding.threadId)
     if (binding.nativeParentThreadId) {
       const parent=getThreadBinding(binding.nativeParentThreadId)
-      if (!parent || ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'].some(key=>parent[key]!==binding[key])) fail(403,'THREAD_SCOPE_REVOKED','原生子任务来源已失效')
+      if (!parent || !sameExecutionBinding(parent, binding) || ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'].some(key=>parent[key]!==binding[key])) fail(403,'THREAD_SCOPE_REVOKED','原生子任务来源已失效')
       validateBinding(parent, ancestors)
     }
     if (binding.revokedAt) fail(404, 'THREAD_NOT_FOUND', '会话已删除')
+    if (binding.executionBinding?.kind === 'customer') {
+      normalizeExecutionBinding(binding.executionBinding)
+      if (binding.visibility !== 'private' || binding.workspaceType || binding.workspaceVersionId || binding.agentId !== 'a-project')
+        fail(400, 'INVALID_CUSTOMER_SCOPE', '客户工作区仅支持私有开发对话，不接入平台工作区或报告助手')
+    }
     if (binding.workspaceType) {
       if (!['internal', 'external'].includes(binding.workspaceType) || !binding.workspaceVersionId)
         fail(400, 'INVALID_WORKSPACE_BINDING', '请选择有效的工作区版本')
@@ -173,7 +198,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     if (!binding || (binding.revokedAt && !includeDeleted)) return false
     if (binding.scopeState !== 'locked' && binding.ownerId !== current.id) return false
     try { validateBinding(includeDeleted ? {...binding,revokedAt:undefined} : binding) } catch { return false }
-    try { workspaceForUser(current.id, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId) } catch { return false }
+    try { bindingAudienceForUser(current.id, binding) } catch { return false }
     return binding.visibility === 'project' || binding.ownerId === current.id
   }
   const requireThread = (principal, threadId) => {
@@ -186,7 +211,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     const project = catalog.projects.find((entry) => entry.id === binding.projectId)
     const candidates = binding.visibility === 'private' ? [binding.ownerId] : [...new Set([...(project?.memberIds || []), ...(project?.memberships || []).map((entry) => entry.userId)])]
     return candidates.filter((userId) => {
-      try { workspaceForUser(userId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId); return true } catch { return false }
+      try { bindingAudienceForUser(userId, binding); return true } catch { return false }
     })
   }
   const bindingInput = (current, input) => {
@@ -199,57 +224,66 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       ownerId: current.id,
       visibility: input.visibility,
       createdAt: new Date(now()).toISOString(),
+      executionBinding: normalizeExecutionBinding(input.executionBinding),
       ...(input.workspaceType !== undefined || input.workspaceVersionId !== undefined ? {
         workspaceType: input.workspaceType,
         workspaceVersionId: identifier(input.workspaceVersionId, '工作区版本'),
       } : {}),
     }
     if (!['private', 'project'].includes(binding.visibility)) fail(400, 'INVALID_VISIBILITY', '会话可见范围无效')
-    workspaceForUser(current.id, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
+    bindingAudienceForUser(current.id, binding)
     validateBinding(binding)
+    if (binding.executionBinding.kind === 'customer') { requireCustomerAgentsEnabled(); customerRegistry.validateTarget(current.id, binding.projectId, binding.executionBinding) }
     return binding
   }
   const bindingKeys = ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId']
+  const bindingChanged = (left, right) => !sameExecutionBinding(left, right) || bindingKeys.some((key) => left[key] !== right[key])
   const bindThread = (principal, input) => {
     const current = refresh(principal)
     const binding = bindingInput(current, input)
     const existing = getThreadBinding(binding.threadId)
     if (existing) {
-      if (bindingKeys.some((key) => existing[key] !== binding[key]))
+      if (bindingChanged(existing, binding))
         fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
       return existing
     }
-    if (workspaceStore && !binding.workspaceType)
+    if (workspaceStore && !binding.workspaceType && binding.executionBinding.kind === 'platform')
       fail(400, 'WORKSPACE_REQUIRED', '新对话必须先选择固定的工作区版本')
-    bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
+    bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
       binding.threadId, binding.projectId, binding.environmentId, binding.agentId,
-      binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null,
+      binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding),
     )
     const stored = getThreadBinding(binding.threadId)
-    if (['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'].some((key) => stored[key] !== binding[key]))
+    if (bindingChanged(stored, binding))
       fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
     return stored
   }
   const reserveThread = (principal, input) => {
     const current = refresh(principal), binding = bindingInput(current, input)
-    if (workspaceStore && !binding.workspaceType) fail(400, 'WORKSPACE_REQUIRED', '新对话必须先选择固定的工作区版本')
+    if (workspaceStore && !binding.workspaceType && binding.executionBinding.kind === 'platform') fail(400, 'WORKSPACE_REQUIRED', '新对话必须先选择固定的工作区版本')
     bindingDb.exec('BEGIN IMMEDIATE')
     try {
       const existing = getThreadBinding(binding.threadId)
       if (existing) {
         if (existing.ownerId !== current.id || existing.nativeParentThreadId || existing.revokedAt) fail(409, 'THREAD_BINDING_CONFLICT', '无法修改此会话的范围')
-        const changed = bindingKeys.some((key) => existing[key] !== binding[key])
+        const changed = bindingChanged(existing, binding)
         if (changed && existing.scopeState !== 'draft') fail(409, 'THREAD_SCOPE_LOCKED', '消息提交中或已被接受，请新建对话以切换范围')
-        if (changed) bindingDb.prepare('UPDATE t3_thread_bindings SET project_id=?,environment_id=?,agent_id=?,visibility=?,workspace_type=?,workspace_version_id=? WHERE thread_id=? AND scope_state=\'draft\'').run(binding.projectId, binding.environmentId, binding.agentId, binding.visibility, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, binding.threadId)
+        if (changed) bindingDb.prepare('UPDATE t3_thread_bindings SET project_id=?,environment_id=?,agent_id=?,visibility=?,workspace_type=?,workspace_version_id=?,execution_binding_json=? WHERE thread_id=? AND scope_state=\'draft\'').run(binding.projectId, binding.environmentId, binding.agentId, binding.visibility, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding), binding.threadId)
       } else {
-        bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,scope_state) VALUES(?,?,?,?,?,?,?,?,?,\'draft\')').run(binding.threadId, binding.projectId, binding.environmentId, binding.agentId, binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null)
+        bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json,scope_state) VALUES(?,?,?,?,?,?,?,?,?,?,\'draft\')').run(binding.threadId, binding.projectId, binding.environmentId, binding.agentId, binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding))
       }
       bindingDb.exec('COMMIT')
       return getThreadBinding(binding.threadId)
     } catch (error) { bindingDb.exec('ROLLBACK'); throw error }
   }
+  const requireThreadExecution = (principal, threadId, options = {}) => {
+    const binding = requireThread(principal, threadId)
+    if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史兼容会话仅供查看')
+    if (binding.executionBinding.kind === 'customer') { requireCustomerAgentsEnabled(); customerRegistry.validateTarget(binding.ownerId, binding.projectId, binding.executionBinding, options) }
+    return binding
+  }
   const beginThreadSubmission = (principal, threadId, commandId) => {
-    requireThread(principal, threadId)
+    requireThreadExecution(principal, threadId, { requireOnline: true })
     identifier(commandId, '提交命令ID')
     bindingDb.exec('BEGIN IMMEDIATE')
     try {
@@ -305,6 +339,8 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       return lookupSession(hash(values[0].slice(13)))
     },
     refresh,
+    customerRegistry,
+    requireThreadExecution,
     requireProject: projectFor,
     requireMembership,
     requireEnvironment,
@@ -348,7 +384,8 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     },
     recordThreadAttachment(principal, attachmentId, threadId, metadata) {
       const current = refresh(principal)
-      requireThread(current, threadId)
+      const target = requireThread(current, threadId)
+      if (target.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_ATTACHMENTS_DISABLED', '客户工作区首版未开放附件')
       bindingDb.prepare('INSERT INTO t3_attachment_access(attachment_id,owner_id,thread_id,created_at,metadata_json) VALUES(?,?,?,?,?) ON CONFLICT(attachment_id) DO NOTHING').run(
         identifier(attachmentId, '附件ID'), current.id, threadId, new Date(now()).toISOString(), metadata ? JSON.stringify({ name: metadata.name, mimeType: metadata.mimeType, sizeBytes: metadata.sizeBytes }) : null,
       )
@@ -358,6 +395,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     recordGeneratedAttachment(threadId, attachmentId, metadata) {
       const binding = getThreadBinding(threadId)
       if (!binding) fail(403, 'THREAD_NOT_BOUND', '生成附件没有获授权的业务会话')
+      if (binding.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_ATTACHMENTS_DISABLED', '客户工作区首版未开放附件')
       if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史兼容会话仅供查看')
       validateBinding(binding)
       workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
@@ -369,6 +407,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     },
     forkBinding(principal, sourceThreadId, targetThreadId) {
       const source = requireThread(principal, sourceThreadId)
+      if (source.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_FORK_DISABLED', '客户工作区首版未开放会话分支')
       return bindThread(principal, { ...source, threadId: targetThreadId, visibility: 'private' })
     },
     recordLegacyNativeFork(sourceThreadId, targetThreadId, sourceNativeId, targetNativeId) {
@@ -395,9 +434,12 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     requireToolThread(threadId) {
       const binding = getThreadBinding(threadId)
       if (!binding) fail(403, 'THREAD_NOT_BOUND', '工具调用没有获授权的业务会话')
+      if (binding.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_BUSINESS_TOOLS_DISABLED', '客户工作区首版未开放平台资料、报告和附件工具')
       if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史会话缺少可验证的原生续接记录，仅供查看')
-      workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
-      return validateBinding(binding)
+      const scope = validateBinding(binding)
+      try { workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId) }
+      catch (error) { if (error?.code === 'PROJECT_NOT_FOUND') fail(403, 'THREAD_SCOPE_REVOKED', '会话所属用户的项目授权已失效'); throw error }
+      return scope
     },
     requireReference(principal, sourceThreadId, targetThreadId) {
       const source = requireThread(principal, sourceThreadId)
@@ -437,6 +479,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
         fixedModel: { instanceId: 'codex', model: process.env.AUTOOPS_T3_MODEL || process.env.AGENT_DEMO_MODEL || '' },
         modelSelectionEnabled: Boolean(process.env.AUTOOPS_T3_MODEL || process.env.AGENT_DEMO_MODEL) && configuredBusinessModels().discovered,
         runtimeMode: 'approval-required',
+        customerAgentsEnabled: isCustomerAgentsEnabled(),
         projects: visibleProjects.map(({ id, name, environments }) => ({
           id, name, environments: environments.filter((entry) => membershipForUser(current.id, id).environmentIds.includes(entry.id)), membership: membershipForUser(current.id, id),
           agents: catalog.agents.filter((agent) => agent.projectIds.includes(id)).map(({ id, name }) => ({ id, name })),
