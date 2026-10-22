@@ -16,6 +16,7 @@ import {
   mergeDirectPreviewAnnotation,
   resolveBackgroundDraftWorkspaceOptions,
   resolveDraftHeroState,
+  resolveThreadVisitWatermark,
   shouldDockDraftHeroForSubmission,
 } from "./ChatView.logic";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
@@ -9007,8 +9008,8 @@ function PreviewSessionSync(props: { readonly threadRef: ScopedThreadRef }) {
 }
 
 // The visit watermark is the one part of the chat view that follows the
-// shell's updatedAt, which ticks while a run streams. Keeping it in a leaf lets
-// ChatView read the quiet shell.
+// shell's activity timestamps, which tick while a run streams. Keeping it in a
+// leaf lets ChatView read the quiet shell.
 function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRef }) {
   const serverThread = useThreadShell(props.threadRef);
   const threadKey = scopedThreadKey(props.threadRef);
@@ -9022,28 +9023,37 @@ function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRef }) {
 
   useEffect(() => {
     if (!serverThread?.id) return;
-    const threadUpdatedAt = Date.parse(serverThread.updatedAt);
-    if (Number.isNaN(threadUpdatedAt)) return;
+    const visitWatermark = resolveThreadVisitWatermark({
+      updatedAt: serverThread.updatedAt,
+      latestRunCompletedAt: serverThread.latestRun?.completedAt,
+    });
+    if (visitWatermark === null) return;
+    const visitWatermarkMs = Date.parse(visitWatermark);
+    const dispatchKey = `${threadKey}:${visitWatermark}`;
     const effectiveLastVisitedAt = resolveThreadLastVisitedAt(
       serverThread.lastVisitedAt,
       activeThreadLocalLastVisitedAt,
     );
     const lastVisitedAt = effectiveLastVisitedAt ? Date.parse(effectiveLastVisitedAt) : NaN;
-    if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= threadUpdatedAt) return;
+    if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= visitWatermarkMs) {
+      // An already-confirmed visit also protects a later mark-unread on this
+      // open thread until new activity lands or the thread is reopened.
+      lastDispatchedVisitRef.current = dispatchKey;
+      return;
+    }
 
     if (serverThread.lastVisitedAt !== undefined) {
       // Dedupe per watermark — the effect re-runs before the command's echo
       // lands. The dedupe also keeps a mark-unread on the open thread sticky:
-      // the rewind leaves updatedAt untouched, so the already-dispatched key
+      // the rewind leaves activity untouched, so the already-dispatched key
       // skips a fresh visit until new activity lands or the thread is reopened.
-      const dispatchKey = `${threadKey}:${serverThread.updatedAt}`;
       if (lastDispatchedVisitRef.current === dispatchKey) return;
       const dispatch = () => {
         lastDispatchedVisitRef.current = dispatchKey;
         lastVisitDispatchAtRef.current = Date.now();
         void visitThreadMutation({
           environmentId: serverThread.environmentId,
-          input: { threadId: serverThread.id, visitedAt: serverThread.updatedAt },
+          input: { threadId: serverThread.id, visitedAt: visitWatermark },
         });
       };
       const latestRunCompletedAtMs = serverThread.latestRun?.completedAt
@@ -9063,7 +9073,7 @@ function ThreadVisitWatermark(props: { readonly threadRef: ScopedThreadRef }) {
 
     markThreadVisited(
       scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
-      serverThread.updatedAt,
+      visitWatermark,
     );
   }, [
     activeThreadLocalLastVisitedAt,

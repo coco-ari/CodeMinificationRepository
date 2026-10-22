@@ -2,6 +2,7 @@ import {
   findRecordedWorktreeSetup,
   isThreadWokeUnseen,
   mergeDirectPreviewAnnotation,
+  resolveThreadVisitWatermark,
   resolveVisibleWorktreeSetup,
 } from "./ChatView.logic";
 import {
@@ -49,6 +50,7 @@ import { environmentThreadDetails } from "../state/threads";
 
 import type { Thread, TurnDiffSummary } from "../types";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures";
+import { hasUnseenCompletion } from "./Sidebar.logic";
 import {
   agentControlledBrowserCloseConfirmation,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
@@ -2577,6 +2579,141 @@ describe("mergeDirectPreviewAnnotation", () => {
       direct: { annotation: annotation("a"), image: null },
     });
     expect(result.previewAnnotations).toBe(existing);
+  });
+});
+
+describe("resolveThreadVisitWatermark", () => {
+  const updatedAt = "2026-10-22T10:00:00.000Z";
+  const completedAt = "2026-10-22T10:00:43.000Z";
+
+  it("acknowledges imported completions newer than the shell timestamp", () => {
+    expect(
+      resolveThreadVisitWatermark({ updatedAt, latestRunCompletedAt: completedAt }),
+    ).toBe(completedAt);
+  });
+
+  it("clears the completed badge after a visit and keeps a later completion unread", () => {
+    const thread = {
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: "default" as const,
+      latestRun: {
+        runId: RunId.make("run-completed"),
+        status: "completed" as const,
+        assistantMessageId: null,
+        requestedAt: updatedAt,
+        startedAt: updatedAt,
+        completedAt,
+      },
+      lastVisitedAt: updatedAt,
+      runtime: null,
+    };
+    expect(hasUnseenCompletion(thread)).toBe(true);
+    const lastVisitedAt = resolveThreadVisitWatermark({
+      updatedAt,
+      latestRunCompletedAt: completedAt,
+    });
+    expect(hasUnseenCompletion({ ...thread, lastVisitedAt })).toBe(false);
+    expect(
+      hasUnseenCompletion({
+        ...thread,
+        lastVisitedAt,
+        latestRun: { ...thread.latestRun, completedAt: "2026-10-22T10:01:00.000Z" },
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps later shell activity instead of rewinding to a completed run", () => {
+    expect(
+      resolveThreadVisitWatermark({
+        updatedAt: "2026-10-22T10:01:00.000Z",
+        latestRunCompletedAt: completedAt,
+      }),
+    ).toBe("2026-10-22T10:01:00.000Z");
+  });
+
+  it("advances the visit target for a new completion when updatedAt does not change", () => {
+    const firstVisit = resolveThreadVisitWatermark({
+      updatedAt,
+      latestRunCompletedAt: completedAt,
+    });
+    const nextCompletion = "2026-10-22T10:01:00.000Z";
+    const nextVisit = resolveThreadVisitWatermark({
+      updatedAt,
+      latestRunCompletedAt: nextCompletion,
+    });
+
+    expect(firstVisit).toBe(completedAt);
+    expect(nextVisit).toBe(nextCompletion);
+    expect(nextVisit).not.toBe(firstVisit);
+  });
+
+  it("keeps the activity target unchanged when mark-unread rewinds the visit marker", () => {
+    const thread = {
+      updatedAt,
+      hasActionableProposedPlan: false,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      interactionMode: "default" as const,
+      latestRun: {
+        runId: RunId.make("run-mark-unread"),
+        status: "completed" as const,
+        assistantMessageId: null,
+        requestedAt: updatedAt,
+        startedAt: updatedAt,
+        completedAt,
+      },
+      lastVisitedAt: completedAt,
+      runtime: null,
+    };
+    const markedUnread = {
+      ...thread,
+      lastVisitedAt: "2026-10-22T10:00:42.999Z",
+    };
+    const visitTarget = (state: typeof thread) =>
+      resolveThreadVisitWatermark({
+        updatedAt: state.updatedAt,
+        latestRunCompletedAt: state.latestRun.completedAt,
+      });
+
+    expect(hasUnseenCompletion(thread)).toBe(false);
+    expect(hasUnseenCompletion(markedUnread)).toBe(true);
+    expect(visitTarget(markedUnread)).toBe(visitTarget(thread));
+  });
+
+  it.each([null, undefined, "not a date"])(
+    "uses valid shell activity when the completion is %s",
+    (latestRunCompletedAt) => {
+      expect(resolveThreadVisitWatermark({ updatedAt, latestRunCompletedAt })).toBe(updatedAt);
+    },
+  );
+
+  it("uses a valid completion when the shell timestamp is invalid", () => {
+    expect(
+      resolveThreadVisitWatermark({
+        updatedAt: "not a date",
+        latestRunCompletedAt: completedAt,
+      }),
+    ).toBe(completedAt);
+  });
+
+  it.each([null, undefined, "not a date"])(
+    "has no visit watermark when neither server timestamp is valid (%s)",
+    (latestRunCompletedAt) => {
+      expect(
+        resolveThreadVisitWatermark({ updatedAt: "not a date", latestRunCompletedAt }),
+      ).toBeNull();
+    },
+  );
+
+  it("keeps an equal server watermark stable for dispatch deduplication", () => {
+    expect(
+      resolveThreadVisitWatermark({
+        updatedAt,
+        latestRunCompletedAt: "2026-10-22T18:00:00.000+08:00",
+      }),
+    ).toBe(updatedAt);
   });
 });
 

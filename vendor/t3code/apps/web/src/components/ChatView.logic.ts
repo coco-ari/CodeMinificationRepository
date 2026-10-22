@@ -1367,6 +1367,25 @@ export function mergeDirectPreviewAnnotation(input: {
   return { images, previewAnnotations };
 }
 
+export function resolveThreadVisitWatermark(input: {
+  readonly updatedAt: string;
+  readonly latestRunCompletedAt: string | null | undefined;
+}): string | null {
+  const updatedAtMs = Date.parse(input.updatedAt);
+  const completedAtMs = input.latestRunCompletedAt
+    ? Date.parse(input.latestRunCompletedAt)
+    : NaN;
+  // Imported history can have a completion newer than its shell timestamp.
+  // A visit must acknowledge that completion without using the client's clock.
+  if (
+    !Number.isNaN(completedAtMs) &&
+    (Number.isNaN(updatedAtMs) || completedAtMs > updatedAtMs)
+  ) {
+    return input.latestRunCompletedAt ?? null;
+  }
+  return Number.isNaN(updatedAtMs) ? null : input.updatedAt;
+}
+
 /**
  * Whether a woken thread woke after the user last saw it. A run that completed
  * after the last visit counts as seeing it, since the user watched it finish.
