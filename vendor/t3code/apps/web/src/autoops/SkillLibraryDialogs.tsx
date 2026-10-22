@@ -560,7 +560,9 @@ export function SkillDetailsDialog({
                             onClick={() =>
                               void mutate(
                                 { action: 'unassign', assignmentId: entry.id },
-                                '分配已撤销，后续轮次不能再通过此范围使用技能。',
+                                entry.targetType === 'project'
+                                  ? '已取消项目的单独分配，该项目将沿用助手设置。'
+                                  : '已取消助手的单独分配，现有项目单独分配不变。',
                               )
                             }
                           >

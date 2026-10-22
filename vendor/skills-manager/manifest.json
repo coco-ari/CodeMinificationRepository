@@ -3,7 +3,7 @@
   "version": "1.43.0",
   "commit": "7a2219219287f4ef4c543fc169ebcc5b0bff085c",
   "license": "MIT",
-  "adaptation": "Node Web port; original CLI is not executed",
+  "adaptation": "Node Web management port and skill-centric interactions; T3 visual components; original desktop CLI is not executed",
   "files": [
     {
       "path": "upstream/Cargo.toml",
@@ -44,6 +44,26 @@
     {
       "path": "LICENSE",
       "sha256": "85296e22a24b1af83b2f8e859052f71999dbdf0d631a1d118004b56c21e2f50d"
+    },
+    {
+      "path": "upstream/src/views/MySkills.tsx",
+      "sha256": "6c3fedb6a8a2472ee7717a9b95a014cc4ffea159dd173a91be079d093c54c021"
+    },
+    {
+      "path": "upstream/src/components/SyncDots.tsx",
+      "sha256": "1f60134861684708125f6fb72751784cb70986210631e884169628f8b926c1ba"
+    },
+    {
+      "path": "upstream/src/components/AgentToggleSection.tsx",
+      "sha256": "8f99a908a9612782d195929e5886a9a74bbd84ac6a52537f3c242407da1c5b4e"
+    },
+    {
+      "path": "upstream/src/components/SkillProjectsSection.tsx",
+      "sha256": "74fe828bdc5d1dcae332dbdca52d7fb8b86c257e8d62bc9aab76a1487de686eb"
+    },
+    {
+      "path": "upstream/src/components/SkillDetailPanel.tsx",
+      "sha256": "554b8524421963b3f441ddf70f2e68feda6ca3c52b536af6c0b25293b0b3fbc3"
     }
   ]
 }

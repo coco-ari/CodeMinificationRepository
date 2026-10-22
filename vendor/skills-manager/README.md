@@ -1,8 +1,8 @@
 # Skills Manager 管理机制的 Web 适配
 
-唯一管理来源：<https://github.com/xingkongliang/skills-manager>，版本 `1.43.0`，固定提交 `7a2219219287f4ef4c543fc169ebcc5b0bff085c`。前端仍仅参考仓库内锁定的 T3 Code；不迁入 Skills Manager 的桌面 UI。
+管理与技能分配流程来源：<https://github.com/xingkongliang/skills-manager>，版本 `1.43.0`，固定提交 `7a2219219287f4ef4c543fc169ebcc5b0bff085c`。按用户要求保留“以技能为中心、卡片直接分配”的操作方式；前端组件和视觉仍采用仓库内锁定的 T3 Code，不迁入 Skills Manager 的桌面样式和 Tauri 调用。
 
-本目录保留上游 MIT 许可和相关 Rust 源码原件。`upstream/` 是来源证据，不参与 Node 构建，也不是一个已安装的 Rust CLI。`manifest.json` 保存原件的 SHA-256。任何升级必须重新分析并更新锁定提交和清单。
+本目录保留上游 MIT 许可、相关 Rust 源码及技能卡片/分配组件原件。`upstream/` 是来源证据，不参与 Node 构建，也不是一个已安装的 Rust CLI。`manifest.json` 保存原件的 SHA-256。任何升级必须重新分析并更新锁定提交和清单。
 
 ## 实际复用
 
@@ -16,6 +16,15 @@
 | `core/skill_store.rs` 的来源及 installed commit/content hash | skill/version 的 `source`、`contentHash` | 公开 HTTPS Git 必须指定 40 位提交、可选择子目录；Markdown、ZIP、Git 都保留来源类型。更新产生版本，分配固定版本，不自动升级正在使用的目标。 |
 | `commands/projects.rs` 的中央仓库→项目；`core/sync_engine.rs` 的归属与冲突保护 | assignment 与 runtime 的范围解析 | 桌面 Agent 工具目录改为 AutoOps 业务助手／项目 ID；同技能项目分配优先，显式停用不会回退助手。按 internal/external 再过滤，运行器使用授权快照及只读文件工具。 |
 | 中央库与目标引用分离、卸载保护 | `remove` 与 `unassign` | 有任何分配时禁止从中央库移除；移除只写 tombstone，永久保留不可变版本供已有会话恢复，不删除运行中的包。 |
+| `views/MySkills.tsx` 卡片网格与 `SyncDots` | 中央库技能卡片、助手直接切换、每目标加载反馈 | 保留技能名称/说明/来源和同卡分配入口；Tauri 的 sync/unsync 接到现有 `assign/unassign`。图标改为可读的业务助手名称与选中状态，视觉复用 T3 `ThemeSearchSection` 卡片及原生按钮，不沿用浮升阴影。 |
+| `SkillDetailPanel`、`SkillProjectsSection` | 按需文件详情、卡片项目入口、项目目标搜索和逐项分配 | 上游项目分配在详情，按用户本轮要求将入口前置到卡片；AutoOps 项目以业务 ID 和权限范围授权。取消仅撤回分配并保留包，不执行上游删除项目文件的操作。 |
+| `AgentToggleSection` 的可用/不可用状态与详细目标说明 | 分配状态、未就绪原因与版本/工作区范围设置 | 上游此组件涉及 preset 工具开关；AutoOps 不引入 preset，不将其混同技能全局启停。全局启停继续保留为独立管理操作。 |
+
+## 分配交互的适配规则
+
+卡片直接显示助手分配，项目列表的选中状态表示该项目有单独分配。项目未单独分配时沿用助手设置；取消项目分配会恢复这层继承，不等于完全禁用技能。新增快分配使用卡片显示的就绪版本，默认仅内部；已有停用分配恢复时保留原版本和全部工作区范围。取消分配后再次添加是新分配，不声称恢复已删除的配置。版本升级、外部范围和完整分配信息继续在原生设置弹窗中管理。
+
+首页展示技能集合与分配，文件目录和预览在点击技能后打开。此调整对应上游的高频操作布局：用户在看到技能时就能看到并修改目标，不必先进入文件页再找更多菜单。
 
 ## 为什么没有直接启动原 CLI
 

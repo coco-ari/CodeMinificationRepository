@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { zipSync, strToU8 } from 'fflate'
@@ -28,6 +29,7 @@ const report = {
   steps: [],
   pageErrors: [],
   blockedMutations: [],
+  mutations: [],
   ownedSkillIds: [],
   coverage: { actualApi: true, actualUploads: true, modelCalls: false, actualTouchDevice: false },
   cleanup: {},
@@ -36,7 +38,8 @@ const sessions = [],
   ownedSkills = new Set(),
   ownedAssignments = new Set()
 const client = new T3LiveClient(origin)
-let page, originalCatalog, currentCatalog, readySkill, restrictedSkill
+let page, originalCatalog, currentCatalog, readySkill, restrictedSkill, primaryAgent, secondaryAgent, primaryProject
+const ownedName = name => name === marker || name.startsWith(`${marker}-`)
 const markdown = (name, title, extra = '') =>
   `---\nname: ${name}\ndescription: 检查当前项目授权资料并引用来源\nmetadata:\n  display-name: ${title}\nallowed-tools:\n  - list_project_materials\n  - read_project_document\n---\n\n只读取当前授权项目。引用真实资料来源，不执行任何任意命令。\n\n${extra}`
 const readyMarkdown = markdown(marker, longName)
@@ -85,10 +88,11 @@ async function step(name, action) {
 function captureOwned(catalog) {
   currentCatalog = catalog
   for (const skill of catalog.skills)
-    if (skill.name === marker || skill.name === `${marker}-restricted`) ownedSkills.add(skill.id)
+    if (ownedName(skill.name)) ownedSkills.add(skill.id)
   for (const assignment of catalog.assignments)
     if (ownedSkills.has(assignment.skillId)) ownedAssignments.add(assignment.id)
   report.ownedSkillIds = [...ownedSkills]
+  writeFileSync(path.join(output,'report.json'),JSON.stringify(report,null,2))
 }
 async function catalog() {
   const result = await client.http('/autoops/skill-library')
@@ -106,6 +110,7 @@ async function mutation(action, click, expectOk = true) {
   await click()
   const response = await resultPromise
   const result = await response.json()
+  report.mutations.push({action,body:response.request().postDataJSON(),status:response.status()})
   assert.equal(response.ok(), expectOk, JSON.stringify(result))
   if (response.ok()) {
     captureOwned(result)
@@ -216,11 +221,72 @@ async function management(session, id) {
   await page.goto(`${origin}/agent-demo.html#/skills`)
   await page.locator('[data-skill-library]').waitFor()
   await closeMobileSidebar(session)
+  const back=page.getByRole('button',{name:'返回技能库',exact:true})
+  if(await back.isVisible())await back.click()
   await page.locator('[aria-label="技能管理范围"]').getByText('中央技能库', { exact: true }).click()
+  const refreshed=page.waitForResponse(response=>response.request().method()==='GET'&&response.url().endsWith('/autoops/skill-library'))
+  void refreshed.catch(()=>{})
+  await page.getByRole('button',{name:'刷新技能库',exact:true}).click()
+  const response=await refreshed
+  assert.equal(response.status(),200)
+  captureOwned(await response.json())
+  await until(()=>page.getByRole('button',{name:'刷新技能库',exact:true}).isEnabled(),'目录刷新完成')
   if (id) {
     await page.locator(`[data-skill-row="${id}"]`).click()
     await page.getByRole('button', { name: '技能操作', exact: true }).waitFor()
   }
+}
+const skillCard = id => page.locator(`[data-skill-card="${id}"]`)
+const targetSelector = (type,id) => `[data-skill-target-type="${type}"][data-skill-target-id="${id}"]`
+const agentTarget = (skillId,agentId) => skillCard(skillId).locator(targetSelector('agent',agentId))
+const assignedTo = (skillId,type,id) => currentCatalog.assignments.find(entry=>entry.skillId===skillId&&entry.targetType===type&&entry.targetId===id)
+async function ownedMutation(body) {
+  assert(body.action.startsWith('import-') ? body.skillId ? ownedSkills.has(body.skillId) : body.contents?.includes(marker)||body.fileName?.includes(marker) : body.action==='unassign' ? ownedAssignments.has(body.assignmentId) : ownedSkills.has(body.skillId),'API准备只能改本轮数据')
+  const before=await catalog()
+  const next=await client.http('/autoops/skill-library','POST',{revision:before.revision,...body})
+  captureOwned(next)
+  return next
+}
+async function projectPopover(skill) {
+  const trigger=skillCard(skill.id).getByRole('button',{name:`项目分配：${skill.displayName}`,exact:true})
+  await trigger.scrollIntoViewIfNeeded()
+  if(sessions.some(session=>session.page===page&&session.touch))await trigger.tap()
+  else await trigger.click()
+  const list=page.locator('[aria-label="项目分配列表"]')
+  await list.waitFor()
+  return {trigger,list}
+}
+async function closeProjectPopover(trigger) {
+  await page.keyboard.press('Escape')
+  await until(async()=>await page.locator('[aria-label="项目分配列表"]').count()===0,'项目浮层应关闭')
+  await until(()=>trigger.evaluate(element=>element===document.activeElement),'项目浮层关闭后恢复入口焦点')
+}
+async function assertQuickView() {
+  assert.equal(await page.locator('[aria-label="技能详情"]:visible').count(),0,'快切不应打开技能文件详情')
+}
+async function delayedRefreshGuard(skillId,agentId) {
+  await until(()=>agentTarget(skillId,agentId).isEnabled(),'目录载入完成后再验证刷新')
+  let release,received=false,completed,routeError,claimed=false
+  const pending=new Promise(resolve=>{release=resolve})
+  const finished=new Promise(resolve=>{completed=resolve})
+  const handler=async route=>{
+    if(route.request().method()!=='GET'||claimed)return route.fallback()
+    claimed=true
+    try {
+      const response=await route.fetch();received=true
+      await pending
+      await route.fulfill({response})
+    }catch(error){routeError=error}finally{completed()}
+  }
+  await page.route('**/autoops/skill-library',handler)
+  try {
+    await page.getByRole('button',{name:'刷新技能库',exact:true}).click()
+    await until(()=>received,'应收到被延迟的真实目录GET')
+    assert.equal(await agentTarget(skillId,agentId).isDisabled(),true,'刷新未完成时卡片写入口必须禁用')
+    assert.equal(await page.getByRole('button',{name:'导入技能',exact:true}).isDisabled(),true)
+  }finally{release();if(claimed)await finished;await page.unroute('**/autoops/skill-library',handler)}
+  if(routeError)throw routeError
+  await until(async()=>!(await agentTarget(skillId,agentId).isDisabled()),'真实刷新响应结束后恢复快切')
 }
 async function menu(label) {
   await page.getByRole('button', { name: '技能操作', exact: true }).click()
@@ -255,7 +321,7 @@ async function theme(session, mode) {
   )
 }
 async function geometry(name) {
-  if (!name.endsWith('-list') && !name.endsWith('-dialog')) {
+  if (!name.endsWith('-list') && !name.endsWith('-dialog') && !name.endsWith('-popover')) {
     await page
       .locator('[aria-label="技能详情"] .chat-markdown')
       .filter({ hasText: marker })
@@ -280,27 +346,33 @@ async function geometry(name) {
     })
     const areas = [
       ...document.querySelectorAll(
-        '[aria-label="技能列表"] [data-slot="scroll-area-viewport"], [data-slot="dialog-panel"]',
+        '[aria-label="技能列表"] [data-slot="scroll-area-viewport"], [data-slot="dialog-panel"], [aria-label="项目分配列表"]',
       ),
     ]
       .filter((element) => element.getBoundingClientRect().height > 0)
       .map((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }))
     const controls = [
       ...root.querySelectorAll(
-        '[aria-label="技能库工具栏"] button, [aria-label="技能操作"], [data-skill-row]',
+        '[aria-label="技能库工具栏"] button, [aria-label="技能操作"], [data-skill-row], [data-skill-target-type]',
       ),
     ]
       .filter((element) => element.getBoundingClientRect().height > 0)
       .map((element) => ({
         label: element.getAttribute('aria-label') || element.textContent?.slice(0, 32),
         rect: rect(element.getBoundingClientRect()),
+        target:element.hasAttribute('data-skill-target-type'),
       }))
+    const popover=document.querySelector('[aria-label="项目分配列表"]')
+    const popup=popover?.closest('[data-slot="popover-popup"], [data-slot="popover-content"], [role="dialog"]')??popover
     return {
       root: rect(bounds),
       viewport: { width: innerWidth, height: innerHeight },
       documentWidth: document.documentElement.scrollWidth,
       areas,
       controls,
+      popup:popup?rect(popup.getBoundingClientRect()):null,
+      popupTargets:popover?[...popover.querySelectorAll('[data-skill-target-type]')].map(element=>rect(element.getBoundingClientRect())):[],
+      coarse:matchMedia('(pointer: coarse)').matches,
     }
   })
   report.lastGeometry = { name, ...measured }
@@ -316,6 +388,9 @@ async function geometry(name) {
       control.rect.left >= measured.root.left - 2 && control.rect.right <= measured.root.right + 2,
       `${control.label} 超出页面边界`,
     )
+  if(measured.popup)assert(measured.popup.left>=-2&&measured.popup.right<=measured.viewport.width+2&&measured.popup.top>=-2&&measured.popup.bottom<=measured.viewport.height+2,'项目浮层必须完整落在视窗内')
+  for(const target of measured.popupTargets)assert(target.left>=-2&&target.right<=measured.viewport.width+2,'项目选择按钮不能超出浮层视窗边界')
+  if(measured.coarse)for(const rect of [...measured.controls.filter(control=>control.target).map(control=>control.rect),...measured.popupTargets])assert(rect.height>=43,'触屏分配控件点击高度应至少44px')
   await page.screenshot({ path: path.join(output, `${name}.png`) })
   return measured
 }
@@ -334,6 +409,11 @@ async function importFile(buffer, filename, action) {
 try {
   await client.login()
   originalCatalog = await catalog()
+  await writeFile(path.join(output,'original-catalog.json'),JSON.stringify(originalCatalog,null,2))
+  primaryAgent=originalCatalog.agents.find(entry=>entry.id==='a-project')??originalCatalog.agents[0]
+  secondaryAgent=originalCatalog.agents.find(entry=>entry.id!==primaryAgent.id)
+  primaryProject=originalCatalog.projects.find(entry=>entry.id==='p-autoops'&&primaryAgent.projectIds.includes(entry.id))??originalCatalog.projects.find(entry=>primaryAgent.projectIds.includes(entry.id))
+  assert(primaryAgent&&secondaryAgent&&primaryProject,'验收需要两个助手和至少一个授权项目')
   const desktop = await openSession()
   await step('markdown-import-and-agent-assignment', async () => {
     await page.getByRole('button', { name: '导入技能', exact: true }).click()
@@ -346,16 +426,35 @@ try {
     readySkill = currentCatalog.skills.find((skill) => skill.name === marker)
     assert(readySkill)
     assert.equal(readySkill.versions[0].readiness, 'ready')
-    await page.locator(`[data-skill-row="${readySkill.id}"]`).click()
-    await menu('分配技能')
-    await choose('分配目标助手', currentCatalog.agents[0].name)
-    await mutation('assign', () =>
-      page.getByRole('button', { name: '保存分配', exact: true }).click(),
-    )
-    await dialogClosed()
-    const assigned = currentCatalog.assignments.find((entry) => entry.skillId === readySkill.id)
+    await management(desktop)
+    const target=agentTarget(readySkill.id,primaryAgent.id)
+    await target.waitFor()
+    await page.screenshot({path:path.join(output,'initial-desktop-cards.png')})
+    await delayedRefreshGuard(readySkill.id,primaryAgent.id)
+    await mutation('assign',()=>target.click())
+    await assertQuickView()
+    let assigned = assignedTo(readySkill.id,'agent',primaryAgent.id)
     assert.deepEqual(assigned.workspaceTypes, ['internal'])
-    return { skillId: readySkill.id, assignmentId: assigned.id, versionId: assigned.versionId }
+    assert.equal(await target.getAttribute('aria-pressed'),'true')
+    await mutation('unassign',()=>target.click())
+    assert.equal(assignedTo(readySkill.id,'agent',primaryAgent.id),undefined)
+    assert.equal(await target.getAttribute('aria-pressed'),'false')
+    await target.focus()
+    await mutation('assign',()=>page.keyboard.press('Enter'))
+    assigned=assignedTo(readySkill.id,'agent',primaryAgent.id)
+    const originalAgent=structuredClone(assigned)
+    const {trigger,list}=await projectPopover(readySkill)
+    const project=list.locator(targetSelector('project',primaryProject.id))
+    await mutation('assign',()=>project.click())
+    assert.deepEqual(assignedTo(readySkill.id,'project',primaryProject.id).workspaceTypes,['internal'])
+    assert.equal(await project.getAttribute('aria-pressed'),'true')
+    await mutation('unassign',()=>project.click())
+    assert.equal(assignedTo(readySkill.id,'project',primaryProject.id),undefined)
+    assert.deepEqual(assignedTo(readySkill.id,'agent',primaryAgent.id),originalAgent,'项目快切不可改写助手绑定')
+    await closeProjectPopover(trigger)
+    await assertQuickView()
+    await management(desktop,readySkill.id)
+    return { skillId: readySkill.id, assignmentId: assigned.id, versionId: assigned.versionId,agentQuickToggle:true,projectPopoverQuickToggle:true,keyboardAssign:true,defaultInternal:true,refreshBlocksWrites:true }
   })
   await step('archive-new-version-pinned-assignment-and-files', async () => {
     const first = currentCatalog.assignments.find((entry) => entry.skillId === readySkill.id)
@@ -390,7 +489,41 @@ try {
       relativePackageLinksVerified: true,
     }
   })
+  await step('quick-toggles-preserve-pinned-version-and-external-scope',async()=>{
+    const oldVersion=readySkill.versions.find(version=>version.id!==readySkill.latestVersionId).id
+    await ownedMutation({action:'assign',skillId:readySkill.id,targetType:'agent',targetId:primaryAgent.id,versionId:oldVersion,workspaceTypes:['internal','external'],enabled:true})
+    await management(desktop)
+    const preserved=structuredClone(assignedTo(readySkill.id,'agent',primaryAgent.id))
+    const second=agentTarget(readySkill.id,secondaryAgent.id)
+    await mutation('assign',()=>second.click())
+    assert.equal(assignedTo(readySkill.id,'agent',secondaryAgent.id).versionId,readySkill.latestVersionId)
+    assert.deepEqual(assignedTo(readySkill.id,'agent',secondaryAgent.id).workspaceTypes,['internal'])
+    assert.deepEqual(assignedTo(readySkill.id,'agent',primaryAgent.id),preserved)
+    await mutation('unassign',()=>second.click())
+    assert.deepEqual(assignedTo(readySkill.id,'agent',primaryAgent.id),preserved)
+    await ownedMutation({action:'assign',skillId:readySkill.id,targetType:'agent',targetId:primaryAgent.id,versionId:oldVersion,workspaceTypes:['internal','external'],enabled:false})
+    await management(desktop)
+    const primary=agentTarget(readySkill.id,primaryAgent.id)
+    assert.equal(await primary.getAttribute('aria-pressed'),'false')
+    await mutation('assign',()=>primary.click())
+    const restored=assignedTo(readySkill.id,'agent',primaryAgent.id)
+    assert.equal(restored.versionId,oldVersion);assert.deepEqual(restored.workspaceTypes,['internal','external']);assert.equal(restored.enabled,true)
+    await ownedMutation({action:'assign',skillId:readySkill.id,targetType:'project',targetId:primaryProject.id,versionId:oldVersion,workspaceTypes:['external'],enabled:false})
+    await management(desktop)
+    const {trigger,list}=await projectPopover(readySkill),project=list.locator(targetSelector('project',primaryProject.id))
+    assert.equal(await project.getAttribute('aria-pressed'),'false')
+    await mutation('assign',()=>project.click())
+    const restoredProject=assignedTo(readySkill.id,'project',primaryProject.id)
+    assert.equal(restoredProject.versionId,oldVersion);assert.deepEqual(restoredProject.workspaceTypes,['external']);assert.equal(restoredProject.enabled,true)
+    assert.deepEqual(assignedTo(readySkill.id,'agent',primaryAgent.id),restored)
+    await mutation('unassign',()=>project.click())
+    await closeProjectPopover(trigger)
+    await assertQuickView()
+    await management(desktop,readySkill.id)
+    return {oldVersion,latestVersion:readySkill.latestVersionId,otherTargetDoesNotRewrite:true,disabledAgentRestored:true,disabledProjectRestored:true,externalPreserved:true}
+  })
   await step('scope-version-update-and-project-assignment', async () => {
+    await page.getByRole('button',{name:'返回技能库',exact:true}).click()
     await page.locator('[aria-label="技能管理范围"]').getByText('助手技能', { exact: true }).click()
     await page.locator(`[data-skill-row="${readySkill.id}"]`).click()
     await menu('调整当前分配')
@@ -404,6 +537,7 @@ try {
       currentCatalog.assignments.find((entry) => entry.skillId === readySkill.id).versionId,
       readySkill.latestVersionId,
     )
+    await page.getByRole('button',{name:'返回技能库',exact:true}).click()
     await page.locator('[aria-label="技能管理范围"]').getByText('项目技能', { exact: true }).click()
     await page.getByRole('button', { name: '添加技能', exact: true }).click()
     await choose('分配的技能', longName)
@@ -491,6 +625,7 @@ try {
           .evaluate((element) => element === document.activeElement),
       '菜单弹窗关闭后应恢复操作入口焦点',
     )
+    await page.getByRole('button',{name:'返回技能库',exact:true}).click()
     await page.getByRole('button', { name: '导入技能', exact: true }).click()
     await page.locator('[aria-label="技能导入方式"]').getByText('粘贴正文', { exact: true }).click()
     await page
@@ -523,7 +658,8 @@ try {
     restrictedSkill = currentCatalog.skills.find((entry) => entry.name === `${marker}-restricted`)
     assert(restrictedSkill)
     assert.equal(restrictedSkill.versions[0].readiness, 'restricted')
-    await page.getByText(/运行条件未满足：/).waitFor()
+    await management(desktop,restrictedSkill.id)
+    await page.locator('[aria-label="技能详情"]').getByText(/运行条件未满足：/).waitFor()
     await page.getByRole('button', { name: '技能操作', exact: true }).click()
     assert.equal(
       await page.getByRole('menuitem', { name: '分配技能', exact: true }).isDisabled(),
@@ -536,6 +672,48 @@ try {
       notPretendingReady: true,
     }
   })
+  await step('disabled-and-restricted-cards-block-additions-but-allow-revoke',async()=>{
+    const preserved=currentCatalog.assignments.filter(entry=>entry.skillId===readySkill.id).map(entry=>structuredClone(entry))
+    await ownedMutation({action:'set-enabled',skillId:readySkill.id,enabled:false})
+    await management(desktop)
+    assert.equal(await agentTarget(readySkill.id,secondaryAgent.id).isDisabled(),true,'全局停用不可新增助手分配')
+    assert.equal(await agentTarget(readySkill.id,primaryAgent.id).isDisabled(),false,'全局停用仍允许撤回既有助手分配')
+    await mutation('unassign',()=>agentTarget(readySkill.id,primaryAgent.id).click())
+    let popup=await projectPopover(readySkill)
+    const project=popup.list.locator(targetSelector('project',primaryProject.id))
+    assert.equal(await project.isDisabled(),false,'全局停用仍允许撤回既有项目分配')
+    await mutation('unassign',()=>project.click())
+    assert.equal(await project.isDisabled(),true,'全局停用撤回后不可新增')
+    await closeProjectPopover(popup.trigger)
+    assert.equal(currentCatalog.skills.find(entry=>entry.id===readySkill.id).enabled,false,'快切不可自动全局启用')
+    await ownedMutation({action:'set-enabled',skillId:readySkill.id,enabled:true})
+    for(const entry of preserved)await ownedMutation({action:'assign',skillId:entry.skillId,versionId:entry.versionId,targetType:entry.targetType,targetId:entry.targetId,workspaceTypes:entry.workspaceTypes,enabled:entry.enabled})
+    // A restricted new version must not prevent revoking an older ready binding.
+    const name=`${marker}-restricted-upgrade`
+    await ownedMutation({action:'import-markdown',contents:markdown(name,`${marker} 已分配旧版后升级为未就绪`)})
+    let skill=currentCatalog.skills.find(entry=>entry.name===name)
+    const oldVersion=skill.latestVersionId
+    for(const [targetType,targetId] of [['agent',primaryAgent.id],['project',primaryProject.id]])await ownedMutation({action:'assign',skillId:skill.id,versionId:oldVersion,targetType,targetId,workspaceTypes:['internal','external']})
+    await ownedMutation({action:'import-archive',skillId:skill.id,fileName:`${name}.zip`,archiveBase64:Buffer.from(zipSync({'SKILL.md':strToU8(markdown(name,`${marker} 已分配旧版后升级为未就绪`,'运行 scripts/check.sh。')),'scripts/check.sh':strToU8('#!/bin/sh\nprintf unavailable\n')})).toString('base64')})
+    skill=currentCatalog.skills.find(entry=>entry.id===skill.id)
+    assert.equal(skill.versions.find(version=>version.id===skill.latestVersionId).readiness,'restricted')
+    await management(desktop)
+    assert.equal(await agentTarget(skill.id,secondaryAgent.id).isDisabled(),true)
+    assert.equal(await agentTarget(skill.id,primaryAgent.id).isDisabled(),false)
+    await mutation('unassign',()=>agentTarget(skill.id,primaryAgent.id).click())
+    popup=await projectPopover(skill)
+    await mutation('unassign',()=>popup.list.locator(targetSelector('project',primaryProject.id)).click())
+    await closeProjectPopover(popup.trigger)
+    assert.equal(await agentTarget(restrictedSkill.id,primaryAgent.id).isDisabled(),true)
+    await assertQuickView()
+    return {globallyDisabledNoAdd:true,globallyDisabledCanRevoke:true,restrictedLatestCanRevokeReadyAssignment:true,neverAutoEnabled:true}
+  })
+  await step('owned-long-name-card-scroll-fixtures',async()=>{
+    for(let index=0;index<12;index++)await ownedMutation({action:'import-markdown',contents:markdown(`${marker}-scroll-${index}`,`${marker} ${index} ${'长标题用于检查卡片控件省略与内部滚动'.repeat(3)}`.slice(0,76))})
+    await management(desktop)
+    assert((await page.locator('[data-skill-card]').count())>=15)
+    return {ownedScrollCards:12,onlyOwnUuidNames:true}
+  })
   for (const [name, session, size] of [
     ['desktop', desktop, { width: 1440, height: 900 }],
     ['short', desktop, { width: 1440, height: 560 }],
@@ -547,6 +725,37 @@ try {
       const checks = []
       for (const mode of ['light', 'dark']) {
         await theme(session, mode)
+        await management(session)
+        checks.push(await geometry(`${name}-${mode}-list`))
+        const scroll = page.locator('[aria-label="技能列表"] [data-slot="scroll-area-viewport"]').first()
+        const scrolling=await scroll.evaluate(element=>{const before=element.scrollTop;element.scrollTop=element.scrollHeight;return {before,after:element.scrollTop,height:element.clientHeight,total:element.scrollHeight}})
+        assert(scrolling.total>scrolling.height&&scrolling.after>0,'多卡列表必须有独立可用滚动')
+        const lastCard=currentCatalog.skills.find(skill=>skill.name===`${marker}-scroll-11`)
+        assert(lastCard)
+        await skillCard(lastCard.id).scrollIntoViewIfNeeded()
+        const beforeDetails=await scroll.evaluate(element=>element.scrollTop)
+        assert(beforeDetails>0,'滚动恢复必须在真实非零位置验证')
+        await page.locator(`[data-skill-row="${lastCard.id}"]`).click()
+        await page.getByRole('button',{name:'返回技能库',exact:true}).click()
+        await until(()=>page.locator(`[data-skill-row="${lastCard.id}"]`).evaluate(element=>element===document.activeElement),'返回后恢复末尾长标题卡片的焦点')
+        await until(async()=>Math.abs((await scroll.evaluate(element=>element.scrollTop))-beforeDetails)<=2,'文件详情返回后应恢复原卡片滚动位置')
+        await skillCard(readySkill.id).scrollIntoViewIfNeeded()
+        const {trigger,list}=await projectPopover(readySkill)
+        await page.getByLabel('搜索分配项目',{exact:true}).fill(primaryProject.name)
+        await list.locator(targetSelector('project',primaryProject.id)).waitFor()
+        checks.push(await geometry(`${name}-${mode}-popover`))
+        await closeProjectPopover(trigger)
+        // Opening and leaving details must restore the exact card and its focus.
+        await page.locator(`[data-skill-row="${readySkill.id}"]`).click()
+        await page.getByRole('button',{name:'返回技能库',exact:true}).click()
+        await until(()=>page.locator(`[data-skill-row="${readySkill.id}"]`).evaluate(element=>element===document.activeElement),'返回卡片应恢复查看按钮焦点')
+        await skillCard(readySkill.id).getByRole('button',{name:`项目分配：${readySkill.displayName}`,exact:true}).focus()
+        await page.keyboard.press('Enter')
+        await page.locator('[aria-label="项目分配列表"]').waitFor()
+        await page.keyboard.press('Tab')
+        const focusInPopover=await page.evaluate(()=>{const active=document.activeElement;return Boolean(active?.closest('[data-slot="popover-popup"], [data-slot="popover-content"], [role="dialog"]')||active?.closest('[aria-label="项目分配列表"]'))})
+        assert(focusInPopover,'键盘焦点应进入项目浮层')
+        await closeProjectPopover(skillCard(readySkill.id).getByRole('button',{name:`项目分配：${readySkill.displayName}`,exact:true}))
         await management(session, readySkill.id)
         checks.push(await geometry(`${name}-${mode}`))
         await page.getByRole('button', { name: '技能操作', exact: true }).click()
@@ -565,7 +774,7 @@ try {
         await page.keyboard.press('Escape')
         await dialogClosed()
         if (session.touch) {
-          await page.getByRole('button', { name: '返回技能列表', exact: true }).click()
+          await page.getByRole('button', { name: '返回技能库', exact: true }).click()
           await page.locator(`[data-skill-row="${readySkill.id}"]`).waitFor()
           await until(
             () =>
@@ -607,9 +816,10 @@ try {
       )
       await dialogClosed()
     }
+    for(const skill of currentCatalog.skills.filter(entry=>ownedSkills.has(entry.id)))await ownedMutation({action:'delete',skillId:skill.id})
     const after = await catalog()
     assert(!after.skills.some((entry) => ownedSkills.has(entry.id)))
-    return { revocations: 2, deleted: 2 }
+    return { uiDeletions: 2, allOwnedRemoved: true }
   })
   assert.deepEqual(report.pageErrors, [])
   assert.deepEqual(report.blockedMutations, [])
@@ -631,7 +841,7 @@ try {
       captureOwned(current)
     }
     for (const skill of current.skills.filter(
-      (entry) => ownedSkills.has(entry.id) && [marker, `${marker}-restricted`].includes(entry.name),
+      (entry) => ownedSkills.has(entry.id) && ownedName(entry.name),
     )) {
       current = await client.http('/autoops/skill-library', 'POST', {
         revision: current.revision,
