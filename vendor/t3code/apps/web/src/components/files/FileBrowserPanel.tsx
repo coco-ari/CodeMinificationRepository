@@ -4,7 +4,7 @@ import type {
   ContextMenuItem as TreeContextMenuItem,
   ContextMenuOpenContext as TreeContextMenuOpenContext,
 } from "@pierre/trees";
-import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectEntry, ProjectListEntriesResult } from "@t3tools/contracts";
 import { FileTree, useFileTree, useFileTreeSearch, useFileTreeSelector } from "@pierre/trees/react";
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
@@ -35,6 +35,7 @@ import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
 import { loadFileAncestors } from "./loadFileAncestors";
 import { useDirectoryEntries } from "./useDirectoryEntries";
 import { useProjectPathSearch } from "~/state/queries";
+import { useReadOnlyFileSource, type ReadOnlyFileSource } from "./readOnlyFileSource";
 
 interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
@@ -52,6 +53,25 @@ interface FileBrowserPanelProps {
   hostFolder?: boolean;
   onRefreshSelectedFile?: () => void;
   workspaceMutationId: string | null;
+}
+
+function useReadOnlyPathSearch(source: ReadOnlyFileSource | undefined, query: string) {
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{ key: string; data?: ProjectListEntriesResult; error?: string } | null>(null);
+  const key = source && query.trim() ? `${source.id}:${query}:${revision}` : null;
+  useEffect(() => {
+    if (!source || !key) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void source.search(query.slice(0, 256), 200).then(
+        (data) => { if (active) setResult({ key, data }); },
+        (error: unknown) => { if (active) setResult({ key, error: error instanceof Error ? error.message : "文件搜索失败。" }); },
+      );
+    }, 120);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [source, key, query]);
+  const current = result?.key === key ? result : null;
+  return { entries: current?.data?.entries ?? [], error: current?.error ?? null, isPending: key !== null && !current, truncated: current?.data?.truncated ?? false, refresh: () => setRevision((value) => value + 1) };
 }
 
 function treePath(entry: ProjectEntry): string {
@@ -150,6 +170,7 @@ export default function FileBrowserPanel({
   workspaceMutationId,
   hostFolder = false,
 }: FileBrowserPanelProps) {
+  const readOnlySource = useReadOnlyFileSource();
   const panelPath = (relativePath: string) =>
     hostFolder ? joinHostPath(cwd, relativePath) : relativePath;
   const { resolvedTheme } = useTheme();
@@ -166,10 +187,12 @@ export default function FileBrowserPanel({
   } = useDirectoryEntries(environmentId, cwd);
   const [query, setQuery] = useState("");
   const [expandAll, setExpandAll] = useState(false);
-  const pathSearch = useProjectPathSearch(
-    { environmentId, cwd: hostFolder ? null : cwd, query: query.slice(0, 256) },
+  const nativePathSearch = useProjectPathSearch(
+    { environmentId, cwd: hostFolder || readOnlySource ? null : cwd, query: query.slice(0, 256) },
     200,
   );
+  const sourcePathSearch = useReadOnlyPathSearch(readOnlySource, query);
+  const pathSearch = readOnlySource ? sourcePathSearch : nativePathSearch;
   const { entries, entryKinds, treePaths, directoryPaths, expandableDirectoryPaths } =
     buildTreeEntries(directoryEntries, pathSearch.entries, pathSearch.isPending, query);
   const entryKindsRef = useRef(entryKinds);
@@ -192,13 +215,14 @@ export default function FileBrowserPanel({
 
   const showEntryContextMenu = useStableCallback(
     (item: TreeContextMenuItem, context: TreeContextMenuOpenContext) => {
+      if (readOnlySource?.allowReferences === false) { context.close(); return; }
       const api = readLocalApi();
       if (!api) {
         context.close();
         return;
       }
       const relativePath = item.path.replace(/\/$/, "");
-      const mention = serializeComposerFileLink(panelPath(relativePath));
+      const mention = serializeComposerFileLink(readOnlySource ? readOnlySource.mentionPath(relativePath) : panelPath(relativePath));
       const pointer = contextMenuPointerRef.current;
       const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
       const anchorRect = context.anchorElement.getBoundingClientRect();
@@ -206,7 +230,7 @@ export default function FileBrowserPanel({
         ? { x: pointer.x, y: pointer.y }
         : { x: anchorRect.left, y: anchorRect.bottom };
       const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: cwd };
-      const fileMenuItems = isAutoOpsResourceCwd(cwd) ? [] : fileContextMenu.buildItems(fileTarget);
+      const fileMenuItems = readOnlySource || isAutoOpsResourceCwd(cwd) ? [] : fileContextMenu.buildItems(fileTarget);
       void settlePromise(async () => {
         const clicked = await api.contextMenu.show(
           [
@@ -271,7 +295,7 @@ export default function FileBrowserPanel({
 
   const loadingDirectoriesRef = useRef(loadingDirectories);
   const dragMention = createFileTreeDragMentionController(
-    hostFolder ? { mentionPath: (path: string) => joinHostPath(cwd, path) } : {},
+    readOnlySource ? { mentionPath: readOnlySource.mentionPath } : hostFolder ? { mentionPath: (path: string) => joinHostPath(cwd, path) } : {},
   );
   const { model } = useFileTree({
     composition: {
@@ -495,7 +519,10 @@ export default function FileBrowserPanel({
     if (panel === null) {
       return;
     }
-    const handleDragStart = (event: DragEvent) => dragMention.handleDragStart(event);
+    const handleDragStart = (event: DragEvent) => {
+      if (readOnlySource?.allowReferences === false) { event.preventDefault(); return; }
+      dragMention.handleDragStart(event);
+    };
     const handleDragEnd = () =>
       dragMention.handleDragEnd((path) => model.getItem(path)?.deselect());
     panel.addEventListener("dragstart", handleDragStart, true);
@@ -504,7 +531,7 @@ export default function FileBrowserPanel({
       panel.removeEventListener("dragstart", handleDragStart, true);
       panel.removeEventListener("dragend", handleDragEnd);
     };
-  }, [dragMention, model]);
+  }, [dragMention, model, readOnlySource]);
 
   return (
     <div

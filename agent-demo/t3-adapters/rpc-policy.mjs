@@ -101,7 +101,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if(Object.keys(payload).some(key=>!['instanceId','cwd','fresh'].includes(key)) || (payload.instanceId!==undefined&&payload.instanceId!=='codex') || (payload.fresh!==undefined&&typeof payload.fresh!=='boolean'))denied()
     if(payload.cwd!==undefined) {
       const data=process.env.AUTOOPS_T3_DATA_DIR
-      if(typeof payload.cwd!=='string'||!data||!access.bootstrap(principal).projects.some(project=>payload.cwd===resolve(data,'t3/workspaces',project.id)))denied('技能目录只能刷新当前账号获授权的项目')
+      if(typeof payload.cwd!=='string'||!data||!access.bootstrap(principal).projects.some(project=>payload.cwd===`autoops/${project.id}/workspaces` || (project.membership.workspaceAccess==='internal' && payload.cwd===resolve(data,'t3/workspaces',project.id))))denied('技能目录只能刷新当前账号获授权的项目')
     }
     return
   }
@@ -172,6 +172,17 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
   denied()
 }
 
+export function prepareAutoOpsRpcPayload(access, principal, method, payload = {}) {
+  if (method !== 'server.refreshProviders' || typeof payload.cwd !== 'string') return payload
+  authorizeAutoOpsRpc(access, principal, method, payload)
+  const project = access.bootstrap(principal).projects.find((entry) => payload.cwd === `autoops/${entry.id}/workspaces`)
+  return project ? { ...payload, cwd: resolve(process.env.AUTOOPS_T3_DATA_DIR, 't3/workspaces', project.id) } : payload
+}
+
+const projectForViewer = (access, principal, project) => access.requireMembership(principal, project.id).workspaceAccess === 'external'
+  ? { ...project, workspaceRoot: `autoops/${project.id}/workspaces`, ...(Object.hasOwn(project, 'repositoryIdentity') ? {repositoryIdentity:null} : {}) }
+  : project
+
 export function filterAutoOpsShell(access, principal, snapshot) {
   access.refresh(principal)
   const permittedProject = (project) => {
@@ -183,7 +194,7 @@ export function filterAutoOpsShell(access, principal, snapshot) {
   const permittedThread = (thread) => access.canSeeThread(principal, thread.id)
   return {
     ...snapshot,
-    ...(Array.isArray(snapshot.projects) ? { projects: snapshot.projects.filter(permittedProject) } : {}),
+    ...(Array.isArray(snapshot.projects) ? { projects: snapshot.projects.filter(permittedProject).map((project) => projectForViewer(access, principal, project)) } : {}),
     ...(Array.isArray(snapshot.threads) ? { threads: snapshot.threads.filter(permittedThread) } : {}),
     ...(Array.isArray(snapshot.archivedThreads) ? { archivedThreads: snapshot.archivedThreads.filter(permittedThread) } : {}),
   }
@@ -199,7 +210,7 @@ export function filterAutoOpsShellItem(access, principal, item) {
   if (item.kind === 'thread.updated' || item.kind === 'thread.removed')
     return access.canSeeThread(principal, item.thread?.id ?? item.threadId, item.kind === 'thread.removed') ? item : null
   if (item.kind === 'project.updated' || item.kind === 'project.removed') {
-    try { access.requireProject(principal, item.project?.id ?? item.projectId); return item } catch (error) {
+    try { access.requireProject(principal, item.project?.id ?? item.projectId); return item.project ? {...item,project:projectForViewer(access,principal,item.project)} : item } catch (error) {
       if (error.status === 404) return null
       throw error
     }

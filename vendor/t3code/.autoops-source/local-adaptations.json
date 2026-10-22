@@ -2,7 +2,7 @@
   "commit": "fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92",
   "baselineInventoryUnchanged": true,
   "checkedBlobs": 28439,
-  "generatedAt": "2026-10-22T08:33:01.846670+00:00",
+  "generatedAt": "2026-10-22T10:15:50.097696+00:00",
   "localAdaptations": [
     {
       "path": "apps/server/src/assets/AssetAccess.ts",
@@ -215,6 +215,12 @@
       "localSha256": "1e73bf5fbefea45a9357d38e925074f3323e0cb228f442caaf1be2ed8b0b0bc6"
     },
     {
+      "path": "apps/server/src/orchestration-v2/WireProjection.ts",
+      "reason": "local content differs from upstream",
+      "upstreamSha256": "dad0c6365287fcafe1c52394825448ffdf296e33548c8b655caa8fe8f6649df9",
+      "localSha256": "9a8ee06f3a241eceaaf9b97f065db2b24271758647dc297b22f8dcdc4b7c24de"
+    },
+    {
       "path": "apps/server/src/orchestration-v2/http.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "19c9f4464192c2994272fb0e36bf5071bdabc21086c8e88f94b0e9fa524c5180",
@@ -290,7 +296,7 @@
       "path": "apps/server/src/ws.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "edf4ea283de00d6ed4efa48d6ed0c053c5e44e18e45e783058a48882d7cde173",
-      "localSha256": "aa77c6af36149d4e5e3ee6e582ca6a7c6086af1e925c9ce6231726116583aa43"
+      "localSha256": "c08c89831c0560b4cdd5c668e53aeaf684112de618e574fccba0cf4f4a02214a"
     },
     {
       "path": "apps/server/vite.config.ts",
@@ -350,7 +356,7 @@
       "path": "apps/web/src/components/BranchToolbar.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "58677c7291adb421cd8ed40e476e976d8ea3fc1383da585f9fa6b1bfbe38af46",
-      "localSha256": "e60cf3be69f8a49888bb21be98a9953711a65a986d7b2076a4263e50d71ae5bb"
+      "localSha256": "85f881c6575593aeb6e3fb337d905a9e2a49144dc8349f20fac722e616bed29f"
     },
     {
       "path": "apps/web/src/components/ChatMarkdown.tsx",
@@ -368,7 +374,7 @@
       "path": "apps/web/src/components/ChatView.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "cfbdfc9832cc66c42ca2976b735c051b4e7d02834f3e6a4c513e98e4e86e8816",
-      "localSha256": "b56a14d5f70afcafce5b15d8e0e048d4e4fdcc53a2b259b42694faef7a1b3307"
+      "localSha256": "28cccbff5d6623945c1df45f16635a063528e67175cd1f4d2c4f2df7fd25bd9f"
     },
     {
       "path": "apps/web/src/components/CommandPalette.logic.test.ts",
@@ -590,7 +596,7 @@
       "path": "apps/web/src/components/chat/ChatComposer.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "14077585aed8edbdc289b4e397c45c2201b1d2bf6f5520e77b91726672ea42ee",
-      "localSha256": "bbb595fcb68921954bcb3608ec54d88f04bc7f5d29dbb068325533a27e94ac15"
+      "localSha256": "74cb811e9a9eac56de66bbd56ea3182eae970e991c8a0dda13056575bc32cdf1"
     },
     {
       "path": "apps/web/src/components/chat/ChatGptSharingControl.tsx",
@@ -1196,7 +1202,7 @@
       "path": "apps/web/src/components/files/AttachmentFilePreview.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "7cf61afcd3cb87977e918d6f5f9573faa13204015ee48845f7041f594aa8cd38",
-      "localSha256": "4afedfaadf6060be117f7b8eb22fbafe7473cb0ba12dbfdbef00cc7bdab16a56"
+      "localSha256": "5ee13acc550bf7f581a868e294dab5a4d96295fd95a87cd00cee2bf67156ed7f"
     },
     {
       "path": "apps/web/src/components/files/BrowserDocumentFrame.tsx",
@@ -1220,13 +1226,13 @@
       "path": "apps/web/src/components/files/FileBrowserPanel.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "1a88a667969290fe26386462b1049485d48c641dd3ae422dfd14f1360a8153d3",
-      "localSha256": "05b67734d6ad86ce1f136038c59db1387589253e82e0663007bcd1422b6a19b8"
+      "localSha256": "690bee98bbcf61a39711bcea821acdc22f5dc0e16efab8554a28eb37898781c9"
     },
     {
       "path": "apps/web/src/components/files/FilePreviewPanel.tsx",
       "reason": "local content differs from upstream",
       "upstreamSha256": "d353b95eaefbd9956ea2bdcdc93d09267e944412291d5a07016f6e23417cc8a4",
-      "localSha256": "99cfec7053258c305bf754e911b7abed10a3546220463d8508432f4cf89278e0"
+      "localSha256": "5bd25a3d8645852de6dc93829a03fc5d771b78ef39ac8bf4c272c64070d88060"
     },
     {
       "path": "apps/web/src/components/files/ProjectFilePicker.tsx",
@@ -1256,13 +1262,13 @@
       "path": "apps/web/src/components/files/projectFilesQueryState.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "56a2759492591c723027e86e07053dfc67ed5b720334b2d4950972dc8234f4a6",
-      "localSha256": "7aabf10f753a87787d19e0e3d4c0047b312ecd83f48fc75b0257d66196991a52"
+      "localSha256": "87f6e8d6af8dc365d9f930e4084a1fb0fd80e831ad06a91ec6a4c6094dc2d87d"
     },
     {
       "path": "apps/web/src/components/files/useDirectoryEntries.ts",
       "reason": "local content differs from upstream",
       "upstreamSha256": "ec065de06aa710a4ccb07021ad398ab41df5eb4a7aab9b8f661ca452e5e31cf2",
-      "localSha256": "e0cb10622be736beecbf6967f4f0efce36a25a211a91ecd188b8bfb782514191"
+      "localSha256": "0139316d511202352769a20ab2e04b2171aab4bf4f54bacf9bc27a4d65d6412d"
     },
     {
       "path": "apps/web/src/components/media/MediaActions.tsx",
@@ -2715,6 +2721,7 @@
     "apps/web/src/motionPreference.test.ts",
     "apps/web/src/autoops/ResourceLink.tsx",
     "apps/web/src/autoops/workspaces.ts",
+    "apps/web/src/autoops/materialPreviewScope.test.ts",
     "apps/web/src/autoops/clientSettings.test.ts",
     "apps/web/src/autoops/theme.css",
     "apps/web/src/autoops/capabilities.test.ts",
@@ -2735,6 +2742,7 @@
     "apps/web/src/autoops/WorkspaceConversationLauncher.tsx",
     "apps/web/src/autoops/WorkspaceScopeControl.tsx",
     "apps/web/src/autoops/SkillsSettings.tsx",
+    "apps/web/src/autoops/materialPreviewScope.ts",
     "apps/web/src/components/ChatMarkdown.autoops-csp.browser.test.tsx",
     "apps/web/src/components/ui/radix-number-field.tsx",
     "apps/web/src/components/ui/radix-menu.tsx",
@@ -2742,6 +2750,7 @@
     "apps/web/src/components/ui/radix-compat.browser.test.tsx",
     "apps/web/src/components/ui/collapsible.css",
     "apps/web/src/components/ui/radix-toast.tsx",
+    "apps/web/src/components/ui/radix-search.browser.test.tsx",
     "apps/web/src/components/ui/radix-overlays.tsx",
     "apps/web/src/components/ui/radix-compat.tsx",
     "apps/web/src/components/ui/radix-adapters.browser.test.tsx",
@@ -2752,6 +2761,8 @@
     "apps/web/src/components/chat/autoOpsChatPolicy.test.ts",
     "apps/web/src/components/chat/displayLabels.ts",
     "apps/web/src/components/chat/autoOpsChatPolicy.ts",
+    "apps/web/src/components/files/ReadOnlyWorkspaceFiles.tsx",
+    "apps/web/src/components/files/readOnlyFileSource.ts",
     "apps/web/src/hooks/useReducedMotion.ts",
     "apps/web/src/routes/_chat.workspaces.tsx",
     "apps/server/src/autoops/personalPreferences.ts",
@@ -2768,11 +2779,15 @@
     "apps/server/src/autoops/http.ts",
     "apps/server/src/autoops/nativePolicy.metadata.test.ts",
     "apps/server/src/autoops/rpc.ts",
+    "apps/server/src/autoops/wireMetadata.ts",
     "apps/server/src/autoops/rpc.principal.test.ts",
     "apps/server/src/autoops/productProfile.runtime.test.ts",
+    "apps/server/src/autoops/wireMetadata.test.ts",
+    "apps/server/src/autoops/threadReservations.ts",
     "apps/server/src/autoops/legacyImportCli.ts",
     "apps/server/src/autoops/skills.ts",
     "apps/server/src/autoops/nativePolicy.ts",
+    "apps/server/src/autoops/threadReservations.test.ts",
     "apps/server/src/autoops/RequestScope.ts",
     "apps/server/src/provider/CodexLegacyDynamicTools.ts",
     "apps/server/src/mcp/AutoOpsElicitation.test.ts",

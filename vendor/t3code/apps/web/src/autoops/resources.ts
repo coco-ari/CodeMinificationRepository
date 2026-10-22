@@ -1,4 +1,16 @@
-import { readAutoOpsHost, readAutoOpsThreadScope } from './hostConfig'
+import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from './hostConfig'
+
+/** Display workspace-relative directories while keeping resource identities canonical. */
+export function autoOpsResourcePathDescription(
+  path: string,
+  scope: Pick<AutoOpsThreadScope, 'projectId' | 'workspaceVersionId'> | undefined,
+): string {
+  const prefix = scope?.workspaceVersionId
+    ? `autoops/${scope.projectId}/workspaces/${scope.workspaceVersionId}/`
+    : undefined
+  const displayPath = prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path
+  return displayPath.slice(0, Math.max(0, displayPath.lastIndexOf('/')))
+}
 
 export function autoOpsBusinessPath(value: string | undefined): string | null {
   if (!value) return null
@@ -22,9 +34,10 @@ export function autoOpsBusinessPath(value: string | undefined): string | null {
 export function autoOpsResourceCwd(
   threadId: string | null,
   projectId: string | undefined,
+  scopeOverride?: AutoOpsThreadScope,
 ): string | null {
   if (!threadId || !projectId || !readAutoOpsHost()) return null
-  const scope = readAutoOpsThreadScope(threadId, projectId)
+  const scope = scopeOverride ?? readAutoOpsThreadScope(threadId, projectId)
   return scope
     ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}${scope.workspaceType && scope.workspaceVersionId ? `?workspaceType=${scope.workspaceType}&workspaceVersionId=${encodeURIComponent(scope.workspaceVersionId)}` : ''}`
     : null

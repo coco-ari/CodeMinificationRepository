@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { configuredAutoOpsAccess } from "../../../../../../agent-demo/t3-adapters/access.mjs";
 import { PRODUCT_CAPABILITY_DISABLED, PRODUCT_CAPABILITY_MESSAGE } from "../../../../../../agent-demo/t3-adapters/product-profile.mjs";
-import { authorizeAutoOpsRpc, filterAutoOpsShell, filterAutoOpsShellItem } from "../../../../../../agent-demo/t3-adapters/rpc-policy.mjs";
+import { authorizeAutoOpsRpc, filterAutoOpsShell, filterAutoOpsShellItem, prepareAutoOpsRpcPayload } from "../../../../../../agent-demo/t3-adapters/rpc-policy.mjs";
 import type * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 
 /** A fork may reserve a new binding, never claim an unmigrated native thread. */
@@ -54,6 +54,9 @@ function projectResult(sessionId: string, method: string, payload: unknown, resu
   if (method === "orchestration.subscribeShell" || method === "orchestration.subscribeArchivedShell")
     return filterAutoOpsShellItem(access, principal, result);
   if (method === "orchestration.getArchivedShellSnapshot") return filterAutoOpsShell(access, principal, result);
+  if (method === "projects.list") return Array.isArray(result)
+    ? filterAutoOpsShell(access, principal, {projects:result}).projects
+    : filterAutoOpsShell(access, principal, result);
   if (method === "orchestration.searchThreads") {
     const value = result as { matches: {threadId: string}[] };
     return {...value, matches: value.matches.filter((match) => access.canSeeThread(principal, match.threadId))};
@@ -74,7 +77,9 @@ export function protectHandlers<T extends object>(handlers: T, sessionId: string
   const entries = Object.entries(handlers).map(([method, original]) => {
     if (typeof original !== "function") return [method, original];
     return [method, (payload: unknown, ...args: unknown[]) => {
-      const value = resourceRequest(sessionId,method,payload) ?? original(payload, ...args);
+      const access = configuredAutoOpsAccess();
+      const nativePayload = access ? prepareAutoOpsRpcPayload(access, access.principalForNativeSession(sessionId), method, payload) : payload;
+      const value = resourceRequest(sessionId,method,payload) ?? original(nativePayload, ...args);
       if (Stream.isStream(value)) return (
         method === "orchestration.subscribeShell" || method === "orchestration.subscribeArchivedShell"
           ? Stream.merge(value, personalChanges(method.includes("Archived") ? "archive" : "active"))

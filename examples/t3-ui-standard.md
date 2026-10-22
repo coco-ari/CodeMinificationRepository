@@ -87,4 +87,8 @@ AutoOps 的身份、权限、项目/环境、资料和报告接在适配边界�
 当前 Demo 采用 examples/agent-demo-lite-profile.md 的精简能力配置。复用完整流程只针对已开放能力；不重新展示已关闭的计划、分支、回退或开发功能。保留可用的 T3 外观设置与历史内容，关闭能力须同时覆盖界面和后端。
 
 完成后运行与改动相关的类型检查、构建和页面验证，检查浅深色、窄屏、键盘与焦点；涉及对话时验证流式、滚动和运行中操作。报告实际改动、复用来源、验证结果与未覆盖项。未经明确需求，不改变模型配置、权限、协议和存量数据。
+
+工作区与对话整合时，复用 `ComposerSurface.ContextStrip`、`ComposerControl`、原生菜单及标签压缩逻辑，范围选择放在输入框下方。目录和预览复用 `FileBrowserPanel`、`FilePreviewPanel`、`AttachmentFilePreview`、右侧面板与窄屏侧栏，只适配授权数据源。显示项目相对路径，引用保持固定版本的完整身份；不另写递归树或源码预览器。管理页与对话页共用这套文件交互。
+
+T3 主聊天组件依赖 React Compiler 缓存。不要在渲染或 JSX 属性中读取 `ref.current`，发送状态使用原生 `isSendBusy`；事件与 effect 内的 ref 判重保留。相关改动须通过 `test/t3-chatview-compiler.test.mjs`，仅类型检查通过不足以证明页面能运行。相邻报告与文件组件切换版本时使用不同前缀的 key，避免旧区域残留。
 ```

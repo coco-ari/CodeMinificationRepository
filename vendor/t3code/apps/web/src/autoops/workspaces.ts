@@ -103,6 +103,14 @@ export const loadWorkspaceContent = (projectId: string, versionId: string, path:
   request<WorkspaceContent>(projectId,
     `/versions/${encodeURIComponent(versionId)}/content?path=${encodeURIComponent(path)}`, undefined, signal)
 
+export const searchWorkspaceFiles = (projectId: string, versionId: string, query: string, limit = 200, signal?: AbortSignal) =>
+  request<{ entries: Array<{ path: string; kind: 'file' | 'directory' }>; truncated: boolean }>(projectId,
+    `/versions/${encodeURIComponent(versionId)}/search?query=${encodeURIComponent(query)}&limit=${limit}`, undefined, signal)
+
+export const loadWorkspaceFileMetadata = (projectId: string, versionId: string, path: string, signal?: AbortSignal) =>
+  request<{ name: string; mime: string; size: number }>(projectId,
+    `/versions/${encodeURIComponent(versionId)}/download?metadata=1&path=${encodeURIComponent(path)}`, undefined, signal)
+
 export const generateExternalWorkspace = (projectId: string, sourceVersionId: string, rules: Array<{ find: string; replace: string }>, requestId: string) =>
   request<WorkspaceTask>(projectId, '/external', { sourceVersionId, rules, requestId })
 

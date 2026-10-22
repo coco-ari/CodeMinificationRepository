@@ -10,6 +10,7 @@ import {
   toolOutputImages,
   toolOutputIndicatesFailure,
 } from "@t3tools/shared/toolOutput";
+import { projectExternalWorkspaceEventMetadata, projectExternalWorkspaceMetadata } from "../autoops/wireMetadata.ts";
 
 const MAX_DETAIL_STRING_BYTES = 32_768;
 const MAX_DYNAMIC_VALUE_BYTES = 16_384;
@@ -225,7 +226,7 @@ export function projectThreadProjectionForWire(
     projectedById.set(key, projected);
     return projected;
   };
-  return {
+  return projectExternalWorkspaceMetadata({
     ...projection,
     contextHandoffs: projection.contextHandoffs.map(projectContextHandoffForWire),
     turnItems: projection.turnItems.map(project),
@@ -233,7 +234,7 @@ export function projectThreadProjectionForWire(
       ...row,
       item: project(row.item),
     })),
-  };
+  });
 }
 
 export function projectDomainEventForWire(
@@ -243,5 +244,5 @@ export function projectDomainEventForWire(
     ? { ...event, payload: projectTurnItemForWire(event.payload) }
     : event.type === "context-handoff.updated"
       ? { ...event, payload: projectContextHandoffForWire(event.payload) }
-      : event;
+      : projectExternalWorkspaceEventMetadata(event);
 }

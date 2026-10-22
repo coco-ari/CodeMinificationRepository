@@ -390,6 +390,8 @@ function List({ children, render, ...props }: Props) {
     Command.List,
     {
       ...props,
+      // cmdk owns the listbox's aria-label and otherwise replaces it with "Suggestions".
+      label: props['aria-label'] ?? props.label,
       children: typeof children === 'function' ? context.visible.map(children) : children,
     },
     render,

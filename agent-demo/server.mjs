@@ -1551,6 +1551,10 @@ const server = http.createServer(async (req, res) => {
     }
     const docMatch = path.match(/^\/projects\/([^/]+)\/documents\/([^/]+)$/)
     if (docMatch) {
+      if (t3Mode) {
+        res.writeHead(302, {Location:`/api/agent-demo/t3/autoops/projects/${encodeURIComponent(decodeURIComponent(docMatch[1]))}/documents/${encodeURIComponent(decodeURIComponent(docMatch[2]))}`, 'Cache-Control':'private, no-store'})
+        return res.end()
+      }
       const p = projects.find((p) => p.id === docMatch[1] && p.memberIds.includes(u.id)),
         d = p?.documents.find((d) => d.id === docMatch[2])
       if (!d) fail(404, 'NOT_FOUND', '资料不存在或无权访问')

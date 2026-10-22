@@ -2,12 +2,16 @@ export const users = [
   { id: 'u-admin', username: 'admin', name: '陶然', role: 'admin' },
   { id: 'u-lin', username: 'lin', name: '林晓', role: 'member' },
   { id: 'u-chen', username: 'chen', name: '陈一', role: 'member' },
+  { id: 'u-guest', username: 'guest', name: '外部协作成员', role: 'member' },
 ]
 export const projects = [
   {
     id: 'p-autoops',
     name: 'AutoOps 工作台',
-    memberIds: ['u-admin', 'u-lin'],
+    memberIds: ['u-admin', 'u-lin', 'u-guest'],
+    memberships: [
+      { userId: 'u-guest', workspaceAccess: 'external', role: 'member', environmentIds: ['env-test'], status: 'active' },
+    ],
     environments: [
       { id: 'env-test', name: '测试环境' },
       { id: 'env-prod', name: '生产环境' },

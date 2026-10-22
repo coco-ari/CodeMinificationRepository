@@ -62,6 +62,7 @@ export interface WorkspaceStore {
   tree(projectId: string, versionId: string, directory?: string): { entries: Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number }>; truncated: boolean };
   /** Management-only tree, including pending external review. */
   managementTree(projectId: string, versionId: string, directory?: string): ReturnType<WorkspaceStore['tree']>;
+  managementSearch(projectId: string, versionId: string, query?: string, limit?: number): { entries: Array<{ path: string; kind: 'file' | 'directory' }>; truncated: boolean };
   read(projectId: string, versionId: string, path: string): { path: string; name: string; mime: string; contents: string; byteLength: number; truncated: boolean };
   /** Management-only text preview, including pending external review. */
   managementRead(projectId: string, versionId: string, path: string): ReturnType<WorkspaceStore['read']>;

@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { ArrowDownToLineIcon, ChevronDownIcon, ChevronRightIcon, FileIcon, FolderIcon, GitBranchIcon, MessageSquarePlusIcon, PlusIcon, RefreshCwIcon, ShieldCheckIcon, Trash2Icon } from 'lucide-react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { ArrowDownToLineIcon, GitBranchIcon, MessageSquarePlusIcon, PlusIcon, RefreshCwIcon, ShieldCheckIcon, Trash2Icon } from 'lucide-react'
 import { WorkspacePageHeader } from '~/components/WorkspacePageHeader'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
@@ -14,12 +14,15 @@ import { Spinner } from '~/components/ui/spinner'
 import { Checkbox } from '~/components/ui/checkbox'
 import { randomUUID } from '~/lib/utils'
 import { readAutoOpsHost } from './hostConfig'
+import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFiles'
+import { ReadOnlySourcePreview } from '~/components/files/AttachmentFilePreview'
+import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
+import { usePrimaryEnvironmentId } from '~/state/environments'
 import {
   cancelWorkspaceTask, generateExternalWorkspace, generateWorkspacePackages,
-  importWorkspaceRepository, loadWorkspaceContent, loadWorkspaces, loadWorkspaceTree,
+  importWorkspaceRepository, loadWorkspaces, loadWorkspaceTree, loadWorkspaceFileMetadata, searchWorkspaceFiles,
   publishWorkspace, startWorkspaceConversation, workspaceFileDownloadUrl, workspacePackageUrl,
-  type WorkspaceContent, type WorkspaceOverview, type WorkspaceRelease, type WorkspaceTask,
-  type WorkspaceTreeEntry, type WorkspaceVersion,
+  type WorkspaceOverview, type WorkspaceRelease, type WorkspaceTask, type WorkspaceVersion,
 } from './workspaces'
 
 const tabs = [{ id: 'internal', name: '内部工作区' }, { id: 'external', name: '外部工作区' }, { id: 'packages', name: '部署发布' }] as const
@@ -50,7 +53,12 @@ export function AutoOpsWorkspacesPage() {
 }
 
 function ProjectWorkspaces({ projectId }: { projectId: string }) {
-  const [tab, setTab] = useState<Tab>('internal')
+  const membership = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.membership
+  const manager = membership?.workspaceAccess === 'internal' && membership.role === 'manager'
+  const externalOnly = membership?.workspaceAccess === 'external'
+  const [selectedTab, setTab] = useState<Tab>(externalOnly ? 'external' : 'internal')
+  const tab = externalOnly ? 'external' : !manager && selectedTab === 'packages' ? 'internal' : selectedTab
+  const availableTabs = tabs.filter((item) => externalOnly ? item.id === 'external' : manager || item.id !== 'packages')
   const [overview, setOverview] = useState<WorkspaceOverview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
@@ -103,7 +111,7 @@ function ProjectWorkspaces({ projectId }: { projectId: string }) {
   }
 
   const internal = overview?.internalVersions ?? []
-  const external = overview?.externalVersions ?? []
+  const external = (overview?.externalVersions ?? []).filter((version) => manager || version.status === 'published')
   const currentInternal = internal.find((version) => version.id === selectedInternal) ?? internal[0]
   const currentExternal = external.find((version) => version.id === selectedExternal) ?? external[0]
   const source = internal.find((version) => version.id === sourceId) ?? currentInternal
@@ -114,40 +122,40 @@ function ProjectWorkspaces({ projectId }: { projectId: string }) {
         <ToggleGroup aria-label="工作区分类" variant="segmented" value={[tab]} onValueChange={(value) => {
           const next = value[0]
           if (next === 'internal' || next === 'external' || next === 'packages') setTab(next)
-        }}>{tabs.map((item) => <Toggle key={item.id} value={item.id}>{item.name}</Toggle>)}</ToggleGroup>
+        }}>{availableTabs.map((item) => <Toggle key={item.id} value={item.id}>{item.name}</Toggle>)}</ToggleGroup>
         <Button variant="ghost" size="icon-sm" aria-label="刷新工作区" disabled={busy} onClick={() => setRefresh((value) => value + 1)}><RefreshCwIcon /></Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6">
           {error ? <Alert variant="error"><AlertTitle>工作区操作未完成</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
           {!overview ? error ? <div><Button size="sm" variant="outline" onClick={() => setRefresh((value) => value + 1)}>重新加载</Button></div> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" />正在读取工作区…</div> : <>
-            {overview.tasks.length > 0 ? <Tasks tasks={overview.tasks.map((task) => task.versionId && overview.externalVersions.some((version) => version.id === task.versionId && version.status === 'published') ? {...task, message:'检查已完成，外部工作区版本已发布'} : task)} busy={busy} onCancel={(id) => void mutate(() => cancelWorkspaceTask(projectId, id))} /> : null}
+            {manager && overview.tasks.length > 0 ? <Tasks tasks={overview.tasks.map((task) => task.versionId && overview.externalVersions.some((version) => version.id === task.versionId && version.status === 'published') ? {...task, message:'检查已完成，外部工作区版本已发布'} : task)} busy={busy} onCancel={(id) => void mutate(() => cancelWorkspaceTask(projectId, id))} /> : null}
             {tab === 'internal' ? <>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="min-w-0 flex-1"><VersionPicker versions={internal} selected={currentInternal} onChange={setSelectedInternal} label="内部版本" /></div>
-                <Button variant="outline" size="sm" onClick={() => setShowImport((value) => !value)}><GitBranchIcon />{showImport ? '收起导入' : '导入仓库'}</Button>
+                {manager ? <Button variant="outline" size="sm" onClick={() => setShowImport((value) => !value)}><GitBranchIcon />{showImport ? '收起导入' : '导入仓库'}</Button> : null}
                 {currentInternal ? <ConversationButton projectId={projectId} version={currentInternal} /> : null}
               </div>
-              {showImport ? <RepositoryImport busy={busy || running || overview.import?.supported === false} limits={overview.import} onImport={async (url, branch) => {
+              {manager && showImport ? <RepositoryImport busy={busy || running || overview.import?.supported === false} limits={overview.import} onImport={async (url, branch) => {
                 await mutate(() => importWorkspaceRepository(projectId, url, branch, randomUUID()))
               }} /> : null}
               {currentInternal ? <>
                 <VersionSummary version={currentInternal} />
                 <p className="text-xs text-muted-foreground">内部原始资料保留 Git 信息。对话固定使用所选版本，资料以只读方式提供给智能体。</p>
-                <FileBrowser key={currentInternal.id} projectId={projectId} version={currentInternal} />
+                <FileBrowser key={`files:${currentInternal.id}`} projectId={projectId} version={currentInternal} />
               </> : <WorkspaceEmpty title="还没有内部工作区" description="导入 HTTPS Git 仓库，保存原始源码、文档和原型的固定版本。" />}
             </> : tab === 'external' ? <>
-              <section className="flex flex-col gap-3 border-b pb-5" aria-label="生成外部工作区">
+              {manager ? <section className="flex flex-col gap-3 border-b pb-5" aria-label="生成外部工作区">
                 <h2 className="text-sm font-medium">生成外部版本</h2>
                 <VersionPicker versions={internal} selected={source} onChange={setSourceId} label="来源内部版本" />
                 <p className="text-xs text-muted-foreground">去除所有 Git 历史并执行脱敏，保持原有目录。原始工作区不会被修改；未完成检查的版本不能用于对话。</p>
                 <RedactionForm disabled={busy || running || !source} onGenerate={(rules) => void mutate(() => generateExternalWorkspace(projectId, source!.id, rules, randomUUID()))} />
-              </section>
+              </section> : null}
               {currentExternal ? <>
                 <div className="flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1"><VersionPicker versions={external} selected={currentExternal} onChange={setSelectedExternal} label="外部版本" /></div><ConversationButton projectId={projectId} version={currentExternal} /></div>
                 <VersionSummary version={currentExternal} />
-                <ExternalReport key={currentExternal.id} projectId={projectId} version={currentExternal} busy={busy} onPublish={(confirmed, excluded) => void mutate(() => publishWorkspace(projectId, currentExternal.id, confirmed, excluded))} />
-                <FileBrowser key={currentExternal.id} projectId={projectId} version={currentExternal} />
+                {manager ? <ExternalReport key={`report:${currentExternal.id}`} projectId={projectId} version={currentExternal} busy={busy} onPublish={(confirmed, excluded) => void mutate(() => publishWorkspace(projectId, currentExternal.id, confirmed, excluded))} /> : null}
+                <FileBrowser key={`files:${currentExternal.id}`} projectId={projectId} version={currentExternal} />
               </> : <WorkspaceEmpty title="还没有外部工作区" description="从内部固定版本生成，检查完成后再发布给外部对话使用。" />}
             </> : <>
               <section className="flex flex-col gap-3 border-b pb-5" aria-label="生成部署包">
@@ -245,47 +253,31 @@ function ExternalReport({ projectId, version, busy, onPublish }: { projectId: st
 }
 
 function FileBrowser({ projectId, version }: { projectId: string; version: WorkspaceVersion }) {
-  const [selected, setSelected] = useState('')
-  return <section className="grid min-h-80 min-w-0 grid-cols-1 overflow-hidden rounded-lg border md:grid-cols-[15rem_minmax(0,1fr)]" aria-label={`${version.name} 文件浏览`}>
-    <div className="max-h-72 min-w-0 overflow-auto border-b p-2 md:max-h-[34rem] md:border-r md:border-b-0"><FileTree projectId={projectId} versionId={version.id} selected={selected} onSelect={setSelected} /></div>
-    <div className="flex min-h-64 min-w-0 flex-col">{selected ? <FilePreview key={selected} projectId={projectId} versionId={version.id} path={selected} /> : <div className="flex min-h-64 flex-1 items-center justify-center px-5 text-sm text-muted-foreground">选择左侧文件查看内容</div>}</div>
+  const environmentId = usePrimaryEnvironmentId()
+  const [selected, setSelected] = useState<string | null>(null)
+  const [trail, setTrail] = useState<string | undefined>(undefined)
+  const source = useMemo<ReadOnlyFileSource>(() => ({
+    id: `management:${projectId}:${version.id}`,
+    allowReferences: false,
+    mentionPath: (path) => `autoops/${projectId}/workspaces/${version.id}/${path}`,
+    list: (directory) => loadWorkspaceTree(projectId, version.id, directory),
+    search: (query, limit) => searchWorkspaceFiles(projectId, version.id, query, limit),
+    async metadata(path) {
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+      const directory = await loadWorkspaceTree(projectId, version.id, parent)
+      const entry = directory.entries.find((item) => item.path === path)
+      if (entry?.kind === 'directory') return { kind: 'directory' as const }
+      const metadata = await loadWorkspaceFileMetadata(projectId, version.id, path)
+      return { kind: 'file' as const, name: metadata.name, mimeType: metadata.mime, sizeBytes: metadata.size, url: workspaceFileDownloadUrl(projectId, version.id, path) }
+    },
+  }), [projectId, version.id])
+  if (!environmentId) return <WorkspaceEmpty title="文件连接不可用" description="请重新连接工作台后重试。" />
+  return <section className="flex h-[min(36rem,65dvh)] min-h-80 min-w-0 overflow-hidden rounded-lg border" aria-label={`${version.name} 文件浏览`}>
+    <ReadOnlyWorkspaceFiles environmentId={environmentId} cwd={source.id} projectName={version.name} relativePath={selected} source={source}
+      folderTrail={trail} onOpenFile={(path) => { setSelected(path); setTrail(undefined) }}
+      onNavigateFolder={(path, nextTrail) => { setSelected(path || null); setTrail(nextTrail) }}
+    />
   </section>
-}
-
-function FileTree({ projectId, versionId, directory = '', selected, onSelect }: { projectId: string; versionId: string; directory?: string; selected: string; onSelect: (path: string) => void }) {
-  const [entries, setEntries] = useState<WorkspaceTreeEntry[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [truncated, setTruncated] = useState(false)
-  const [attempt, setAttempt] = useState(0)
-  useEffect(() => {
-    const controller = new AbortController()
-    void loadWorkspaceTree(projectId, versionId, directory, controller.signal).then((result) => { setEntries(result.entries); setTruncated(result.truncated); setError(null) }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(errorLabel(cause)) })
-    return () => controller.abort()
-  }, [projectId, versionId, directory, attempt])
-  if (error) return <div className="p-2 text-xs text-destructive"><p>{error}</p><Button size="xs" variant="ghost" onClick={() => setAttempt((value) => value + 1)}>重试</Button></div>
-  if (!entries) return <div className="flex items-center gap-2 p-2 text-xs text-muted-foreground"><Spinner size="xs" />读取文件…</div>
-  return <ul className="min-w-0" aria-label={directory || '工作区文件'}>{entries.map((entry) => <TreeEntry key={entry.path} projectId={projectId} versionId={versionId} entry={entry} selected={selected} onSelect={onSelect} />)}{truncated ? <li className="p-2 text-xs text-muted-foreground">目录过大，已截断显示。</li> : !entries.length ? <li className="p-2 text-xs text-muted-foreground">此目录为空</li> : null}</ul>
-}
-
-function TreeEntry({ projectId, versionId, entry, selected, onSelect }: { projectId: string; versionId: string; entry: WorkspaceTreeEntry; selected: string; onSelect: (path: string) => void }) {
-  const [expanded, setExpanded] = useState(false)
-  const folder = entry.kind === 'directory'
-  return <li className="min-w-0"><Button variant={selected === entry.path ? 'secondary' : 'ghost'} size="sm" className="w-full justify-start" aria-expanded={folder ? expanded : undefined} title={entry.path} onClick={() => folder ? setExpanded((value) => !value) : onSelect(entry.path)}>{folder ? expanded ? <ChevronDownIcon /> : <ChevronRightIcon /> : <FileIcon />}<span className="truncate">{entry.name}</span>{folder ? <FolderIcon /> : null}</Button>{folder && expanded ? <div className="ml-3 border-l pl-1"><FileTree projectId={projectId} versionId={versionId} directory={entry.path} selected={selected} onSelect={onSelect} /></div> : null}</li>
-}
-
-function FilePreview({ projectId, versionId, path }: { projectId: string; versionId: string; path: string }) {
-  const [content, setContent] = useState<WorkspaceContent | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
-  useEffect(() => {
-    const controller = new AbortController()
-    void loadWorkspaceContent(projectId, versionId, path, controller.signal).then((result) => { setContent(result); setError(null) }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(errorLabel(cause)) })
-    return () => controller.abort()
-  }, [projectId, versionId, path, attempt])
-  return <>
-    <div className="flex min-w-0 items-center gap-2 border-b px-3 py-2"><span className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>{path}</span><Button variant="ghost" size="icon-xs" aria-label={`下载 ${path}`} render={<a href={workspaceFileDownloadUrl(projectId, versionId, path)} download />}><ArrowDownToLineIcon /></Button></div>
-    {error ? <div className="flex flex-col items-start gap-3 p-4 text-xs"><p className="text-muted-foreground">{error}</p><Button size="xs" variant="outline" onClick={() => setAttempt((value) => value + 1)}>重试预览</Button></div> : !content ? <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground"><Spinner size="sm" />读取内容…</div> : <><pre className="max-h-[30rem] min-w-0 flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed"><code>{content.contents}</code></pre><div className="border-t px-3 py-2 text-xs text-muted-foreground">{sizeLabel(content.byteLength)}{content.truncated ? ' · 文件过大，预览已截断，可下载查看完整内容。' : ''}</div></>}
-  </>
 }
 
 function PackageForm({ disabled, onGenerate }: { disabled: boolean; onGenerate: (services: Array<'frontend' | 'backend'>) => void }) {
@@ -295,5 +287,5 @@ function PackageForm({ disabled, onGenerate }: { disabled: boolean; onGenerate: 
 }
 
 function Release({ projectId, release, sourceName }: { projectId: string; release: WorkspaceRelease; sourceName: string }) {
-  return <section className="flex min-w-0 flex-col gap-3 py-4" aria-label={release.name}><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{release.name}</h2><time className="text-xs text-muted-foreground" dateTime={release.createdAt}>{dateLabel(release.createdAt)}</time></div><p className="text-xs text-muted-foreground">来源：{sourceName}</p><div className="flex flex-col gap-3">{release.services.map((service) => <div key={service.service} className="flex min-w-0 flex-wrap items-center gap-2"><Button size="sm" variant="outline" render={<a href={workspacePackageUrl(projectId, release.id, service.service)} download />}><ArrowDownToLineIcon />{service.service === 'frontend' ? '下载前端 ZIP' : '下载后端 ZIP'}</Button><span className="text-xs text-muted-foreground">{sizeLabel(service.size)}</span><code className="min-w-0 break-all text-xs text-muted-foreground" title="SHA-256">{service.sha256}</code></div>)}</div><div><Button size="xs" variant="ghost" render={<a href={workspacePackageUrl(projectId, release.id, 'manifest')} download />}><ArrowDownToLineIcon />下载 manifest.json</Button></div><details className="text-xs"><summary className="cursor-pointer text-muted-foreground">查看交付清单</summary><pre className="mt-2 max-h-64 overflow-auto border p-3 font-mono"><code>{JSON.stringify(release.manifest, null, 2)}</code></pre></details></section>
+  return <section className="flex min-w-0 flex-col gap-3 py-4" aria-label={release.name}><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{release.name}</h2><time className="text-xs text-muted-foreground" dateTime={release.createdAt}>{dateLabel(release.createdAt)}</time></div><p className="text-xs text-muted-foreground">来源：{sourceName}</p><div className="flex flex-col gap-3">{release.services.map((service) => <div key={service.service} className="flex min-w-0 flex-wrap items-center gap-2"><Button size="sm" variant="outline" render={<a href={workspacePackageUrl(projectId, release.id, service.service)} download />}><ArrowDownToLineIcon />{service.service === 'frontend' ? '下载前端 ZIP' : '下载后端 ZIP'}</Button><span className="text-xs text-muted-foreground">{sizeLabel(service.size)}</span><code className="min-w-0 break-all text-xs text-muted-foreground" title="SHA-256">{service.sha256}</code></div>)}</div><div><Button size="xs" variant="ghost" render={<a href={workspacePackageUrl(projectId, release.id, 'manifest')} download />}><ArrowDownToLineIcon />下载 manifest.json</Button></div><details className="text-xs"><summary className="cursor-pointer text-muted-foreground">查看交付清单</summary><div className="mt-2 flex h-64 min-w-0 overflow-hidden border"><ReadOnlySourcePreview name="manifest.json" text={JSON.stringify(release.manifest, null, 2)} /></div></details></section>
 }

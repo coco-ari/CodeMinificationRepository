@@ -15,6 +15,8 @@ export interface ThreadBinding {
   readonly ownerId: string;
   readonly visibility: 'private' | 'project';
   readonly createdAt: string;
+  readonly scopeState: 'draft' | 'submitting' | 'locked';
+  readonly scopeLocked: boolean;
   readonly workspaceType?: 'internal' | 'external';
   readonly workspaceVersionId?: string;
   readonly revokedAt?: string;
@@ -23,8 +25,16 @@ export interface ThreadBinding {
   readonly nativeThreadId?: string;
   readonly nativeParentThreadId?: string;
 }
+export interface ProjectMembership {
+  userId: string;
+  workspaceAccess: 'internal' | 'external';
+  role: 'manager' | 'member';
+  environmentIds: string[];
+  status: 'active' | 'disabled';
+}
 export interface AutoOpsProject {
   id: string; name: string; memberIds: string[];
+  memberships?: ProjectMembership[];
   environments: {id: string; name: string}[];
   documents: {id: string; name: string; mime: string; content: string; excerpt?: string}[];
   resources: {id: string; name: string; type: string; environmentId: string}[];
@@ -36,6 +46,11 @@ export interface AutoOpsAccess {
   authenticateCookie(cookie?: string): AutoOpsPrincipal;
   refresh(principal: AutoOpsPrincipal): AutoOpsPrincipal;
   requireProject(principal: AutoOpsPrincipal, projectId: string): AutoOpsProject;
+  requireMembership(principal: AutoOpsPrincipal, projectId: string): ProjectMembership;
+  requireEnvironment(principal: AutoOpsPrincipal, projectId: string, environmentId: string): ProjectMembership;
+  requireWorkspace(principal: AutoOpsPrincipal, projectId: string, type: 'internal' | 'external', versionId?: string, environmentId?: string): ProjectMembership;
+  requireWorkspaceManager(principal: AutoOpsPrincipal, projectId: string): ProjectMembership;
+  threadAudience(binding: ThreadBinding): string[];
   getThreadBinding(threadId: string): ThreadBinding | undefined;
   nativeSubagentParent(threadId: string): string | undefined;
   canSeeThread(principal: AutoOpsPrincipal, threadId: string, includeDeleted?: boolean): boolean;
@@ -43,6 +58,12 @@ export interface AutoOpsAccess {
   requireThread(principal: AutoOpsPrincipal, threadId: string): ThreadBinding;
   markThreadDeleted(threadId: string): void;
   bindThread(principal: AutoOpsPrincipal, input: Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'>): ThreadBinding;
+  reserveThread(principal: AutoOpsPrincipal, input: Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'>): ThreadBinding;
+  beginThreadSubmission(principal: AutoOpsPrincipal, threadId: string, commandId: string): ThreadBinding;
+  finishThreadSubmission(threadId: string, commandId: string, accepted: boolean): ThreadBinding | undefined;
+  markThreadAccepted(threadId: string): ThreadBinding | undefined;
+  /** Invoke only after native execution is known to have ended or been lost. */
+  reconcileThreadSubmission(threadId: string, accepted: boolean): ThreadBinding | undefined;
   requireAttachment(principal: AutoOpsPrincipal, attachmentId: string, targetThreadId?: string): {id:string; ownerId:string; threadId:string|null;name?:string;mimeType?:string;sizeBytes?:number};
   recordPendingAttachment(principal: AutoOpsPrincipal, attachmentId: string, metadata?: {name:string;mimeType:string;sizeBytes:number}): void;
   recordClaimedAttachment(principal: AutoOpsPrincipal, sourceId: string, finalId: string, threadId: string): void;
@@ -56,10 +77,10 @@ export interface AutoOpsAccess {
   recordNativeSession(principal: AutoOpsPrincipal, nativeSessionId: string): void;
   principalForNativeSession(nativeSessionId: string): AutoOpsPrincipal;
   bootstrap(principal: AutoOpsPrincipal): {
-    principal: {id: string; displayName: string}; csrfToken: string; gatewayBasePath: string;
+    principal: {id: string; displayName: string; role:string}; csrfToken: string; gatewayBasePath: string;
     fixedModel: {instanceId: 'codex'; model: string}; runtimeMode: 'approval-required';
     modelSelectionEnabled:boolean;
-    projects: (Pick<AutoOpsProject, 'id'|'name'|'environments'> & {agents: {id:string; name:string}[]})[];
+    projects: (Pick<AutoOpsProject, 'id'|'name'|'environments'> & {agents: {id:string; name:string}[];membership:ProjectMembership})[];
     agents: AutoOpsAgent[];
     productProfile: {id: ProductProfile['id']};
     capabilities: ProductProfile['capabilities'];

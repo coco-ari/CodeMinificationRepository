@@ -30,6 +30,7 @@ async function launch(version){
  else {assert(!details.includes('sk-example-workspace-not-real-1234567890'));assert(!details.includes('example-password-not-real'));assert(!details.includes('192.168.99.10'));assert(details.includes('已脱敏'));assert(!answer.includes('192.168.99.10'))}
  const binding=(await client.http('/autoops/thread-bindings/'+threadId)).binding
  assert.equal(binding.workspaceVersionId,version.id)
+ assert.equal(binding.scopeState,'locked');assert.equal(binding.scopeLocked,true)
  const result={type:version.type,threadId,versionId:version.id,status:'passed',runId:p.runs.at(-1).id,toolEvents:tools.map(x=>({toolName:x.toolName,status:x.status})),answer}
  report.cases.push(result);console.log(JSON.stringify({type:version.type,status:'passed',toolCalls:tools.length}))
  await writeFile(output+'/'+version.type+'.json',JSON.stringify({binding,projection:p,tools},null,2))

@@ -74,7 +74,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
   }
   const workspacePath = (binding, relativePath) => `autoops/${binding.projectId}/workspaces/${binding.workspaceVersionId}/${relativePath}`
   const workspaceSource = (binding, path) => `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(workspacePath(binding, path))}`
-  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: `autoops/${binding.projectId}/workspaces/${version.id}`, source: { contentHash: version.source?.contentHash, repositories: version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) } })
+  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: `autoops/${binding.projectId}/workspaces/${version.id}`, source: { contentHash: version.source?.contentHash, repositories: version.type === 'external' ? [] : version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) } })
   return {
     async listMaterials(threadId) {
       const { project, binding } = await authorize(threadId)

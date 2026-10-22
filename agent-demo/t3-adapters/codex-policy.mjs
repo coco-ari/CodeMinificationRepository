@@ -41,7 +41,7 @@ export function businessThreadParameters(appThreadId) {
     if (!store || !binding.workspaceType || !binding.workspaceVersionId) throw new Error('会话固定工作区不可用')
     const version = store.getVersion(binding.projectId, binding.workspaceVersionId)
     if (version.type !== binding.workspaceType) throw new Error('工作区不属于当前会话范围')
-    workspace = { type: version.type, versionId: version.id, root: `autoops/${binding.projectId}/workspaces/${version.id}`, source: { contentHash: version.source?.contentHash, repositories: version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) }, readOnly: true }
+    workspace = { type: version.type, versionId: version.id, root: `autoops/${binding.projectId}/workspaces/${version.id}`, source: { contentHash: version.source?.contentHash, repositories: version.type === 'external' ? [] : version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) }, readOnly: true }
   }
   const catalog = {
     project: { id: project.id, name: project.name },

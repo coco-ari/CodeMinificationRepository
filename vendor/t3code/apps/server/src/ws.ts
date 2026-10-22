@@ -5,6 +5,7 @@ import * as AutoOpsPreferences from "./autoops/personalPreferences.ts";
 import { isAutoOpsEnabled } from "../../../../../agent-demo/t3-adapters/access.mjs";
 import * as AutoOpsRpc from "./autoops/rpc.ts";
 import { withCommandPrincipal } from "./autoops/RequestScope.ts";
+import { hasAcceptedUserMessage, withThreadLaunchReservation } from "./autoops/threadReservations.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
@@ -1202,6 +1203,14 @@ export const layerWsRpc = (
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+      const readAccepted = (threadId: string) => threadManagement.getThreadSnapshot(ThreadId.make(threadId)).pipe(
+        Effect.map(hasAcceptedUserMessage),
+        Effect.catch((error) => {
+          const cause = error as { _tag?: string; cause?: { _tag?: string } };
+          return cause._tag === "ThreadManagementThreadNotFoundError" || cause.cause?._tag === "ProjectionStoreThreadNotFoundError"
+            ? Effect.succeed(false) : Effect.fail(error);
+        }),
+      );
       const intakeContext = yield* Effect.context<
         | ThreadManagementService.ThreadManagementService
         | ThreadLaunchService.ThreadLaunchService
@@ -1851,6 +1860,9 @@ export const layerWsRpc = (
                   ).pipe(
                     (effect) => Effect.andThen(AutoOpsRpc.reserveForkBinding(command, currentSessionId, threadManagement), effect),
                     Effect.provide(intakeContext),
+                    (effect) => command.type === "message.dispatch"
+                      ? withThreadLaunchReservation(effect, currentSessionId, command, readAccepted(command.threadId))
+                      : effect,
                     (effect) => withCommandPrincipal(effect, currentSessionId, ORCHESTRATION_V2_WS_METHODS.dispatchCommand, command),
                   ),
                 )
@@ -1961,7 +1973,12 @@ export const layerWsRpc = (
             Effect.andThen(
               startup
                 .enqueueCommand(
-                  ThreadMessageIntake.launchThread(ThreadMessageIntake.browserLaunchInput(input)).pipe(Effect.provide(intakeContext), (effect) => withCommandPrincipal(effect, currentSessionId, ORCHESTRATION_V2_WS_METHODS.launchThread, input)),
+                  ThreadMessageIntake.launchThread(ThreadMessageIntake.browserLaunchInput(input)).pipe(
+                    Effect.provide(intakeContext),
+                    (effect) => input.threadId === undefined || input.initialMessage === undefined ? effect
+                      : withThreadLaunchReservation(effect, currentSessionId, {threadId:input.threadId,commandId:input.commandId}, readAccepted(input.threadId), hasAcceptedUserMessage),
+                    (effect) => withCommandPrincipal(effect, currentSessionId, ORCHESTRATION_V2_WS_METHODS.launchThread, input),
+                  ),
                 )
                 .pipe(
                   Effect.tap(() =>

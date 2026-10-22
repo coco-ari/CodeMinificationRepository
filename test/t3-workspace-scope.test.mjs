@@ -70,11 +70,12 @@ test('references and attachments cannot cross workspace boundaries even for thei
 })
 
 test('workspace HTTP scope checks membership before creating or serving project data',async t=>{
-  const {workspaceStore,access,admin}=await setup(t)
+  const {workspaceStore,access,admin,internal}=await setup(t)
   const call=(path,principal=admin)=>handleWorkspaceRequest({access,store:workspaceStore,principal,url:new URL('http://localhost/autoops/projects/'+path),method:'GET'})
   await assert.rejects(call('p-cabinet/workspaces',access.authenticateCookie('demo_session=u-lin')),{code:'PROJECT_NOT_FOUND'})
   const result=await call('p-autoops/workspaces')
   assert.equal(result.status,200)
   assert.equal(result.body.projectId,'p-autoops')
-  await assert.rejects(call('p-autoops/workspaces/versions/nope/content?path=../../secrets'),{code:'WORKSPACE_PATH_INVALID'})
+  await assert.rejects(call('p-autoops/workspaces/versions/nope/content?path=docs/file'),{code:'WORKSPACE_NOT_FOUND'})
+  await assert.rejects(call(`p-autoops/workspaces/versions/${internal.id}/content?path=../../secrets`),{code:'WORKSPACE_PATH_INVALID'})
 })

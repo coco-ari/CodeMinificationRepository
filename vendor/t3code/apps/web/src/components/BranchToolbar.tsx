@@ -462,7 +462,7 @@ function labelTextWidth(label: HTMLElement, range: Range): number {
   return Number.isFinite(maxWidth) ? Math.min(width, maxWidth) : width;
 }
 
-function useLabelsOverflow(element: HTMLDivElement | null): boolean {
+export function useComposerContextLabelsOverflow(element: HTMLDivElement | null): boolean {
   const [overflows, setOverflows] = useState(false);
   const pendingLabelRectsRef = useRef<Map<HTMLElement, DOMRect> | null>(null);
   const labelAnimationsRef = useRef(new Map<HTMLElement, Animation>());
@@ -700,7 +700,7 @@ export const BranchToolbar = memo(function BranchToolbar({
     canPickEnvironment: hasMultipleEnvironments,
   });
   const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
-  const labelsOverflow = useLabelsOverflow(stripElement);
+  const labelsOverflow = useComposerContextLabelsOverflow(stripElement);
 
   if (!activeProject) return null;
 

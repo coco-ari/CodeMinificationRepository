@@ -17,6 +17,7 @@ import { useFilesystemReadAccess } from "~/state/filesystem";
 import { projectEnvironment } from "~/state/projects";
 import { useProjectPathSearch } from "~/state/queries";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+import { useReadOnlyDirectoryQuery, useReadOnlyFileSource } from "./readOnlyFileSource";
 
 const EMPTY_PROJECT_FILE_PATH = "";
 const EMPTY_PROJECT_ENTRIES_QUERY_ATOM = Atom.make(
@@ -196,15 +197,18 @@ export function useProjectEntriesQuery(
   cwd: string,
   directoryPath?: string,
 ): ProjectQueryState<ProjectListEntriesResult> {
+  const readOnlySource = useReadOnlyFileSource();
+  const sourceQuery = useReadOnlyDirectoryQuery(readOnlySource, directoryPath ?? "");
   const fileAccess = useFilesystemReadAccess(environmentId);
   const businessResources = isAutoOpsResourceCwd(cwd);
   const canReadFiles = businessResources || fileAccess.canReadFiles;
-  const atom = canReadFiles
+  const atom = canReadFiles && !readOnlySource
     ? getProjectEntriesQueryAtom(environmentId, cwd, directoryPath)
     : EMPTY_PROJECT_ENTRIES_QUERY_ATOM;
   const result = useAtomValue(atom);
   const refreshAtom = useAtomRefresh(atom);
   const refresh = () => refreshAtom();
+  if (readOnlySource) return sourceQuery;
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
     error: !businessResources && fileAccess.isPending

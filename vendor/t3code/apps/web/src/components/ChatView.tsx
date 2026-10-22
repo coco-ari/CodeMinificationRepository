@@ -5,7 +5,7 @@ import { inheritAutoOpsThreadScope } from "~/autoops/hostConfig";
 import { autoOpsFeature, isAutoOpsHosted, isAutoOpsLite } from "~/autoops/capabilities";
 import { useThreadRelationshipsAvailable } from "./chat/ThreadRelationshipsControl";
 import { AutoOpsThreadScopeControl } from "~/autoops/ThreadScopeControl";
-import { autoOpsBusinessPath } from '~/autoops/resources';
+import { autoOpsBusinessPath, autoOpsResourceCwd } from '~/autoops/resources';
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
@@ -3160,7 +3160,9 @@ export default function ChatView(props: ChatViewProps) {
   const hasTimelineTopBanner = Boolean(timelineThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
-  const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const businessWorkspaceCwd = isAutoOpsHosted() ? autoOpsResourceCwd(threadId, activeThread?.projectId, businessScope) : null;
+  const businessFilesAvailable = businessWorkspaceCwd !== null && businessScope?.workspaceVersionId !== undefined;
+  const activeWorkspaceRoot = businessWorkspaceCwd ?? activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   useLayoutEffect(() => {
     if (
       threadDetailLoading ||
@@ -3216,7 +3218,7 @@ export default function ChatView(props: ChatViewProps) {
           providerSubagentModels,
           reportedModelSelection,
         );
-  const mountComposerContextStrip = shouldShowComposerContextStrip({
+  const mountComposerContextStrip = !isAutoOpsHosted() && shouldShowComposerContextStrip({
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
     hasActiveProject: activeProject !== null && !showProviderSubagentBar,
@@ -3224,7 +3226,7 @@ export default function ChatView(props: ChatViewProps) {
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server",
   });
-  const showComposerContextStrip = shouldShowComposerContextStrip({
+  const showComposerContextStrip = !isAutoOpsHosted() && shouldShowComposerContextStrip({
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
     hasActiveProject: activeProject !== null && !showProviderSubagentBar,
@@ -3233,7 +3235,7 @@ export default function ChatView(props: ChatViewProps) {
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
   const mountComposerModelStrip =
-    routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
+    !isAutoOpsHosted() && routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
   const terminalShortcutLabelOptions = {
     context: {
@@ -3816,6 +3818,7 @@ export default function ChatView(props: ChatViewProps) {
   const openChangesFromThreadPanelStable = useStableCallback(openChangesFromThreadPanel);
   const addFilesSurface = () => {
     if (!activeThreadRef || !activeProject) return;
+    if (isAutoOpsHosted() && !businessFilesAvailable) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   };
   const addFilesSurfaceStable = useStableCallback(addFilesSurface);
@@ -4034,9 +4037,13 @@ export default function ChatView(props: ChatViewProps) {
   const activateRightPanelSurfaceStable = useStableCallback(activateRightPanelSurface);
   const toggleRightPanel = () => {
     if (!activeThreadRef) return;
-    if (isAutoOpsHosted() && !rightPanelState.surfaces.some((surface) => surface.kind === "file" && (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null))) return;
+    if (isAutoOpsHosted() && !businessFilesAvailable && !rightPanelState.surfaces.some((surface) => surface.kind === "file" && (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null))) return;
     if (rightPanelOpen) {
       closePreviewPanel();
+      return;
+    }
+    if (businessFilesAvailable && rightPanelState.surfaces.length === 0) {
+      useRightPanelStore.getState().open(activeThreadRef, 'files');
       return;
     }
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
@@ -8089,7 +8096,7 @@ export default function ChatView(props: ChatViewProps) {
     threadPanelPresentation,
     threadPanelPopoverHandle,
     threadPanelShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
-    rightPanelAvailable: activeProject !== null && (autoOpsFeature("workspace") || rightPanelState.surfaces.some((surface) => surface.kind === "file" && (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null))),
+    rightPanelAvailable: activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace") || rightPanelState.surfaces.some((surface) => surface.kind === "file" && (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null))),
     rightPanelOpen,
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
     onToggleTerminal: toggleTerminalVisibilityStable,
@@ -8207,8 +8214,6 @@ export default function ChatView(props: ChatViewProps) {
               : {})}
           />
         </header>
-        <AutoOpsThreadScopeControl key={activeThread.id} threadId={activeThread.id} projectId={activeThread.projectId} isDraft={isLocalDraftThread} />
-
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
             findOptions={{
@@ -8465,7 +8470,7 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ComposerSurface.Shell
-                      contextStrip={showComposerContextStrip || showComposerModelStrip}
+                      contextStrip={isAutoOpsHosted() || showComposerContextStrip || showComposerModelStrip}
                     >
                       <ComposerSurface.Host
                         inert={queuedRunEdit.isSaving}
@@ -8616,8 +8621,8 @@ export default function ChatView(props: ChatViewProps) {
                               threadPullRequests={(activeThreadShell ?? activeThread)?.pullRequests}
                               restingControlsHost={restingComposerControlsHost}
                               restingControlsHaveLeadingContext={
-                                mountComposerContextStrip &&
-                                (isGitRepo || showComposerEnvironmentIndicator)
+                                isAutoOpsHosted() || (mountComposerContextStrip &&
+                                (isGitRepo || showComposerEnvironmentIndicator))
                               }
                               onRestingControlsVisibilityChange={setRestingComposerControlsVisible}
                               getTimelineScrollableNode={getTimelineScrollableNodeStable}
@@ -8692,6 +8697,17 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </ComposerSurface.ContextStrip>
                           ) : null}
+                          {isAutoOpsHosted() ? <AutoOpsThreadScopeControl
+                            key={activeThread.id}
+                            threadId={activeThread.id}
+                            projectId={activeThread.projectId}
+                            runtimeEnvironmentId={activeThread.environmentId}
+                            isDraft={isLocalDraftThread}
+                            draftTarget={composerDraftTarget}
+                            submitting={isSendBusy}
+                            hasAcceptedMessage={committedServerMessageIds.size > 0 || serverProjection?.messages.some((message) => message.role === 'user') === true}
+                            composerControlsHostRef={setRestingComposerControlsHost}
+                          /> : null}
                           {mountComposerContextStrip && (
                             <div className="pointer-events-auto">
                               <BranchToolbar
@@ -8903,7 +8919,7 @@ export default function ChatView(props: ChatViewProps) {
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")}
           diffAvailable={isServerThread && isGitRepo}
-          filesAvailable={activeProject !== null && autoOpsFeature("workspace")}
+          filesAvailable={activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
           deviceAvailable={activeThreadRef !== null}
@@ -8958,7 +8974,7 @@ export default function ChatView(props: ChatViewProps) {
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")}
             diffAvailable={isServerThread && isGitRepo}
-            filesAvailable={activeProject !== null && autoOpsFeature("workspace")}
+            filesAvailable={activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
             deviceAvailable={activeThreadRef !== null}

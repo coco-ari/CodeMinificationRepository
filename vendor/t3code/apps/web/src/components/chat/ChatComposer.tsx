@@ -1,5 +1,5 @@
 import { chatSubmissionIntentAllowed, chatSlashCommandAllowed, unavailableChatSlashCommand } from "./autoOpsChatPolicy";
-import { autoOpsResourceCwd, autoOpsResourceUrl } from "~/autoops/resources";
+import { autoOpsResourceCwd, autoOpsResourcePathDescription, autoOpsResourceUrl } from "~/autoops/resources";
 import { openAutoOpsResource } from '~/autoops/ResourceLink';
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { readAutoOpsHost } from "~/autoops/hostConfig";
@@ -2594,8 +2594,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
   const environmentThreadShells = useThreadShells(isPathTrigger);
-  useAutoOpsThreadScope(activeThreadId ?? "");
-  const composerReferenceCwd = autoOpsResourceCwd(activeThreadId, activeThread?.projectId) ?? gitCwd;
+  const autoOpsThreadScope = useAutoOpsThreadScope(activeThreadId ?? "");
+  const composerReferenceCwd = autoOpsResourceCwd(activeThreadId, activeThread?.projectId, autoOpsThreadScope) ?? gitCwd;
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? composerReferenceCwd : null,
@@ -2687,7 +2687,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           pathKind: entry.kind,
           searchTarget: workspaceEntries.searchedTarget,
           label: basenameOfPath(entry.path),
-          description: entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))),
+          description: autoOpsResourcePathDescription(entry.path, autoOpsThreadScope),
         })),
       ];
     }

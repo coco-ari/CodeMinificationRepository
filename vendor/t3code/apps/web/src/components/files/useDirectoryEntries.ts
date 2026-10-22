@@ -5,8 +5,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
+import { useReadOnlyFileSource } from "./readOnlyFileSource";
 
 export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
+  const source = useReadOnlyFileSource();
   const [directories, setDirectories] = useState(new Map<string, readonly ProjectEntry[]>());
   const [errors, setErrors] = useState(new Map<string, string>());
   // The root starts counted as loading because the mount effect requests it.
@@ -25,13 +27,17 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
   const startRequest = (directoryPath: string, refresh: boolean): Promise<void> => {
     loaded.current.add(directoryPath);
     requested.current.add(directoryPath);
-    const atom = projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } });
     const request = (async () => {
       if (running.current >= 4) await new Promise<void>((resolve) => waiting.current.push(resolve));
       else running.current++;
       // executeAtomQuery settles instead of throwing, so the slot is always released.
       const result = active.current
-        ? await executeAtomQuery(appAtomRegistry, atom, {
+        ? source
+          ? await source.list(directoryPath).then(
+              (value) => ({ _tag: "Success" as const, value }),
+              (error: unknown) => ({ _tag: "Failure" as const, cause: Cause.fail(error) }),
+            )
+          : await executeAtomQuery(appAtomRegistry, projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } }), {
             refresh: true,
             reportFailure: false,
             reportDefect: false,

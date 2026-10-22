@@ -6,19 +6,34 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
   if (!match || !store) fail(404, 'WORKSPACE_NOT_FOUND', '工作区不存在')
   const projectId = decodeURIComponent(match[1])
   const project = access.requireProject(principal, projectId)
+  const membership = access.requireMembership(principal, projectId)
   await store.ensureProject(project)
   const parts = (match[2] ?? '').split('/').filter(Boolean).map(decodeURIComponent)
   const body = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const canManage = membership.workspaceAccess === 'internal' && membership.role === 'manager'
+  const publicExternal = (version) => {
+    const { sourceVersionId: _sourceVersionId, ...rest } = version
+    return { ...rest, source: { contentHash: version.source.contentHash, repositories: [] } }
+  }
   if (method === 'GET') {
-    if (!parts.length) return {status:200, body:store.overview(projectId)}
+    if (!parts.length) {
+      const overview = store.overview(projectId), internal = membership.workspaceAccess === 'internal'
+      return {status:200, body:{...overview, internalVersions: internal ? overview.internalVersions.filter((entry) => canManage || entry.status === 'published') : [], externalVersions: overview.externalVersions.filter((entry) => canManage || entry.status === 'published').map((entry) => internal ? entry : publicExternal(entry)), releases: canManage ? overview.releases : [], tasks: canManage ? overview.tasks : [], import: {...overview.import, supported:canManage, ...(internal ? {} : {hosts:[]})}}}
+    }
     if (parts[0] === 'versions' && parts.length === 3) {
       const [, versionId, action] = parts
+      const overview = store.overview(projectId)
+      const version = [...overview.internalVersions, ...overview.externalVersions].find((entry) => entry.id === versionId && (canManage || entry.status === 'published'))
+      if (!version) fail(404, 'WORKSPACE_NOT_FOUND', '工作区版本不存在或尚未发布')
+      access.requireWorkspace(principal, projectId, version.type, version.status === 'published' ? version.id : undefined)
       const path = url.searchParams.get('path') ?? ''
       if (action === 'tree') return {status:200, body:store.managementTree(projectId, versionId, url.searchParams.get('directory') ?? '')}
+      if (action === 'search') return {status:200, body:store.managementSearch(projectId, versionId, url.searchParams.get('query') ?? '', Number(url.searchParams.get('limit') ?? 200))}
       if (action === 'content') return {status:200, body:store.managementRead(projectId, versionId, path)}
       if (action === 'download') return {status:200, file:store.versionFile(projectId, versionId, path)}
     }
     if (parts[0] === 'packages') {
+      access.requireWorkspaceManager(principal, projectId)
       if (parts.length === 4 && parts[3] === 'download')
         return {status:200, file:store.packageFile(projectId, parts[1], parts[2])}
       if (parts.length === 3 && parts[2] === 'manifest') {
@@ -29,6 +44,7 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
     }
   }
   if (method === 'POST') {
+    access.requireWorkspaceManager(principal, projectId)
     if (parts.length === 1 && parts[0] === 'external') return {status:202, body:store.startExternal(projectId, body)}
     if (parts.length === 1 && parts[0] === 'packages') return {status:202, body:store.startPackages(projectId, body)}
     if (parts.length === 1 && parts[0] === 'import') return {status:202, body:store.startImport(projectId, body)}

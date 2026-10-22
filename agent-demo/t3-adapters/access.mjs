@@ -40,6 +40,8 @@ const fromRow = (row) => row && ({
   ownerId: row.owner_id,
   visibility: row.visibility,
   createdAt: row.created_at,
+  scopeState: row.scope_state || 'locked',
+  scopeLocked: (row.scope_state || 'locked') === 'locked',
   ...(row.workspace_type ? { workspaceType: row.workspace_type, workspaceVersionId: row.workspace_version_id } : {}),
   compatibilityReadOnly: Boolean(row.compatibility_read_only),
   continuationVerified: Boolean(row.continuation_verified),
@@ -77,7 +79,7 @@ export function initializeAutoOpsAccessSchema(db) {
   `)
   if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === 'revoked_at'))
     db.exec('ALTER TABLE t3_thread_bindings ADD COLUMN revoked_at TEXT')
-  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT']]) {
+  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT'],['scope_state',"TEXT NOT NULL DEFAULT 'locked'"],['submission_command_id','TEXT']]) {
     if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === name)) db.exec(`ALTER TABLE t3_thread_bindings ADD COLUMN ${name} ${type}`)
   }
   if (!db.prepare('PRAGMA table_info(t3_attachment_access)').all().some((column) => column.name === 'metadata_json'))
@@ -88,7 +90,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
   const lookupSession = (sessionHash) => {
     const row = sessionDb.prepare('SELECT token,uid,csrf,expires FROM sessions WHERE token=? AND expires>?').get(sessionHash, now())
     const user = row && catalog.users.find((entry) => entry.id === row.uid)
-    if (!row || !user) fail(401, 'UNAUTHENTICATED', '登录已失效，请重新登录')
+    if (!row || !user || (user.status !== undefined && user.status !== 'active')) fail(401, 'UNAUTHENTICATED', '登录已失效，请重新登录')
     return Object.freeze({ id: user.id, displayName: user.name, role: user.role, sessionHash: row.token, csrf: row.csrf, expiresAt: row.expires })
   }
   const refresh = (principal) => {
@@ -97,10 +99,43 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     if (current.id !== principal.id) fail(401, 'UNAUTHENTICATED', '登录身份已改变')
     return current
   }
-  const projectFor = (principal, projectId) => {
-    const current = refresh(principal)
+  const membershipForUser = (userId, projectId) => {
     const project = catalog.projects.find((entry) => entry.id === projectId)
-    if (!project?.memberIds.includes(current.id)) fail(404, 'PROJECT_NOT_FOUND', '项目不存在或无权访问')
+    const user = catalog.users.find((entry) => entry.id === userId)
+    const configured = project?.memberships?.find((entry) => entry.userId === userId)
+    const membership = configured || (project?.memberIds.includes(userId) ? { userId, workspaceAccess: 'internal', role: user?.role === 'admin' ? 'manager' : 'member', environmentIds: project.environments.map((entry) => entry.id), status: 'active' } : undefined)
+    if (!project || !user || (user.status !== undefined && user.status !== 'active') || !membership || membership.status !== 'active' ||
+        !['internal', 'external'].includes(membership.workspaceAccess) || !['manager', 'member'].includes(membership.role) ||
+        !Array.isArray(membership.environmentIds) || membership.environmentIds.some((id) => !project.environments.some((environment) => environment.id === id)))
+      fail(404, 'PROJECT_NOT_FOUND', '项目不存在或无权访问')
+    return { userId, workspaceAccess: membership.workspaceAccess, role: membership.role, environmentIds: [...new Set(membership.environmentIds)], status: 'active' }
+  }
+  const requireMembership = (principal, projectId) => membershipForUser(refresh(principal).id, projectId)
+  const requireEnvironment = (principal, projectId, environmentId) => {
+    const membership = requireMembership(principal, projectId)
+    if (!membership.environmentIds.includes(environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
+    return membership
+  }
+  const workspaceForUser = (userId, projectId, type, versionId, environmentId) => {
+    const membership = membershipForUser(userId, projectId)
+    if (!['internal', 'external'].includes(type) || (type === 'internal' && membership.workspaceAccess !== 'internal'))
+      fail(403, 'WORKSPACE_FORBIDDEN', '无权访问内部原始资料')
+    if (environmentId !== undefined && !membership.environmentIds.includes(environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
+    if (versionId !== undefined && workspaceStore) {
+      const version = workspaceStore.getVersion(projectId, versionId)
+      if (version.type !== type || version.status !== 'published') fail(403, 'WORKSPACE_NOT_AVAILABLE', '此工作区版本尚未发布或已不可用')
+    }
+    return membership
+  }
+  const requireWorkspace = (principal, projectId, type, versionId, environmentId) => workspaceForUser(refresh(principal).id, projectId, type, versionId, environmentId)
+  const requireWorkspaceManager = (principal, projectId) => {
+    const membership = requireWorkspace(principal, projectId, 'internal')
+    if (membership.role !== 'manager') fail(403, 'WORKSPACE_MANAGEMENT_FORBIDDEN', '只有项目内部管理者可以管理工作区')
+    return membership
+  }
+  const projectFor = (principal, projectId) => {
+    requireMembership(principal, projectId)
+    const project = catalog.projects.find((entry) => entry.id === projectId)
     return project
   }
   const nativeSubagentParent = (threadId) => bindingDb.prepare('SELECT parent_thread_id FROM t3_native_subagent_bindings WHERE child_thread_id=?').get(identifier(threadId, '会话ID'))?.parent_thread_id
@@ -127,8 +162,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     }
     const project = catalog.projects.find((entry) => entry.id === binding.projectId)
     const agent = catalog.agents.find((entry) => entry.id === binding.agentId)
-    if (!project?.memberIds.includes(binding.ownerId) ||
-        !project.environments.some((entry) => entry.id === binding.environmentId) ||
+    if (!project?.environments.some((entry) => entry.id === binding.environmentId) ||
         !agent?.projectIds.includes(binding.projectId))
       fail(403, 'THREAD_SCOPE_REVOKED', '会话的项目、环境或 Agent 授权已失效')
     return { binding, project, agent }
@@ -137,10 +171,10 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     const current = refresh(principal)
     const binding = getThreadBinding(threadId)
     if (!binding || (binding.revokedAt && !includeDeleted)) return false
+    if (binding.scopeState !== 'locked' && binding.ownerId !== current.id) return false
     try { validateBinding(includeDeleted ? {...binding,revokedAt:undefined} : binding) } catch { return false }
-    const project = catalog.projects.find((entry) => entry.id === binding.projectId)
-    return Boolean(project?.memberIds.includes(current.id) &&
-      (binding.visibility === 'project' || binding.ownerId === current.id))
+    try { workspaceForUser(current.id, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId) } catch { return false }
+    return binding.visibility === 'project' || binding.ownerId === current.id
   }
   const requireThread = (principal, threadId) => {
     if (!canSeeThread(principal, threadId)) fail(404, 'THREAD_NOT_FOUND', '会话不存在或无权访问')
@@ -148,8 +182,14 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     validateBinding(binding)
     return binding
   }
-  const bindThread = (principal, input) => {
-    const current = refresh(principal)
+  function threadAudience(binding) {
+    const project = catalog.projects.find((entry) => entry.id === binding.projectId)
+    const candidates = binding.visibility === 'private' ? [binding.ownerId] : [...new Set([...(project?.memberIds || []), ...(project?.memberships || []).map((entry) => entry.userId)])]
+    return candidates.filter((userId) => {
+      try { workspaceForUser(userId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId); return true } catch { return false }
+    })
+  }
+  const bindingInput = (current, input) => {
     projectFor(current, identifier(input.projectId, '项目ID'))
     const binding = {
       threadId: identifier(input.threadId, '会话ID'),
@@ -165,10 +205,17 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       } : {}),
     }
     if (!['private', 'project'].includes(binding.visibility)) fail(400, 'INVALID_VISIBILITY', '会话可见范围无效')
+    workspaceForUser(current.id, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
     validateBinding(binding)
+    return binding
+  }
+  const bindingKeys = ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId']
+  const bindThread = (principal, input) => {
+    const current = refresh(principal)
+    const binding = bindingInput(current, input)
     const existing = getThreadBinding(binding.threadId)
     if (existing) {
-      if (['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'].some((key) => existing[key] !== binding[key]))
+      if (bindingKeys.some((key) => existing[key] !== binding[key]))
         fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
       return existing
     }
@@ -183,6 +230,54 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
     return stored
   }
+  const reserveThread = (principal, input) => {
+    const current = refresh(principal), binding = bindingInput(current, input)
+    if (workspaceStore && !binding.workspaceType) fail(400, 'WORKSPACE_REQUIRED', '新对话必须先选择固定的工作区版本')
+    bindingDb.exec('BEGIN IMMEDIATE')
+    try {
+      const existing = getThreadBinding(binding.threadId)
+      if (existing) {
+        if (existing.ownerId !== current.id || existing.nativeParentThreadId || existing.revokedAt) fail(409, 'THREAD_BINDING_CONFLICT', '无法修改此会话的范围')
+        const changed = bindingKeys.some((key) => existing[key] !== binding[key])
+        if (changed && existing.scopeState !== 'draft') fail(409, 'THREAD_SCOPE_LOCKED', '消息提交中或已被接受，请新建对话以切换范围')
+        if (changed) bindingDb.prepare('UPDATE t3_thread_bindings SET project_id=?,environment_id=?,agent_id=?,visibility=?,workspace_type=?,workspace_version_id=? WHERE thread_id=? AND scope_state=\'draft\'').run(binding.projectId, binding.environmentId, binding.agentId, binding.visibility, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, binding.threadId)
+      } else {
+        bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,scope_state) VALUES(?,?,?,?,?,?,?,?,?,\'draft\')').run(binding.threadId, binding.projectId, binding.environmentId, binding.agentId, binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null)
+      }
+      bindingDb.exec('COMMIT')
+      return getThreadBinding(binding.threadId)
+    } catch (error) { bindingDb.exec('ROLLBACK'); throw error }
+  }
+  const beginThreadSubmission = (principal, threadId, commandId) => {
+    requireThread(principal, threadId)
+    identifier(commandId, '提交命令ID')
+    bindingDb.exec('BEGIN IMMEDIATE')
+    try {
+      const row = bindingDb.prepare('SELECT * FROM t3_thread_bindings WHERE thread_id=?').get(threadId)
+      if (row.scope_state === 'draft') bindingDb.prepare("UPDATE t3_thread_bindings SET scope_state='submitting',submission_command_id=? WHERE thread_id=?").run(commandId, threadId)
+      else if (row.submission_command_id !== commandId) fail(409, 'THREAD_SUBMISSION_CONFLICT', '此对话已有提交，请等待当前消息确认或新建对话')
+      bindingDb.exec('COMMIT')
+      return getThreadBinding(threadId)
+    } catch (error) { bindingDb.exec('ROLLBACK'); throw error }
+  }
+  const finishThreadSubmission = (threadId, commandId, accepted) => {
+    identifier(threadId, '会话ID'); identifier(commandId, '提交命令ID')
+    if (typeof accepted !== 'boolean') fail(400, 'INVALID_SUBMISSION_RESULT', '消息接受状态无效')
+    bindingDb.prepare("UPDATE t3_thread_bindings SET scope_state=?,submission_command_id=CASE WHEN ? THEN submission_command_id ELSE NULL END WHERE thread_id=? AND scope_state='submitting' AND submission_command_id=?").run(accepted ? 'locked' : 'draft', Number(accepted), threadId, commandId)
+    return getThreadBinding(threadId)
+  }
+  const markThreadAccepted = (threadId) => {
+    identifier(threadId, '会话ID')
+    bindingDb.prepare("UPDATE t3_thread_bindings SET scope_state='locked' WHERE thread_id=?").run(threadId)
+    return getThreadBinding(threadId)
+  }
+  const reconcileThreadSubmission = (threadId, accepted) => {
+    identifier(threadId, '会话ID')
+    if (typeof accepted !== 'boolean') fail(400, 'INVALID_SUBMISSION_RESULT', '消息接受状态无效')
+    if (accepted) return markThreadAccepted(threadId)
+    bindingDb.prepare("UPDATE t3_thread_bindings SET scope_state='draft',submission_command_id=NULL WHERE thread_id=? AND scope_state='submitting'").run(threadId)
+    return getThreadBinding(threadId)
+  }
   const requireAttachment = (principal, attachmentId, targetThreadId) => {
     const current = refresh(principal)
     const row = bindingDb.prepare('SELECT * FROM t3_attachment_access WHERE attachment_id=?').get(identifier(attachmentId, '附件ID'))
@@ -195,8 +290,8 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       if (targetThreadId && targetThreadId !== row.thread_id) {
         const source = requireThread(current, row.thread_id), target = requireThread(current, targetThreadId)
         requireMatchingWorkspaces(source, target)
-        const sourceAudience = source.visibility === 'private' ? [source.ownerId] : projectFor(current, source.projectId).memberIds
-        const targetAudience = target.visibility === 'private' ? [target.ownerId] : projectFor(current, target.projectId).memberIds
+        const sourceAudience = threadAudience(source)
+        const targetAudience = threadAudience(target)
         if (targetAudience.some((member) => !sourceAudience.includes(member)))
           fail(403, 'REFERENCE_AUDIENCE_MISMATCH', '附件授权范围不包含目标会话的所有成员')
       }
@@ -211,6 +306,11 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     },
     refresh,
     requireProject: projectFor,
+    requireMembership,
+    requireEnvironment,
+    requireWorkspace,
+    requireWorkspaceManager,
+    threadAudience,
     getThreadBinding,
     nativeSubagentParent,
     canSeeThread,
@@ -224,6 +324,11 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       bindingDb.prepare('UPDATE t3_thread_bindings SET revoked_at=COALESCE(revoked_at,?) WHERE thread_id=?').run(new Date(now()).toISOString(), identifier(threadId, '会话ID'))
     },
     bindThread,
+    reserveThread,
+    beginThreadSubmission,
+    finishThreadSubmission,
+    markThreadAccepted,
+    reconcileThreadSubmission,
     requireAttachment,
     recordPendingAttachment(principal, attachmentId, metadata) {
       const current = refresh(principal)
@@ -255,6 +360,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       if (!binding) fail(403, 'THREAD_NOT_BOUND', '生成附件没有获授权的业务会话')
       if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史兼容会话仅供查看')
       validateBinding(binding)
+      workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
       bindingDb.prepare('INSERT INTO t3_attachment_access(attachment_id,owner_id,thread_id,created_at,metadata_json) VALUES(?,?,?,?,?) ON CONFLICT(attachment_id) DO NOTHING').run(
         identifier(attachmentId, '附件ID'), binding.ownerId, threadId, new Date(now()).toISOString(), JSON.stringify({name:metadata.name,mimeType:metadata.mimeType,sizeBytes:metadata.sizeBytes}),
       )
@@ -272,11 +378,11 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       if (sourceThreadId === targetThreadId) return
       const source = getThreadBinding(sourceThreadId)
       if (!source?.continuationVerified) return
-      const { project } = validateBinding(source)
+      validateBinding(source)
       const target = getThreadBinding(targetThreadId)
       if (!target) fail(403, 'THREAD_NOT_BOUND', '原生分支没有获授权的业务会话')
       validateBinding(target)
-      const audience = source.visibility === 'private' ? [source.ownerId] : project.memberIds
+      const audience = threadAudience(source)
       if (source.compatibilityReadOnly || source.nativeParentThreadId || source.nativeThreadId !== sourceNativeId ||
           target.compatibilityReadOnly || target.nativeParentThreadId || target.visibility !== 'private' ||
           !audience.includes(target.ownerId) || ['projectId','environmentId','agentId','workspaceType','workspaceVersionId'].some(key => source[key] !== target[key]))
@@ -290,16 +396,15 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
       const binding = getThreadBinding(threadId)
       if (!binding) fail(403, 'THREAD_NOT_BOUND', '工具调用没有获授权的业务会话')
       if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史会话缺少可验证的原生续接记录，仅供查看')
+      workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
       return validateBinding(binding)
     },
     requireReference(principal, sourceThreadId, targetThreadId) {
       const source = requireThread(principal, sourceThreadId)
       const target = requireThread(principal, targetThreadId)
       requireMatchingWorkspaces(source, target)
-      const sourceProject = projectFor(principal, source.projectId)
-      const targetProject = projectFor(principal, target.projectId)
-      const sourceAudience = source.visibility === 'private' ? [source.ownerId] : sourceProject.memberIds
-      const targetAudience = target.visibility === 'private' ? [target.ownerId] : targetProject.memberIds
+      const sourceAudience = threadAudience(source)
+      const targetAudience = threadAudience(target)
       if (targetAudience.some((member) => !sourceAudience.includes(member)))
         fail(403, 'REFERENCE_AUDIENCE_MISMATCH', '引用内容的授权范围不包含目标会话的所有成员')
       return source
@@ -324,16 +429,16 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     bootstrap(principal) {
       const current = refresh(principal)
       const profile = resolveProductProfile()
-      const visibleProjects = catalog.projects.filter((entry) => entry.memberIds.includes(current.id))
+      const visibleProjects = catalog.projects.filter((entry) => { try { membershipForUser(current.id, entry.id); return true } catch { return false } })
       return {
-        principal: { id: current.id, displayName: current.displayName },
+        principal: { id: current.id, displayName: current.displayName, role: current.role },
         csrfToken: current.csrf,
         gatewayBasePath: '/api/agent-demo/t3',
         fixedModel: { instanceId: 'codex', model: process.env.AUTOOPS_T3_MODEL || process.env.AGENT_DEMO_MODEL || '' },
         modelSelectionEnabled: Boolean(process.env.AUTOOPS_T3_MODEL || process.env.AGENT_DEMO_MODEL) && configuredBusinessModels().discovered,
         runtimeMode: 'approval-required',
         projects: visibleProjects.map(({ id, name, environments }) => ({
-          id, name, environments,
+          id, name, environments: environments.filter((entry) => membershipForUser(current.id, id).environmentIds.includes(entry.id)), membership: membershipForUser(current.id, id),
           agents: catalog.agents.filter((agent) => agent.projectIds.includes(id)).map(({ id, name }) => ({ id, name })),
         })),
         agents: catalog.agents.filter((entry) => entry.projectIds.some((id) => visibleProjects.some((project) => project.id === id))),

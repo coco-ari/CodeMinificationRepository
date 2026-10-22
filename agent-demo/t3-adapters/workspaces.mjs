@@ -362,6 +362,17 @@ export function createWorkspaceStore({ dataDir }) {
     files(id, versionId) { return clone(versionRecord(id, versionId).files.map(({ binary: _binary, executable: _executable, ...file }) => file)) },
     tree(id, versionId, directory = '') { return versionTree(id, versionId, directory) },
     managementTree(id, versionId, directory = '') { return versionTree(id, versionId, directory, true) },
+    managementSearch(id, versionId, query = '', limit = 200) {
+      if (typeof query !== 'string' || query.length > 256 || !Number.isInteger(limit) || limit < 1 || limit > 500) fail(400, 'WORKSPACE_SEARCH_INVALID', '搜索文字或结果数量无效')
+      const version = versionRecord(id, versionId, true), entries = new Map(), needle = query.toLocaleLowerCase()
+      for (const file of version.files) {
+        entries.set(file.path, { path: file.path, kind: 'file' })
+        const parts = file.path.split('/')
+        for (let index = 1; index < parts.length; index++) { const path = parts.slice(0, index).join('/'); entries.set(path, { path, kind: 'directory' }) }
+      }
+      const matches = [...entries.values()].filter((entry) => entry.path.toLocaleLowerCase().includes(needle)).sort((a, b) => a.path.localeCompare(b.path))
+      return { entries: matches.slice(0, limit), truncated: matches.length > limit }
+    },
     read(id, versionId, path) { return versionText(id, versionId, path) },
     managementRead(id, versionId, path) { return versionText(id, versionId, path, true) },
     readBytes(id, versionId, path) { return readVersionFile(id, versionId, path, false).bytes },

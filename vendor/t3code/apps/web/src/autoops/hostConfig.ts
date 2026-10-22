@@ -19,6 +19,11 @@ export interface AutoOpsT3Bootstrap {
     readonly name: string
     readonly environments: ReadonlyArray<{ readonly id: string; readonly name: string }>
     readonly agents: ReadonlyArray<{ readonly id: string; readonly name: string }>
+    readonly membership?: {
+      readonly workspaceAccess: 'internal' | 'external'
+      readonly role: 'manager' | 'member'
+      readonly environmentIds: ReadonlyArray<string>
+    }
   }>
   readonly initialRoute?: { readonly environmentId: string; readonly threadId: string }
   readonly capabilities: Readonly<Record<string, unknown>>
@@ -157,6 +162,8 @@ export interface AutoOpsThreadScope {
   continuationVerified?: boolean
   nativeThreadId?: string
   nativeParentThreadId?: string
+  scopeState?: 'draft' | 'submitting' | 'locked'
+  scopeLocked?: boolean
 }
 const pendingScopes = new Map<string, AutoOpsThreadScope>()
 const scopeListeners = new Set<() => void>()
@@ -171,7 +178,22 @@ export function readKnownAutoOpsThreadScope(threadId: string) {
 }
 function publishThreadScope(threadId: string, scope: AutoOpsThreadScope) {
   pendingScopes.set(threadId, scope)
+  if (typeof window !== 'undefined') {
+    try { autoOpsStorage(window.localStorage).setItem(`thread-scope:${threadId}`, JSON.stringify(scope)) } catch {}
+  }
   for (const listener of scopeListeners) listener()
+}
+export function sameAutoOpsThreadScope(left: AutoOpsThreadScope, right: AutoOpsThreadScope) {
+  return left.projectId === right.projectId && left.environmentId === right.environmentId &&
+    left.agentId === right.agentId && left.visibility === right.visibility &&
+    (left.workspaceType ?? null) === (right.workspaceType ?? null) &&
+    (left.workspaceVersionId ?? null) === (right.workspaceVersionId ?? null)
+}
+function scopeAllowed(scope: AutoOpsThreadScope, project: AutoOpsT3Bootstrap['projects'][number]) {
+  return project.environments.some((entry) => entry.id === scope.environmentId) &&
+    project.agents.some((entry) => entry.id === scope.agentId) &&
+    (!project.membership || project.membership.environmentIds.includes(scope.environmentId)) &&
+    (project.membership?.workspaceAccess !== 'external' || scope.workspaceType === 'external')
 }
 export function readAutoOpsThreadScope(
   threadId: string,
@@ -186,8 +208,7 @@ export function readAutoOpsThreadScope(
         const project = activeHost?.projects.find((entry) => entry.id === projectId)
         if (
           candidate.projectId === projectId &&
-          project?.environments.some((entry) => entry.id === candidate.environmentId) &&
-          project.agents.some((entry) => entry.id === candidate.agentId)
+          project && scopeAllowed(candidate, project)
         )
           selected = candidate
       }
@@ -195,29 +216,28 @@ export function readAutoOpsThreadScope(
       /* Removed authorization is rejected by setAutoOpsThreadScope. */
     }
   }
-  if (selected) return selected
   const project = activeHost?.projects.find((entry) => entry.id === projectId)
-  if (!project?.environments[0] || !project.agents[0]) return undefined
+  if (selected && project && scopeAllowed(selected, project)) return selected
+  const environment = project?.environments.find((entry) => !project.membership || project.membership.environmentIds.includes(entry.id))
+  if (!project || !environment || !project.agents[0]) return undefined
   return {
     projectId,
-    environmentId: project.environments[0].id,
+    environmentId: environment.id,
     agentId: project.agents[0].id,
     visibility: 'private',
+    ...(project.membership?.workspaceAccess === 'external' ? { workspaceType: 'external' as const } : {}),
   }
 }
 export function setAutoOpsThreadScope(threadId: string, scope: AutoOpsThreadScope): void {
   const project = activeHost?.projects.find((entry) => entry.id === scope.projectId)
   if (
-    !project?.environments.some((entry) => entry.id === scope.environmentId) ||
-    !project.agents.some((entry) => entry.id === scope.agentId)
+    !project || !scopeAllowed(scope, project)
   )
-    throw new Error('Unavailable conversation scope.')
+    throw new Error('当前成员无权使用所选工作区、环境或助手。')
+  const current = pendingScopes.get(threadId)
+  if (current && (current.scopeLocked || current.scopeState === 'submitting') && !sameAutoOpsThreadScope(current, scope))
+    throw new Error(current.scopeLocked ? '对话范围已固定，请新建对话切换。' : '正在确认本次提交，暂时不能切换对话范围。')
   publishThreadScope(threadId, scope)
-  if (typeof window !== 'undefined') {
-    try {
-      autoOpsStorage(window.localStorage).setItem(`thread-scope:${threadId}`, JSON.stringify(scope))
-    } catch {}
-  }
 }
 
 /** Derive business scope from current server authority, never a project's first environment. */
@@ -249,13 +269,36 @@ async function authorizeThreadLaunch({
   if (!host) return
   const scope = readAutoOpsThreadScope(threadId, projectId)
   if (!scope)
-    throw new Error('Select an authorized project, environment and agent before starting.')
+    throw new Error('请先选择有权使用的项目、环境和助手。')
+  await reserveAutoOpsThreadScope(threadId, scope)
+}
+
+export async function reserveAutoOpsThreadScope(threadId: string, desired: AutoOpsThreadScope): Promise<AutoOpsThreadScope> {
+  const host = activeHost
+  if (!host) throw new Error('项目工作台未连接。')
+  const project = host.projects.find((entry) => entry.id === desired.projectId)
+  if (!project || !scopeAllowed(desired, project)) throw new Error('当前成员无权使用所选工作区、环境或助手。')
+  const previous = await fetch(`${host.gatewayBasePath}/autoops/thread-bindings/${encodeURIComponent(threadId)}`, { credentials: 'same-origin' })
+    .catch(() => { throw new Error('无法确认前次发送状态，请恢复连接后重试。') })
+  if (previous.ok) {
+    const { binding } = await previous.json() as { binding: AutoOpsThreadScope }
+    publishThreadScope(threadId, binding)
+    if (binding.scopeLocked || binding.scopeState === 'locked') {
+      if (!sameAutoOpsThreadScope(binding, desired)) throw new Error('前次发送已被接受，对话范围已固定。请新建对话切换。')
+      return binding
+    }
+    if (binding.scopeState === 'submitting') throw new Error('正在确认前次发送结果，请稍后重试；对话范围暂时不能修改。')
+  } else if (previous.status !== 404) {
+    throw new Error(previous.status === 401 ? '请重新登录。' : '无法确认前次发送状态，请恢复连接后重试。')
+  }
   const response = await fetch(`${host.gatewayBasePath}/autoops/thread-bindings`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'X-Demo-CSRF': host.csrfToken },
-    body: JSON.stringify({ threadId, ...scope }),
-  })
+    body: JSON.stringify({ threadId, projectId: desired.projectId, environmentId: desired.environmentId,
+      agentId: desired.agentId, visibility: desired.visibility,
+      ...(desired.workspaceType ? { workspaceType: desired.workspaceType, workspaceVersionId: desired.workspaceVersionId } : {}) }),
+  }).catch(() => { throw new Error('未收到本次发送的确认，请恢复连接后重试。') })
   if (!response.ok)
     throw new Error(
       response.status === 401
@@ -264,18 +307,31 @@ async function authorizeThreadLaunch({
     )
   const result = (await response.json()) as {binding: AutoOpsThreadScope}
   publishThreadScope(threadId, result.binding)
+  return result.binding
 }
 
 export async function loadAutoOpsThreadScope(
   threadId: string,
   signal?: AbortSignal,
 ): Promise<AutoOpsThreadScope> {
-  if (!activeHost) throw new Error('AutoOps is not connected.')
+  const binding = await findAutoOpsThreadScope(threadId, signal)
+  if (!binding) throw new Error('对话范围尚未保存。')
+  return binding
+}
+
+export async function findAutoOpsThreadScope(threadId: string, signal?: AbortSignal): Promise<AutoOpsThreadScope | null> {
+  if (!activeHost) throw new Error('项目工作台未连接。')
   const response = await fetch(
     `${activeHost.gatewayBasePath}/autoops/thread-bindings/${encodeURIComponent(threadId)}`,
     { credentials: 'same-origin', ...(signal ? { signal } : {}) },
-  )
-  if (!response.ok) throw new Error('Conversation access is unavailable.')
+  ).catch(() => { throw new Error('无法确认对话范围，请恢复连接后重试。') })
+  if (response.status === 404) {
+    const current = pendingScopes.get(threadId)
+    if (current?.scopeState === 'submitting' && current.scopeLocked !== true)
+      publishThreadScope(threadId, { ...current, scopeState: 'draft', scopeLocked: false })
+    return null
+  }
+  if (!response.ok) throw new Error('无法确认对话范围，请恢复连接后重试。')
   const result = (await response.json()) as { binding: AutoOpsThreadScope }
   publishThreadScope(threadId, result.binding)
   return result.binding

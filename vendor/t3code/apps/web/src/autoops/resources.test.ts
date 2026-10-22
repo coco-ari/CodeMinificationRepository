@@ -1,5 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 afterEach(() => vi.resetModules())
+
+it('shows workspace-relative candidate directories without changing resource identities', async () => {
+  const { autoOpsResourcePathDescription } = await import('./resources')
+  const scope = { projectId: 'p-autoops', workspaceVersionId: 'version-1' }
+  const canonicalPath = 'autoops/p-autoops/workspaces/version-1/frontend/src/App.tsx'
+  expect(autoOpsResourcePathDescription(canonicalPath, scope)).toBe('frontend/src')
+  expect(canonicalPath).toBe('autoops/p-autoops/workspaces/version-1/frontend/src/App.tsx')
+  expect(autoOpsResourcePathDescription('autoops/p-autoops/workspaces/version-1/README.md', scope)).toBe('')
+  for (const path of [
+    'autoops/other-project/workspaces/version-1/frontend/App.tsx',
+    'autoops/p-autoops/workspaces/version-10/frontend/App.tsx',
+    'autoops/p-autoops/documents/doc-1/README.md',
+    'frontend/src/App.tsx',
+  ]) {
+    expect(autoOpsResourcePathDescription(path, scope)).toBe(path.slice(0, path.lastIndexOf('/')))
+  }
+  expect(autoOpsResourcePathDescription(canonicalPath, undefined)).toBe(
+    'autoops/p-autoops/workspaces/version-1/frontend/src',
+  )
+})
 describe('authorized business resource transport', () => {
   it('maps only same-origin allowed resources and preserves the preview id through reload', async () => {
     const { installAutoOpsHost } = await import('./hostConfig')
@@ -74,4 +94,38 @@ it('preserves authorized identities in native mentions and preview URLs without 
     new URL(autoOpsResourceRequestUrl(url, 'inline'), 'https://work.test').searchParams.get('path'),
   ).toBe(path)
   expect(autoOpsResourceUrl('autoops/p-autoops/documents/../../secret')).toBeNull()
+})
+
+it('uses the explicit subscribed scope when a workspace version arrives after the initial cwd', async () => {
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost(
+    {
+      principal: { id: 'cwd-scope-test', displayName: 'Test' },
+      gatewayBasePath: '/api/agent-demo/t3',
+      csrfToken: 'x',
+      projects: [{
+        id: 'p-autoops', name: 'AutoOps',
+        environments: [{ id: 'test', name: 'Test' }],
+        agents: [{ id: 'agent', name: 'Agent' }],
+      }],
+      capabilities: {},
+      fixedModel: { instanceId: 'codex', model: 'fixed' },
+      runtimeMode: 'approval-required',
+    },
+    'https://work.test',
+  )
+  const { autoOpsResourceCwd } = await import('./resources')
+  const initialCwd = autoOpsResourceCwd('thread-1', 'p-autoops')!
+  expect(new URL(initialCwd).search).toBe('')
+  const scope = {
+    projectId: 'p-autoops', environmentId: 'test', agentId: 'agent', visibility: 'private' as const,
+    workspaceType: 'external' as const, workspaceVersionId: 'version-1',
+  }
+  const updatedCwd = new URL(autoOpsResourceCwd('thread-1', 'p-autoops', scope)!)
+  expect(updatedCwd.searchParams.get('workspaceType')).toBe('external')
+  expect(updatedCwd.searchParams.get('workspaceVersionId')).toBe('version-1')
+  const nextCwd = new URL(autoOpsResourceCwd('thread-1', 'p-autoops', {
+    ...scope, workspaceVersionId: 'version-2',
+  })!)
+  expect(nextCwd.searchParams.get('workspaceVersionId')).toBe('version-2')
 })

@@ -56,7 +56,7 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     if (!match) fail('业务资料目录无效；不接受宿主路径')
     const [, projectId, environmentId, threadId, query] = match
     const project = access.requireProject(principal, projectId)
-    if (!project.environments.some((entry) => entry.id === environmentId)) fail()
+    access.requireEnvironment(principal, projectId, environmentId)
     let binding = access.getThreadBinding(threadId)
     const parameters = new URLSearchParams(query || '')
     const workspaceType = parameters.get('workspaceType'), workspaceVersionId = parameters.get('workspaceVersionId')
@@ -68,12 +68,14 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     } else if (parameters.size) binding = { projectId, environmentId, workspaceType, workspaceVersionId }
     else throw new AutoOpsAccessError(409, 'WORKSPACE_REQUIRED', '请先选择工作区版本')
     workspace(binding)
+    access.requireWorkspace(principal, projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, environmentId)
     return { project, environmentId, threadId, binding }
   }
   function projectAtCwd(principal, cwd) {
     return scopeAtCwd(principal, cwd).project
   }
   function visible(principal, project, binding) {
+    access.requireWorkspace(principal, project.id, binding?.workspaceType || 'internal', binding?.workspaceVersionId, binding?.environmentId)
     return catalog(project, (threadId) => access.canSeeThread(principal, threadId), binding)
   }
   function assertPath(path) {
@@ -97,6 +99,7 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     const selected = parts[2] === 'workspaces' ? workspaceStore?.getVersion(project.id, parts[3]) : null
     if (parts[2] === 'workspaces' && !selected) fail()
     const binding = selected ? { projectId: project.id, workspaceType: selected.type, workspaceVersionId: selected.id } : parts[2] === 'threads' ? access.getThreadBinding(parts[3]) : undefined
+    if (parts[2] === 'environments') access.requireEnvironment(principal, project.id, parts[3])
     const found = visible(principal, project, binding).find((entry) => entry.path === path)
     if (!found) fail()
     return found
@@ -126,11 +129,11 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
   }
   function forThread(threadId) {
     const target = access.requireToolThread(threadId)
-    const targetAudience = target.binding.visibility === 'project' ? target.project.memberIds : [target.binding.ownerId]
+    const targetAudience = access.threadAudience(target.binding)
     return catalog(target.project, (sourceId) => {
       const source = access.getThreadBinding(sourceId)
       if (!source || source.revokedAt) return false
-      const sourceAudience = source.visibility === 'project' ? target.project.memberIds : [source.ownerId]
+      const sourceAudience = access.threadAudience(source)
       return targetAudience.every((id) => sourceAudience.includes(id))
     }, target.binding).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
   }
@@ -172,9 +175,11 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
         if (path === 'autoops') { entries.push({kind:'directory'}); continue }
         const project = access.requireProject(principal, path.split('/')[1])
         const parts = path.split('/')
+        if (parts.length === 2) { entries.push({kind:'directory'}); continue }
         if (parts.length === 3 && parts[2] === 'workspaces') { entries.push({kind:'directory'}); continue }
         const selected = parts[2] === 'workspaces' ? workspaceStore?.getVersion(project.id, parts[3]) : null
         const binding = selected ? { projectId: project.id, workspaceType: selected.type, workspaceVersionId: selected.id } : parts[2] === 'threads' ? access.getThreadBinding(parts[3]) : undefined
+        if (parts[2] === 'environments') access.requireEnvironment(principal, project.id, parts[3])
         const files = visible(principal, project, binding)
         const file = files.find((entry) => entry.path === path)
         if (file) entries.push({ kind: 'file', byteLength: file.size ?? (file.content ? Buffer.byteLength(file.content) : 0), mimeType: file.mime })

@@ -80,7 +80,7 @@ export function Login({ login, error: initialError }) {
           </Button>
         </form>
         <div className="flex flex-col gap-1 border-t border-border pt-4 text-xs text-muted-foreground">
-          <span>测试账号：admin / lin / chen</span>
+          <span>内部账号：admin / lin / chen；外部账号：guest</span>
           <span>演示口令：Demo123!</span>
         </div>
       </section>

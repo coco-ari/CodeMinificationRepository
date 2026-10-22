@@ -8,6 +8,7 @@ vi.mock("../../../../../../agent-demo/t3-adapters/rpc-policy.mjs", () => ({
   authorizeAutoOpsRpc: mocks.authorize,
   filterAutoOpsShell: (_access: unknown, _principal: unknown, value: unknown) => value,
   filterAutoOpsShellItem: (_access: unknown, _principal: unknown, value: unknown) => value,
+  prepareAutoOpsRpcPayload: (_access: unknown, _principal: unknown, _method: string, value: unknown) => value,
 }));
 vi.mock("./resources.ts", () => ({ resourceRequest: () => undefined }));
 vi.mock("./personalPreferences.ts", () => ({ overlayPersonalResult: (_session: string, _method: string, value: unknown) => value }));

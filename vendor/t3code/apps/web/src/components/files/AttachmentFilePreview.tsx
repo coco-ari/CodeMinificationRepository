@@ -9,7 +9,7 @@ import * as Cause from "effect/Cause";
 import { filePreviewKind, FILE_TEXT_PREVIEW_MAX_BYTES } from "@t3tools/shared/filePreview";
 import { ChevronRightIcon, DownloadIcon, Trash2Icon, WrapTextIcon, XIcon } from "lucide-react";
 import { Check, Code2, Copy, Eye, Table2 } from "lucide";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAssetUrlRefresh } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
@@ -58,6 +58,10 @@ export function AttachmentFilePreview(props: {
   htmlRender?: boolean;
   threadRef?: ScopedThreadRef;
   origin?: string;
+  /** An already authorized business file, preserving its resource identity. */
+  resourceUrl?: string;
+  header?: ReactNode;
+  toolbarEnd?: ReactNode;
   onRemove?: () => void;
   onClose?: () => void;
 }) {
@@ -66,7 +70,7 @@ export function AttachmentFilePreview(props: {
   const renderedMode =
     kind === "markdown" ? "markdown" : kind === "html" ? "html" : delimiter ? "table" : null;
   const attachmentId = props.asset?.attachmentId;
-  const businessResource = autoOpsResourceFromAttachmentId(attachmentId);
+  const businessResource = props.resourceUrl ?? autoOpsResourceFromAttachmentId(attachmentId);
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: props.name });
   // useAssetUrlRefresh keys its callback on these objects, so they must stay cached.
   const resource = attachmentId && !businessResource
@@ -266,7 +270,8 @@ export function AttachmentFilePreview(props: {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className={cn(FILE_SURFACE_SUBHEADER_CLASS)} data-surface-subheader>
-        <div className="flex min-w-0 flex-1 items-center text-xs">
+        <div className="flex min-w-0 flex-1 items-center overflow-hidden text-xs">
+          {props.header ?? <>
           <span className="shrink-0 px-0.5 text-muted-foreground">
             {props.origin ?? "附件"}
           </span>
@@ -278,7 +283,7 @@ export function AttachmentFilePreview(props: {
             <span className="ml-2 shrink-0 text-muted-foreground">
               {formatAttachmentSize(props.sizeBytes)}
             </span>
-          ) : null}
+          ) : null}</>}
         </div>
         {renderedMode ? (
           <FileSurfaceAction
@@ -328,6 +333,7 @@ export function AttachmentFilePreview(props: {
             <XIcon className="size-3.5" />
           </FileSurfaceAction>
         ) : null}
+        {props.toolbarEnd}
       </div>
       {content?.truncated ? (
         <FileSurfaceNotice>

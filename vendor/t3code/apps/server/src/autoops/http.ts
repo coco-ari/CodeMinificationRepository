@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import { hasAcceptedUserMessage, isThreadSubmissionActive, getThreadSubmissionGeneration } from './threadReservations.ts';
 import { configuredBusinessArtifactStore } from "../../../../../../agent-demo/t3-adapters/business-tools.mjs";
 import { configuredBusinessResourceCatalog } from "../../../../../../agent-demo/t3-adapters/resources.mjs";
 import { configuredWorkspaceStore } from "../../../../../../agent-demo/t3-adapters/workspaces.mjs";
@@ -20,9 +21,9 @@ import {
   type ThreadBinding,
 } from "../../../../../../agent-demo/t3-adapters/access.mjs";
 
-const safeMimes = new Set(["text/plain", "text/markdown", "text/csv", "application/json", "application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"]);
+const safeMimes = new Set(["text/plain", "text/markdown", "text/csv", "text/html", "application/json", "application/pdf", "image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/gif"]);
 const resourceHeaders = (url: URL, name: string, mime: string) => ({
-  "cache-control": "private, no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox",
+  "cache-control": "private, no-store", "x-content-type-options": "nosniff", "content-security-policy": mime === 'text/html' ? "default-src 'none'; sandbox; style-src 'unsafe-inline'; img-src data:; font-src data:" : "default-src 'none'; sandbox",
   "content-type": safeMimes.has(mime) ? mime : "application/octet-stream",
   "content-disposition": `${url.searchParams.get("inline") === "1" && safeMimes.has(mime) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
 });
@@ -49,18 +50,34 @@ export const layer = Layer.unwrap(Effect.sync(() => {
     const native = yield* auth.authenticateHttpRequest(request);
     return yield* Effect.try(() => access.principalForNativeSession(native.sessionId));
   });
+  const nativeSubmissionState = (threadId: string) => Effect.gen(function* () {
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    return yield* threads.getThreadSnapshot(ThreadId.make(threadId)).pipe(
+      Effect.map((snapshot) => hasAcceptedUserMessage(snapshot) ? 'accepted' as const : 'empty' as const),
+      Effect.catch((error) => {
+        const cause = error as { _tag?: string; cause?: { _tag?: string } };
+        return cause._tag === 'ThreadManagementThreadNotFoundError' || cause.cause?._tag === 'ProjectionStoreThreadNotFoundError'
+          ? Effect.succeed('missing' as const) : Effect.fail(error);
+      }),
+    );
+  });
   const workspaceRequest = Effect.gen(function* () {
     const current = yield* principal;
     const request = yield* HttpServerRequest.HttpServerRequest;
     if (request.method !== 'GET') yield* Effect.try(() => access.requireCsrf(current, request.headers['x-demo-csrf']));
     const input = request.method === 'GET' ? undefined : yield* request.json;
     const result = yield* Effect.tryPromise(() => handleWorkspaceRequest({access, store:configuredWorkspaceStore(), principal:current, url:new URL(request.url,'http://localhost'), method:request.method, input}));
-    if (result.file) return HttpServerResponse.uint8Array(result.file.bytes, {status:result.status, headers:resourceHeaders(new URL(request.url,'http://localhost'),result.file.name,result.file.mime)});
+    if (result.file) {
+      const url = new URL(request.url,'http://localhost');
+      if (url.searchParams.get('metadata') === '1') return HttpServerResponse.jsonUnsafe({name:result.file.name,mime:result.file.mime,size:result.file.bytes.byteLength}, {headers:{'cache-control':'private, no-store'}});
+      return HttpServerResponse.uint8Array(result.file.bytes, {status:result.status, headers:resourceHeaders(url,result.file.name,result.file.mime)});
+    }
     return HttpServerResponse.jsonUnsafe(result.body, {status:result.status, headers:{'cache-control':'private, no-store'}});
   }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))));
   return Layer.mergeAll(
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/tree', workspaceRequest),
+    HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/search', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/content', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/versions/:versionId/download', workspaceRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/workspaces/packages/:releaseId/:service/download', workspaceRequest),
@@ -123,7 +140,18 @@ export const layer = Layer.unwrap(Effect.sync(() => {
       const current = yield* principal;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const threadId = decodeURIComponent(new URL(request.url, "http://localhost").pathname.split("/").at(-1) ?? "");
-      const binding = yield* Effect.try(() => access.requireThread(current, threadId));
+      let binding = yield* Effect.try(() => access.requireThread(current, threadId));
+      if (binding.scopeState !== 'locked') {
+        const generation = getThreadSubmissionGeneration(threadId), wasInactive = !isThreadSubmissionActive(threadId);
+        const state = yield* nativeSubmissionState(threadId).pipe(Effect.catch(() => Effect.succeed('unavailable' as const)));
+        if (state === 'accepted') yield* Effect.sync(() => access.markThreadAccepted(threadId));
+        else if (state !== 'unavailable' && binding.scopeState === 'submitting')
+          yield* Effect.sync(() => {
+            if (wasInactive && !isThreadSubmissionActive(threadId) && getThreadSubmissionGeneration(threadId) === generation)
+              access.reconcileThreadSubmission(threadId, false);
+          });
+        binding = yield* Effect.try(() => access.requireThread(current, threadId));
+      }
       return HttpServerResponse.jsonUnsafe({ binding }, { headers: { "cache-control": "no-store" } });
     }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
     HttpRouter.add("GET", "/autoops/legacy-drafts", Effect.gen(function* () {
@@ -193,6 +221,7 @@ export const layer = Layer.unwrap(Effect.sync(() => {
       const url = new URL(request.url, "http://localhost");
       const segments = url.pathname.split("/").map(decodeURIComponent);
       const project = yield* Effect.try(() => access.requireProject(current, segments.at(-3) ?? ""));
+      yield* Effect.try(() => access.requireWorkspace(current, project.id, 'internal'));
       const document = project.documents.find((entry) => entry.id === segments.at(-1));
       if (!document) return HttpServerResponse.empty({status:404});
       const bytes = new TextEncoder().encode(document.content);
@@ -209,20 +238,22 @@ export const layer = Layer.unwrap(Effect.sync(() => {
       }
       const binding = input as Omit<ThreadBinding, "ownerId" | "createdAt">;
       // Do not let a user claim an existing, as-yet-unmigrated native T3 thread.
-      if (typeof binding.threadId === "string" && access.getThreadBinding(binding.threadId) === undefined) {
-        const threads = yield* ThreadManagement.ThreadManagementService;
-        const exists = yield* threads.getThreadSnapshot(ThreadId.make(binding.threadId)).pipe(
-          Effect.as(true),
-          Effect.catch((error) => {
-            const cause = error as { _tag?: string; cause?: { _tag?: string } };
-            return cause._tag === "ThreadManagementThreadNotFoundError" || cause.cause?._tag === "ProjectionStoreThreadNotFoundError"
-              ? Effect.succeed(false)
-              : Effect.fail(error);
-          }),
-        );
-        if (exists) return HttpServerResponse.jsonUnsafe({ code: "THREAD_ALREADY_EXISTS", error: "该会话需先完成授权数据迁移" }, { status: 409 });
+      if (typeof binding.threadId === "string") {
+        const existing = access.getThreadBinding(binding.threadId);
+        if (existing) yield* Effect.try(() => access.requireThread(current, binding.threadId));
+        if (!existing || existing.scopeState !== 'locked') {
+          const generation = getThreadSubmissionGeneration(binding.threadId), wasInactive = !isThreadSubmissionActive(binding.threadId);
+          const state = yield* nativeSubmissionState(binding.threadId);
+          if (!existing && state !== 'missing') return HttpServerResponse.jsonUnsafe({ code: "THREAD_ALREADY_EXISTS", error: "该会话需先完成授权数据迁移" }, { status: 409 });
+          if (existing && state === 'accepted') yield* Effect.sync(() => access.markThreadAccepted(binding.threadId));
+          else if (existing?.scopeState === 'submitting')
+            yield* Effect.sync(() => {
+              if (wasInactive && !isThreadSubmissionActive(binding.threadId) && getThreadSubmissionGeneration(binding.threadId) === generation)
+                access.reconcileThreadSubmission(binding.threadId, false);
+            });
+        }
       }
-      const saved = yield* Effect.try(() => access.bindThread(current, binding));
+      const saved = yield* Effect.try(() => access.reserveThread(current, binding));
       return HttpServerResponse.jsonUnsafe({ binding: saved }, { headers: { "cache-control": "no-store" } });
     }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
   );

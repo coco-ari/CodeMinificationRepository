@@ -113,6 +113,8 @@ import {
   workspaceAssetResource,
 } from "./filePreviewMode";
 import { useFileSaveCoordinator } from "./useFileSaveCoordinator";
+import { ReadOnlyWorkspaceFiles } from "./ReadOnlyWorkspaceFiles";
+import type { ReadOnlyFileSource } from "./readOnlyFileSource";
 import {
   getOptimisticProjectFileQueryData,
   getProjectFileContents,
@@ -126,6 +128,8 @@ export interface FilePreviewPanelProps {
   projectName: string;
   relativePath: string | null;
   attachment?: ChatFileAttachment;
+  /** A scoped business version uses the native read-only tree and preview, never host file editing. */
+  readOnlySource?: ReadOnlyFileSource;
   /** Metadata-verified business directory; avoids probing a folder as a file. */
   knownDirectory?: boolean;
   threadRef: ScopedThreadRef;
@@ -974,7 +978,17 @@ function initialExplorerOpen(): boolean {
   }
 }
 
-export default function FilePreviewPanel({
+export default function FilePreviewPanel(props: FilePreviewPanelProps) {
+  if (props.readOnlySource && !props.attachment) return <ReadOnlyWorkspaceFiles
+    environmentId={props.environmentId} cwd={props.cwd} projectName={props.projectName}
+    relativePath={props.relativePath} source={props.readOnlySource} threadRef={props.threadRef}
+    knownDirectory={props.knownDirectory} revealRequestId={props.revealRequestId} folderTrail={props.folderTrail}
+    onOpenFile={props.onOpenFile} onNavigateFolder={props.onNavigateFolder}
+  />;
+  return <NativeFilePreviewPanel {...props} />;
+}
+
+function NativeFilePreviewPanel({
   environmentId,
   cwd,
   projectName,
