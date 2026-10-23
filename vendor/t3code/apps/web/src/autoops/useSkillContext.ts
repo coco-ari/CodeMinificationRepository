@@ -1,4 +1,10 @@
-import { useEffect, useState } from "react";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/reactivity";
+
+import { useEnvironmentQuery } from "~/state/query";
+import { autoOpsRequest, isAutoOpsAccessError } from "./apiClient";
 import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from "./hostConfig";
 
 interface SkillContext {
@@ -6,8 +12,7 @@ interface SkillContext {
   snapshotId: string;
   skills: { name: string; displayName?: string; versionId: string }[];
 }
-/** Remote skills never resolve a platform catalogue, including a draft carrying
- * obsolete platform fields from before the target was changed. */
+/** 客户端执行目标不读取平台目录，即使草稿仍携带切换前的平台范围。 */
 export function autoOpsSkillContextRequestKey(
   gatewayBasePath: string | undefined,
   threadId: string | null,
@@ -32,7 +37,80 @@ export function autoOpsSkillContextRequestKey(
   return `${gatewayBasePath}/autoops/skill-library/context?${query}`;
 }
 
-/** Resolve the server-authorized scope before asking T3's native skill scanner. */
+interface SkillContextResponse {
+  readonly context: SkillContext | null;
+  readonly error: string | null;
+}
+
+class SkillContextReadError extends Data.TaggedError("SkillContextReadError")<{
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
+
+interface SkillContextRequest {
+  readonly principalId: string;
+  readonly csrfToken: string;
+  readonly httpBaseUrl: string;
+  readonly gatewayBasePath: string;
+  readonly threadId: string;
+  readonly requestKey: string;
+}
+
+const skillContextQueries = Atom.family((key: string) => {
+  const request = JSON.parse(key) as SkillContextRequest;
+  return Atom.make((get) => {
+    const refresh = () => {
+      const current = Option.getOrNull(
+        get.self<AsyncResult.AsyncResult<SkillContextResponse, SkillContextReadError>>(),
+      );
+      if (!current?.waiting) get.refreshSelf();
+    };
+    const changed = () => get.refreshSelf();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("autoops:skill-library-changed", changed);
+    get.addFinalizer(() => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("autoops:skill-library-changed", changed);
+    });
+    return Effect.tryPromise({
+      try: async (signal): Promise<SkillContextResponse> => {
+        const host = readAutoOpsHost();
+        if (
+          host?.principal.id !== request.principalId ||
+          host.csrfToken !== request.csrfToken ||
+          host.httpBaseUrl !== request.httpBaseUrl ||
+          host.gatewayBasePath !== request.gatewayBasePath
+        ) {
+          throw new DOMException("登录上下文已经改变", "AbortError");
+        }
+        try {
+          const path = request.requestKey.slice(request.gatewayBasePath.length);
+          const context = await autoOpsRequest<SkillContext>(path, {
+            label: "当前技能范围",
+            signal,
+          });
+          return { context, error: null };
+        } catch (cause) {
+          // 撤权成为新的读取基线，之后的网络失败也不能复活此前的技能展示。
+          if (isAutoOpsAccessError(cause)) {
+            return {
+              context: null,
+              error: cause instanceof Error ? cause.message : "当前技能访问已失效。",
+            };
+          }
+          throw cause;
+        }
+      },
+      catch: (cause) =>
+        new SkillContextReadError({
+          message: cause instanceof Error ? cause.message : "无法读取当前技能范围",
+          cause,
+        }),
+    });
+  }).pipe(Atom.setIdleTTL(0), Atom.withLabel("autoops:skill-context"));
+});
+
+/** 历史展示保留同范围快照；技能发现和新选择仅使用复核完成后的授权目录。 */
 export function useAutoOpsSkillContext(
   threadId: string | null,
   projectId: string | undefined,
@@ -42,43 +120,27 @@ export function useAutoOpsSkillContext(
   const selection =
     scope ?? (threadId && projectId ? readAutoOpsThreadScope(threadId, projectId) : undefined);
   const requestKey = autoOpsSkillContextRequestKey(host?.gatewayBasePath, threadId, selection);
-  const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<{
-    key: string;
-    revision: number;
-    context: SkillContext | null;
-    error: string | null;
-  } | null>(null);
-  useEffect(() => {
-    const changed = () => setRevision((value) => value + 1);
-    window.addEventListener("autoops:skill-library-changed", changed);
-    window.addEventListener("focus", changed);
-    return () => {
-      window.removeEventListener("autoops:skill-library-changed", changed);
-      window.removeEventListener("focus", changed);
-    };
-  }, []);
-  useEffect(() => {
-    if (!requestKey) return;
-    const controller = new AbortController();
-    void fetch(requestKey, { credentials: "include", signal: controller.signal })
-      .then(async (response) => {
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error ?? "无法读取当前技能范围");
-        if (!controller.signal.aborted)
-          setResult({ key: requestKey, revision, context: body as SkillContext, error: null });
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted)
-          setResult({
-            key: requestKey,
-            revision,
-            context: null,
-            error: cause instanceof Error ? cause.message : "无法读取当前技能范围",
-          });
-      });
-    return () => controller.abort();
-  }, [requestKey, revision]);
-  // Never reuse the previous scope's catalogue while a new scope is loading.
-  return result?.key === requestKey && result.revision === revision ? result : null;
+  const query = useEnvironmentQuery(
+    host && requestKey && threadId
+      ? skillContextQueries(
+          JSON.stringify({
+            principalId: host.principal.id,
+            csrfToken: host.csrfToken,
+            httpBaseUrl: host.httpBaseUrl,
+            gatewayBasePath: host.gatewayBasePath,
+            threadId,
+            requestKey,
+          } satisfies SkillContextRequest),
+        )
+      : null,
+  );
+  if (!requestKey || (!query.data && query.isPending)) return null;
+  const error = query.error ?? query.data?.error ?? null;
+  const context = query.data?.context ?? null;
+  return {
+    context,
+    authorizedContext: query.isSuccess && !query.isPending && error === null ? context : null,
+    error,
+    isRefreshing: query.isPending,
+  };
 }

@@ -3029,8 +3029,22 @@ const CHAT_MARKDOWN_COMPONENTS = {
     }
     if (href && autoOpsResourceUrl(href)) {
       if (customerScope) return <span>{children}</span>;
+      const label = nodeToPlainText(children);
+      const start = node?.position?.start.offset;
+      const end = node?.position?.end.offset;
+      const source = start !== undefined && end !== undefined ? text.slice(start, end) : "";
+      const copyMarkdown =
+        source.startsWith("[") && source.includes("](")
+          ? source
+          : `[${label.replace(/[\\[\]]/g, "\\$&")}](${href})`;
       return (
-        <AutoOpsResourceLink {...props} sourceUrl={href} {...(threadRef ? { threadRef } : {})}>
+        <AutoOpsResourceLink
+          {...props}
+          sourceUrl={href}
+          label={label}
+          copyMarkdown={copyMarkdown}
+          {...(threadRef ? { threadRef } : {})}
+        >
           {children}
         </AutoOpsResourceLink>
       );
