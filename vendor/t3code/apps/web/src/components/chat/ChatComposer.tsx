@@ -4397,6 +4397,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (
         workspacePathCompletion &&
         trigger?.kind === "path" &&
+        !workspaceEntries.error &&
         isComposerDirectoryCompletionKey(event)
       ) {
         // Pending or stale results must never complete an old directory or another version.

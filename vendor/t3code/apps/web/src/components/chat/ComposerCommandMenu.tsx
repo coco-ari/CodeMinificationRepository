@@ -125,7 +125,16 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
           <div role="alert" className="flex items-center gap-2 px-5 pt-3.5 pb-7 text-xs">
             <span className="min-w-0 flex-1 text-destructive wrap-anywhere">{props.error}</span>
             {props.onRetry ? (
-              <Button size="xs" variant="outline" onPointerDown={(event) => event.preventDefault()} onClick={props.onRetry}>
+              <Button
+                size="xs"
+                variant="outline"
+                onPointerDown={(event) => event.preventDefault()}
+                onKeyDown={(event) => {
+                  // 保留按钮的原生激活，避免候选容器把回车当成选项确认。
+                  if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+                }}
+                onClick={props.onRetry}
+              >
                 重试读取文件
               </Button>
             ) : null}
