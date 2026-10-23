@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFiles'
+import { fileScrollViewports } from '~/components/files/fileSurfaceChrome'
 import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
 import { usePrimaryEnvironmentId } from '~/state/environments'
@@ -61,18 +62,25 @@ export function WorkspaceFileBrowser({
       /* 无效的历史位置不影响当前浏览。 */
     }
     const restored = new WeakSet<HTMLElement>()
+    const observed = new WeakSet<Element>()
     let interrupted = false
-    const viewports = () => [
-      ...element.querySelectorAll<HTMLElement>('[data-slot="scroll-area-viewport"]'),
-    ]
+    const viewports = () => fileScrollViewports(element)
     const restore = () => {
       if (interrupted) return
       viewports().forEach((viewport, index) => {
+        // 原生代码预览异步绘制并调整高度，需等可滚动范围就绪后再恢复。
+        for (const target of [viewport, viewport.firstElementChild]) {
+          if (target && !observed.has(target)) {
+            observed.add(target)
+            resizeObserver.observe(target)
+          }
+        }
         const position = saved[index]
         if (
           !position ||
           restored.has(viewport) ||
-          position.top > viewport.scrollHeight - viewport.clientHeight
+          position.top > viewport.scrollHeight - viewport.clientHeight ||
+          position.left > viewport.scrollWidth - viewport.clientWidth
         )
           return
         viewport.scrollTop = position.top
@@ -96,6 +104,7 @@ export function WorkspaceFileBrowser({
     const interact = () => {
       interrupted = true
     }
+    const resizeObserver = new ResizeObserver(restore)
     const observer = new MutationObserver(restore)
     observer.observe(element, { childList: true, subtree: true, characterData: true })
     element.addEventListener('scroll', remember, true)
@@ -105,6 +114,7 @@ export function WorkspaceFileBrowser({
     restore()
     return () => {
       observer.disconnect()
+      resizeObserver.disconnect()
       element.removeEventListener('scroll', remember, true)
       element.removeEventListener('wheel', interact)
       element.removeEventListener('pointerdown', interact)

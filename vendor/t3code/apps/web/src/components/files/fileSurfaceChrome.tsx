@@ -12,6 +12,15 @@ export const FILE_SURFACE_SUBHEADER_CLASS =
 
 export const FILE_LINK_REVEAL_ATTRIBUTE = "data-file-link-reveal";
 
+/** 文件区域统一公开原生滚动视口，调用方不依赖具体预览器的 DOM 结构。 */
+export function fileScrollViewports(root: ParentNode): HTMLElement[] {
+  return [
+    ...root.querySelectorAll<HTMLElement>(
+      '[data-slot="scroll-area-viewport"], .file-preview-virtualizer',
+    ),
+  ];
+}
+
 export const FILE_LINK_REVEAL_UNSAFE_CSS = `
   ${DIFF_SURFACE_THEME_UNSAFE_CSS}
 

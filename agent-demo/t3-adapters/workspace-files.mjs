@@ -37,6 +37,32 @@ function checkedFile(root, path) {
   if (!lstatSync(cursor).isFile()) fail(400, 'WORKSPACE_NOT_FILE', '请选择文件进行预览')
   return cursor
 }
+function checkImportFiles(directory) {
+  let bytes = 0, count = 0
+  const rootReal = realpathSync(directory)
+  function entryInfo(path) {
+    const info = lstatSync(path)
+    if (info.isSymbolicLink() || !sameOrWithin(rootReal, realpathSync(path))) fail(422, 'WORKSPACE_LINK_UNSUPPORTED', '来源包含不支持的符号链接')
+    return info
+  }
+  function visit(root, allowMissing = false) {
+    let entries
+    try { entryInfo(root); entries = readdirSync(root, { withFileTypes: true }) }
+    catch (error) { if (allowMissing && error?.code === 'ENOENT') return; throw error }
+    for (const entry of entries) {
+      const path = join(root, entry.name)
+      let info
+      // Git 会重命名或删除正在生成的临时对象；这里只容忍已消失项，发布前仍严格扫描固定目录。
+      try { info = entryInfo(path) }
+      catch (error) { if (error?.code === 'ENOENT') continue; throw error }
+      if (info.isDirectory()) visit(path, true)
+      else if (info.isFile()) { bytes += info.size; count++ }
+      if (bytes > MAX_BYTES || count > MAX_FILES) fail(413, 'WORKSPACE_TOO_LARGE', 'Git 导入超过演示大小上限，已中止以保护可用存储')
+    }
+  }
+  visit(directory)
+  entryInfo(directory)
+}
 function scan(root, { skipGit = false, skipCaches = false } = {}) {
   let size = 0, removedGitEntries = 0
   const files = []
@@ -61,4 +87,4 @@ function scan(root, { skipGit = false, skipCaches = false } = {}) {
   return { files, removedGitEntries, contentHash: sha(JSON.stringify(files.map(({ path, sha256 }) => [path, sha256]))), byteLength: size }
 }
 
-export { MAX_FILES, MAX_BYTES, MAX_FILE_BYTES, sha, safePath, textOf, checkedFile, scan }
+export { MAX_FILES, MAX_BYTES, MAX_FILE_BYTES, sha, safePath, textOf, checkedFile, checkImportFiles, scan }

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, lstatSync, existsSync, rmSync, statfsSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, statfsSync } from 'node:fs'
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
-import { WorkspaceError, MAX_FILES, MAX_BYTES, sha, safePath, textOf, checkedFile, scan } from './workspace-files.mjs'
+import { WorkspaceError, MAX_FILES, MAX_BYTES, sha, safePath, textOf, checkedFile, checkImportFiles, scan } from './workspace-files.mjs'
 import { createWorkspaceJobs } from './workspace-jobs.mjs'
 import { buildWorkspacePackages } from './workspace-packages.mjs'
 export { WorkspaceError } from './workspace-files.mjs'
@@ -50,18 +50,7 @@ function checkFree(directory, required = STORAGE_RESERVE) {
 }
 function checkImportBudget(directory) {
   checkFree(directory)
-  let bytes = 0, count = 0
-  function visit(root) {
-    if (!existsSync(root)) return
-    for (const entry of readdirSync(root, { withFileTypes: true })) {
-      const path = join(root, entry.name), info = lstatSync(path)
-      if (info.isSymbolicLink()) fail(422, 'WORKSPACE_LINK_UNSUPPORTED', '来源包含不支持的符号链接')
-      if (info.isDirectory()) visit(path)
-      else if (info.isFile()) { bytes += info.size; count++ }
-      if (bytes > MAX_BYTES || count > MAX_FILES) fail(413, 'WORKSPACE_TOO_LARGE', 'Git 导入超过演示大小上限，已中止以保护可用存储')
-    }
-  }
-  visit(directory)
+  checkImportFiles(directory)
 }
 
 function redact(text, rules) {

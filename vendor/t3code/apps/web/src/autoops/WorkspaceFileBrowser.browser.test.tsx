@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   download: vi.fn(),
   environment: vi.fn(),
   host: vi.fn(),
+  codeViewport: false,
+  contentHeight: 1500,
+  contentWidth: 600,
 }))
 vi.mock(import('./hostSnapshot'), async (original) => ({
   ...(await original()),
@@ -39,6 +42,8 @@ vi.mock(import('../components/files/ReadOnlyWorkspaceFiles'), () => ({
     onNavigateFolder,
   }: ComponentProps<typeof ReadOnlyWorkspaceFiles>) {
     const [metadata, setMetadata] = useState('')
+    const [height, setHeight] = useState(mocks.contentHeight)
+    const [width, setWidth] = useState(mocks.contentWidth)
     return (
       <div>
         <output aria-label="选中文件">{relativePath ?? '根目录'}</output>
@@ -69,8 +74,21 @@ vi.mock(import('../components/files/ReadOnlyWorkspaceFiles'), () => ({
           搜索源码
         </button>
         <output aria-label="文件信息">{metadata}</output>
-        <div data-slot="scroll-area-viewport" style={{ height: 100, width: 200, overflow: 'auto' }}>
-          <div style={{ height: 1500, width: 600 }}>原生文件内容区域</div>
+        <button
+          onClick={() => {
+            setHeight(1500)
+            setWidth(600)
+          }}
+        >
+          完成内容排版
+        </button>
+        <div
+          {...(mocks.codeViewport
+            ? { className: 'file-preview-virtualizer' }
+            : { 'data-slot': 'scroll-area-viewport' })}
+          style={{ height: 100, width: 200, overflow: 'auto' }}
+        >
+          <div style={{ height, width }}>原生文件内容区域</div>
         </div>
       </div>
     )
@@ -89,6 +107,9 @@ const version: WorkspaceVersion = {
 const stateKey = (key: string) => 'autoops:workspaces:files-owner:' + key
 beforeEach(() => {
   vi.resetAllMocks()
+  mocks.codeViewport = false
+  mocks.contentHeight = 1500
+  mocks.contentWidth = 600
   sessionStorage.clear()
   mocks.host.mockReturnValue({ principal: { id: 'files-owner' } })
   mocks.environment.mockReturnValue(EnvironmentId.make('files-test'))
@@ -105,6 +126,89 @@ beforeEach(() => {
 })
 
 describe('工作区文件浏览职责边界', () => {
+  it('横向内容尚未排版完成时不提前消费恢复位置', async () => {
+    mocks.codeViewport = true
+    mocks.contentWidth = 220
+    sessionStorage.setItem(
+      stateKey('p-one:files:v-one'),
+      JSON.stringify({ selected: 'src/index.ts' }),
+    )
+    sessionStorage.setItem(
+      stateKey('p-one:scroll:v-one:src/index.ts'),
+      JSON.stringify([{ top: 600, left: 80 }]),
+    )
+    // 这里只检验文件视口合同，不依赖路由。
+    await using screen = await render(
+      <WorkspaceFileBrowser projectId="p-one" version={version} />,
+      { router: false },
+    )
+    const viewport = screen.container.querySelector<HTMLElement>('.file-preview-virtualizer')!
+    expect(viewport.scrollLeft).toBe(0)
+    await act(() => {
+      screen.container.querySelector<HTMLButtonElement>('button:last-of-type')!.click()
+    })
+    await vi.waitFor(() => expect(viewport.scrollLeft).toBe(80))
+    expect(viewport.scrollTop).toBe(600)
+  })
+  it.each([false, true])('异步排版后恢复阅读位置，代码视口=%s', async (codeViewport) => {
+    mocks.codeViewport = codeViewport
+    mocks.contentHeight = 140
+    sessionStorage.setItem(
+      stateKey('p-one:files:v-one'),
+      JSON.stringify({ selected: 'src/index.ts' }),
+    )
+    sessionStorage.setItem(
+      stateKey('p-one:scroll:v-one:src/index.ts'),
+      JSON.stringify([{ top: 600, left: 40 }]),
+    )
+    // 这里只检验文件视口合同，不依赖路由。
+    await using screen = await render(
+      <WorkspaceFileBrowser projectId="p-one" version={version} />,
+      {
+        router: false,
+      },
+    )
+    const viewport = screen.container.querySelector<HTMLElement>(
+      '.file-preview-virtualizer, [data-slot="scroll-area-viewport"]',
+    )!
+    expect(viewport.scrollTop).toBe(0)
+    await act(() => {
+      screen.container.querySelector<HTMLButtonElement>('button:last-of-type')!.click()
+    })
+    await vi.waitFor(() => expect(viewport.scrollTop).toBe(600))
+    expect(viewport.scrollLeft).toBe(40)
+  })
+  it('用户已开始滚动时，迟到排版不覆盖新的阅读位置', async () => {
+    mocks.codeViewport = true
+    mocks.contentHeight = 300
+    sessionStorage.setItem(
+      stateKey('p-one:files:v-one'),
+      JSON.stringify({ selected: 'src/index.ts' }),
+    )
+    sessionStorage.setItem(
+      stateKey('p-one:scroll:v-one:src/index.ts'),
+      JSON.stringify([{ top: 600, left: 0 }]),
+    )
+    // 这里只检验文件视口合同，不依赖路由。
+    await using screen = await render(
+      <WorkspaceFileBrowser projectId="p-one" version={version} />,
+      {
+        router: false,
+      },
+    )
+    const viewport = screen.container.querySelector<HTMLElement>('.file-preview-virtualizer')!
+    await act(() => {
+      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }))
+      viewport.scrollTop = 100
+      viewport.dispatchEvent(new Event('scroll'))
+      screen.container.querySelector<HTMLButtonElement>('button:last-of-type')!.click()
+    })
+    await vi.waitFor(() => expect(viewport.scrollHeight).toBe(1500))
+    expect(viewport.scrollTop).toBe(100)
+    expect(
+      JSON.parse(sessionStorage.getItem(stateKey('p-one:scroll:v-one:src/index.ts'))!),
+    ).toEqual([{ top: 100, left: 0 }])
+  })
   it('保留用户和版本的选中项、目录轨迹及重新进入后的滚动位置', async () => {
     sessionStorage.setItem(
       stateKey('p-one:files:v-one'),
