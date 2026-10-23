@@ -15,3 +15,5 @@ export function isPersonalPreferenceCommand(command:unknown):boolean;
 export function initializePreferencesSchema(db:DatabaseSync):void;
 export function createPreferences(options:{db:DatabaseSync;now?:()=>number;decodeTimestamp?:(value:string)=>unknown}):PersonalPreferences;
 export function configuredPreferences(decodeTimestamp?:(value:string)=>unknown):PersonalPreferences|undefined;
+
+export function closeConfiguredPreferences(): void;

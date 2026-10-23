@@ -14,7 +14,11 @@ export interface DeploymentStore {
  taskDetails(projectId:string,id:string,after?:number):Promise<{task:DeploymentTask;logs:DeploymentLog[];nextSeq:number}>;
  releases(projectId:string,id:string):{releases:DeploymentRelease[]};
  readonly agentAddress:import('node:net').AddressInfo|string|null|undefined;
+ stopAccepting():void;
  close():Promise<void>;
 }
 export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;access:Pick<AutoOpsAccess,'requireDeploymentActor'>;agentPort?:number;publicOrigin?:string}):DeploymentStore;
 export function configuredDeploymentStore():DeploymentStore|undefined;
+
+export function stopConfiguredDeploymentStore():void;
+export function closeConfiguredDeploymentStore():Promise<void>;

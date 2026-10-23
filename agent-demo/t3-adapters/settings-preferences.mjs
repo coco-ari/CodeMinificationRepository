@@ -29,6 +29,7 @@ export function createSettingsPreferences({db, env = process.env}) {
   const read = (principalId) => JSON.parse(db.prepare('SELECT value_json FROM t3_user_settings WHERE principal_id=?').get(principalId)?.value_json ?? '{}')
   return {
     read,
+    dispose() { listeners.clear() },
     overlay(principalId,settings) { return {...settings,...read(principalId),...resolveProductProfile(env).serverSettingsOverrides} },
     update(principalId,patch) {
       assertPersonalSettingsPatch(patch, env)
@@ -47,14 +48,21 @@ export function createSettingsPreferences({db, env = process.env}) {
     subscribe(principalId,listener) { let set=listeners.get(principalId); if (!set) listeners.set(principalId,set=new Set()); set.add(listener); return () => {set.delete(listener);if (!set.size) listeners.delete(principalId)} },
   }
 }
-let configured
+let configured, configuredDb, configuredClosed = false
+export function closeConfiguredSettingsPreferences() {
+  if (configuredClosed) return
+  configuredClosed = true
+  try { configured?.dispose() } finally { configuredDb?.close() }
+}
 export function configuredSettingsPreferences() {
+  if (configuredClosed) throw Object.assign(new Error('个人设置服务已关闭'), {status:503, code:'AUTOOPS_STOPPING'})
   if (process.env.AUTOOPS_T3_DATA_DIR === undefined) return undefined
   if (!process.env.AUTOOPS_T3_DATA_DIR.trim()) throw new Error('AUTOOPS_T3_DATA_DIR must not be empty')
   if (!configured) {
     const directory=resolve(process.env.AUTOOPS_T3_DATA_DIR); mkdirSync(directory,{recursive:true,mode:0o700})
-    const db=new DatabaseSync(join(directory,'t3-autoops.sqlite')); db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;')
-    configured=createSettingsPreferences({db})
+    const db=new DatabaseSync(join(directory,'t3-autoops.sqlite'))
+    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;'); configured=createSettingsPreferences({db}); configuredDb=db }
+    catch (error) { db.close(); throw error }
   }
   return configured
 }

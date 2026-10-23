@@ -99,7 +99,7 @@ function validateRepository(repositoryUrl) {
 async function git(args, cwd, signal, { budgetRoot } = {}) {
   return new Promise((resolvePromise, reject) => {
     const budgetController = new AbortController()
-    let budgetError, timer
+    let budgetError, processError, timer
     const effectiveSignal = signal ? AbortSignal.any([signal, budgetController.signal]) : budgetController.signal
     const child = spawn('git', ['-c', 'credential.helper=', '-c', 'http.followRedirects=false', '-c', 'protocol.file.allow=never', '-c', 'protocol.ext.allow=never', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.required=false', ...args], {
       cwd, signal: effectiveSignal, windowsHide: true,
@@ -112,8 +112,9 @@ async function git(args, cwd, signal, { budgetRoot } = {}) {
     if (budgetRoot) timer = setInterval(() => {
       try { checkImportBudget(budgetRoot) } catch (error) { budgetError = error instanceof WorkspaceError ? error : new WorkspaceError(507, 'WORKSPACE_STORAGE_CHECK_FAILED', '无法检查导入存储，任务已停止'); budgetController.abort() }
     }, 200)
-    child.on('error', (error) => { clearInterval(timer); reject(budgetError || error) })
-    child.on('close', (code) => { clearInterval(timer); if (budgetError) reject(budgetError); else if (code === 0) resolvePromise(output.trim()); else reject(new WorkspaceError(502, 'WORKSPACE_GIT_FAILED', 'Git 操作失败，请检查公开仓库地址、分支、网络与 Git 安装')) })
+    // 错误发生后仍等子进程关闭，避免中止时清理仍在写入的临时目录。
+    child.on('error', (error) => { processError = error })
+    child.on('close', (code) => { clearInterval(timer); if (budgetError || processError) reject(budgetError || processError); else if (code === 0) resolvePromise(output.trim()); else reject(new WorkspaceError(502, 'WORKSPACE_GIT_FAILED', 'Git 操作失败，请检查公开仓库地址、分支、网络与 Git 安装')) })
   })
 }
 
@@ -265,6 +266,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     return { path, name, mime, contents, byteLength: bytes.length, truncated }
   }
   async function ensureProject(project) {
+    jobs.assertAccepting()
     const id = safeId(project.id)
     if (existsSync(stateFile(id))) return
     if (initializing.has(id)) return initializing.get(id)
@@ -322,8 +324,9 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
 
   return {
     ensureProject,
-    whenIdle: jobs.whenIdle,
-    close: jobs.close,
+    stopAccepting: jobs.stopAccepting,
+    async whenIdle() { await Promise.allSettled([...initializing.values()]); await jobs.whenIdle() },
+    async close(options) { jobs.stopAccepting(); await Promise.all([Promise.allSettled([...initializing.values()]), jobs.close(options)]) },
     overview(id) {
       const state = load(id)
       return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal').map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
@@ -372,6 +375,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       }, actorId)
     },
     confirmExternal(id, versionId, input) {
+      jobs.assertAccepting()
       const state = load(id), version = state.versions.find((entry) => entry.id === safeId(versionId))
       if (!version || version.type !== 'external') missing()
       if (version.status === 'published') return publicVersion(version)
@@ -458,8 +462,11 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
   }
 }
 
-let configured
+let configured, configuredStopped = false
+export function stopConfiguredWorkspaceStore() { configuredStopped = true; configured?.store.stopAccepting() }
+export async function closeConfiguredWorkspaceStore(options) { stopConfiguredWorkspaceStore(); await configured?.store.close(options) }
 export function configuredWorkspaceStore({ authorizeTask } = {}) {
+  if (configuredStopped) fail(503, 'WORKSPACE_STOPPING', '工作区服务正在停止，请稍后重试')
   const dataDir = process.env.AUTOOPS_T3_DATA_DIR
   if (!dataDir) return undefined
   if (!configured || configured.dataDir !== dataDir) {

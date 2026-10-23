@@ -48,6 +48,7 @@ export class RemoteDeviceHub {
     delete session.pendingInterrupt;this.journal.saveSession(session);
   }
   async acquireWorkspace(threadId:string,runId:string,signal?:AbortSignal) {
+    this.access.assertAccepting();
     const binding=this.access.getThreadBinding(threadId);if(binding?.executionBinding.kind!=='customer')throw error('NOT_CUSTOMER','客户对话绑定不存在');
     const key=customerWorkspaceKey(binding.executionBinding);
     await new Promise<void>((resolve,reject)=>{
@@ -120,6 +121,7 @@ export class RemoteDeviceHub {
     if(session)await this.connections.get(session.deviceId)?.send({type:'ack',sessionId:delivery.sessionId,runtimeEpoch:delivery.epoch,seq}).catch(()=>undefined);
   }
   connect(principal:CustomerDevicePrincipal,send:Send,onClose:()=>void) {
+    this.access.assertAccepting();
     const prior=this.connections.get(principal.deviceId);prior?.close();
     const {connectionEpoch}=this.access.customerRegistry.markConnected(principal);
     const connection:Connection={principal,epoch:connectionEpoch,send,hello:false,sessions:new Map(),close:onClose};
@@ -226,6 +228,8 @@ export class RemoteDeviceHub {
     const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');
     const connection=this.connections.get(session.deviceId);
     const control=['interruptTurn','respondToRuntimeRequest'].includes(method);
+    // 停止期间只允许已接受执行的控制及结果核对，不再下发新的执行命令。
+    if (!control && method !== 'readThreadSnapshot') this.access.assertAccepting();
     if(!connection?.hello&&!control)throw error('DEVICE_OFFLINE','客户设备已离线，请等待重新连接');
     const target={kind:'customer' as const,deviceId:session.deviceId,...session.target};
     if(method!=='readThreadSnapshot')this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,target,{requireOnline:!control});
@@ -287,8 +291,9 @@ export const layer=Layer.effect(RemoteDeviceService,Effect.gen(function*(){
   const access=configuredAutoOpsAccess();if(!access)return {hub:undefined};
   const fs=yield* FileSystem.FileSystem,path=yield* Path.Path;
   const directory=process.env.AUTOOPS_T3_DATA_DIR!;yield* fs.makeDirectory(path.join(directory,'t3'),{recursive:true}).pipe(Effect.orDie);
-  const db=new DatabaseSync(path.join(directory,'t3','customer-transport.sqlite'));db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
+  const db=yield* Effect.acquireRelease(Effect.sync(()=>new DatabaseSync(path.join(directory,'t3','customer-transport.sqlite'))),db=>Effect.sync(()=>db.close()));
+  db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
   const hub=new RemoteDeviceHub(access,createCustomerTransportJournal(db));
-  yield* Effect.addFinalizer(()=>Effect.sync(()=>{hub.close();db.close();}));
+  yield* Effect.addFinalizer(()=>Effect.sync(()=>hub.close()));
   return {hub};
 }));

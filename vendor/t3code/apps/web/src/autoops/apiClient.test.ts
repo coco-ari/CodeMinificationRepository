@@ -5,7 +5,7 @@ const context = vi.hoisted(() => ({ host: {
   gatewayBasePath: '/api/agent-demo/t3', httpBaseUrl: 'https://work.test/api/agent-demo/t3',
   csrfToken: 'isolated-test-csrf', principal: { id: 'test-user' },
 } }))
-vi.mock('./hostConfig', () => ({ readAutoOpsHost: () => context.host }))
+vi.mock('./hostSnapshot', () => ({ readAutoOpsHost: () => context.host }))
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('统一业务请求边界', () => {

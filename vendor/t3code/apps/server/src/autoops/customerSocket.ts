@@ -14,6 +14,9 @@ export const layer = HttpRouter.add(
     const request = yield* HttpServerRequest.HttpServerRequest;
     const { hub } = yield* RemoteDeviceService;
     if (!hub) return HttpServerResponse.empty({ status: 404 });
+    const accepting = yield* Effect.try(() => hub.access.assertAccepting()).pipe(Effect.result);
+    if (accepting._tag === "Failure")
+      return HttpServerResponse.jsonUnsafe({ error: "业务服务正在停止，请稍后重试", code: "AUTOOPS_STOPPING" }, { status: 503 });
     const principal = yield* Effect.try(() => {
       const header = request.headers.authorization;
       if (!header?.startsWith("Bearer ")) throw new Error("缺少设备凭据");

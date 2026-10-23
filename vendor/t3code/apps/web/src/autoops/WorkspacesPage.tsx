@@ -1,8 +1,10 @@
+import { WorkspaceFileBrowser } from './WorkspaceFileBrowser'
+import { readSelection, saveSelection } from './workspaceViewState'
 import { useWorkspaceOverview } from './useWorkspaceOverview'
 import { useWorkspaceTaskSubmission } from './useWorkspaceTaskSubmission'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   GitBranchIcon,
   HistoryIcon,
@@ -30,10 +32,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/u
 import { Spinner } from '~/components/ui/spinner'
 import { readAutoOpsHost } from './hostConfig'
 import { useAutoOpsProjectId } from './projectNavigation'
-import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFiles'
 import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
-import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
-import { usePrimaryEnvironmentId } from '~/state/environments'
 import {
   ExternalWorkspaceDialog,
   WorkspaceImportDialog,
@@ -44,12 +43,8 @@ import {
 } from './WorkspaceActions'
 import {
   cancelWorkspaceTask,
-  loadWorkspaceTree,
-  loadWorkspaceFileMetadata,
-  searchWorkspaceFiles,
   publishWorkspace,
   startWorkspaceConversation,
-  workspaceFileDownloadUrl,
   type WorkspaceTask,
   type WorkspaceVersion,
 } from './workspaces'
@@ -69,23 +64,6 @@ const sizeLabel = (value: number) =>
 const errorLabel = (error: unknown) =>
   error instanceof Error ? error.message : '操作失败，请重试。'
 const taskActive = (task: WorkspaceTask) => task.status === 'queued' || task.status === 'running'
-const selectionKey = (key: string) =>
-  `autoops:workspaces:${readAutoOpsHost()?.principal.id ?? ''}:${key}`
-function readSelection(key: string) {
-  try {
-    return sessionStorage.getItem(selectionKey(key))
-  } catch {
-    return null
-  }
-}
-function saveSelection(key: string, value: string) {
-  try {
-    sessionStorage.setItem(selectionKey(key), value)
-  } catch {
-    /* 浏览器存储不可用时仍可查看当前页面。 */
-  }
-}
-
 export function AutoOpsWorkspacesPage() {
   const projectId = useAutoOpsProjectId()
   const project = readAutoOpsHost()?.projects.find((entry) => entry.id === projectId)
@@ -139,7 +117,10 @@ function ProjectWorkspaces({
   const membership = readAutoOpsHost()?.projects.find(
     (project) => project.id === projectId,
   )?.membership
-  const manager = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.['workspace.manage'] === true
+  const manager =
+    readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.[
+      'workspace.manage'
+    ] === true
   const externalOnly = membership?.workspaceAccess === 'external'
   const [versionQuery, setVersionQuery] = useState('')
   const [selectedTab, setTab] = useState<Tab>(() =>
@@ -169,7 +150,15 @@ function ProjectWorkspaces({
   })
   const busy = mutationBusy || submission.busy
   const error = submission.error ?? actionError ?? loadError
-  const submissionNotice = <WorkspaceSubmissionNotice label={submission.pendingLabel} retryAvailable={submission.retryAvailable && manager} busy={busy} onCheck={submission.check} onRetry={submission.retry} />
+  const submissionNotice = (
+    <WorkspaceSubmissionNotice
+      label={submission.pendingLabel}
+      retryAvailable={submission.retryAvailable && manager}
+      busy={busy}
+      onCheck={submission.check}
+      onRetry={submission.retry}
+    />
+  )
   const running = overview?.tasks.some(taskActive) ?? false
   useEffect(() => {
     saveSelection(`${projectId}:tab`, tab)
@@ -362,11 +351,7 @@ function ProjectWorkspaces({
           title="工作区"
           detail={current?.name}
           actions={
-            <FileSurfaceAction
-              label="刷新工作区"
-              disabled={busy}
-              onPress={() => refreshOverview()}
-            >
+            <FileSurfaceAction label="刷新工作区" disabled={busy} onPress={() => refreshOverview()}>
               <RefreshCwIcon />
             </FileSurfaceAction>
           }
@@ -524,12 +509,7 @@ function ProjectWorkspaces({
             <AlertTitle>工作区操作未完成</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
-          <Button
-            className="mt-2"
-            size="xs"
-            variant="outline"
-            onClick={() => refreshOverview()}
-          >
+          <Button className="mt-2" size="xs" variant="outline" onClick={() => refreshOverview()}>
             重新加载
           </Button>
         </div>
@@ -547,7 +527,9 @@ function ProjectWorkspaces({
           中查看任务。
         </div>
       ) : null}
-      {!dialog && submission.pendingLabel ? <div className="shrink-0 border-b border-border/60 px-3 py-2">{submissionNotice}</div> : null}
+      {!dialog && submission.pendingLabel ? (
+        <div className="shrink-0 border-b border-border/60 px-3 py-2">{submissionNotice}</div>
+      ) : null}
       {!overview || !requestApplied ? (
         error ? null : (
           <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -561,7 +543,7 @@ function ProjectWorkspaces({
           description="请选择有权访问的工作区版本；不会自动改用其他来源。"
         />
       ) : current ? (
-        <FileBrowser key={`files:${current.id}`} projectId={projectId} version={current} />
+        <WorkspaceFileBrowser key={`files:${current.id}`} projectId={projectId} version={current} />
       ) : (
         <WorkspaceEmpty
           title={tab === 'internal' ? '还没有内部工作区' : '还没有外部工作区'}
@@ -645,143 +627,5 @@ function WorkspaceEmpty({ title, description }: { title: string; description: st
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
     </Empty>
-  )
-}
-type FileView = { selected: string | null; trail?: string }
-function fileView(projectId: string, versionId: string): FileView {
-  try {
-    const value = JSON.parse(
-      readSelection(`${projectId}:files:${versionId}`) ?? 'null',
-    ) as FileView | null
-    return value && (value.selected === null || typeof value.selected === 'string')
-      ? value
-      : { selected: null }
-  } catch {
-    return { selected: null }
-  }
-}
-function FileBrowser({ projectId, version }: { projectId: string; version: WorkspaceVersion }) {
-  const environmentId = usePrimaryEnvironmentId()
-  const [view, setView] = useState(() => fileView(projectId, version.id))
-  const root = useRef<HTMLElement | null>(null)
-  useEffect(() => {
-    saveSelection(`${projectId}:files:${version.id}`, JSON.stringify(view))
-  }, [projectId, version.id, view])
-  useEffect(() => {
-    const element = root.current
-    if (!element) return
-    const key = `${projectId}:scroll:${version.id}:${view.selected ?? ''}`
-    let saved: Array<{ top: number; left: number }> = []
-    try {
-      const parsed: unknown = JSON.parse(readSelection(key) ?? '[]')
-      saved = Array.isArray(parsed)
-        ? parsed.filter(
-            (entry) =>
-              entry &&
-              typeof entry.top === 'number' &&
-              Number.isFinite(entry.top) &&
-              entry.top >= 0 &&
-              typeof entry.left === 'number' &&
-              Number.isFinite(entry.left) &&
-              entry.left >= 0,
-          )
-        : []
-    } catch {
-      /* Ignore an unavailable previous position. */
-    }
-    const restored = new WeakSet<HTMLElement>()
-    let interrupted = false
-    const viewports = () => [
-      ...element.querySelectorAll<HTMLElement>('[data-slot="scroll-area-viewport"]'),
-    ]
-    const restore = () => {
-      if (interrupted) return
-      viewports().forEach((viewport, index) => {
-        const position = saved[index]
-        if (
-          !position ||
-          restored.has(viewport) ||
-          position.top > viewport.scrollHeight - viewport.clientHeight
-        )
-          return
-        viewport.scrollTop = position.top
-        viewport.scrollLeft = position.left
-        restored.add(viewport)
-      })
-    }
-    const remember = () => {
-      if (!interrupted && saved.length > viewports().length) return
-      if (
-        interrupted ||
-        viewports().every((viewport, index) => !saved[index] || restored.has(viewport))
-      )
-        saveSelection(
-          key,
-          JSON.stringify(
-            viewports().map((viewport) => ({ top: viewport.scrollTop, left: viewport.scrollLeft })),
-          ),
-        )
-    }
-    const interact = () => {
-      interrupted = true
-    }
-    const observer = new MutationObserver(restore)
-    observer.observe(element, { childList: true, subtree: true, characterData: true })
-    element.addEventListener('scroll', remember, true)
-    element.addEventListener('wheel', interact, { passive: true })
-    element.addEventListener('pointerdown', interact, { passive: true })
-    element.addEventListener('keydown', interact)
-    restore()
-    return () => {
-      observer.disconnect()
-      element.removeEventListener('scroll', remember, true)
-      element.removeEventListener('wheel', interact)
-      element.removeEventListener('pointerdown', interact)
-      element.removeEventListener('keydown', interact)
-    }
-  }, [projectId, version.id, view.selected])
-  const source = useMemo<ReadOnlyFileSource>(
-    () => ({
-      id: `management:${projectId}:${version.id}`,
-      allowReferences: false,
-      mentionPath: (path) => `autoops/${projectId}/workspaces/${version.id}/${path}`,
-      list: (directory) => loadWorkspaceTree(projectId, version.id, directory),
-      search: (query, limit) => searchWorkspaceFiles(projectId, version.id, query, limit),
-      async metadata(path) {
-        const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
-        const directory = await loadWorkspaceTree(projectId, version.id, parent)
-        const entry = directory.entries.find((item) => item.path === path)
-        if (entry?.kind === 'directory') return { kind: 'directory' as const }
-        const metadata = await loadWorkspaceFileMetadata(projectId, version.id, path)
-        return {
-          kind: 'file' as const,
-          name: metadata.name,
-          mimeType: metadata.mime,
-          sizeBytes: metadata.size,
-          url: workspaceFileDownloadUrl(projectId, version.id, path),
-        }
-      },
-    }),
-    [projectId, version.id],
-  )
-  if (!environmentId)
-    return <WorkspaceEmpty title="文件连接不可用" description="请重新连接工作台后重试。" />
-  return (
-    <section
-      ref={root}
-      className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
-      aria-label={`${version.name} 文件浏览`}
-    >
-      <ReadOnlyWorkspaceFiles
-        environmentId={environmentId}
-        cwd={source.id}
-        projectName={version.name}
-        relativePath={view.selected}
-        source={source}
-        folderTrail={view.trail}
-        onOpenFile={(path) => setView({ selected: path })}
-        onNavigateFolder={(path, trail) => setView({ selected: path || null, trail })}
-      />
-    </section>
   )
 }

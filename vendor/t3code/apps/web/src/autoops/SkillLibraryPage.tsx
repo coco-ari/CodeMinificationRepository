@@ -1,4 +1,4 @@
-import { isAutoOpsAccessError } from './apiClient'
+import { useSkillLibraryCatalog } from './useSkillLibraryCatalog'
 import {
   ModuleHeader,
   ModuleSidebar,
@@ -42,15 +42,12 @@ import {
   SkillDeleteDialog,
 } from './SkillLibraryDialogs'
 import {
-  changeSkillLibrary,
-  loadSkillLibrary,
   skillFileSource,
   skillSourceName,
   skillVersion,
   skillVersionName,
   type LibrarySkill,
   type SkillAssignment,
-  type SkillLibrary,
   type SkillLibraryAction,
   type SkillTargetType,
   type SkillVersion,
@@ -63,8 +60,6 @@ type OpenDialog =
   | { type: 'details' | 'delete'; skill: LibrarySkill }
   | null
 const scopeNames = { library: '中央技能库', agent: '助手技能', project: '项目技能' } as const
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : '操作失败，请重试。'
 
 const viewStorageKey = (principalId: string, projectId: string) =>
   `autoops:skill-library-view:${encodeURIComponent(principalId)}:${encodeURIComponent(projectId)}`
@@ -80,7 +75,7 @@ function readView(
   }
 }
 
-/** The shared project shell owns navigation; the library retains its global assignment semantics. */
+/** 公共项目框架负责导航，技能库保留全局分配语义。 */
 export function AutoOpsSkillLibraryPage() {
   const host = readAutoOpsHost()
   const projectId = useAutoOpsProjectId()
@@ -97,7 +92,7 @@ export function AutoOpsSkillLibraryPage() {
       : ''
   useEffect(() => {
     if (!host || !project || search.skillView !== undefined) return
-    // Persisted view state becomes explicit so project switching and browser history agree.
+    // 把保存的视图同步到路由，保证项目切换与浏览历史一致。
     void navigate({
       to: '/skills',
       replace: true,
@@ -157,7 +152,17 @@ function SkillLibraryContent({
   selectView: (scope: Scope, agentId?: string) => void
 }) {
   const host = readAutoOpsHost()!
-  const [catalog, setCatalog] = useState<SkillLibrary | null>(null)
+  const {
+    catalog,
+    error,
+    accessDenied,
+    busy,
+    loading,
+    refreshLibrary,
+    isUpdating,
+    mutate: mutateCatalog,
+    clearError,
+  } = useSkillLibraryCatalog()
   const [query, setQuery] = useState(() => {
     const saved = readView(host.principal.id, projectId)
     return saved.scope === scope && typeof saved.query === 'string' ? saved.query : ''
@@ -169,17 +174,13 @@ function SkillLibraryContent({
         JSON.stringify({ scope, agentId, query }),
       )
     } catch {
-      /* The current page remains usable without storage. */
+      /* 存储不可用时，当前页面仍可使用。 */
     }
   }, [host.principal.id, projectId, scope, agentId, query])
   const [selectedId, setSelectedId] = useState('')
   const [selectedVersionId, setSelectedVersionId] = useState('')
   const [detailOpen, setDetailOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
   const [pendingTarget, setPendingTarget] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refresh, setRefresh] = useState(0)
   const [dialog, setDialog] = useState<OpenDialog>(null)
   const [assignmentPopoverSkillId, setAssignmentPopoverSkillId] = useState<string | null>(null)
   const [successNotice, setSuccessNotice] = useState<string | null>(null)
@@ -187,12 +188,8 @@ function SkillLibraryContent({
   const libraryActionRef = useRef<HTMLButtonElement | null>(null)
   const gridRef = useRef<HTMLDivElement | null>(null)
   const gridPosition = useRef({ top: 0, skillId: '' })
-  const mutationLock = useRef(false)
-  const requestGeneration = useRef(0)
-  const refreshPending = useRef(true)
 
-  // Publish after the active editor closes, so a toast cannot become the top
-  // dismissable layer while the user is still selecting assignment targets.
+  // 编辑器关闭后再显示成功提示，避免提示层干扰用户继续选择分配目标。
   useEffect(() => {
     if (!successNotice || dialog || assignmentPopoverSkillId) return
     toastManager.add({
@@ -206,52 +203,8 @@ function SkillLibraryContent({
   }, [successNotice, dialog, assignmentPopoverSkillId])
 
   useEffect(() => {
-    const controller = new AbortController()
-    const generation = ++requestGeneration.current
-    refreshPending.current = true
-    setLoading(true)
-    void loadSkillLibrary(controller.signal)
-      .then((next) => {
-        if (controller.signal.aborted || generation !== requestGeneration.current) return
-        setCatalog(next)
-        setError(null)
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted && generation === requestGeneration.current) {
-          if (isAutoOpsAccessError(cause)) setCatalog(null)
-          setError(errorMessage(cause))
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && generation === requestGeneration.current) {
-          refreshPending.current = false
-          setLoading(false)
-        }
-      })
-    return () => {
-      controller.abort()
-      // An accepted write keeps its original target, but must not navigate a later page.
-      ++requestGeneration.current
-    }
-  }, [refresh])
-  const refreshLibrary = () => {
-    if (mutationLock.current || refreshPending.current) return
-    refreshPending.current = true
-    setLoading(true)
-    setRefresh((value) => value + 1)
-  }
-  useEffect(() => {
-    const changed = () => {
-      // This page applies its own mutation response directly. A write finishing
-      // on an earlier page must invalidate this page's possibly older catalogue.
-      if (mutationLock.current) return
-      refreshPending.current = true
-      setLoading(true)
-      setRefresh((value) => value + 1)
-    }
-    window.addEventListener('autoops:skill-library-changed', changed)
-    return () => window.removeEventListener('autoops:skill-library-changed', changed)
-  }, [])
+    if (accessDenied) setDialog(null)
+  }, [accessDenied])
 
   const targets =
     scope === 'agent'
@@ -278,7 +231,7 @@ function SkillLibraryContent({
     !detailOpen && visibleSkills.some((skill) => skill.id === assignmentPopoverSkillId)
   useEffect(() => {
     if (!assignmentPopoverSkillId || assignmentPopoverCardVisible) return
-    // Revoking the active scope can remove its card without an onOpenChange.
+    // 撤销当前范围时，卡片可能直接消失，需同时关闭浮层并恢复焦点。
     setAssignmentPopoverSkillId(null)
     requestAnimationFrame(() => {
       if (document.activeElement !== document.body) return
@@ -307,72 +260,39 @@ function SkillLibraryContent({
       ? dialogReturnFocus.current
       : libraryActionRef.current
   const openDialog = (next: OpenDialog, trigger?: HTMLElement | null) => {
-    if (next?.type !== 'details' && (mutationLock.current || refreshPending.current)) return
+    if (next?.type !== 'details' && isUpdating()) return
     if (trigger) dialogReturnFocus.current = trigger
     else if (document.activeElement instanceof HTMLElement)
       dialogReturnFocus.current = document.activeElement
-    setError(null)
+    clearError()
     setDialog(next)
   }
   const closeDialog = () => setDialog(null)
   const mutate = async (action: SkillLibraryAction, success: string) => {
-    if (!catalog || mutationLock.current || refreshPending.current) return false
-    mutationLock.current = true
-    const generation = ++requestGeneration.current
-    setBusy(true)
-    setError(null)
     setSuccessNotice(null)
-    return changeSkillLibrary(catalog.revision, action)
-      .then((next) => {
-        window.dispatchEvent(new Event('autoops:skill-library-changed'))
-        if (generation !== requestGeneration.current) return false
-        setCatalog(next)
-        setSuccessNotice(success)
-        if (action.action.startsWith('import-')) {
-          const imported =
-            'skillId' in action && action.skillId
-              ? next.skills.find((entry) => entry.id === action.skillId)
-              : next.skills.find((entry) => !catalog.skills.some((old) => old.id === entry.id))
-          if (imported) {
-            if (scope !== 'library') selectView('library')
-            setQuery('')
-            setSelectedId(imported.id)
-            setSelectedVersionId(imported.latestVersionId)
-            if (!('skillId' in action && action.skillId)) setDetailOpen(false)
-          }
-        }
-        if (action.action === 'delete' && action.skillId === selectedId) setDetailOpen(false)
-        return true
-      })
-      .catch(async (cause: unknown) => {
-        if (generation !== requestGeneration.current) return false
-        setError(errorMessage(cause))
-        if (isAutoOpsAccessError(cause)) {
-          setCatalog(null)
-          setDialog(null)
-          return false
-        }
-        await loadSkillLibrary()
-          .then((next) => {
-            if (generation === requestGeneration.current) setCatalog(next)
-          })
-          .catch((refreshCause: unknown) => {
-            if (generation === requestGeneration.current && isAutoOpsAccessError(refreshCause)) {
-              setCatalog(null)
-              setDialog(null)
-              setError(errorMessage(refreshCause))
-            }
-            // 暂时性读取失败保留可读版本；撤权时立即清除目录和已打开的详情。
-          })
-        return false
-      })
-      .finally(() => {
-        mutationLock.current = false
-        setBusy(false)
-      })
+    const result = await mutateCatalog(action)
+    if (!result) return false
+    setSuccessNotice(success)
+    if (action.action.startsWith('import-')) {
+      const imported =
+        'skillId' in action && action.skillId
+          ? result.next.skills.find((entry) => entry.id === action.skillId)
+          : result.next.skills.find(
+              (entry) => !result.previous.skills.some((old) => old.id === entry.id),
+            )
+      if (imported) {
+        if (scope !== 'library') selectView('library')
+        setQuery('')
+        setSelectedId(imported.id)
+        setSelectedVersionId(imported.latestVersionId)
+        if (!('skillId' in action && action.skillId)) setDetailOpen(false)
+      }
+    }
+    if (action.action === 'delete' && action.skillId === selectedId) setDetailOpen(false)
+    return true
   }
   const toggleTarget = (skill: LibrarySkill, type: SkillTargetType, id: string) => {
-    if (!catalog || !catalog.canManage || mutationLock.current || refreshPending.current) return
+    if (!catalog || !catalog.canManage || isUpdating()) return
     const existing = catalog.assignments.find(
       (entry) => entry.skillId === skill.id && entry.targetType === type && entry.targetId === id,
     )

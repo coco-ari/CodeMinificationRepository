@@ -68,7 +68,11 @@ export type SkillLibraryAction =
 
 const base = () => autoOpsApiUrl('/autoops/skill-library')
 const request = (body?: SkillLibraryAction & { revision: string }, signal?: AbortSignal) =>
-  autoOpsRequest<SkillLibrary>('/autoops/skill-library', { label: '技能库', ...(body === undefined ? {} : { body }), ...(signal ? { signal } : {}) })
+  autoOpsRequest<SkillLibrary>('/autoops/skill-library', {
+    label: '技能库',
+    ...(body === undefined ? {} : { body }),
+    ...(signal ? { signal } : {}),
+  })
 
 export const loadSkillLibrary = (signal?: AbortSignal) => request(undefined, signal)
 export const changeSkillLibrary = (revision: string, action: SkillLibraryAction) =>
@@ -142,4 +146,18 @@ export function skillFileSource(skill: LibrarySkill, version: SkillVersion): Rea
       }
     },
   }
+}
+
+export interface SkillContext {
+  cwd: string
+  snapshotId: string
+  skills: { name: string; displayName?: string; versionId: string }[]
+}
+
+/** 接受既有范围缓存键，统一处理同源、取消、预算及登录上下文校验。 */
+export async function loadSkillContext(requestKey: string, signal?: AbortSignal): Promise<SkillContext> {
+  const endpoint = autoOpsApiUrl('/autoops/skill-library/context')
+  if (!requestKey.startsWith(endpoint + '?')) throw new Error('当前技能范围地址无效。')
+  const path = '/autoops/skill-library/context' + requestKey.slice(endpoint.length)
+  return autoOpsRequest(path, { label: '当前技能范围', ...(signal ? { signal } : {}) })
 }

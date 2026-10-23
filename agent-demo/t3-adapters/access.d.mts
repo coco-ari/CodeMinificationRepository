@@ -52,6 +52,8 @@ export class AutoOpsAccessError extends Error { constructor(status:number,code:s
 export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
 export interface AutoOpsAccess {
+  assertAccepting(): void;
+  stopAccepting(): void;
   readonly customerRegistry: CustomerRegistry;
   requireThreadExecution(principal: AutoOpsPrincipal, threadId: string, options?: {requireOnline?: boolean}): ThreadBinding;
   authenticateCookie(cookie?: string): AutoOpsPrincipal;
@@ -113,3 +115,6 @@ export function requireToolThread(threadId: string): ToolScope;
 
 export function initializeAutoOpsAccessSchema(db: DatabaseSync): void;
 export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean}): AutoOpsAccess;
+
+export function stopConfiguredAutoOpsAccess(): void;
+export function closeConfiguredAutoOpsAccess(): void;

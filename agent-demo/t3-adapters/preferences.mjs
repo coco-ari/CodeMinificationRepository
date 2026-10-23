@@ -182,7 +182,9 @@ export function createPreferences({ db, now = Date.now, decodeTimestamp = (value
     scheduleWake(principalId, command.threadId, value.snoozedUntil); emit(change)
     return result
   }
-  for (const row of db.prepare('SELECT principal_id,thread_id,value_json FROM t3_user_thread_preferences').all()) scheduleWake(row.principal_id, row.thread_id, JSON.parse(row.value_json).snoozedUntil)
+  try {
+    for (const row of db.prepare('SELECT principal_id,thread_id,value_json FROM t3_user_thread_preferences').all()) scheduleWake(row.principal_id, row.thread_id, JSON.parse(row.value_json).snoozedUntil)
+  } catch (error) { for (const timer of wakeTimers.values()) clearTimeout(timer); wakeTimers.clear(); throw error }
   return { applyCommand, overlayThread, overlayProjection, overlayShell,
     setTimestampDecoder(decoder) { decode = decoder },
     subscribe(principalId, listener) { id(principalId, '用户'); let targets = listeners.get(principalId); if (!targets) listeners.set(principalId, targets = new Set()); targets.add(listener); return () => { targets.delete(listener); if (!targets.size) listeners.delete(principalId) } },
@@ -190,14 +192,21 @@ export function createPreferences({ db, now = Date.now, decodeTimestamp = (value
     dispose() { for (const timer of wakeTimers.values()) clearTimeout(timer); wakeTimers.clear(); listeners.clear() },
   }
 }
-let configured
+let configured, configuredDb, configuredClosed = false
+export function closeConfiguredPreferences() {
+  if (configuredClosed) return
+  configuredClosed = true
+  try { configured?.dispose() } finally { configuredDb?.close() }
+}
 export function configuredPreferences(decodeTimestamp) {
+  if (configuredClosed) throw Object.assign(new Error('个人偏好服务已关闭'), {status:503, code:'AUTOOPS_STOPPING'})
   if (process.env.AUTOOPS_T3_DATA_DIR === undefined) return undefined
   if (!process.env.AUTOOPS_T3_DATA_DIR.trim()) throw new Error('AUTOOPS_T3_DATA_DIR must not be empty')
   if (!configured) {
     const directory = resolve(process.env.AUTOOPS_T3_DATA_DIR); mkdirSync(directory, { recursive:true, mode:0o700 })
-    const db = new DatabaseSync(join(directory, 't3-autoops.sqlite')); db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;')
-    configured = createPreferences({ db })
+    const db = new DatabaseSync(join(directory, 't3-autoops.sqlite'))
+    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;'); configured = createPreferences({ db }); configuredDb = db }
+    catch (error) { db.close(); throw error }
   }
   if (decodeTimestamp) configured.setTimestampDecoder(decodeTimestamp)
   return configured

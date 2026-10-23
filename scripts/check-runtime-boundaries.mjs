@@ -50,8 +50,60 @@ export async function discoverRuntimeSources(root = process.cwd()) {
   return groups
 }
 
+// 所有者公开入口与内部实现一起维护；同模块内部允许直接协作。
+const privateBoundaries = [
+  {
+    name: '身份授权内部只能由授权门面装配',
+    internal:
+      '^agent-demo/t3-adapters/(?:access-(?:identity|bootstrap|service|runtime)|project-access)\\.mjs$',
+    owner:
+      '^agent-demo/t3-adapters/(?:access(?:-(?:identity|bootstrap|service|runtime))?|project-access)\\.mjs$',
+  },
+  {
+    name: '工作区阅读偏好只由工作区模块使用',
+    internal: '^' + web + 'autoops/workspaceViewState\\.ts$',
+    owner:
+      '^' +
+      web +
+      'autoops/(?:WorkspacesPage\\.tsx|WorkspaceFileBrowser\\.tsx|workspaceViewState\\.ts)$',
+  },
+  {
+    name: '工作区内部只能由工作区服务调用',
+    internal: '^agent-demo/t3-adapters/workspace-(?:jobs|files|packages|package-worker)\\.mjs$',
+    owner:
+      '^agent-demo/t3-adapters/(?:workspaces|workspace-(?:jobs|files|packages|package-worker))\\.mjs$',
+  },
+  {
+    name: '部署项目存储只由部署引擎调用',
+    internal: '^src/deployment-projects\\.mjs$',
+    owner: '^src/(?:deployment|deployment-projects)\\.mjs$',
+  },
+  {
+    name: '工作区文件浏览内部只由工作区页面调用',
+    internal: '^' + web + 'autoops/WorkspaceFileBrowser\\.tsx$',
+    owner: '^' + web + 'autoops/(?:WorkspacesPage|WorkspaceFileBrowser)\\.tsx$',
+  },
+  {
+    name: '技能目录控制器只由技能目录页面调用',
+    internal: '^' + web + 'autoops/useSkillLibraryCatalog\\.ts$',
+    owner: '^' + web + 'autoops/(?:SkillLibraryPage\\.tsx|useSkillLibraryCatalog\\.ts)$',
+  },
+]
+
 export const runtimeRules = {
   forbidden: [
+    ...privateBoundaries.map(({ name, internal, owner }) => ({
+      name,
+      severity: 'error',
+      from: { path: scope, pathNot: owner },
+      to: { path: internal },
+    })),
+    {
+      name: '宿主快照不能反向依赖会话或业务客户端',
+      severity: 'error',
+      from: { path: `^${web}autoops/hostSnapshot\\.ts$` },
+      to: { path: `^${web}` },
+    },
     {
       name: '公共合同不能反向依赖运行实现',
       severity: 'error',
@@ -111,7 +163,7 @@ export const runtimeRules = {
       severity: 'error',
       from: { path: '^agent-demo/customer-agent/' },
       to: {
-        path: `^src/|^${adapters}|^agent-demo/(?:server|fixtures)\\.mjs$|^${server}(?:autoops|persistence|secrets)/|^${server}(?:config|attachmentStore)\\.ts$`,
+        path: `^autoops/server/|^src/|^${adapters}|^agent-demo/(?:server|fixtures)\\.mjs$|^${server}(?:autoops|persistence|secrets)/|^${server}(?:config|attachmentStore)\\.ts$`,
       },
     },
     {
@@ -142,7 +194,7 @@ export const runtimeRules = {
       name: '共享请求边界不能依赖业务界面',
       severity: 'error',
       from: { path: `^${web}autoops/apiClient\\.ts$` },
-      to: { path: `^${web}`, pathNot: `^${web}autoops/hostConfig\\.ts$` },
+      to: { path: `^${web}`, pathNot: `^${web}autoops/hostSnapshot\\.ts$` },
     },
   ],
 }

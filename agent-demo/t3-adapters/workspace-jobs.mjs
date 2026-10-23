@@ -27,6 +27,8 @@ export function createWorkspaceJobs({ maxConcurrent = 2, maxQueued = 8, onFailur
   const whenIdle = () => jobs.size ? new Promise((done) => idle.add(done)) : Promise.resolve()
   return {
     assertCapacity,
+    assertAccepting() { if (closed) throw new WorkspaceError(503, 'WORKSPACE_STOPPING', '工作区服务正在停止，请稍后重试') },
+    stopAccepting() { closed = true },
     submit(id, run) {
       assertCapacity()
       const job = { id, run, controller: new AbortController() }
@@ -41,6 +43,6 @@ export function createWorkspaceJobs({ maxConcurrent = 2, maxQueued = 8, onFailur
       return true
     },
     whenIdle,
-    async close() { closed = true; for (const job of jobs.values()) job.controller.abort(); await whenIdle() },
+    async close({ force = false } = {}) { closed = true; if (force) for (const job of jobs.values()) job.controller.abort(); await whenIdle() },
   }
 }

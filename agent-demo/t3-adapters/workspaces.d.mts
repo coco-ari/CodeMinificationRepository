@@ -2,7 +2,8 @@ import type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, W
 export type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../autoops/contracts/workspaces.ts'
 export interface WorkspaceStore {
   whenIdle(): Promise<void>;
-  close(): Promise<void>;
+  stopAccepting(): void;
+  close(options?: {force?: boolean}): Promise<void>;
   ensureProject(project: { id: string; name: string; documents?: ReadonlyArray<{ id: string; name: string; mime?: string; content: string }> }): Promise<void>;
   overview(projectId: string): WorkspaceOverview;
   getVersion(projectId: string, versionId: string): WorkspaceVersion;
@@ -29,3 +30,6 @@ export class WorkspaceError extends Error { status: number; code: string; constr
 export interface WorkspaceAuthorization { authorizeTask?: (input: { actorId?: string; projectId: string; type: string }) => unknown }
 export function createWorkspaceStore(options: WorkspaceAuthorization & { dataDir: string; taskLimits?: { maxConcurrent?: number; maxQueued?: number }; onTaskDiagnostic?: (event: { event: string; taskId: string; code: string }) => void }): WorkspaceStore;
 export function configuredWorkspaceStore(options?: WorkspaceAuthorization): WorkspaceStore | undefined;
+
+export function stopConfiguredWorkspaceStore(): void;
+export function closeConfiguredWorkspaceStore(options?: {force?: boolean}): Promise<void>;

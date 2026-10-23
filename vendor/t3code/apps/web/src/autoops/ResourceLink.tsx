@@ -6,7 +6,7 @@ import { readAutoOpsHost } from './hostConfig'
 import {
   autoOpsResourceAttachmentId,
   autoOpsResourceUrl,
-  autoOpsResourceRequestUrl,
+  loadAutoOpsResourceMetadata,
 } from './resources'
 
 export async function openAutoOpsResource(
@@ -17,26 +17,16 @@ export async function openAutoOpsResource(
   if (!url) return
   const resource = new URL(url, window.location.origin)
   const resourcePath = resource.searchParams.get('path')
-  // Only the business resource endpoint carries workspace file identities.
-  // Skill packages use their own relative path and the native attachment viewer.
-  if (resource.pathname === `${readAutoOpsHost()?.gatewayBasePath}/autoops/resources` && resourcePath) {
+  // 工作区文件使用业务路径定位；技能包的相对路径交给原生附件查看器。
+  if (
+    resource.pathname === `${readAutoOpsHost()?.gatewayBasePath}/autoops/resources` &&
+    resourcePath
+  ) {
     useRightPanelStore.getState().openFile(threadRef, resourcePath)
     return
   }
   try {
-    const response = await fetch(autoOpsResourceRequestUrl(url, 'metadata'), {
-      credentials: 'same-origin',
-    })
-    if (!response.ok) throw new Error('文件不可用或当前账号没有访问权限。')
-    const file = (await response.json()) as { name?: unknown; mime?: unknown; size?: unknown }
-    if (
-      typeof file.name !== 'string' ||
-      typeof file.mime !== 'string' ||
-      typeof file.size !== 'number' ||
-      !Number.isFinite(file.size) ||
-      file.size < 0
-    )
-      throw new Error('文件信息不可用，请重试。')
+    const file = await loadAutoOpsResourceMetadata(url)
     useRightPanelStore.getState().openAttachment(threadRef, {
       type: 'file',
       id: autoOpsResourceAttachmentId(url),
@@ -53,7 +43,7 @@ export async function openAutoOpsResource(
   }
 }
 
-/** Open an authorized resource through T3's existing attachment tab and viewer. */
+/** 使用 T3 现有附件标签页和查看器打开已授权资源。 */
 export function AutoOpsResourceLink({
   sourceUrl,
   threadRef,

@@ -122,6 +122,7 @@ import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as AuthHttp from "./auth/http.ts";
 import * as AutoOpsHttp from "./autoops/http.ts";
+import * as AutoOpsBusinessRuntime from "./autoops/BusinessRuntime.ts";
 import * as CustomerHttp from './autoops/customerHttp.ts';
 import * as CustomerSocket from './autoops/customerSocket.ts';
 import * as CustomerStatusHttp from './autoops/customerStatusHttp.ts';
@@ -1060,6 +1061,8 @@ const layerMakeServer = Layer.unwrap(
     );
 
     return layerServerApplication.pipe(
+      // 请求入口退出后先停止业务接单并落盘，再释放 T3 消费者。
+      Layer.provide(AutoOpsBusinessRuntime.stopping),
       Layer.provide(CloudLink.layer.pipe(Layer.provideMerge(ConnectReachability.layer))),
       Layer.provideMerge(layerRuntimeServices),
       Layer.provideMerge(
@@ -1074,6 +1077,8 @@ const layerMakeServer = Layer.unwrap(
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(VcsProcess.layer),
       Layer.provideMerge(AgentScopeLive.layer),
+      // 业务身份与存储先取得、最后释放，消费者清理时仍可记录断线和结果。
+      Layer.provideMerge(AutoOpsBusinessRuntime.layer),
       Layer.provideMerge(layerPlatformServices),
     );
   }),

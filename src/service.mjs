@@ -20,7 +20,10 @@ function publicCredential(credential) {
 }
 
 class WorkQueue {
-  constructor(limit, maxPending) { this.limit = limit; this.maxPending = maxPending; this.active = 0; this.waiters = []; }
+  constructor(limit, maxPending) { this.limit = limit; this.maxPending = maxPending; this.active = 0; this.waiters = []; this.idleWaiters = new Set(); }
+  async waitForIdle() {
+    if (this.active) await new Promise(resolve => this.idleWaiters.add(resolve));
+  }
   async run(work) {
     if (this.active >= this.limit) {
       if (this.waiters.length >= this.maxPending) throw new HttpError(503, '同步任务已满，请稍后重试');
@@ -30,6 +33,10 @@ class WorkQueue {
     finally {
       const next = this.waiters.shift();
       if (next) next(); else this.active--;
+      if (!this.active) {
+        for (const resolve of this.idleWaiters) resolve();
+        this.idleWaiters.clear();
+      }
     }
   }
 }
@@ -41,7 +48,8 @@ export class RepositoryService {
     this.builder = builder || new ArchiveBuilder(path.join(directory, 'cache'), archiveOptions);
     this.queue = new WorkQueue(maxConcurrent, maxPending);
     this.inFlight = new Map();
-    this.phaseListeners = new Map();
+    this.syncOperations = new Map();
+    this.sourcePending = new Map();
   }
   async initialize() {
     await this.store.open();
@@ -212,9 +220,35 @@ export class RepositoryService {
     const record = this.store.state.credentials.find(item => item.id === project.credentialId);
     return record ? { username: record.username, password: decrypt(record.secret, this.store.key) } : null;
   }
+  #withSourceLock(project, work) {
+    const key = sourceKey(project);
+    const operation = (this.sourcePending.get(key) || Promise.resolve()).then(work);
+    const pending = operation.catch(() => {}).finally(() => {
+      if (this.sourcePending.get(key) === pending) this.sourcePending.delete(key);
+    });
+    this.sourcePending.set(key, pending);
+    return operation;
+  }
+  async waitForIdle() {
+    // 调用方先停止新请求；排空已有同步、排队历史和源码固定操作。
+    await Promise.allSettled([...this.inFlight.values()]);
+    await this.queue.waitForIdle();
+    await Promise.allSettled([...this.sourcePending.values()]);
+  }
+  async pinRevision(project, taskId) {
+    if (this.builder.pinRevision) await this.#withSourceLock(project, () => this.builder.pinRevision(project, taskId));
+  }
+  async releasePin(project, taskId) {
+    if (this.builder.releasePin) await this.#withSourceLock(project, () => this.builder.releasePin(project, taskId));
+  }
+  async cachedCommitSubject(project, revision) {
+    if (!this.builder.cachedCommitSubject) return null;
+    return this.#withSourceLock(project, () => this.builder.cachedCommitSubject(project, revision));
+  }
   async history(project, refresh = false) {
     if (!this.builder.history) return { commits: [], refreshedAt: null };
-    return this.queue.run(() => this.builder.history(project, this.credential(project), refresh));
+    // 与同步统一先进入有界队列，再取得源码锁，避免反向等待。
+    return this.queue.run(() => this.#withSourceLock(project, () => this.builder.history(project, this.credential(project), refresh)));
   }
   async branches(id, refresh = false) {
     const project = this.store.state.projects.find(item => item.id === id);
@@ -246,6 +280,13 @@ export class RepositoryService {
     }
   }
   async sync(id, frozen, onPhase) {
+    return this.#requestSync(id, frozen, onPhase);
+  }
+  async captureArchive(id, frozen, consume, onPhase) {
+    if (typeof consume !== 'function') throw new TypeError('固定源码归档需要消费函数');
+    return this.#requestSync(id, frozen, onPhase, consume);
+  }
+  async #requestSync(id, frozen, onPhase, consume) {
     const project = this.store.state.projects.find(item => item.id === id);
     if (!project) throw new HttpError(404, '项目不存在');
     if (!project.enabled) throw new HttpError(409, '项目已停用');
@@ -253,30 +294,42 @@ export class RepositoryService {
     if (!snapshot.branch) throw new HttpError(409, '仓库尚无默认分支，请先刷新仓库信息');
     if (snapshot.id !== id) throw new HttpError(400, '源码快照不匹配');
     const key = archiveKey(snapshot);
-    if (onPhase) {
-      if (!this.phaseListeners.has(key)) this.phaseListeners.set(key, new Set());
-      this.phaseListeners.get(key).add(onPhase);
+    let operation = this.syncOperations.get(key);
+    if (!operation?.accepting) {
+      operation = { accepting: true, phases: new Set(), consumers: [] };
+      this.syncOperations.set(key, operation);
     }
-    if (this.inFlight.has(key)) return this.inFlight.get(key);
-    // 仅合并同仓库地址和分支的任务；每次新任务仍向远端检查最新提交。
-    const task = this.performSync(snapshot);
-    this.inFlight.set(key, task);
-    try { return await task; }
-    finally { if (this.inFlight.get(key) === task) { this.inFlight.delete(key); this.phaseListeners.delete(key); } }
+    if (onPhase) operation.phases.add(onPhase);
+    const consumer = consume ? { consume } : null;
+    if (consumer) operation.consumers.push(consumer);
+    if (!operation.promise) {
+      // 同一仓库、分支及固定版本共用构建；后续独立请求仍检查远端。
+      operation.promise = this.performSync(snapshot, operation);
+      this.inFlight.set(key, operation.promise);
+    }
+    try {
+      const archive = await operation.promise;
+      if (!consumer) return archive;
+      if (!consumer.outcome.ok) throw consumer.outcome.error;
+      return consumer.outcome.value;
+    } finally {
+      if (this.inFlight.get(key) === operation.promise) this.inFlight.delete(key);
+      if (this.syncOperations.get(key) === operation) this.syncOperations.delete(key);
+    }
   }
-  async performSync(project) {
+  async performSync(project, operation) {
     const update = async fields => this.store.change(state => {
       const current = state.projects.find(item => item.id === project.id);
       if (current && !project.revision && sourceKey(current) === sourceKey(project)) Object.assign(current, fields);
     });
     try {
       await update({ status: 'queued', error: null, lastAttemptAt: timestamp() });
-      return await this.queue.run(async () => {
+      return await this.queue.run(() => this.#withSourceLock(project, async () => {
         await update({ status: 'syncing' });
         const record = this.store.state.credentials.find(item => item.id === project.credentialId);
         const credential = record ? { username: record.username, password: decrypt(record.secret, this.store.key) } : null;
         const result = await this.builder.build(project, credential, async phase => {
-          await Promise.all([...(this.phaseListeners.get(archiveKey(project)) || [])].map(listener => listener(phase)));
+          await Promise.all([...operation.phases].map(listener => listener(phase)));
         });
         await this.store.change(state => {
           const current = state.projects.find(item => item.id === project.id);
@@ -286,8 +339,16 @@ export class RepositoryService {
           }
           audit(state, project.id, 'sync', `${project.name} / ${project.branch}：${result.cached ? '已确认最新，复用源码包' : '新版本源码包已生成'}`);
         });
+        // 消费期间保留缓存锁；迟到的同次请求也必须在锁释放前固定归档。
+        // 消费函数只复制或保存本次结果，不得重入同源码的构建、历史或固定接口。
+        for (const consumer of operation.consumers) {
+          try { consumer.outcome = { ok: true, value: await consumer.consume({ ...result }) }; }
+          catch (error) { consumer.outcome = { ok: false, error }; }
+        }
+        // 此后不再加入已完成的构建，防止锁释放后读取已被清理的缓存。
+        operation.accepting = false;
         return result;
-      });
+      }));
     } catch (error) {
       const safe = error instanceof HttpError ? error : new HttpError(500, '同步失败，请检查凭证数据和服务存储');
       await this.store.change(state => {

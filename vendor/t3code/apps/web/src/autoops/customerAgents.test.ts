@@ -111,7 +111,7 @@ describe("customer workspace UI boundary", () => {
     host.setAutoOpsThreadScope("draft", scope);
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce(Response.json({ error: "会话范围尚未保存" }, { status: 404 }))
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ binding: { ...scope, scopeState: "draft" } }),

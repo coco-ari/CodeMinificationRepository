@@ -6,6 +6,9 @@ import {join} from 'node:path'
 import {randomUUID} from 'node:crypto'
 import {DatabaseSync} from 'node:sqlite'
 import {createHash} from 'node:crypto'
+import {createServer as createHttpServer, request as httpRequest, Server as HttpServer} from 'node:http'
+import {DeploymentService} from '../src/deployment.mjs'
+import {Store} from '../src/store.mjs'
 import {createAutoOpsAccess, initializeAutoOpsAccessSchema} from '../agent-demo/t3-adapters/access.mjs'
 import {createWorkspaceStore} from '../agent-demo/t3-adapters/workspaces.mjs'
 import {createDeploymentStore} from '../agent-demo/t3-adapters/deployments.mjs'
@@ -193,4 +196,61 @@ test('未启用部署也要授权，合法GET显示真实关闭状态，其余�
   assert.equal((await request()).body.enabled,false)
   await assert.rejects(request('POST'),{status:503})
   await assert.rejects(request('GET',{...principal,external:true}),{status:403})
+})
+
+test('关闭等待已接受的Agent写入，即使客户端断开也先落盘后释放存储', async t => {
+  const f=await fixture(t,{listener:true})
+  await f.store.ensureProject(projects[0])
+  const server=await f.store.createServer('p-one',{name:'关闭验证',environmentId:'env-one',requestId:randomUUID()})
+  const entered=Promise.withResolvers(),release=Promise.withResolvers(),listenerClosed=Promise.withResolvers()
+  const originalRegister=DeploymentService.prototype.register,originalClose=Store.prototype.close,originalListenerClose=HttpServer.prototype.close
+  let storageClosed=false
+  // 只在隔离测试中设置真实写入前的屏障，生产协作仍使用公开方法。
+  t.mock.method(DeploymentService.prototype,'register',async function(input) {
+    entered.resolve();await release.promise;return originalRegister.call(this,input)
+  })
+  t.mock.method(Store.prototype,'close',function() {
+    if(this.directory===join(f.dataDir,'deployment-center'))storageClosed=true
+    return originalClose.call(this)
+  })
+  const address=f.store.agentAddress
+  t.mock.method(HttpServer.prototype,'close',function(callback) {
+    const selected=this.address()?.port===address.port
+    return originalListenerClose.call(this,(...args)=>{if(selected)listenerClosed.resolve();callback?.(...args)})
+  })
+  const request=httpRequest({hostname:'127.0.0.1',port:address.port,path:'/api/agent/v1/register',method:'POST',headers:{'content-type':'application/json'}})
+  request.on('error',()=>{})
+  request.end(JSON.stringify({registrationToken:server.registrationToken,capabilities:['static-site-v1']}))
+  let closing
+  try {
+    await entered.promise
+    request.destroy()
+    let completed=false
+    closing=f.store.close().then(()=>{completed=true})
+    // 已确认监听与全部socket关闭，剩余阻塞只能来自已接受的异步写入。
+    await listenerClosed.promise
+    await new Promise(done=>setImmediate(done))
+    assert.equal(completed,false)
+    assert.equal(storageClosed,false)
+    await assert.rejects(f.store.createServer('p-one',{}),{code:'DEPLOYMENT_STOPPING'})
+  } finally { release.resolve();if(closing)await closing }
+  assert.equal(storageClosed,true)
+  const saved=readState(f.dataDir).deployments.servers.find(item=>item.id===server.server.id)
+  assert.ok(saved.registeredAt)
+  assert.ok(saved.tokenHash)
+  await f.reopen()
+  assert.ok(f.store.overview(projects[0],['env-one']).servers.find(item=>item.id===server.server.id).registeredAt)
+})
+
+test('Agent端口占用导致初始化失败时清理自己的资源，不关闭已有监听者', async t => {
+  const dataDir=await mkdtemp(join(tmpdir(),'t3-deployment-init-fail-'))
+  const occupied=createHttpServer((_request,response)=>response.end('fixture-owner'))
+  await new Promise(done=>occupied.listen(0,'127.0.0.1',done))
+  const workspaceStore=createWorkspaceStore({dataDir,authorizeTask:()=>{}})
+  const store=createDeploymentStore({dataDir,workspaceStore,access,agentPort:occupied.address().port})
+  t.after(async()=>{await store.close();await workspaceStore.close();await new Promise(done=>occupied.close(done));await rm(dataDir,{recursive:true,force:true})})
+  await assert.rejects(store.initialize(),{code:'EADDRINUSE'})
+  await assert.rejects(store.initialize(),{code:'DEPLOYMENT_CLOSED'})
+  await Promise.all([store.close(),store.close()])
+  assert.equal(await(await fetch(`http://127.0.0.1:${occupied.address().port}`)).text(),'fixture-owner')
 })

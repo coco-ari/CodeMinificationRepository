@@ -24,6 +24,32 @@ function setup(t) {
 }
 const scope = { projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'private' }
 
+test('替换账号目录后所有身份入口都读取最新停用状态，不沿用旧数组', t => {
+  const {access,catalog,principal}=setup(t)
+  const admin=principal('u-admin')
+  access.recordNativeSession(admin,'replaced-directory')
+  catalog.users=catalog.users.map(user=>user.id==='u-admin'?{...user,status:'disabled'}:user)
+  assert.throws(()=>access.authenticateCookie('demo_session=u-admin'),{code:'UNAUTHENTICATED'})
+  assert.throws(()=>access.refresh(admin),{code:'UNAUTHENTICATED'})
+  assert.throws(()=>access.principalForNativeSession('replaced-directory'),{code:'UNAUTHENTICATED'})
+  assert.equal(principal('u-lin').id,'u-lin')
+})
+
+test('停止接单拒绝会话、工具及RPC新授权，已接受绑定可完成落盘且任务仍重查授权', t => {
+  const {access,catalog,principal}=setup(t)
+  const admin=principal('u-admin')
+  access.recordNativeSession(admin,'stopping-session')
+  access.reserveThread(admin,{...scope,threadId:'stopping-thread'})
+  access.stopAccepting();access.stopAccepting()
+  for(const operation of [()=>access.authenticateCookie('demo_session=u-admin'),()=>access.refresh(admin),()=>access.principalForNativeSession('stopping-session'),()=>access.requireToolThread('stopping-thread'),()=>access.requireProject(admin,scope.projectId)])
+    assert.throws(operation,{status:503,code:'AUTOOPS_STOPPING'})
+  access.markThreadAccepted('stopping-thread')
+  assert.equal(access.getThreadBinding('stopping-thread').scopeState,'locked')
+  assert.equal(access.requireWorkspaceActor(admin.id,scope.projectId).workspaceAccess,'internal')
+  catalog.users=catalog.users.map(user=>user.id===admin.id?{...user,status:'disabled'}:user)
+  assert.throws(()=>access.requireWorkspaceActor(admin.id,scope.projectId),{status:404,code:'PROJECT_NOT_FOUND'})
+})
+
 test('real session rows, private/project scopes and immutable thread binding', (t) => {
   const { access, principal } = setup(t)
   const admin = principal('u-admin'), lin = principal('u-lin'), chen = principal('u-chen')

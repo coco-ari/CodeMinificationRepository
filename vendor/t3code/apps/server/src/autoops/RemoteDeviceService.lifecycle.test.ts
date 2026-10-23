@@ -14,6 +14,7 @@ function fixture() {
   const validation: unknown[] = [];
   const hub = new RemoteDeviceHub(
     {
+      assertAccepting() {},
       customerRegistry: {
         resetPresence() {},
         markConnected: () => ({ connectionEpoch: 1 }),

@@ -21,13 +21,13 @@ const bounded = (value, field, max = 1024 * 1024) => {
 export function createBusinessArtifactStore(dataDir) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 })
   const db = new DatabaseSync(join(dataDir, 't3-business.sqlite'))
-  db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+  try { db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS business_artifacts (
       id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, run_id TEXT NOT NULL,
       project_id TEXT NOT NULL, owner_id TEXT NOT NULL, published INTEGER NOT NULL,
       name TEXT NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL, created_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS business_artifacts_thread ON business_artifacts(thread_id);`)
+    CREATE INDEX IF NOT EXISTS business_artifacts_thread ON business_artifacts(thread_id);`) } catch (error) { db.close(); throw error }
   return {
     create({ binding, runId, name, mime, bytes }) {
       // Identical retries in one run reuse the same artifact; different bytes or
@@ -48,8 +48,14 @@ export function createBusinessArtifactStore(dataDir) {
   }
 }
 
-let configuredArtifacts
+let configuredArtifacts, configuredArtifactsClosed = false
+export function closeConfiguredBusinessArtifactStore() {
+  if (configuredArtifactsClosed) return
+  configuredArtifactsClosed = true
+  configuredArtifacts?.close()
+}
 export function configuredBusinessArtifactStore() {
+  if (configuredArtifactsClosed) throw Object.assign(new Error('业务成果服务已关闭'), {status:503, code:'AUTOOPS_STOPPING'})
   if (!process.env.AUTOOPS_T3_DATA_DIR) return undefined
   return configuredArtifacts ||= createBusinessArtifactStore(process.env.AUTOOPS_T3_DATA_DIR)
 }

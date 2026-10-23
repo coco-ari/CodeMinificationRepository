@@ -174,3 +174,151 @@ test('目录没有源码、解析漏扫或停止遍历源码时不能报通过',
     /漏扫文件/,
   )
 })
+
+test('工作区公开服务允许跨模块协作，内部实现不能被穿透', async (t) => {
+  const f = await fixture(t)
+  await f.write('agent-demo/t3-adapters/workspace-files.mjs', 'export const read = () => true\n')
+  await f.write(
+    'agent-demo/t3-adapters/workspaces.mjs',
+    "export { read } from './workspace-files.mjs'\n",
+  )
+  await f.write(
+    'agent-demo/t3-adapters/deployments.mjs',
+    "export { read } from './workspaces.mjs'\n",
+  )
+  assert.equal(f.run().status, 0)
+  await f.write(
+    'agent-demo/t3-adapters/deployments.mjs',
+    "export const load = () => import('./workspace-files.mjs')\n",
+  )
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.ok(
+    result.result.violations.some((row) => row.rule.name === '工作区内部只能由工作区服务调用'),
+  )
+})
+
+test('部署存储内部通过引擎公开入口，跨模块穿透被拒绝', async (t) => {
+  const f = await fixture(t)
+  await f.write('src/deployment-projects.mjs', 'export const create = () => true\n')
+  await f.write('src/deployment.mjs', "export { create } from './deployment-projects.mjs'\n")
+  await f.write(
+    'agent-demo/t3-adapters/deployments.mjs',
+    "export { create } from '../../src/deployment.mjs'\n",
+  )
+  assert.equal(f.run().status, 0)
+  await f.write(
+    'agent-demo/t3-adapters/deployments.mjs',
+    "export { create } from '../../src/deployment-projects.mjs'\n",
+  )
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.ok(
+    result.result.violations.some((row) => row.rule.name === '部署项目存储只由部署引擎调用'),
+  )
+})
+
+test('页面内部控制器可由所有者组合，其他页面的别名导入被拒绝', async (t) => {
+  const f = await fixture(t)
+  await f.write(web + '/WorkspaceFileBrowser.tsx', 'export type Browser = string\n')
+  await f.write(web + '/useSkillLibraryCatalog.ts', 'export type Catalog = string\n')
+  await f.write(
+    web + '/WorkspacesPage.tsx',
+    "export type { Browser } from './WorkspaceFileBrowser'\n",
+  )
+  await f.write(
+    web + '/SkillLibraryPage.tsx',
+    "export type { Catalog } from './useSkillLibraryCatalog'\n",
+  )
+  assert.equal(f.run().status, 0)
+  await f.write(
+    web + '/DeploymentsPage.tsx',
+    "export type { Browser } from '~/autoops/WorkspaceFileBrowser'; export type { Catalog } from './useSkillLibraryCatalog'\n",
+  )
+  const result = f.run()
+  assert.equal(result.status, 1)
+  const rules = result.result.violations.map((row) => row.rule.name)
+  assert.ok(rules.includes('工作区文件浏览内部只由工作区页面调用'))
+  assert.ok(rules.includes('技能目录控制器只由技能目录页面调用'))
+})
+
+test('请求层依赖纯宿主快照，会话客户端使用请求层而不能反向', async (t) => {
+  const f = await fixture(t)
+  await f.write(web + '/hostSnapshot.ts', 'export const host = {}\n')
+  await f.write(web + '/apiClient.ts', "export { host } from './hostSnapshot'\n")
+  await f.write(web + '/threadScopes.ts', "export { host } from './apiClient'\n")
+  assert.equal(f.run().status, 0)
+  await f.write(web + '/hostSnapshot.ts', "export { host } from './threadScopes'\n")
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.ok(
+    result.result.violations.some(
+      (row) => row.rule.name === '宿主快照不能反向依赖会话或业务客户端',
+    ),
+  )
+})
+
+test('业务复用授权门面，不能直接穿透身份存储与项目授权内部', async (t) => {
+  const f = await fixture(t)
+  await f.write(
+    'agent-demo/t3-adapters/access-identity.mjs',
+    'export const authorize = () => true\n',
+  )
+  await f.write('agent-demo/t3-adapters/project-access.mjs', 'export const check = () => true\n')
+  await f.write(
+    'agent-demo/t3-adapters/access-service.mjs',
+    "import './project-access.mjs'; export { authorize } from './access-identity.mjs'\n",
+  )
+  await f.write(
+    'agent-demo/t3-adapters/access.mjs',
+    "export { authorize } from './access-service.mjs'\n",
+  )
+  await f.write('agent-demo/t3-adapters/skills.mjs', "export { authorize } from './access.mjs'\n")
+  assert.equal(f.run().status, 0)
+  await f.write(
+    'agent-demo/t3-adapters/skills.mjs',
+    "export { authorize } from './access-identity.mjs'\n",
+  )
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.ok(
+    result.result.violations.some((row) => row.rule.name === '身份授权内部只能由授权门面装配'),
+  )
+})
+
+test('工作区内部共享阅读偏好，其他模块不能读取内部状态', async (t) => {
+  const f = await fixture(t)
+  await f.write(web + '/workspaceViewState.ts', 'export const read = () => true\n')
+  await f.write(web + '/WorkspaceFileBrowser.tsx', "export { read } from './workspaceViewState'\n")
+  await f.write(
+    web + '/WorkspacesPage.tsx',
+    "import './WorkspaceFileBrowser'; export { read } from './workspaceViewState'\n",
+  )
+  assert.equal(f.run().status, 0)
+  await f.write(web + '/SkillLibraryPage.tsx', "export { read } from './workspaceViewState'\n")
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.ok(
+    result.result.violations.some((row) => row.rule.name === '工作区阅读偏好只由工作区模块使用'),
+  )
+})
+
+test('客户程序允许纯合同，但不能穿透独立后端的公开服务', async (t) => {
+  const f = await fixture(t)
+  await f.write('autoops/contracts/device.ts', 'export type Device = string\n')
+  await f.write('autoops/server/modules/identity/index.ts', 'export const session = () => true\n')
+  await f.write(
+    'agent-demo/customer-agent/client.ts',
+    "export type { Device } from '../../autoops/contracts/device.ts'\n",
+  )
+  assert.equal(f.run().status, 0)
+  await f.write(
+    'agent-demo/customer-agent/client.ts',
+    "export { session } from '../../autoops/server/modules/identity/index.ts'\n",
+  )
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.ok(
+    result.result.violations.some((row) => row.rule.name === '客户执行不能引入平台存储及业务'),
+  )
+})

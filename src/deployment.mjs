@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { mkdir, copyFile, readFile, stat, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { sourceKey, archiveKey, validateRevision, validateBranch } from './archive.mjs';
+import { sourceKey, validateRevision, validateBranch } from './archive.mjs';
 import { SourceArchives, checksum } from './source-archives.mjs';
 import { migrateWorkspaces, sourceSnapshot } from './workspaces.mjs';
 import { atomicWrite } from './store.mjs';
@@ -156,7 +156,7 @@ export class DeploymentService extends EventEmitter {
     if (authorizeTask !== undefined && typeof authorizeTask !== 'function') throw new TypeError('任务授权端口必须是函数');
     this.authorizeTask = authorizeTask;
     this.repository = repository; this.store = repository.store; this.publicOrigin = publicOrigin;
-    this.root = path.join(repository.directory, 'deployments'); this.pins = new Map(); this.pinErrors = new Map(); this.archivePending = new Map(); this.preparations = new Map();
+    this.root = path.join(repository.directory, 'deployments'); this.preparations = new Map(); this.sourceCleanups = new Set();
     this.archives = new SourceArchives(this);
     this.projects = createProjectDeployments({ store: this.store, validateConfig, publicServer: server => structuredClone(safeServer(server)),
       insertServer: (data, input) => insertServer(data, input, this.publicOrigin), changed: (type, id) => this.changed(type, id) });
@@ -178,27 +178,12 @@ export class DeploymentService extends EventEmitter {
     await this.cleanupSources();
     this.archiveCleanupTimer = setInterval(() => this.cleanupSources().catch(() => this.emit('error-safe', { message: '过期失败源码清理延后' })), 3600000);
     this.archiveCleanupTimer.unref();
-    const original = this.repository.builder.build.bind(this.repository.builder);
-    // 固定任务源码与原缓存清理共享锁，复制完成后才允许下一次构建清理旧缓存。
-    this.repository.builder.build = (project, credential, onPhase) => this.archiveLock(sourceKey(project), async () => {
-      const archive = await original(project, credential, onPhase);
-      for (const pin of this.pins.get(archiveKey(project)) || []) {
-        // 新平台快照失败不能破坏共用这次同步的旧 Jenkins 下载请求。
-        try { await this.copyArchive(archive, pin); } catch (error) { this.pinErrors.set(pin, error); }
-      }
-      return archive;
-    });
-    if (this.repository.builder.history) {
-      const history = this.repository.builder.history.bind(this.repository.builder);
-      this.repository.builder.history = (project, credential, refresh) => this.archiveLock(sourceKey(project), () => history(project, credential, refresh));
-    }
     for (const task of this.data.tasks.filter(task => task.status === 'preparing')) this.startPrepare(task.id);
     this.commitBackfill = this.backfillCommitSubjects().catch(() => {
       this.emit('error-safe', { message: '部分历史版本的提交说明暂时无法补齐' });
     });
   }
   async backfillCommitSubjects() {
-    if (!this.repository.builder.cachedCommitSubject) return;
     const updates = new Map(), cache = new Map();
     const releases = this.data.releases.filter(release => typeof release.commitSubject !== 'string');
     for (const release of releases) {
@@ -208,8 +193,7 @@ export class DeploymentService extends EventEmitter {
       if (!snapshot || !release.revision) continue;
       const key = `${sourceKey(snapshot)}:${release.revision}`;
       if (!cache.has(key)) {
-        const subject = await this.archiveLock(sourceKey(snapshot), () =>
-          this.repository.builder.cachedCommitSubject(snapshot, release.revision)).catch(() => null);
+        const subject = await this.repository.cachedCommitSubject(snapshot, release.revision).catch(() => null);
         cache.set(key, subject);
       }
       const subject = cache.get(key);
@@ -229,12 +213,6 @@ export class DeploymentService extends EventEmitter {
     });
     this.changed('releases');
   }
-  archiveLock(projectId, work) {
-    // 缓存清理只影响本项目；不同项目仍遵守原同步队列的并发额度。
-    const operation = (this.archivePending.get(projectId) || Promise.resolve()).then(work);
-    const pending = operation.catch(() => {}).finally(() => { if (this.archivePending.get(projectId) === pending) this.archivePending.delete(projectId); });
-    this.archivePending.set(projectId, pending); return operation;
-  }
   async copyArchive(archive, taskId) {
     if (archive.size > 64 * 1024 * 1024) throw new HttpError(413, 'Agent 仅支持不超过 64 MiB 的源码 ZIP；普通源码下载接口不受此限制');
     const directory = path.join(this.root, 'tasks', taskId);
@@ -242,6 +220,7 @@ export class DeploymentService extends EventEmitter {
     const source = await this.archives.import(find(this.data.tasks, taskId, '任务'), archive);
     await copyFile(archive.file, path.join(directory, 'source.zip'));
     await atomicWrite(path.join(directory, 'source.json'), JSON.stringify(source));
+    return source;
   }
   overview() {
     return { servers: this.data.servers.map(safeServer), applications: this.data.applications, environments: this.data.environments,
@@ -481,7 +460,7 @@ export class DeploymentService extends EventEmitter {
       const history = await this.repository.history(selection);
       selectedCommit = history.commits.find(commit => commit.revision === input.revision);
       if (!selectedCommit) throw new HttpError(409, '提交记录已变化，请更新代码后重新选择');
-      if (this.repository.builder.pinRevision) await this.archiveLock(sourceKey(selection), () => this.repository.builder.pinRevision({ ...selection, revision: input.revision }, taskId));
+      await this.repository.pinRevision({ ...selection, revision: input.revision }, taskId);
     }
     let task;
     try { task = await this.store.change(state => {
@@ -523,10 +502,10 @@ export class DeploymentService extends EventEmitter {
       transition(task, task.status);
       data.tasks.push(task); return structuredClone(task);
     }); } catch (error) {
-      if (selection && this.repository.builder.releasePin) await this.archiveLock(sourceKey(selection), () => this.repository.builder.releasePin(selection, taskId)).catch(() => {});
+      if (selection) await this.repository.releasePin(selection, taskId).catch(() => {});
       throw error;
     }
-    if (task.id !== taskId && selection && this.repository.builder.releasePin) await this.repository.builder.releasePin(selection, taskId).catch(() => {});
+    if (task.id !== taskId && selection) await this.repository.releasePin(selection, taskId).catch(() => {});
     if (task.status === 'preparing') this.startPrepare(task.id);
     this.changed('task', task.id); return task;
   }
@@ -560,8 +539,6 @@ export class DeploymentService extends EventEmitter {
     const task = find(this.data.tasks, id, '任务'); const sourceId = task.sourceProjectId;
     if (task.sourceKind === 'workspace-package') return this.prepareWorkspaceArchive(id, archive);
     const snapshot = task.sourceSnapshot || sourceSnapshot(find(this.store.state.projects, sourceId));
-    const key = archiveKey(snapshot);
-    if (!this.pins.has(key)) this.pins.set(key, new Set()); this.pins.get(key).add(id);
     try {
       let source;
       try {
@@ -570,17 +547,13 @@ export class DeploymentService extends EventEmitter {
       }
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        const archive = await this.repository.sync(sourceId, snapshot, async phase => {
+        source = await this.repository.captureArchive(sourceId, snapshot, archive => this.copyArchive(archive, id), async phase => {
           await this.store.change(state => {
             const current = find(state.deployments.tasks, id);
             if (current.status === 'preparing') { transition(current, phase); current.stage = phase; current.updatedAt = now(); }
           });
           this.changed('task', id);
         });
-        if (this.pinErrors.has(id)) throw this.pinErrors.get(id);
-        // 兼容准备任务加入时已有同步即将结束的情况。
-        try { source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); }
-        catch (missing) { if (missing.code !== 'ENOENT') throw missing; await this.archiveLock(sourceKey(snapshot), () => this.copyArchive(archive, id)); source = JSON.parse(await readFile(path.join(this.root, 'tasks', id, 'source.json'), 'utf8')); }
       }
       if (source.archiveId) await this.archives.verify(source);
       await this.store.change(state => {
@@ -595,8 +568,8 @@ export class DeploymentService extends EventEmitter {
         Object.assign(current, { status: 'failed', stage: 'failed', error: error instanceof HttpError ? error.message : '固定源码失败，请检查服务存储', finishedAt: now(), updatedAt: now() });
       });
     } finally {
-      if (snapshot.revision && this.repository.builder.releasePin) await this.archiveLock(sourceKey(snapshot), () => this.repository.builder.releasePin(snapshot, id)).catch(() => {});
-      this.pins.get(key)?.delete(id); this.pinErrors.delete(id); if (!this.pins.get(key)?.size) this.pins.delete(key); this.changed('task', id);
+      if (snapshot.revision) await this.repository.releasePin(snapshot, id).catch(() => {});
+      this.changed('task', id);
     }
   }
   async claim(serverId) {
@@ -764,7 +737,14 @@ export class DeploymentService extends EventEmitter {
     if (terminal.has(status)) await this.cleanupSources().catch(() => {});
     return { ackSeq: ack };
   }
-  async cleanupSources() {
+  cleanupSources() {
+    // 档案队列结束后还有任务副本清理，关闭必须等待整个操作。
+    const operation = this.#cleanupSources();
+    this.sourceCleanups.add(operation);
+    void operation.then(() => this.sourceCleanups.delete(operation), () => this.sourceCleanups.delete(operation));
+    return operation;
+  }
+  async #cleanupSources() {
     await this.archives.cleanup();
     for (const task of this.data.tasks) if (terminal.has(task.status) && task.sourceArchiveId) {
       const directory = path.join(this.root, 'tasks', task.id);
@@ -782,11 +762,17 @@ export class DeploymentService extends EventEmitter {
     offset = integer(offset, 0, 0, 1000000000, '分页起点'); limit = integer(limit, 20, 1, 100, '分页条数');
     const releases = this.releases(targetId); return { releases: releases.slice(offset, offset + limit), total: releases.length, offset, nextOffset: offset + limit < releases.length ? offset + limit : null };
   }
-  beginClose() { if (!this.closing) { this.closing = true; clearInterval(this.archiveCleanupTimer); this.emit('shutdown'); } }
+  beginClose() {
+    // 初始化可能在首次拒新之后才创建计时器，重复关闭仍需释放它。
+    clearInterval(this.archiveCleanupTimer);
+    if (!this.closing) { this.closing = true; this.emit('shutdown'); }
+  }
   async close() {
     this.beginClose();
-    await Promise.allSettled([this.commitBackfill, ...this.preparations.values(), ...this.repository.inFlight.values()]);
-    await Promise.allSettled([...this.archivePending.values()]); this.removeAllListeners();
+    await Promise.allSettled([this.commitBackfill, ...this.preparations.values()]);
+    await this.repository.waitForIdle();
+    await Promise.allSettled([...this.sourceCleanups]);
     await this.archives.pending;
+    this.removeAllListeners();
   }
 }

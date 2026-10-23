@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { loadDeployments, isDeploymentAccessError, DeploymentRequestError } from './deployments'
 
-vi.mock('./hostConfig', () => ({
+vi.mock('./hostSnapshot', () => ({
   readAutoOpsHost: () => ({
     httpBaseUrl: 'https://isolated.invalid/',
     gatewayBasePath: '/api/agent-demo/t3',

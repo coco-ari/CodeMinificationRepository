@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { page } from 'vite-plus/test/browser'
-import { render } from '../../test/render'
+import { act, render } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { AutoOpsSkillLibraryPage } from './SkillLibraryPage'
 import { AutoOpsRequestError } from './apiClient'
@@ -115,4 +115,89 @@ describe('技能库写入后的撤权处理', () => {
       expect(mocks.load).toHaveBeenCalledTimes(phase === 'mutation' ? 1 : 2)
     })
   }
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+function namedCatalog(name: string) {
+  const value = catalog()
+  value.skills[0]!.displayName = name
+  value.revision = name
+  return value
+}
+const library = () => (
+  <SidebarProvider>
+    <AutoOpsSkillLibraryPage />
+  </SidebarProvider>
+)
+const testLocation = { router: '/skills?projectId=p-one&skillView=library' }
+
+describe('技能目录控制器的跨页面隔离', () => {
+  it('刷新会取消旧读取，即使旧请求迟到也不覆盖新目录', async () => {
+    const earlier = deferred<SkillLibrary>()
+    const current = deferred<SkillLibrary>()
+    mocks.load.mockReset().mockReturnValueOnce(earlier.promise).mockReturnValueOnce(current.promise)
+    await using screen = await render(library(), testLocation)
+    await vi.waitFor(() => expect(mocks.load).toHaveBeenCalledTimes(1))
+    const previousSignal = mocks.load.mock.calls[0]![0] as AbortSignal
+    await act(() => window.dispatchEvent(new Event('autoops:skill-library-changed')))
+    await vi.waitFor(() => expect(mocks.load).toHaveBeenCalledTimes(2))
+    expect(previousSignal.aborted).toBe(true)
+    await act(() => current.resolve(namedCatalog('新目录技能')))
+    await expect
+      .element(page.getByRole('button', { name: '新目录技能', exact: true }))
+      .toBeVisible()
+    await act(() => earlier.resolve(namedCatalog('过期目录技能')))
+    expect(screen.container.textContent).not.toContain('过期目录技能')
+    await expect
+      .element(page.getByRole('button', { name: '新目录技能', exact: true }))
+      .toBeVisible()
+  })
+  it('旧页面已经接受的写入完成后只刷新当前页，不把旧写入响应作为当前目录', async () => {
+    const accepted = deferred<SkillLibrary>()
+    mocks.change.mockReturnValue(accepted.promise)
+    await using previous = await render(library(), testLocation)
+    await expect.element(page.getByRole('button', { name: '技能操作', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '技能操作', exact: true }).click()
+    await page.getByRole('menuitem', { name: '停用技能', exact: true }).click()
+    await vi.waitFor(() => expect(mocks.change).toHaveBeenCalledTimes(1))
+    const previousSignal = mocks.load.mock.calls[0]![0] as AbortSignal
+    await previous.unmount()
+    expect(previousSignal.aborted).toBe(true)
+    mocks.load.mockResolvedValue(namedCatalog('当前页面技能'))
+    await using current = await render(library(), testLocation)
+    await expect
+      .element(page.getByRole('button', { name: '当前页面技能', exact: true }))
+      .toBeVisible()
+    await act(() => accepted.resolve(namedCatalog('旧页面写入结果')))
+    await vi.waitFor(() => expect(mocks.load).toHaveBeenCalledTimes(3))
+    expect(current.container.textContent).not.toContain('旧页面写入结果')
+    await expect
+      .element(page.getByRole('button', { name: '当前页面技能', exact: true }))
+      .toBeVisible()
+    expect(mocks.change).toHaveBeenCalledTimes(1)
+  })
+  it('写入冲突后的核对读取随页面离开取消，保留原写入次数', async () => {
+    const checking = deferred<SkillLibrary>()
+    mocks.change.mockRejectedValue(
+      new AutoOpsRequestError('版本发生变化，请刷新。', 'CONFLICT', 409),
+    )
+    await using screen = await render(library(), testLocation)
+    await expect.element(page.getByRole('button', { name: '技能操作', exact: true })).toBeVisible()
+    mocks.load.mockReturnValue(checking.promise)
+    await page.getByRole('button', { name: '技能操作', exact: true }).click()
+    await page.getByRole('menuitem', { name: '停用技能', exact: true }).click()
+    await vi.waitFor(() => expect(mocks.load).toHaveBeenCalledTimes(2))
+    const signal = mocks.load.mock.calls[1]![0] as AbortSignal
+    expect(signal.aborted).toBe(false)
+    await screen.unmount()
+    expect(signal.aborted).toBe(true)
+    await act(() => checking.resolve(catalog()))
+    expect(mocks.change).toHaveBeenCalledTimes(1)
+  })
 })

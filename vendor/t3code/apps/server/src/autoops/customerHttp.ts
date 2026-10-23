@@ -64,6 +64,7 @@ export const layer = Layer.unwrap(
     const device = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       return yield* Effect.try(() => {
+        access.assertAccepting();
         const authorization = request.headers.authorization;
         if (!authorization?.startsWith("Bearer "))
           throw {

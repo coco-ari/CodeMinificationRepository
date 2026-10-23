@@ -1,4 +1,4 @@
-import { readAutoOpsHost } from './hostConfig'
+import { readAutoOpsHost } from './hostSnapshot'
 
 export class AutoOpsRequestError extends Error {
   constructor(

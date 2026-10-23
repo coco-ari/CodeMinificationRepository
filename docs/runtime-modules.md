@@ -7,7 +7,7 @@
 - `pnpm start:agent-demo` 启动[网关](../agent-demo/server.mjs)，T3 模式由 `AGENT_DEMO_ENGINE=t3` 选择；网关负责登录、同源 HTTP/WebSocket 代理与静态资源，不拥有 T3 轮次。
 - `pnpm start:agent-demo:t3` 通过[启动器](../scripts/start-t3-worker.mjs)装配锁定 T3 worker，监听回环地址。`DATA_DIR`、`AUTOOPS_T3_BASE_DIR`、`AUTOOPS_T3_PORT` 及外置凭据沿当前部署配置提供；不得用测试默认值覆盖已有服务。
 - T3 [HTTP 适配入口](../vendor/t3code/apps/server/src/autoops/http.ts)、[RPC 适配入口](../vendor/t3code/apps/server/src/autoops/rpc.ts)及客户接入入口，从认证请求取得身份后调用业务适配器。T3 原生会话、命令、事件及恢复仍由上游服务拥有。
-- 前端从 [hostConfig](../vendor/t3code/apps/web/src/autoops/hostConfig.ts)接收可信 bootstrap，通过当前 T3 路由与公共框架组合页面。组件不读取服务端表或凭证。
+- 前端由 [hostConfig](../vendor/t3code/apps/web/src/autoops/hostConfig.ts) 组合启动与公开出口；[hostSnapshot](../vendor/t3code/apps/web/src/autoops/hostSnapshot.ts) 只保存已认证宿主快照和用户存储视图，[threadScopes](../vendor/t3code/apps/web/src/autoops/threadScopes.ts) 通过统一客户端处理会话范围。页面继续使用当前 T3 路由与公共框架，组件不读取服务端表或凭证。
 - 部署保留 [DeploymentService](../src/deployment.mjs) 与 [Agent](../agent/main.mjs) 的现有协议、构建及恢复；业务适配器只提供项目授权、固定工作区包与公开 DTO。
 
 ## 已实现模块
@@ -35,10 +35,13 @@
 
 - HTTP 仅由 [http.ts](../vendor/t3code/apps/server/src/autoops/http.ts) 装配，按工作区、部署、技能、会话和资料划分 [http/](../vendor/t3code/apps/server/src/autoops/http) 路由。共享身份、业务实例和错误映射属于 context/responses；子模块不能反向调用 HTTP、RPC 或客户接入入口。
 - 工作区的公开业务入口仍为 workspaces.mjs；[workspace-jobs.mjs](../agent-demo/t3-adapters/workspace-jobs.mjs) 管理任务生命周期，[workspace-files.mjs](../agent-demo/t3-adapters/workspace-files.mjs) 管理受限文件操作，[workspace-packages.mjs](../agent-demo/t3-adapters/workspace-packages.mjs) 调用受限 Worker 打包。发行时须一起携带 workspace-package-worker.mjs；不能只发布原入口而漏掉后台实现。
-- 项目成员和环境授权复用 [project-access.mjs](../agent-demo/t3-adapters/project-access.mjs)。工作区与部署服务只在完成授权后操作自身数据；后台任务接受和执行阶段仍校验调用者范围，退出页面不改变任务所属身份。
-- 部署中心通过 [deployment-projects.mjs](../src/deployment-projects.mjs) 的公开用例提供项目同步、目标创建和领取归属查询；业务适配器不直接读取或修改 DeploymentService 的存储内部状态。
+- 授权的唯一公开入口为 [access.mjs](../agent-demo/t3-adapters/access.mjs)。内部 access-identity 管理登录与会话映射，access-bootstrap 管理宿主投影，access-service 管理现有业务策略，access-runtime 装配配置与 SQLite；项目成员和环境授权内部复用 [project-access.mjs](../agent-demo/t3-adapters/project-access.mjs)。其他模块不得直接引用这些内部实现。工作区与部署服务只在完成授权后操作自身数据；后台任务接受和执行阶段仍校验调用者范围，退出页面不改变任务所属身份。
+- 部署中心经 [DeploymentService](../src/deployment.mjs) 的公开用例提供项目同步、目标创建和领取归属查询；[deployment-projects.mjs](../src/deployment-projects.mjs) 是引擎内部实现，业务适配器不直接引用它或读取存储。源码构建由 [RepositoryService](../src/service.mjs) 拥有：部署通过 captureArchive、pinRevision、releasePin、cachedCommitSubject 和 waitForIdle 协作，不改写注入的 builder 方法。captureArchive 在源码锁内完成归档消费，同次构建的单个固定失败不破坏普通下载；消费函数不得重入相同源码的构建、历史或固定接口。
 - T3 原生附件通过宿主 [resourceCatalog.ts](../vendor/t3code/apps/server/src/autoops/resourceCatalog.ts) 注入公开读取端口；resources.mjs 只负责业务授权与资料投影，不反向导入 attachmentStore，也不查询其他模块的表。
-- 前后端 DTO 归 [autoops/contracts](../autoops/contracts)；[apiClient.ts](../vendor/t3code/apps/web/src/autoops/apiClient.ts) 统一请求和错误，工作区轮询与页面错误由所属 hook/ModuleErrorBoundary 管理。它们不改变 T3 会话执行与恢复来源。
+- 工作区、部署和客户执行等已共享 DTO 归 [autoops/contracts](../autoops/contracts)；[apiClient.ts](../vendor/t3code/apps/web/src/autoops/apiClient.ts) 统一请求和错误，工作区轮询与页面错误由所属 hook/ModuleErrorBoundary 管理。它们不改变 T3 会话执行与恢复来源。
+
+- 工作区页面只组合路由、任务和表单；[WorkspaceFileBrowser](../vendor/t3code/apps/web/src/autoops/WorkspaceFileBrowser.tsx) 适配原生文件浏览与固定版本读取，workspaceViewState 仅供工作区内部共享阅读偏好。技能页面保留选择、对话框与导航，[useSkillLibraryCatalog](../vendor/t3code/apps/web/src/autoops/useSkillLibraryCatalog.ts) 负责目录读取、变更与撤权；旧页面写入结果不能覆盖新页面状态。
+- [BusinessRuntime](../vendor/t3code/apps/server/src/autoops/BusinessRuntime.ts) 在现有 Effect 宿主中装配业务生命周期，[business-runtime.mjs](../agent-demo/t3-adapters/business-runtime.mjs) 只协调各模块公开停止/关闭端口。初始化失败同样释放已取得资源；已停止的配置实例不会被惰性读取重新创建。具体排空策略及验收见下表与关闭测试。
 
 ## 可执行门禁
 
@@ -67,21 +70,44 @@ pnpm --dir vendor/t3code/apps/web exec playwright install --with-deps chromium
 
 检查器递归扫描 `agent-demo/`、`agent/`、`src/`、`autoops/contracts/`、T3 Server `src/autoops/` 和 T3 Web `src/autoops/` 的 JS/TS/JSX/TSX 运行源码。测试、声明文件、依赖安装目录、运行数据及构建输出不作为生产源入口；唯一额外排除的 `agent-demo/customer-agent/live-validation.mjs` 是需要真实环境的手动验收程序。它不进入产品分发，客户 ZIP 另有全部分块依赖审计。
 
-静态分析保留类型导入、动态导入和 T3 的 `~`/`@` 路径别名。禁止扫描范围内循环、未解析依赖、前端引入后端/Node、业务服务反向导入 T3 入口、执行引擎反向导入工作台、客户执行带入平台存储、部署内部被深层引用、HTTP 内部被穿透或反向依赖入口，以及共享请求层反调界面。新增业务子目录与文件无需手动列清单；根目录为空、源码漏扫或被停止遍历时必须失败。
+静态分析保留类型导入、动态导入和 T3 的 `~`/`@` 路径别名。禁止扫描范围内循环、未解析依赖、前端引入后端/Node、业务服务反向导入 T3 入口、执行引擎反向导入工作台、客户执行带入平台存储、部署内部被深层引用、HTTP 内部被穿透或反向依赖入口，以及共享请求层反调界面。新增业务子目录与文件自动进入扫描；根目录为空、源码漏扫或被停止遍历时必须失败。私有入口规则额外保护 access 内部、工作区后台、部署项目存储及工作区/技能页面内部控制器；共享请求只依赖宿主快照。新增私有边界仍须登记所有者与内部路径，并补合法协作和非法穿透用例；自动发现文件不等于自动推断其所有权。
 
 锁定 T3 其余源目录和依赖包作为外部节点保留直接依赖边，不递归审计其全部内部结构；`web/src` 的历史页面也未纳入本项架构扫描。T3 Web/Server 类型与相关测试继续覆盖实际引用，但不能将本门禁表述为上游全仓架构检查。`Worker` 的文件 URL、运行时路由和 SQL 访问边界还需合同、执行及行为测试，依赖图本身不证明授权正确。
+
+AutoOps Web 全量回归按文件串行执行，保留原 15 秒单例断言预算。Windows 上并行导入宿主依赖曾造成三个用例在模块加载阶段超时；串行运行相同 134 项全部通过，不跳过用例或提高断言时限。该资源安排同步在本地与 CI 的同一命令中。
 
 Windows 上的目录 fsync、POSIX 权限、静态站点符号链接和 shell 构建用例目前存在环境差异；缺浏览器、沙箱写权限及有实际错误的测试必须分别报告。不得为获得绿色结果跳过后宣称完整链路通过，也不能用 Windows 失败替代 Linux CI 的实际结果。
 
 ## 当前运行限制与后续收敛
 
 - 当前工作区文件存储按单个服务进程写入；PID 与进程实例标记用于恢复本实例遗留任务，对其他仍存活 PID 采用保守保留。尚未提供多实例租约，不得部署多个共享该目录的写入 worker。
-- 工作区、部署业务 store 已提供关闭能力，HTTP 组合根尚未完成统一的优雅关闭装配。本次程序切换必须先核实会话、部署和工作区任务全部空闲，停止网关后再核对一次；不能把进程退出后的任务恢复等同于完整排空能力。
-- hostConfig 仍含会话绑定与 fork 请求，部分资料元数据读取仍有独立传输路径。后续拆出 bootstrap 快照与会话范围客户端，再归入统一请求边界，避免 apiClient 与 hostConfig 循环依赖。
-- 工作区文件浏览面板、技能目录控制器仍有继续细分的空间；当前公开入口、授权与回归保持有效。不得以此为由重写原生 T3 文件、会话或技能执行器。
+- 本轮业务生命周期已接入 T3 Effect 组合根，但本节代码验收不能代替真实升级。远端已领取的部署和客户动作继续按持久收据核对，中心进程退出不等于远端动作取消或完成；目标主机切换仍要核对活动任务和数据保留。
+- 现有部署引擎的聚合存储继续由引擎拥有，未进行全面换库；单实例和现有持久格式是明确边界，不能据此声称所有历史存储已迁入独立后端。
 - 共享服务器上安装依赖或验收，必须使用独立 cgroup 的总内存限制并串行执行；只设置 V8 堆上限不能保护线上进程。构建优先在开发或 CI 主机完成，验收只使用隔离数据目录。
 
-## 本轮交付与验收记录（2026-10-23）
+## 本轮逐模块验收范围
+
+下表列明本轮改造与沿用边界，具体执行结果以提交对应 CI 为准；不将测试入口存在写成实际通过。没有行为变更的模块只核对必要调用链，不为增加拆分数量改写实现。
+
+| 模块                 | 本轮状态与公开交集                                                        | 行为验证入口及限制                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 登录、项目与环境授权 | access 公开合同保留；内部身份、宿主投影、业务策略与资源装配分开           | access、project-memberships、workspace-scope、rpc.principal；仍使用既有账号来源                                                |
+| 宿主与生命周期       | BusinessRuntime 接入实际 T3 Effect；停止接单、排空与释放分阶段            | t3-business-lifecycle、BusinessRuntime、RemoteDeviceService.lifecycle；真实服务器信号退出仍需发布时验收                        |
+| 工作区               | 原公开服务保留；正常关闭排空队列，显式强制取消等待本地 worker 退出        | t3-workspaces、t3-business-lifecycle；继续单实例写入                                                                           |
+| 发布与源码           | 部署服务经 RepositoryService 公开端口固定源码；不改写构建器，不穿透源码锁 | source-cooperation、deployment-lifecycle、deployment-workspace-source、t3-deployments；未更换引擎持久格式                      |
+| 技能                 | 目录读取与变更由所属控制器拥有；页面拥有选择、对话框和导航                | SkillLibraryAccess.browser、skillLibrary、t3-skills-management；仍复用原生技能执行                                             |
+| 资料与成果           | 资源元数据、计划保存和技能上下文使用已有统一客户端；成果存储纳入宿主释放  | businessRequests、t3-resources、t3-business-tools；原生二进制与历史草稿恢复保留原协议                                          |
+| 前端宿主与工作区展示 | 快照、会话范围、文件浏览与阅读偏好各自拥有状态；公开出口保持              | hostConfig、apiClient、WorkspaceFileBrowser.browser、ProjectAreasResponsive.browser、WorkspaceSubmission.browser；无新增页面壳 |
+| 客户本机             | 停止接单后不接受新执行，原有收据与断线落盘保留                            | RemoteDeviceService 生命周期/安全、customer-agent 分发；门禁拒绝打包平台后端                                                   |
+| 部署 Agent           | 保持原中心协议与本地执行所有权；上游停止不伪造远端成功或取消              | agent、integration-protocol、source-cache；本轮不执行真实远端发布                                                              |
+| 模型、偏好与导航     | 保留原生模型与用户状态；偏好数据库由宿主统一释放                          | t3-models、t3-preferences、t3-settings-preferences、t3-project-navigation；未引入新执行器                                      |
+| 独立 AutoOps 后端    | 保留独立合同、身份、权限、审计和升级切片                                  | verify:autoops；未替换线上身份与存储                                                                                           |
+
+关闭配置：AUTOOPS_SHUTDOWN_DRAIN_MS 默认 30000 毫秒，允许 1000–120000 毫秒。它是优雅排空预算，超出后记录未完成模块并协作取消本地工作区任务；部署已经接受的本地落盘仍需完成，不能在后台继续写入时提前关闭数据库。此配置不是整个进程的硬退出上限；最终强停由部署监督器的退出预算负责，重启后仍按持久收据核对远端结果。
+
+本轮尚未切换服务器，线上最后一次已核实发行仍为下文 81a5c2f8。代码检查、Linux 回归与线上验收分别记录，不能将上次部署证据复用于本轮代码。
+
+## 上一轮已部署验收记录（2026-10-23，81a5c2f8）
 
 模块改造及部署撤权补丁已以 `a212086a57dcec562c23ee3fbfbbb799068a053f` 完成完整回归并发布；最终预览提交 `81a5c2f861e9af04a4fa89577f24c311ae814388` 修复线上验收发现的部署确认取消后焦点恢复问题，也已通过下表完整回归并部署。程序使用不可变发行目录，业务数据继续使用原数据目录。
 

@@ -28,3 +28,5 @@ export function createAutoOpsBusinessTools(options: {
   queryEnvironment(threadId: string, environmentId: string): Promise<Record<string, unknown>>;
   createReport(threadId: string, runId: string, input: { name: string; mime: string; content: string }): Promise<Record<string, unknown>>;
 };
+
+export function closeConfiguredBusinessArtifactStore(): void;

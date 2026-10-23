@@ -50,7 +50,15 @@ export function createDeploymentStore({dataDir, workspaceStore, access, agentPor
     const scope = deployment.projects.claimScope(task, target)
     access.requireDeploymentActor(task.actor.id, scope.projectId, scope.environmentId)
   }})
-  let initializing, pending = Promise.resolve(), listener, closed = false
+  let initializing, pending = Promise.resolve(), listener, listenerClosing, closing, closed = false
+  const operations = new Set()
+  const accept = (work) => {
+    if (closed) return Promise.reject(Object.assign(new Error('部署服务正在停止，请稍后重试'), {status:503, code:'DEPLOYMENT_STOPPING'}))
+    const operation = Promise.resolve().then(work)
+    operations.add(operation)
+    void operation.finally(() => operations.delete(operation)).catch(() => {})
+    return operation
+  }
   const serial = (work) => { const operation = pending.then(work); pending = operation.catch(() => {}); return operation }
   const ownedTarget = (projectId, targetId) => deployment.projects.target(projectId, targetId)
   const targetDto = (projectId, id) => {
@@ -72,21 +80,34 @@ export function createDeploymentStore({dataDir, workspaceStore, access, agentPor
         for (const name of await readdir(root)) if (/^package-[A-Za-z0-9]+$/.test(name)) await rm(join(root, name), {recursive:true, force:true})
         if (agentPort !== undefined) {
           if (!Number.isInteger(agentPort) || agentPort < 0 || agentPort > 65535) fail(500, 'DEPLOYMENT_AGENT_PORT_INVALID', '部署 Agent 接入端口无效')
-          listener = createServer(async (req, res) => {
-            const json = (response, status, body) => { response.writeHead(status, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store'}); response.end(JSON.stringify(body)) }
-            const body = async (request) => { let size = 0; const chunks = []; for await (const chunk of request) { size += chunk.length; if (size > 1024 * 1024) fail(413, 'BODY_TOO_LARGE', 'Agent 请求过大'); chunks.push(chunk) } try { return JSON.parse(Buffer.concat(chunks).toString()) } catch { fail(400, 'INVALID_JSON', 'Agent 请求格式错误') } }
-            try { if (!await handleAgentRequest(req, res, new URL(req.url || '/', 'http://127.0.0.1'), {deployment, body, json})) json(res, 404, {error:'Agent 接口不存在'}) }
-            catch (error) { if (!res.headersSent) json(res, Number.isInteger(error.status) ? error.status : 500, {error:error.status ? error.message : '部署 Agent 请求失败'}); else res.destroy() }
+          listener = createServer((req, res) => {
+            const operation = (async () => {
+              const json = (response, status, body) => { response.writeHead(status, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store'}); response.end(JSON.stringify(body)) }
+              const body = async (request) => { let size = 0; const chunks = []; for await (const chunk of request) { size += chunk.length; if (size > 1024 * 1024) fail(413, 'BODY_TOO_LARGE', 'Agent 请求过大'); chunks.push(chunk) } try { return JSON.parse(Buffer.concat(chunks).toString()) } catch { fail(400, 'INVALID_JSON', 'Agent 请求格式错误') } }
+              if (closed) { json(res,503,{error:'部署服务正在停止，请稍后重试',code:'DEPLOYMENT_STOPPING'}); return }
+              try { if (!await handleAgentRequest(req, res, new URL(req.url || '/', 'http://127.0.0.1'), {deployment, body, json})) json(res, 404, {error:'Agent 接口不存在'}) }
+              catch (error) { if (!res.headersSent) json(res, Number.isInteger(error.status) ? error.status : 500, {error:error.status ? error.message : '部署 Agent 请求失败'}); else res.destroy() }
+            })()
+            operations.add(operation)
+            void operation.finally(() => operations.delete(operation)).catch(() => {})
           })
+          listener.requestTimeout = 30_000; listener.headersTimeout = 15_000
           await new Promise((done, reject) => { listener.once('error', reject); listener.listen(agentPort, '127.0.0.1', done) })
         }
         return store
-      })()
+      })().catch(async (error) => {
+        store.stopAccepting()
+        try { if (listenerClosing) await listenerClosing; await deployment.close() }
+        finally { await repository.store.close() }
+        throw error
+      })
       return initializing
     },
     async ensureProject(project) {
-      await store.initialize()
-      await deployment.projects.ensureProject(project)
+      return accept(async () => {
+        await store.initialize()
+        await deployment.projects.ensureProject(project)
+      })
     },
     overview(project, environmentIds) {
       const all = deployment.projects.snapshot(project.id), map = all.mapping, allowed = new Set(environmentIds), serverIds = new Set(map.servers.filter((item) => allowed.has(item.environmentId)).map((item) => item.serverId))
@@ -96,44 +117,50 @@ export function createDeploymentStore({dataDir, workspaceStore, access, agentPor
       return {enabled:true, environments:project.environments.filter((item) => allowed.has(item.id)).map((item) => ({id:item.id, name:item.name})), servers:all.servers.filter((item) => serverIds.has(item.id)).map((item) => safeServer(item, map.servers.find((bound) => bound.serverId === item.id).environmentId)), targets, tasks}
     },
     async createServer(projectId, input) {
-      return serial(async () => {
-        const result = await deployment.projects.createServer(projectId, input)
-        return {server:safeServer(result.server, input.environmentId), registrationToken:result.registrationToken, expiresAt:result.expiresAt, ...(result.repeated ? {repeated:true} : {})}
+      return accept(async () => {
+        return serial(async () => {
+          const result = await deployment.projects.createServer(projectId, input)
+          return {server:safeServer(result.server, input.environmentId), registrationToken:result.registrationToken, expiresAt:result.expiresAt, ...(result.repeated ? {repeated:true} : {})}
+        })
       })
     },
     async createTarget(projectId, input) {
-      const id = await deployment.projects.createTarget(projectId, input)
-      return {target:targetDto(projectId, id)}
+      return accept(async () => {
+        const id = await deployment.projects.createTarget(projectId, input)
+        return {target:targetDto(projectId, id)}
+      })
     },
     targetScope(projectId, targetId) { return {environmentId:ownedTarget(projectId, targetId).environmentId} },
     taskScope(projectId, taskId) { const task = deployment.projects.task(projectId, taskId); return store.targetScope(projectId, task.targetId) },
     async createTask(projectId, input, principal) {
-      const {target, environmentId} = ownedTarget(projectId, input.targetId)
-      access.requireDeploymentActor(principal.id, projectId, environmentId)
-      uuid(input.requestId, '请求标识')
-      if (!['deploy', 'rollback'].includes(input.action) || input.service !== 'frontend') fail(400, 'DEPLOYMENT_ACTION_UNSUPPORTED', '首轮仅支持前端静态站点发布与回退')
-      if (typeof input.configKey !== 'string' || !/^[a-f0-9]{64}$/.test(input.configKey)) fail(400, 'DEPLOYMENT_CONFIG_REQUIRED', '请刷新配置并确认发布快照')
-      const actor = {id:principal.id, displayName:principal.displayName}
-      if (input.action === 'rollback') {
-        const task = await deployment.createTask({targetId:target.id, action:'rollback', releaseId:uuid(input.releaseId, '回退版本'), requestId:input.requestId, configKey:input.configKey, actor})
-        return {task:taskDto(projectId, task)}
-      }
-      const packageId = uuid(input.packageId, '源码包标识'), overview = workspaceStore.overview(projectId), selected = overview.releases.find((item) => item.id === packageId)
-      if (!selected) fail(404, 'DEPLOYMENT_PACKAGE_NOT_FOUND', '当前项目中不存在此源码包')
-      const version = workspaceStore.getVersion(projectId, selected.sourceVersionId), manifest = selected.manifest, artifact = manifest?.services?.find((item) => item.service === 'frontend')
-      if (version.type !== 'internal' || version.status !== 'published' || manifest.projectId !== projectId || manifest.releaseId !== packageId || manifest.sourceVersionId !== version.id || manifest.status !== 'packaged' || manifest.source?.contentHash !== version.source.contentHash || JSON.stringify(manifest.source?.repositories) !== JSON.stringify(version.source.repositories)) fail(409, 'DEPLOYMENT_SOURCE_INVALID', '只能发布来自已发布内部固定版本的源码包')
-      if (!artifact || artifact.context?.service !== 'frontend' || typeof artifact.context?.workingDirectory !== 'string' || normalizedModule(artifact.context.workingDirectory) !== normalizedModule(target.config.module)) fail(409, 'DEPLOYMENT_CONTEXT_MISMATCH', '源码包构建目录与部署配置不一致，请为此构建上下文配置独立服务')
-      const packed = workspaceStore.packageFile(projectId, packageId, 'frontend'), bytes = Buffer.from(packed.bytes)
-      if (bytes.length !== artifact.size || sha(bytes) !== artifact.sha256) fail(409, 'DEPLOYMENT_PACKAGE_CHANGED', '源码包内容与固定清单不一致，已停止发布')
-      if (bytes.length > 64 * 1024 * 1024) fail(413, 'DEPLOYMENT_PACKAGE_TOO_LARGE', '部署验证首轮只接受不超过 64 MiB 的源码 ZIP')
-      const temporary = await mkdtemp(join(directory, 'workspace-inputs', 'package-'))
-      try {
-        const file = join(temporary, 'source.zip'); await writeFile(file, bytes, {flag:'wx', mode:0o600})
-        const sourceIdentity = {projectId, sourceVersionId:version.id, packageId, service:'frontend', contentHash:version.source.contentHash, repositories:copy(version.source.repositories)}
-        const revision = version.source.repositories.length === 1 ? version.source.repositories[0].commit : version.source.contentHash
-        const task = await deployment.createTaskFromArchive({targetId:target.id, requestId:input.requestId, configKey:input.configKey, actor, sourceIdentity}, {file, sha256:artifact.sha256, size:bytes.length, revision})
-        return {task:taskDto(projectId, task)}
-      } finally { await rm(temporary, {recursive:true, force:true}) }
+      return accept(async () => {
+        const {target, environmentId} = ownedTarget(projectId, input.targetId)
+        access.requireDeploymentActor(principal.id, projectId, environmentId)
+        uuid(input.requestId, '请求标识')
+        if (!['deploy', 'rollback'].includes(input.action) || input.service !== 'frontend') fail(400, 'DEPLOYMENT_ACTION_UNSUPPORTED', '首轮仅支持前端静态站点发布与回退')
+        if (typeof input.configKey !== 'string' || !/^[a-f0-9]{64}$/.test(input.configKey)) fail(400, 'DEPLOYMENT_CONFIG_REQUIRED', '请刷新配置并确认发布快照')
+        const actor = {id:principal.id, displayName:principal.displayName}
+        if (input.action === 'rollback') {
+          const task = await deployment.createTask({targetId:target.id, action:'rollback', releaseId:uuid(input.releaseId, '回退版本'), requestId:input.requestId, configKey:input.configKey, actor})
+          return {task:taskDto(projectId, task)}
+        }
+        const packageId = uuid(input.packageId, '源码包标识'), overview = workspaceStore.overview(projectId), selected = overview.releases.find((item) => item.id === packageId)
+        if (!selected) fail(404, 'DEPLOYMENT_PACKAGE_NOT_FOUND', '当前项目中不存在此源码包')
+        const version = workspaceStore.getVersion(projectId, selected.sourceVersionId), manifest = selected.manifest, artifact = manifest?.services?.find((item) => item.service === 'frontend')
+        if (version.type !== 'internal' || version.status !== 'published' || manifest.projectId !== projectId || manifest.releaseId !== packageId || manifest.sourceVersionId !== version.id || manifest.status !== 'packaged' || manifest.source?.contentHash !== version.source.contentHash || JSON.stringify(manifest.source?.repositories) !== JSON.stringify(version.source.repositories)) fail(409, 'DEPLOYMENT_SOURCE_INVALID', '只能发布来自已发布内部固定版本的源码包')
+        if (!artifact || artifact.context?.service !== 'frontend' || typeof artifact.context?.workingDirectory !== 'string' || normalizedModule(artifact.context.workingDirectory) !== normalizedModule(target.config.module)) fail(409, 'DEPLOYMENT_CONTEXT_MISMATCH', '源码包构建目录与部署配置不一致，请为此构建上下文配置独立服务')
+        const packed = workspaceStore.packageFile(projectId, packageId, 'frontend'), bytes = Buffer.from(packed.bytes)
+        if (bytes.length !== artifact.size || sha(bytes) !== artifact.sha256) fail(409, 'DEPLOYMENT_PACKAGE_CHANGED', '源码包内容与固定清单不一致，已停止发布')
+        if (bytes.length > 64 * 1024 * 1024) fail(413, 'DEPLOYMENT_PACKAGE_TOO_LARGE', '部署验证首轮只接受不超过 64 MiB 的源码 ZIP')
+        const temporary = await mkdtemp(join(directory, 'workspace-inputs', 'package-'))
+        try {
+          const file = join(temporary, 'source.zip'); await writeFile(file, bytes, {flag:'wx', mode:0o600})
+          const sourceIdentity = {projectId, sourceVersionId:version.id, packageId, service:'frontend', contentHash:version.source.contentHash, repositories:copy(version.source.repositories)}
+          const revision = version.source.repositories.length === 1 ? version.source.repositories[0].commit : version.source.contentHash
+          const task = await deployment.createTaskFromArchive({targetId:target.id, requestId:input.requestId, configKey:input.configKey, actor, sourceIdentity}, {file, sha256:artifact.sha256, size:bytes.length, revision})
+          return {task:taskDto(projectId, task)}
+        } finally { await rm(temporary, {recursive:true, force:true}) }
+      })
     },
     async taskDetails(projectId, id, after = 0) {
       store.taskScope(projectId, id)
@@ -142,13 +169,32 @@ export function createDeploymentStore({dataDir, workspaceStore, access, agentPor
     },
     releases(projectId, targetId) { ownedTarget(projectId, targetId); return {releases:deployment.releases(targetId).map(safeRelease)} },
     get agentAddress() { return listener?.address() },
-    async close() { closed = true; await pending; await initializing?.catch(() => {}); if (listener) { listener.closeAllConnections(); await new Promise((done) => listener.close(done)) }; await deployment.close(); await repository.store.close() },
+    stopAccepting() {
+      closed = true; deployment.beginClose()
+      if (listener?.listening) listenerClosing ||= new Promise((done) => listener.close(done))
+    },
+    close() {
+      store.stopAccepting()
+      return closing ||= (async () => {
+        await initializing?.catch(() => {})
+        store.stopAccepting()
+        await Promise.allSettled([...operations])
+        await pending
+        try {
+          if (listenerClosing) await listenerClosing
+          await deployment.close()
+        } finally { await repository.store.close() }
+      })()
+    },
   }
   return store
 }
 
-let configured
+let configured, configuredStopped = false
+export function stopConfiguredDeploymentStore() { configuredStopped = true; configured?.store.stopAccepting() }
+export async function closeConfiguredDeploymentStore() { stopConfiguredDeploymentStore(); await configured?.store.close() }
 export function configuredDeploymentStore() {
+  if (configuredStopped) fail(503, 'DEPLOYMENT_STOPPING', '部署服务正在停止，请稍后重试')
   if (process.env.AUTOOPS_DEPLOYMENT_ENABLED !== '1') return undefined
   const dataDir = process.env.AUTOOPS_T3_DATA_DIR, workspaceStore = configuredWorkspaceStore()
   if (!dataDir || !workspaceStore) fail(500, 'DEPLOYMENT_NOT_CONFIGURED', '部署验证存储尚未配置')

@@ -524,7 +524,8 @@ describe("customer receipt boundary before durable storage", () => {
     const db = new DatabaseSync(":memory:");
     const journal = createCustomerTransportJournal(db);
     const hub = new RemoteDeviceHub(
-      { customerRegistry: { resetPresence: () => {} } } as never,
+      {
+      assertAccepting() {}, customerRegistry: { resetPresence: () => {} } } as never,
       journal,
     );
     try {
@@ -561,6 +562,7 @@ describe("customer receipt boundary before durable storage", () => {
     const journal = createCustomerTransportJournal(db);
     const hub = new RemoteDeviceHub(
       {
+      assertAccepting() {},
         customerRegistry: {
           resetPresence: () => {},
           markConnected: () => ({ connectionEpoch: 1 }),
