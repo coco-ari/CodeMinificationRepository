@@ -76,7 +76,17 @@
 
 无凭据真实证据位于本 worktree `.deployment/workspace-authoring-evidence/`：`public-git-result.json`、`restart-result.json`、`ui/fixed-selection.json`、`ui/real-ui-theme.json`、`ui/unknown-extract.json`；最初定位与断言错误的报告保留，不计入产品失败或通过。早期 `fixed-version-generated.png` 截于轮询完成之前，只显示旧示例，不能证明新版本；以 `fixed-version-actual-selected.png` 和对应 JSON 为准。
 
-本批尚未部署到 `192.168.31.157:28887`。真实远端私有 HTTPS 凭证、Linux 新发行切换及有效 PDF 的原生浏览器插件呈现未在本批实测；没有调用真实模型执行新资料问答。既有第二步的生产证据不替代这些新增能力的验证。
+### 测试服务器部署与用户仓库（2026-10-23 至 24 日）
+
+应用提交 `71d1b3b21750b033d68cdb87f6c8ac6b9781d251` 已部署到 `192.168.31.157:28887`，完整发行和恢复配置见[当前验证发行](../examples/agent-demo-t3-deployment.md#当前验证发行)。对应 [Linux 运行链路 39979040966](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39979040966) 与 [AutoOps 质量检查 39979040864](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39979040864) 均通过：Node 468、Server 114（另 2 条件跳过）、Web 207、客户 17、独立后端 21；Markdown 定向三组 179/41/20，另 88 项非本门禁目标跳过。
+
+服务器从实际 Linux 发行目录分别完成原件上传及固定版本生成、既有基线 ZIP Worker 隔离冒烟，真实切换网关与 Worker 后健康、HTML 字节及原业务数据保留均通过。仅在 `p-autoops` 使用正式 API 保存 `coco-ari/travel-map` 和 `coco-ari/ai-gateway` 两个公开来源，固定版本 v003 `7b42cc81-563f-4560-800a-7bc814ce31fa` 的完整 SHA 与配置一致，实际 package.json/README 读取通过；旧两个版本及摘要保留。首次失败记录保留，同期服务器直连 GitHub HTTPS 超时；网络自行恢复后确认原任务失败才显式新请求重试；没有改网络或降低 Git 安全边界。生成成功后验收脚本误读不存在 README 的错误保留，并以实际存在路径只读续验原任务。
+
+线上浏览器只读验收 5 项通过：两来源完整呈现，实际展开目录并打开 README/package.json 原生预览，选择 v003 与核对两完整 SHA，首次失败任务历史，以及浅深色 1440×900/390×844 页面；页面错误与被拦截业务写入为 0，来源数据前后深等，外观偏好已恢复。真实保存来源和生成版本由 API 写入记录证明；静态截图与交互证据分开，不把浏览证明作写流程通过。
+
+新增数据完成独立 cgroup 下的一致性检查点：15 个非空 SQLite 与业务文件归档包含新增资料/凭证库及 0600 默认主密钥；同程序重启后修订 2、两个来源、新旧固定版本和原成功/失败收据均保留，其他四项服务 PID 未变。程序回滚预检通过；未实际执行程序降级或整库恢复。证据为 `checkpoint.log`、`rollback-check.log`、`after-checkpoint-import.json` 与 `ui/report.json`。
+
+证据为 `.deployment/workspace-authoring-deploy/verify.json`、`switch.json`、`seed-repositories.json`、`retry-repositories.json`。真实远端私有 HTTPS 凭证、有效 PDF 的原生浏览器插件呈现未在本批实测；没有调用真实模型执行新资料问答，也没有执行两个用户仓库的脚本或部署其应用。既有第二步的生产证据不替代这些新增能力的验证。
 
 ## 可执行门禁
 
@@ -143,7 +153,7 @@ Windows 上的目录 fsync、POSIX 权限、静态站点符号链接和 shell �
 
 ## 第二步最终验收
 
-第二步按当前分支已经实现的模块和业务流程完成，不以目录或拆分数量、零依赖为完成依据。逐模块表已经记录唯一数据与状态所有者、实际公开接口、必要依赖、失败影响及成功/越权/异常/恢复证据；本轮真实验收发现的导入容量扫描、原生代码视口、冷刷新阅读恢复和部署提示布局缺陷均已修复并随最终版本发布。
+第二步于 2026-10-23 以 `73b119c4` 完成当时已实现的模块和业务流程，不以目录或拆分数量、零依赖为完成依据。逐模块表已经记录唯一数据与状态所有者、实际公开接口、必要依赖、失败影响及成功/越权/异常/恢复证据；本轮真实验收发现的导入容量扫描、原生代码视口、冷刷新阅读恢复和部署提示布局缺陷均已修复并随最终版本发布。
 
 当前应用提交、程序/网页/客户包、摘要、服务配置和恢复点的唯一现行记录见[当前验证发行](../examples/agent-demo-t3-deployment.md#当前验证发行)。下方 b6f25a04、61e9ed11 与更早批次保留各自证据，不能把历史发行或健康接口中的锁定 T3 `sourceCommit` 当作当前应用提交。
 

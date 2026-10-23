@@ -10,6 +10,39 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-23 至 24 日，工作区来源与资料维护应用提交 `71d1b3b21750b033d68cdb87f6c8ac6b9781d251` 已部署。网关、T3 Worker、网页与客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-workspace-71d1b3b2`，业务数据沿用 `/home/tao/autoops-deployment-validation/data`。这次包含服务端新增模块、公共 SQLite 文件与文档 Worker；未初始化空库或切换独立身份后端。应用身份由发行记录、有效 WorkingDirectory 和实际网页字节核对；健康接口中的 `sourceCommit` 仍表示锁定 T3。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `cbd05b2974d84c04344839bf2aadb5f0fc1d74a99fa81ba3e6975fb2e1408651` |
+| 完整清单 SHA-256 | `2dd54a58683ceee070a77d18b58fc99db90ebec1c937d1aaa0641b2f7d971e44` |
+| 原生依赖清单 SHA-256 | `eab67aec2e4a8c462b03ff83f599683c76b700618fa071397e7ac2c9a054e745` |
+| 实际网页 HTML SHA-256 | `340e50ceda87ab2ea049478649fce192aa378cc0bf7576d25404bb7151e749a0` |
+| 客户 ZIP SHA-256 / 字节 | `48fb35c3e39fec059671b1825619e09a3b7a3114b9e91c75b2c34534c98481bb` / 1042160 |
+| 清单与旧资源 | 5929 文件、61 相对链接；保留 1705 个旧哈希资源；官方同版原生依赖 2038 文件/21 包校验通过 |
+| 应用提交 CI | [工作台运行链路 39979040966](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39979040966)、[AutoOps 质量检查 39979040864](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39979040864) 均通过 |
+
+构建在开发机完成；服务器准备、发行目录的原件上传与固定版本生成、ZIP Worker 冒烟、CLI 校验及切换串行进行，各自处于独立 `MemoryMax=512M / MemorySwapMax=0 / CPUQuota=100%` cgroup。两个验证服务仅增加本批 `zzzzzzzzzzzzzzz-workspace-71d1b3b2.conf`，正常停止接单并复核活动任务后切换，停止预算 90 秒。切换时原 235 个工作区/技能文件、99 条消息、32 轮运行、293 条轮次条目、17 个绑定、3 份成果，以及客户设备、目录、13 个命令和 3 个游标均保留；原部署配置与记录、28890 站点及另四项服务 PID 不变。
+
+按用户授权，仅向 `p-autoops` 添加两个用户所属的公开仓库；未改动 `p-cabinet`，未执行仓库脚本或部署其业务。`travel-map` 是全栈示例，`ai-gateway` 是客户端 SDK，不把它们伪装成前后端配套服务。
+
+| 来源与挂载目录 | 固定提交 |
+| --- | --- |
+| `coco-ari/travel-map` → `demo-travel-map` | `514e596978dc46ad494ad2904b8112b8d4d84689` |
+| `coco-ari/ai-gateway` → `demo-ai-gateway` | `792144145a68f7c69271536a35ce5a86e653036e` |
+
+首次请求 `34d28216-ce02-488c-81ef-4dffbe5f6aea` 失败，任务 `c732c77a-a205-44d7-b5bd-6c40cdbf234e` 保留失败终态；同期服务器直连 GitHub HTTPS 检查超时，业务错误未保存底层网络诊断。只读确认网络自行恢复、原任务确已失败后，显式新请求 `84cc0fa9-df88-44f9-931e-dd56201b0f04` 生成成功，任务 `7d7acf9f-1550-4853-bd97-e766cf437db2` 发布内部版本 v003 `7b42cc81-563f-4560-800a-7bc814ce31fa`。两来源均为 synced，固定 SHA 与配置相符，旧两个版本及摘要保留；当前资料的 `demo-travel-map/package.json` 与 `demo-ai-gateway/README.md` 均实际读取通过。没有修改代理、TLS、DNS 固定或 Git 访问边界。早期验收脚本误读 travel-map 不存在的 README，生成任务实际上已完成；修正路径后只核对原任务，没有重复生成。
+
+本批程序恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-workspace-71d1b3b2-20261023`，程序回退目标为切换前的 `t3-step2-73b119c4`。`rollback-program.sh` 只撤销本批且摘要未变的配置，继续使用回滚当下数据，保留新来源、资料、密钥和版本；旧程序暂不提供新增资料维护入口。不得执行下方历史批次脚本越层回退，也不得用旧数据库覆盖发布后新增资料。
+
+添加来源后，又在同样独立 512MiB/no-swap cgroup 内创建 `backups/t3-workspace-71d1b3b2-20261023/post-seed` 一致性恢复点；15 个非空 SQLite 的备份均 quick_check 通过，包含新增资料与凭证库，默认主密钥随文件归档保留且权限为 0600。发布前备份不包含当时尚未懒初始化的新库与主密钥，因此不能替代此恢复点。检查点正常排空后重启同一发行，资料修订 2、两来源、v003、旧版本与成功/失败原收据再次通过公开接口核对，其他四项服务 PID 不变。`rollback-program.sh --check` 通过；本批未实际执行程序降级或整库恢复。部署辅助脚本另有 27 项本地临时库/模拟服务检查，不能称为远端恢复演练。
+
+线上浏览器只读验收 5 项通过：两来源列表、实际目录展开与两文件原生预览、v003 选择与完整来源 SHA、首次失败任务历史、浅深色 1440px/390px 呈现；页面错误和被拦截业务写入为 0。来源配置与生成的真实写入由上述 API 记录证明，截图仅证明静态呈现。证据包括 `ui/report.json`、`checkpoint.log`、`rollback-check.log` 与 `after-checkpoint-import.json`。
+
+证据位于本 worktree `.deployment/workspace-authoring-deploy/`：`archive.json`、`verify.json`、`switch.json`、`seed-repositories.json`、`retry-repositories.json` 与 `retry-verified.log`。新增能力、线上交互与未测边界统一见[工作区来源与资料维护验收](../docs/runtime-modules.md#工作区来源与资料维护验收)。
+
+### 历史程序与网页：第二步最终发行（t3-step2-73b119c4）
+
 2026-10-23，最终应用提交为 `73b119c40a62fb4374a78947b82e6e9e9aedfa09`，分支 `feat/workspace-deployment-validation`。网关、T3 Worker、网页与客户 ZIP 均使用 `/home/tao/autoops-agent-demo/releases/t3-step2-73b119c4`；业务数据继续使用 `/home/tao/autoops-deployment-validation/data`，未初始化空库或切换独立身份后端。完整发行含导入预算扫描、原生视口与冷刷新阅读恢复、部署提示布局修复；完整基线及客户、权限、技能、发布恢复流程的分批证据继续有效。
 
 | 发行身份与校验 | 实际结果 |
@@ -24,9 +57,9 @@
 
 最终归档由 Python tarfile 生成，不附带 macOS 扩展元数据；开发机完成构建。Linux 目标按完整清单和官方同版原生依赖逐项校验，隔离打包 Worker 与 CLI 启动通过后才切换。服务器准备、校验与切换串行运行，各自使用独立 512MiB/no-swap cgroup；该限额不表示 Docker daemon 或业务构建容器共享同一个总限额。
 
-当前两个验证服务增加 `zzzzzzzzzzzzzz-step2-73b119c4.conf`，停止预算 90 秒，继承 Worker 对锁定 Effect 正常中断的 `SuccessExitStatus=130`，其他错误仍按失败处理。切换前停止接单，复核平台/工作区/部署任务、客户租约与原收据；客户 completed/failed 历史允许保留，unknown/accepted、未应用事件或未追平游标会阻断切换。实际目录、健康、网页与当前数据保留均通过；235 个原工作区/技能文件、96 条消息、31 轮运行、289 条轮次条目、17 个会话绑定、3 份成果，以及 1 个客户设备、1 个目录、1 个传输会话、12 个命令和 3 个游标均保留，原部署配置与记录不变，其他四项服务 PID 不变。
+当批两个验证服务增加 `zzzzzzzzzzzzzz-step2-73b119c4.conf`，停止预算 90 秒，继承 Worker 对锁定 Effect 正常中断的 `SuccessExitStatus=130`，其他错误仍按失败处理。切换前停止接单，复核平台/工作区/部署任务、客户租约与原收据；客户 completed/failed 历史允许保留，unknown/accepted、未应用事件或未追平游标会阻断切换。实际目录、健康、网页与当前数据保留均通过；235 个原工作区/技能文件、96 条消息、31 轮运行、289 条轮次条目、17 个会话绑定、3 份成果，以及 1 个客户设备、1 个目录、1 个传输会话、12 个命令和 3 个游标均保留，原部署配置与记录不变，其他四项服务 PID 不变。
 
-当前恢复点 `/home/tao/autoops-agent-demo/backups/t3-step2-73b119c4-20261023` 包含有效服务配置、全部非空 SQLite 的一致性副本与 quick_check、其余业务文件归档及摘要，以及前后保留性记录和可执行 `rollback-program.sh`。文件归档只排除已单独一致性备份的具体数据库及其日志，不按 `.sqlite` 或 `.tmp` 字符串遗漏普通业务文件；原生 home 与其他业务文件随文件归档保留。
+当批恢复点 `/home/tao/autoops-agent-demo/backups/t3-step2-73b119c4-20261023` 包含有效服务配置、全部非空 SQLite 的一致性副本与 quick_check、其余业务文件归档及摘要，以及前后保留性记录和可执行 `rollback-program.sh`。文件归档只排除已单独一致性备份的具体数据库及其日志，不按 `.sqlite` 或 `.tmp` 字符串遗漏普通业务文件；原生 home 与其他业务文件随文件归档保留。
 
 `/home/tao/autoops-agent-demo/backups/t3-step2-73b119c4-20261023/rollback-program.sh --check` 已通过。程序回滚目标是 `/home/tao/autoops-agent-demo/releases/t3-step2-61e9ed11`；脚本以回滚当下数据为基线，仅撤销本批且摘要未变化的配置，继续使用当前数据，遇外部配置改动保留并报告；不会用发布前数据库覆盖后来新增记录。程序恢复中途失败会尝试恢复原程序与服务。**本轮未实际执行程序降级或整库恢复**；17 项本地临时库/模拟服务检查以及真实部署目标的回退/恢复演练分别记录，不能互相替代。
 
