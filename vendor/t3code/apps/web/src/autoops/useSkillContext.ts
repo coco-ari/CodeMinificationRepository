@@ -4,7 +4,7 @@ import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from
 interface SkillContext {
   cwd: string;
   snapshotId: string;
-  skills: { name: string; versionId: string }[];
+  skills: { name: string; displayName?: string; versionId: string }[];
 }
 /** Remote skills never resolve a platform catalogue, including a draft carrying
  * obsolete platform fields from before the target was changed. */

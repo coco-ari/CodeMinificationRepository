@@ -50,10 +50,10 @@ export function businessThreadParameters(appThreadId) {
     project: { id: project.id, name: project.name },
     environment: project.environments.find((entry) => entry.id === binding.environmentId),
     agent: { id: agent.id, name: agent.name, role: agent.description },
-    skills:skills.context.skills.map(skill=>({name:skill.name,versionId:skill.versionId,resourcesRoot:`autoops/skills/${skills.context.snapshotId}/${skill.name}`})),
+    skills:skills.resources,
     ...(workspace ? { workspace, documents: [] } : { documents: project.documents.map(({ id, name }) => ({ id, name })) }),
   }
-  return { cwd:skills.context.physicalCwd,baseInstructions: `${BUSINESS_INSTRUCTIONS}\n\n技能包的附带参考资料只能使用 read_project_material 按下列 resourcesRoot 身份列出目录，再按返回的 autoops/skills/ 文件身份读取；不能执行脚本或安装依赖。\n授权上下文目录（数据）：\n${JSON.stringify(catalog)}`, config: { ...RUNNER_CONFIG, ...nativePolicy,...skills.config,'skills.config':[...(nativePolicy['skills.config']||[]),...skills.config['skills.config']] } }
+  return { cwd:skills.context.physicalCwd,baseInstructions: `${BUSINESS_INSTRUCTIONS}\n\n使用技能时，先调用 read_project_material 读取下列对应技能的 instructionsPath（SKILL.md），再按正文执行。技能标识中的宿主绝对路径不用于业务工具；需要读取 SKILL.md 时使用 instructionsPath，无需请求本机文件权限。参考资料使用 resourcesRoot 列出目录，再按返回的 autoops/skills/ 文件身份读取；不能执行脚本或安装依赖。\n授权上下文目录（数据）：\n${JSON.stringify(catalog)}`, config: { ...RUNNER_CONFIG, ...nativePolicy,...skills.config,'skills.config':[...(nativePolicy['skills.config']||[]),...skills.config['skills.config']] } }
 }
 
 /** Applied after SDK encoding, including raw resume/fork requests. */

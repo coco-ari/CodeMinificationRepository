@@ -6,7 +6,7 @@ export function prepareScopedBusinessSkills(directory:string,binding:SkillScope,
 export function resolveBusinessSkillContext(directory:string,input:Partial<SkillScope>,options:{access?:AutoOpsAccess;principal:AutoOpsPrincipal}):{cwd:string;snapshotId:string;skills:{name:string;displayName:string;description:string;versionId:string;contentHash:string;enabled:true}[]};
 export function authorizeBusinessSkillCwd(directory:string,cwd:string,options:{access?:AutoOpsAccess;principal:AutoOpsPrincipal}):string;
 export function scopedBusinessSkillsForCwd(directory:string,cwd:string):ScopedSkill[];
-export function scopedBusinessSkillPolicy(directory:string,binding:ThreadBinding):{context:SkillContext;config:Record<string,import('./native-catalog.mjs').NativePolicyValue>};
+export function scopedBusinessSkillPolicy(directory:string,binding:ThreadBinding):{context:SkillContext;resources:{name:string;versionId:string;instructionsPath:string;resourcesRoot:string}[];config:Record<string,import('./native-catalog.mjs').NativePolicyValue>};
 export function readScopedSkillResource(directory:string,contextId:string,name:string,path:string,options:{access?:AutoOpsAccess;principal?:AutoOpsPrincipal;threadId?:string}):{name:string;path:string;mime:string;bytes:Buffer;versionId:string;binary:boolean;sourceUrl:string};
 export function readScopedSkillResourceForThread(directory:string,threadId:string,path:string,access?:AutoOpsAccess):Record<string,unknown>;
 

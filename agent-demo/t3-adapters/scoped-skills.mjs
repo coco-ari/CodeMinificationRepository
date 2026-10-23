@@ -175,7 +175,10 @@ export function scopedBusinessSkillPolicyForCwd(directory,cwd) {
   return policyForContext(assertCurrent(directory,readContext(directory,id),{strict:true}))
 }
 function policyForContext(context) {
-  return {context,config:{
+  return {context,resources:context.skills.map(skill=>{
+    const resourcesRoot=`autoops/skills/${context.snapshotId}/${skill.name}`
+    return {name:skill.name,versionId:skill.versionId,instructionsPath:`${resourcesRoot}/SKILL.md`,resourcesRoot}
+  }),config:{
     'skills.include_instructions':context.skills.length>0,
     'skills.config':context.skills.map(skill=>({path:skill.path,enabled:true})),
     'permissions.agent_demo.filesystem':{':root':'deny',...Object.fromEntries(context.skills.map(skill=>[skill.packageRoot,'read']))},

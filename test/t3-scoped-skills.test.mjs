@@ -173,3 +173,24 @@ test('平台技能投影不覆盖客户本机目录，平台仍只输出授权�
  assert.match(projected[0].workspaceSnapshots[0].cwd,/^autoops\/skill-context\//)
  assert.match(projected[0].workspaceSnapshots[0].skills[0].path,/skill-library\/contexts/)
 })
+
+
+test('技能运行上下文提供可直接读取的正文路径，正文与参考资料固定同一授权版本',t=>{
+ const f=fixture(t),skill=f.importSkill('sample','先读取 SKILL.md，再读取 references/check.md。');f.assign(skill)
+ const policy=scopedBusinessSkillPolicy(f.directory,f.binding)
+ const resource=policy.resources[0]
+ assert.equal(resource.name,'autoops-sample')
+ assert.equal(resource.versionId,policy.context.skills[0].versionId)
+ const instructions=readScopedSkillResourceForThread(f.directory,f.binding.threadId,resource.instructionsPath,f.access)
+ assert.match(instructions.content,/name: autoops-sample/)
+ assert.match(instructions.content,/先读取 SKILL.md/)
+ assert.equal(instructions.versionId,resource.versionId)
+ const listing=readScopedSkillResourceForThread(f.directory,f.binding.threadId,resource.resourcesRoot,f.access)
+ assert.equal(listing.kind,'directory')
+ const reference=readScopedSkillResourceForThread(f.directory,f.binding.threadId,resource.resourcesRoot+'/references/check.md',f.access)
+ assert.equal(reference.content,'固定参考内容')
+ assert.equal(reference.versionId,instructions.versionId)
+ assert.throws(()=>readScopedSkillResourceForThread(f.directory,f.binding.threadId,policy.context.skills[0].path,f.access))
+ assert.equal(policy.config['features.shell_tool'],undefined)
+ assert.equal(policy.config['permissions.agent_demo.filesystem'][':root'],'deny')
+})

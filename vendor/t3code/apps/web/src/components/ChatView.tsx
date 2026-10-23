@@ -7,6 +7,7 @@ import {
 import { isMotionReduced } from "~/motionPreference";
 import { chatSubmissionIntentAllowed, unavailableChatSlashCommand } from "./chat/autoOpsChatPolicy";
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
+import { useAutoOpsSkillContext } from "~/autoops/useSkillContext";
 import { inheritAutoOpsThreadScope, readAutoOpsHost } from "~/autoops/hostConfig";
 import { autoOpsFeature, isAutoOpsHosted, isAutoOpsLite } from "~/autoops/capabilities";
 import { useThreadRelationshipsAvailable } from "./chat/ThreadRelationshipsControl";
@@ -5875,11 +5876,18 @@ export default function ChatView(props: ChatViewProps) {
     isDesktop: isElectron,
   });
   const getShortcutContextStable = useStableCallback(getShortcutContext);
-  const timelineSkills = activeProviderStatus
-    ? customerScope
-      ? activeProviderStatus.skills
-      : resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
-    : EMPTY_PROVIDER_SKILLS;
+  const autoOpsSkillContext = useAutoOpsSkillContext(
+    activeThreadId,
+    activeThread?.projectId,
+    businessScope,
+  );
+  const timelineSkills = isAutoOpsHosted() && !customerScope
+    ? (autoOpsSkillContext?.context?.skills ?? EMPTY_PROVIDER_SKILLS)
+    : activeProviderStatus
+      ? customerScope
+        ? activeProviderStatus.skills
+        : resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
+      : EMPTY_PROVIDER_SKILLS;
   const threadFindControlsRef = useRef<ThreadFindControls | null>(null);
   const [isThreadFindActive, setIsThreadFindActive] = useState(false);
   const openThreadFind = () => threadFindControlsRef.current?.open();
