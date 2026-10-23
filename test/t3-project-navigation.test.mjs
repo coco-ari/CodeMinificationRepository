@@ -263,7 +263,7 @@ test('我的电脑是独立个人模块，入口和直链共用开关，不依�
   const definition = AUTOOPS_AREAS.find(area => area.id === 'devices')
   assert.equal(definition.scope, 'global')
   assert.equal(definition.common, false)
-  assert.equal(definition.sidebar, false)
+  assert.equal(definition.sidebar, true)
 })
 
 test('电脑模块切项目只更新返回上下文，不保留资源命令或改绑已有对话', () => {

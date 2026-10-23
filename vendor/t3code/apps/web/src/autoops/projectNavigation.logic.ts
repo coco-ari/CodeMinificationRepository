@@ -1,10 +1,10 @@
 /** One module definition feeds navigation, route identity and the shared shell. */
 export const AUTOOPS_AREAS = [
   { id: 'chat', label: '问答', icon: 'message', path: '/', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'workspaces', label: '工作区', icon: 'folder', path: '/workspaces', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: false },
-  { id: 'deployments', label: '部署发布', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'internal-manager', manage: 'server', sidebar: false },
-  { id: 'devices', label: '我的电脑', icon: 'laptop', path: '/devices', scope: 'global', common: false, enabled: 'customer-agents', read: 'owner', manage: 'owner', sidebar: false },
-  { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: false },
+  { id: 'workspaces', label: '工作区', icon: 'folder', path: '/workspaces', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
+  { id: 'deployments', label: '部署发布', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'internal-manager', manage: 'server', sidebar: true },
+  { id: 'devices', label: '我的电脑', icon: 'laptop', path: '/devices', scope: 'global', common: false, enabled: 'customer-agents', read: 'owner', manage: 'owner', sidebar: true },
+  { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
 ] as const
 
 export type AutoOpsArea = typeof AUTOOPS_AREAS[number]['id']

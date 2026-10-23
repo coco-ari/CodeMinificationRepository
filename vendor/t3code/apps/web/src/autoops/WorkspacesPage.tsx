@@ -11,10 +11,16 @@ import {
   RefreshCwIcon,
   ShieldCheckIcon,
 } from 'lucide-react'
+import {
+  ModuleHeader,
+  ModuleSidebar,
+  ModuleSidebarItem,
+  ModuleSidebarEmpty,
+} from './ModuleWorkspace'
+import { ScrollArea } from '~/components/ui/scroll-area'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
 import { Badge } from '~/components/ui/badge'
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '~/components/ui/menu'
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert'
@@ -98,7 +104,14 @@ export function AutoOpsWorkspacesPage() {
       aria-label="项目工作区"
       data-testid="workspace-page"
     >
-      <h1 className="sr-only">工作区</h1>
+      {!project ? (
+        <>
+          <ModuleHeader title="工作区" />
+          <ModuleSidebar label="工作区版本">
+            <ModuleSidebarEmpty>请先选择有权访问的项目。</ModuleSidebarEmpty>
+          </ModuleSidebar>
+        </>
+      ) : null}
       {project ? (
         <ProjectWorkspaces
           key={`${projectId}:${versionId === undefined ? 'remembered' : versionId === null ? 'invalid' : versionId}`}
@@ -130,6 +143,7 @@ function ProjectWorkspaces({
   )?.membership
   const manager = membership?.workspaceAccess === 'internal' && membership.role === 'manager'
   const externalOnly = membership?.workspaceAccess === 'external'
+  const [versionQuery, setVersionQuery] = useState('')
   const [selectedTab, setTab] = useState<Tab>(() =>
     externalOnly || readSelection(`${projectId}:tab`) === 'external' ? 'external' : 'internal',
   )
@@ -255,7 +269,11 @@ function ProjectWorkspaces({
     setInvalidVersion(false)
     if (tab === 'internal') setSelectedInternal(id)
     else setSelectedExternal(id)
-    void navigate({ to: '/workspaces', search: { projectId: ProjectId.make(projectId), versionId: id }, replace: true })
+    void navigate({
+      to: '/workspaces',
+      search: { projectId: ProjectId.make(projectId), versionId: id },
+      replace: true,
+    })
   }
   const mutate = async (action: () => Promise<WorkspaceTask | WorkspaceVersion>) => {
     setBusy(true)
@@ -274,21 +292,19 @@ function ProjectWorkspaces({
   }
   const sourceLink =
     current && manager && tab === 'internal' && current.status === 'published' ? (
-      <Link to="/deployments" search={{ projectId: ProjectId.make(projectId), sourceVersionId: current.id }}>
+      <Link
+        to="/deployments"
+        search={{ projectId: ProjectId.make(projectId), sourceVersionId: current.id }}
+      >
         从此版本部署
       </Link>
     ) : null
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div
-        className="flex shrink-0 flex-col border-y border-border/60"
-        aria-label="工作区工具栏"
-        onClickCapture={(event) => {
-          const button = event.target instanceof Element ? event.target.closest('button') : null
-          if (button) dialogReturnFocus.current = button
-        }}
-      >
-        <div className="flex min-w-0 items-center gap-2 px-3 py-1.5">
+      <ModuleSidebar
+        label="工作区版本"
+        search={{ value: versionQuery, onChange: setVersionQuery, label: '搜索工作区版本' }}
+        header={
           <ToggleGroup
             aria-label="工作区分类"
             variant="segmented"
@@ -300,7 +316,11 @@ function ProjectWorkspaces({
                 setTab(next)
                 setInvalidVersion(false)
                 if (requestedVersionId !== undefined)
-                  void navigate({ to: '/workspaces', search: { projectId: ProjectId.make(projectId) }, replace: true })
+                  void navigate({
+                    to: '/workspaces',
+                    search: { projectId: ProjectId.make(projectId) },
+                    replace: true,
+                  })
               }
             }}
           >
@@ -310,24 +330,63 @@ function ProjectWorkspaces({
               </Toggle>
             ))}
           </ToggleGroup>
-          <span className="flex-1" />
-          <FileSurfaceAction
-            label="刷新工作区"
-            disabled={busy}
-            onPress={() => setRefresh((value) => value + 1)}
-          >
-            <RefreshCwIcon />
-          </FileSurfaceAction>
-        </div>
-        <div className="flex min-w-0 items-center gap-2 px-3 pb-2">
-          <div className="min-w-0 flex-1 sm:max-w-72">
-            <VersionPicker
-              versions={versions}
-              selected={current}
-              onChange={chooseVersion}
-              label={tab === 'internal' ? '内部版本' : '外部版本'}
-            />
+        }
+      >
+        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+          <div className="px-[var(--sidebar-content-inset)]">
+            {versions
+              .filter((version) =>
+                version.name.toLocaleLowerCase().includes(versionQuery.toLocaleLowerCase()),
+              )
+              .map((version) => (
+                <ModuleSidebarItem
+                  key={version.id}
+                  label={version.name}
+                  icon={tab === 'internal' ? GitBranchIcon : ShieldCheckIcon}
+                  description={`${version.fileCount} 个文件 · ${version.status === 'published' ? '可用' : version.status === 'pending_review' ? '待复核' : '失败'}`}
+                  selected={version.id === current?.id}
+                  onClick={() => chooseVersion(version.id)}
+                />
+              ))}
+            {!versions.length ? (
+              <ModuleSidebarEmpty>
+                {overview ? '当前区域还没有工作区版本。' : '正在读取工作区…'}
+              </ModuleSidebarEmpty>
+            ) : null}
+            {versions.length > 0 &&
+            !versions.some((version) =>
+              version.name.toLocaleLowerCase().includes(versionQuery.toLocaleLowerCase()),
+            ) ? (
+              <ModuleSidebarEmpty>没有匹配的版本。</ModuleSidebarEmpty>
+            ) : null}
           </div>
+        </ScrollArea>
+      </ModuleSidebar>
+      <div
+        className="shrink-0"
+        aria-label="工作区工具栏"
+        onClickCapture={(event) => {
+          const button = event.target instanceof Element ? event.target.closest('button') : null
+          if (button) dialogReturnFocus.current = button
+        }}
+      >
+        <ModuleHeader
+          title="工作区"
+          detail={current?.name}
+          actions={
+            <FileSurfaceAction
+              label="刷新工作区"
+              disabled={busy}
+              onPress={() => setRefresh((value) => value + 1)}
+            >
+              <RefreshCwIcon />
+            </FileSurfaceAction>
+          }
+        ></ModuleHeader>
+        <div className="flex min-h-10 min-w-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
+          <span className="truncate text-xs text-muted-foreground">
+            {tab === 'internal' ? '内部工作区' : '外部工作区'}
+          </span>
           {current ? (
             <Badge
               size="sm"
@@ -490,7 +549,11 @@ function ProjectWorkspaces({
       {overview?.tasks.some((task) => task.type === 'packages' && taskActive(task)) ? (
         <div className="shrink-0 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
           源码包正在生成，可在{' '}
-          <Link className="underline underline-offset-2" to="/deployments" search={{ projectId: ProjectId.make(projectId) }}>
+          <Link
+            className="underline underline-offset-2"
+            to="/deployments"
+            search={{ projectId: ProjectId.make(projectId) }}
+          >
             部署
           </Link>{' '}
           中查看任务。
@@ -593,47 +656,6 @@ function WorkspaceEmpty({ title, description }: { title: string; description: st
     </Empty>
   )
 }
-function VersionPicker({
-  versions,
-  selected,
-  onChange,
-  label,
-}: {
-  versions: WorkspaceVersion[]
-  selected: WorkspaceVersion | undefined
-  onChange: (id: string) => void
-  label: string
-}) {
-  return (
-    <Select
-      value={selected?.id ?? ''}
-      disabled={!versions.length}
-      onValueChange={(value) => {
-        if (typeof value === 'string') onChange(value)
-      }}
-    >
-      <SelectTrigger size="sm" aria-label={label}>
-        <SelectValue>
-          <span className="truncate">{selected?.name ?? '暂无可用版本'}</span>
-        </SelectValue>
-      </SelectTrigger>
-      <SelectPopup>
-        {versions.map((version) => (
-          <SelectItem value={version.id} key={version.id}>
-            {version.name}
-            {version.status === 'pending_review'
-              ? ' · 待复核'
-              : version.status === 'failed'
-                ? ' · 失败'
-                : ''}
-            {version.isExample ? ' · 示例项目' : ''}
-          </SelectItem>
-        ))}
-      </SelectPopup>
-    </Select>
-  )
-}
-
 type FileView = { selected: string | null; trail?: string }
 function fileView(projectId: string, versionId: string): FileView {
   try {

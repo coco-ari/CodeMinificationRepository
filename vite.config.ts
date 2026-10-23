@@ -1,13 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { fileURLToPath, URL } from 'node:url'
+import { fileURLToPath, pathToFileURL, URL } from 'node:url'
 import { createRequire } from 'node:module'
 import { thirdPartyLicensesPlugin } from './vendor/t3code/scripts/lib/third-party-licenses'
 
 const t3WebRoot = fileURLToPath(new URL('./vendor/t3code/apps/web', import.meta.url))
 const t3Require = createRequire(new URL('./vendor/t3code/apps/web/package.json', import.meta.url))
-const { tanstackRouter } = await import(t3Require.resolve('@tanstack/router-plugin/vite'))
+const { tanstackRouter } = await import(pathToFileURL(t3Require.resolve('@tanstack/router-plugin/vite')).href)
 const t3RuntimeModule = 'virtual:autoops-t3-runtime'
 const t3HostModule = 'virtual:autoops-t3-host'
 

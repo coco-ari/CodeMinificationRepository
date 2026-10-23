@@ -1,3 +1,9 @@
+import {
+  ModuleHeader,
+  ModuleSidebar,
+  ModuleSidebarItem,
+  ModuleSidebarEmpty,
+} from './ModuleWorkspace'
 import { Link } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
 import {
@@ -11,7 +17,6 @@ import {
 } from 'react'
 import {
   ArrowDownIcon,
-  ArrowLeftIcon,
   FileTextIcon,
   HistoryIcon,
   PlusIcon,
@@ -36,16 +41,12 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from '~/components/ui/menu'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Spinner } from '~/components/ui/spinner'
 import { Textarea } from '~/components/ui/textarea'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
-import {
-  FILE_SURFACE_SUBHEADER_CLASS,
-  FileSurfaceAction,
-} from '~/components/files/fileSurfaceChrome'
+import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
 import { randomUUID } from '~/lib/utils'
 import { readAutoOpsHost } from './hostConfig'
 import type { WorkspaceRelease } from './workspaces'
@@ -130,10 +131,17 @@ function packageDirectory(release: WorkspaceRelease) {
 export function DeploymentsPanel({
   projectId,
   packages,
+  navigation,
+  packageActions,
+  onRefreshPackages,
 }: {
   projectId: string
   packages: WorkspaceRelease[]
+  navigation: ReactNode
+  packageActions: ReactNode
+  onRefreshPackages: () => void
 }) {
+  const [query, setQuery] = useState('')
   const [selection, setSelection] = useState<Selection>(() => initialSelection(projectId))
   const [pending, setPending] = useState<PendingSubmission | null>(() =>
     readStored<PendingSubmission>(storageKey(projectId, 'pending')),
@@ -324,40 +332,103 @@ export function DeploymentsPanel({
   const finalFocus = () => returnFocus.current
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="服务发布">
-      <div
-        className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5"
-        onClickCapture={captureTrigger}
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      aria-label="服务发布"
+      onClickCapture={captureTrigger}
+    >
+      <ModuleSidebar
+        label="部署服务"
+        search={{ value: query, onChange: setQuery, label: '搜索服务' }}
+        actions={
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="添加前端服务"
+            disabled={!overview?.enabled || busy || !!pending || !overview.servers.length}
+            onClick={() => openDialog('target')}
+          >
+            <PlusIcon />
+          </Button>
+        }
+        header={
+          <>
+            {navigation}
+            <div className="pt-2">
+              <Choice
+                label="部署环境"
+                value={environmentId}
+                options={environments.length ? environments : (overview?.environments ?? [])}
+                onChange={chooseEnvironment}
+                disabled={busy || !!pending}
+                placeholder="读取环境…"
+              />
+            </div>
+          </>
+        }
       >
-        <div className="min-w-0 flex-1 sm:max-w-52">
-          <Choice
-            label="部署环境"
-            value={environmentId}
-            options={environments.length ? environments : (overview?.environments ?? [])}
-            onChange={chooseEnvironment}
-            disabled={busy || !!pending}
-            placeholder="读取环境…"
-          />
-        </div>
-        <span className="flex-1" />
-        <FileSurfaceAction
-          label="刷新部署状态"
-          disabled={busy}
-          onPress={() => setRefresh((value) => value + 1)}
-        >
-          <RefreshCwIcon />
-        </FileSurfaceAction>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!overview?.enabled || busy || !!pending || !overview.servers.length}
-          onClick={() => openDialog('target')}
-        >
-          <PlusIcon />
-          <span className="hidden sm:inline">添加前端服务</span>
-          <span className="sm:hidden">添加服务</span>
-        </Button>
-      </div>
+        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+          <div className="px-[var(--sidebar-content-inset)]">
+            {targets
+              .filter((item) => item.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
+              .map((item) => {
+                const itemServer = overview?.servers.find((entry) => entry.id === item.serverId)
+                const task = overview?.tasks.find((entry) => entry.targetId === item.id)
+                return (
+                  <ModuleSidebarItem
+                    key={item.id}
+                    label={item.name}
+                    icon={ServerIcon}
+                    selected={item.id === target?.id}
+                    description={`${itemServer?.name ?? '服务器不可用'} · ${!itemServer?.online ? '离线' : task ? deploymentStatusLabel(task.status) : item.currentRelease ? '已发布' : '未发布'}`}
+                    onClick={() => {
+                      setSelection({ environmentId, targetId: item.id, taskId: '' })
+                      setShowDetail(true)
+                    }}
+                  />
+                )
+              })}
+            {!targets.length ? (
+              <ModuleSidebarEmpty>
+                {overview ? '当前环境还没有服务。' : '正在读取服务…'}
+              </ModuleSidebarEmpty>
+            ) : null}
+            {targets.length > 0 &&
+            !targets.some((item) =>
+              item.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+            ) ? (
+              <ModuleSidebarEmpty>没有匹配的服务。</ModuleSidebarEmpty>
+            ) : null}
+          </div>
+        </ScrollArea>
+      </ModuleSidebar>
+      <ModuleHeader
+        title="部署发布"
+        detail={target?.name}
+        actions={
+          <>
+            <FileSurfaceAction
+              label="刷新部署状态"
+              disabled={busy}
+              onPress={() => {
+                setRefresh((value) => value + 1)
+                onRefreshPackages()
+              }}
+            >
+              <RefreshCwIcon />
+            </FileSurfaceAction>
+            {packageActions}
+            <Button
+              size="sm"
+              disabled={releaseDisabled || !frontendPackages.length || !target}
+              onClick={() => openDialog('deploy')}
+            >
+              <RocketIcon />
+              发布
+            </Button>
+          </>
+        }
+      />
       {error || loadError || pending ? (
         <div className="shrink-0 border-b border-border/60 px-3 py-2">
           <Alert variant={pending ? 'warning' : 'error'}>
@@ -415,106 +486,11 @@ export function DeploymentsPanel({
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <section
-            className={`${showDetail && target ? 'hidden md:flex' : 'flex'} min-h-0 min-w-0 flex-1 flex-col md:w-72 md:flex-none md:border-r md:border-border/60`}
-            aria-label="部署服务列表"
-          >
-            <div className={FILE_SURFACE_SUBHEADER_CLASS}>
-              <ServerIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">前端服务</span>
-              <span className="text-xs text-muted-foreground">{targets.length}</span>
-            </div>
-            <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
-              {targets.length ? (
-                <div className="flex flex-col divide-y divide-border/60">
-                  {targets.map((item) => {
-                    const itemServer = overview.servers.find((entry) => entry.id === item.serverId)
-                    const task = overview.tasks.find((entry) => entry.targetId === item.id)
-                    return (
-                      <Button
-                        key={item.id}
-                        size="sm-multiline"
-                        variant="ghost"
-                        className="min-h-14 min-w-0 justify-start rounded-none px-3 py-2.5 text-left"
-                        aria-pressed={item.id === target?.id}
-                        data-pressed={item.id === target?.id || undefined}
-                        onClick={() => {
-                          setSelection({ environmentId, targetId: item.id, taskId: '' })
-                          setShowDetail(true)
-                        }}
-                      >
-                        <ServerIcon className="shrink-0 self-start" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm">{item.name}</span>
-                          <span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">
-                            {itemServer?.name ?? '服务器不可用'} ·{' '}
-                            {itemServer?.online
-                              ? task
-                                ? deploymentStatusLabel(task.status)
-                                : item.currentRelease
-                                  ? '已发布'
-                                  : '未发布'
-                              : '离线'}
-                          </span>
-                        </span>
-                        {task && !deploymentTaskFinished(task) ? <Spinner size="sm" /> : null}
-                      </Button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <DeploymentEmpty
-                  title="还没有前端服务"
-                  description="添加服务，配置构建目录和站点检查地址。"
-                />
-              )}
-            </ScrollArea>
-          </section>
-          <section
-            className={`${showDetail ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 flex-col overflow-hidden`}
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             aria-label="部署详情"
           >
             {target ? (
               <>
-                <div className={FILE_SURFACE_SUBHEADER_CLASS} onClickCapture={captureTrigger}>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    className="md:hidden"
-                    aria-label="返回服务列表"
-                    onClick={() => setShowDetail(false)}
-                  >
-                    <ArrowLeftIcon />
-                  </Button>
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium" title={target.name}>
-                    {target.name}
-                  </span>
-                  <Menu>
-                    <MenuTrigger
-                      render={<Button size="icon-sm" variant="ghost" />}
-                      aria-label="服务操作"
-                    >
-                      <SettingsIcon />
-                    </MenuTrigger>
-                    <MenuPopup align="end">
-                      <MenuItem onClick={() => setDetailTab('config')}>
-                        <SettingsIcon />
-                        查看部署配置
-                      </MenuItem>
-                      <MenuItem onClick={() => setDetailTab('history')}>
-                        <HistoryIcon />
-                        发布记录
-                      </MenuItem>
-                    </MenuPopup>
-                  </Menu>
-                  <Button
-                    size="sm"
-                    disabled={releaseDisabled || !frontendPackages.length}
-                    onClick={() => openDialog('deploy')}
-                  >
-                    <RocketIcon />
-                    发布
-                  </Button>
-                </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
                   <span className="min-w-0 truncate">
                     {server?.name ?? '服务器不可用'} · {online ? '在线' : '离线'}
@@ -971,7 +947,10 @@ function DeploymentLogs({
               render={
                 <Link
                   to="/workspaces"
-                  search={{ projectId: ProjectId.make(projectId), versionId: task.sourceIdentity.sourceVersionId }}
+                  search={{
+                    projectId: ProjectId.make(projectId),
+                    versionId: task.sourceIdentity.sourceVersionId,
+                  }}
                 />
               }
             >
@@ -1559,7 +1538,10 @@ function ReleaseDialog({
                       render={
                         <Link
                           to="/workspaces"
-                          search={{ projectId: ProjectId.make(projectId), versionId: selectedPackage.sourceVersionId }}
+                          search={{
+                            projectId: ProjectId.make(projectId),
+                            versionId: selectedPackage.sourceVersionId,
+                          }}
                         />
                       }
                     >

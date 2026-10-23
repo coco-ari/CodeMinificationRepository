@@ -1,3 +1,9 @@
+import {
+  ModuleHeader,
+  ModuleSidebar,
+  ModuleSidebarItem,
+  ModuleSidebarEmpty,
+} from "./ModuleWorkspace";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CopyIcon,
@@ -38,7 +44,14 @@ export function AutoOpsCustomerDevicesPage() {
   const host = readAutoOpsHost();
   return (
     <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-customer-devices>
-      <h1 className="sr-only">我的电脑</h1>
+      {!autoOpsAreaAvailable("devices", host) ? (
+        <>
+          <ModuleHeader title="我的电脑" />
+          <ModuleSidebar label="个人电脑">
+            <ModuleSidebarEmpty>客户设备接入未启用。</ModuleSidebarEmpty>
+          </ModuleSidebar>
+        </>
+      ) : null}
       {autoOpsAreaAvailable("devices", host) && host ? (
         <CustomerDevicesContent key={host.principal.id} />
       ) : (
@@ -57,6 +70,7 @@ export function AutoOpsCustomerDevicesPage() {
 
 function CustomerDevicesContent() {
   const host = readAutoOpsHost()!;
+  const [query, setQuery] = useState("");
   const [devices, setDevices] = useState<CustomerDevice[]>([]);
   const [workspaces, setWorkspaces] = useState<CustomerWorkspace[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,36 +153,70 @@ function CustomerDevicesContent() {
   };
   return (
     <>
-      <div
-        className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2"
-        aria-label="电脑管理工具栏"
+      <ModuleHeader
+        title="我的电脑"
+        actions={
+          <>
+            {" "}
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void reload()}>
+              <RefreshCwIcon className="size-3.5" />
+              刷新
+            </Button>
+            <Button
+              ref={pairTrigger}
+              variant="outline"
+              size="sm"
+              aria-disabled={busy}
+              onClick={() => {
+                if (busy) return;
+                void action(async () => {
+                  const issued = await customerRequest<{ pairingCode: string; expiresAt: string }>(
+                    "pairings",
+                    {},
+                  );
+                  setPairing({ ...issued, previousDeviceIds: devices.map((device) => device.id) });
+                });
+              }}
+            >
+              连接电脑
+            </Button>
+          </>
+        }
+      />
+      <ModuleSidebar
+        label="个人电脑"
+        search={{ value: query, onChange: setQuery, label: "搜索电脑" }}
       >
-        <p className="min-w-0 text-xs text-muted-foreground">个人账号 · 所有项目的已登记电脑</p>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void reload()}>
-            <RefreshCwIcon className="size-3.5" />
-            刷新
-          </Button>
-          <Button
-            ref={pairTrigger}
-            variant="outline"
-            size="sm"
-            aria-disabled={busy}
-            onClick={() => {
-              if (busy) return;
-              void action(async () => {
-                const issued = await customerRequest<{ pairingCode: string; expiresAt: string }>(
-                  "pairings",
-                  {},
-                );
-                setPairing({ ...issued, previousDeviceIds: devices.map((device) => device.id) });
-              });
-            }}
-          >
-            连接电脑
-          </Button>
-        </div>
-      </div>
+        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+          <div className="px-[var(--sidebar-content-inset)]">
+            {devices
+              .filter((device) =>
+                device.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+              )
+              .map((device) => (
+                <ModuleSidebarItem
+                  key={device.id}
+                  label={device.label}
+                  icon={LaptopIcon}
+                  closeOnSelect={false}
+                  description={device.online ? "在线" : "离线"}
+                  onClick={(event) => {
+                    detailsTrigger.current = event.currentTarget;
+                    setDetails(device);
+                  }}
+                />
+              ))}
+            {!devices.length ? (
+              <ModuleSidebarEmpty>
+                {loading ? "正在读取电脑…" : "还没有连接电脑。"}
+              </ModuleSidebarEmpty>
+            ) : null}
+          </div>
+        </ScrollArea>
+        <p className="px-4 py-3 text-xs text-sidebar-muted-foreground">
+          个人账号 · 所有项目的已登记电脑
+        </p>
+      </ModuleSidebar>
       {error ? (
         <p
           className="shrink-0 border-b border-border/60 px-3 py-2 text-sm text-destructive"

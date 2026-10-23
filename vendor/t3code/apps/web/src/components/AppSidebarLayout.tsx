@@ -10,7 +10,11 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
-import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
+import {
+  getLocalStorageItem,
+  removeLocalStorageItem,
+  useLocalStorage,
+} from "../hooks/useLocalStorage";
 import {
   isRichTextBoldShortcut,
   resolveShortcutCommand,
@@ -34,7 +38,11 @@ import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import {
+  SidebarBrandWidthProbe,
+  SidebarChromeHeader,
+  SidebarChromeFooter,
+} from "./sidebar/SidebarChrome";
 import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
@@ -59,6 +67,8 @@ import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { isAutoOpsHosted } from "../autoops/capabilities";
 import { AutoOpsProjectRouteSync, ProjectAreaTopbar } from "../autoops/ProjectAreaNavigation";
 import { AUTOOPS_AREAS, autoOpsAreaFromPath } from "../autoops/projectNavigation.logic";
+
+import { ModuleSidebarProvider, ModuleSidebarOutlet } from "../autoops/ModuleWorkspace";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
 const AUTOOPS_TOPBAR_HEIGHT = 52;
@@ -259,14 +269,6 @@ function ProjectProjectionRetention() {
   return null;
 }
 
-function SidebarRouteAvailability({ available }: { available: boolean }) {
-  const { setOpenMobile } = useSidebar();
-  useEffect(() => {
-    if (!available) setOpenMobile(false);
-  }, [available, setOpenMobile]);
-  return null;
-}
-
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -278,8 +280,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const hosted = isAutoOpsHosted();
-  const showSidebar = !hosted || isOnSettings ||
-    AUTOOPS_AREAS.find((area) => area.id === autoOpsAreaFromPath(pathname))?.sidebar === true;
+  const area = AUTOOPS_AREAS.find((entry) => entry.id === autoOpsAreaFromPath(pathname));
+  const moduleSidebar = hosted && !isOnSettings && area?.id !== "chat";
+  const [sidebarOpen, setSidebarOpen] = useLocalStorage(
+    "autoops.workspace-sidebar-open",
+    true,
+    Schema.Boolean,
+  );
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
@@ -332,62 +339,89 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     };
   }, [navigate, pathname]);
 
-  const content = <>
-    {showSidebar ? (
-        <Sidebar
-          side="left"
-          collapsible="offcanvas"
-          data-app-sidebar=""
-          role="navigation"
-          aria-label={isOnSettings ? "设置" : "对话"}
-          resizable={{
-            maxWidth: sidebarMaximumWidth,
-            minWidth: sidebarMinimumWidth,
-            shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
-              nextWidth <= currentWidth ||
-              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
-            storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-            onResize: setSidebarWidth,
-          }}
-          style={windowControlsInsetStyle}
-        >
-          {isOnSettings ? (
-            <>
-              {hosted ? <div className="shrink-0 md:hidden"><SidebarChromeHeader isElectron={isElectron} /></div> : <SidebarChromeHeader isElectron={isElectron} />}
-              <SettingsSidebarNav pathname={pathname} />
-            </>
-          ) : legacySidebarEnabled && !hosted ? (
-            <LegacyThreadSidebar />
-          ) : (
-            <ThreadSidebar />
-          )}
-          <SidebarRail onDoubleClick={resetSidebarWidth} />
-        </Sidebar>
-    ) : null}
-        {children}
-        {showSidebar ? <SidebarControl renderControl={!hosted} /> : null}
-        <NavigationHistoryShortcuts />
-        <MainAppLocationTracker />
-  </>;
+  const content = (
+    <>
+      <Sidebar
+        side="left"
+        collapsible="offcanvas"
+        data-app-sidebar=""
+        role="navigation"
+        aria-label={isOnSettings ? "设置" : moduleSidebar ? area?.label : "对话"}
+        resizable={{
+          maxWidth: sidebarMaximumWidth,
+          minWidth: sidebarMinimumWidth,
+          shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
+            nextWidth <= currentWidth ||
+            wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+          storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
+          onResize: setSidebarWidth,
+        }}
+        style={windowControlsInsetStyle}
+      >
+        {isOnSettings ? (
+          <>
+            {hosted ? (
+              <div className="shrink-0 md:hidden">
+                <SidebarChromeHeader isElectron={isElectron} />
+              </div>
+            ) : (
+              <SidebarChromeHeader isElectron={isElectron} />
+            )}
+            <SettingsSidebarNav pathname={pathname} />
+          </>
+        ) : moduleSidebar ? (
+          <>
+            <ModuleSidebarOutlet />
+            <SidebarChromeFooter />
+          </>
+        ) : legacySidebarEnabled && !hosted ? (
+          <LegacyThreadSidebar />
+        ) : (
+          <ThreadSidebar />
+        )}
+        <SidebarRail onDoubleClick={resetSidebarWidth} />
+      </Sidebar>
+      {children}
+      <SidebarControl renderControl={!hosted} />
+      <NavigationHistoryShortcuts />
+      <MainAppLocationTracker />
+    </>
+  );
 
   return (
     <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
-      <SidebarProvider
-        className={cn("h-dvh! min-h-0!", hosted && "flex-col")}
-        data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
-        defaultOpen
-        topOffset={hosted ? AUTOOPS_TOPBAR_HEIGHT : 0}
-        style={sidebarProviderStyle}
-      >
-        <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
-        <ProjectProjectionRetention />
-        <AutoOpsProjectRouteSync />
-        {hosted ? <SidebarRouteAvailability available={showSidebar} /> : null}
-        {hosted ? <>
-          <ProjectAreaTopbar />
-          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-autoops-body="" style={{ "--workspace-fixed-controls-top": `calc(var(--workspace-controls-top) + ${AUTOOPS_TOPBAR_HEIGHT}px)` } as CSSProperties}>{content}</div>
-        </> : content}
-      </SidebarProvider>
+      <ModuleSidebarProvider>
+        <SidebarProvider
+          className={cn("h-dvh! min-h-0!", hosted && "flex-col")}
+          data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
+          defaultOpen
+          {...(hosted ? { open: sidebarOpen, onOpenChange: setSidebarOpen } : {})}
+          topOffset={hosted ? AUTOOPS_TOPBAR_HEIGHT : 0}
+          style={sidebarProviderStyle}
+        >
+          <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
+          <ProjectProjectionRetention />
+          <AutoOpsProjectRouteSync />
+          {hosted ? (
+            <>
+              <ProjectAreaTopbar />
+              <div
+                className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
+                data-autoops-body=""
+                style={
+                  {
+                    "--workspace-fixed-controls-top": `calc(var(--workspace-controls-top) + ${AUTOOPS_TOPBAR_HEIGHT}px)`,
+                  } as CSSProperties
+                }
+              >
+                {content}
+              </div>
+            </>
+          ) : (
+            content
+          )}
+        </SidebarProvider>
+      </ModuleSidebarProvider>
     </PanelAnimationSuppressionProvider>
   );
 }

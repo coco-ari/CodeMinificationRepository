@@ -1,3 +1,9 @@
+import {
+  ModuleHeader,
+  ModuleSidebar,
+  ModuleSidebarItem,
+  ModuleSidebarEmpty,
+} from './ModuleWorkspace'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeftIcon,
@@ -5,7 +11,6 @@ import {
   MoreHorizontalIcon,
   PlusIcon,
   RefreshCwIcon,
-  SearchIcon,
   UploadIcon,
 } from 'lucide-react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
@@ -17,10 +22,8 @@ import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
 import { Badge } from '~/components/ui/badge'
-import { InputGroup, InputGroupAddon, InputGroupInput } from '~/components/ui/input-group'
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from '~/components/ui/popover'
 import { toastManager } from '~/components/ui/toast'
-import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '~/components/ui/menu'
 import { ScrollArea } from '~/components/ui/scroll-area'
@@ -110,6 +113,10 @@ export function AutoOpsSkillLibraryPage() {
         className="h-dvh min-h-0 min-w-0 overflow-hidden"
         data-testid="skill-project-unavailable"
       >
+        <ModuleHeader title="技能库" />
+        <ModuleSidebar label="技能管理">
+          <ModuleSidebarEmpty>请先选择有权访问的项目。</ModuleSidebarEmpty>
+        </ModuleSidebar>
         <SkillEmpty title="项目不可用或无权访问" description="请通过顶部导航选择有权访问的项目。" />
       </SidebarInset>
     )
@@ -446,7 +453,60 @@ function SkillLibraryContent({
       data-skill-library
       data-skill-library-revision={catalog?.revision}
     >
-      <h1 className="sr-only">技能库</h1>
+      <ModuleHeader
+        title="技能库"
+        detail={showDetail && selected ? selected.name : scopeNames[scope]}
+        actions={
+          <>
+            {!showDetail && canManage ? (
+              <Button
+                ref={libraryActionRef}
+                size="sm"
+                variant="outline"
+                disabled={busy || loading || (scope !== 'library' && !target)}
+                onClick={() =>
+                  openDialog(scope === 'library' ? { type: 'import' } : { type: 'assign' })
+                }
+              >
+                {scope === 'library' ? <UploadIcon /> : <PlusIcon />}
+                {scope === 'library' ? '导入技能' : '添加技能'}
+              </Button>
+            ) : null}
+            <FileSurfaceAction
+              label="刷新技能库"
+              disabled={busy || loading}
+              onPress={refreshLibrary}
+            >
+              <RefreshCwIcon className={loading ? 'animate-spin' : undefined} />
+            </FileSurfaceAction>
+          </>
+        }
+      />
+      <ModuleSidebar
+        label="技能管理"
+        search={{
+          value: query,
+          label: '搜索技能',
+          onChange: (value) => {
+            setQuery(value)
+            setDetailOpen(false)
+          },
+        }}
+      >
+        <div className="space-y-1 px-[var(--sidebar-content-inset)]">
+          {Object.entries(scopeNames).map(([value, name]) => (
+            <ModuleSidebarItem
+              key={value}
+              label={name}
+              selected={scope === value}
+              onClick={() => selectView(value as Scope)}
+            />
+          ))}
+          <p className="px-2 py-3 text-xs leading-relaxed text-sidebar-muted-foreground">
+            中央库和助手分配为全局范围；项目技能使用顶部当前项目。
+          </p>
+        </div>
+      </ModuleSidebar>
       {error && !dialog ? (
         <div className="shrink-0 border-b border-border/60 p-3">
           <Alert variant="error">
@@ -488,23 +548,6 @@ function SkillLibraryContent({
                   className="flex min-w-0 flex-wrap items-center gap-2"
                   aria-label="技能库工具栏"
                 >
-                  <ToggleGroup
-                    value={[scope]}
-                    variant="segmented"
-                    aria-label="技能管理范围"
-                    onValueChange={(values) => {
-                      const next = values[0]
-                      if (next === 'library' || next === 'agent' || next === 'project') {
-                        selectView(next)
-                      }
-                    }}
-                  >
-                    {Object.entries(scopeNames).map(([value, name]) => (
-                      <Toggle key={value} value={value}>
-                        {name}
-                      </Toggle>
-                    ))}
-                  </ToggleGroup>
                   {scope === 'agent' ? (
                     <div className="w-40 min-w-0 max-w-full">
                       <Select
@@ -536,30 +579,12 @@ function SkillLibraryContent({
                     {scope === 'project' ? projectName : '全局共享'}
                   </span>
                   <div className="flex min-w-0 flex-1 basis-48 items-center gap-1 sm:ml-auto sm:max-w-72">
-                    <InputGroup>
-                      <InputGroupAddon>
-                        <SearchIcon aria-hidden />
-                      </InputGroupAddon>
-                      <InputGroupInput
-                        type="search"
-                        size="sm"
-                        aria-label="搜索技能"
-                        value={query}
-                        placeholder="搜索技能"
-                        onChange={(event) => {
-                          setQuery(event.currentTarget.value)
-                          setDetailOpen(false)
-                        }}
-                      />
-                      <InputGroupAddon align="inline-end">
-                        <span
-                          className="text-xs text-muted-foreground"
-                          aria-label={`${visibleSkills.length} 项技能`}
-                        >
-                          {visibleSkills.length}
-                        </span>
-                      </InputGroupAddon>
-                    </InputGroup>
+                    <span
+                      className="text-xs text-muted-foreground"
+                      aria-label={`${visibleSkills.length} 项技能`}
+                    >
+                      {visibleSkills.length} 项技能
+                    </span>
                     <Popover>
                       <PopoverTrigger
                         aria-label="技能分配说明"
@@ -586,27 +611,6 @@ function SkillLibraryContent({
                       </PopoverPopup>
                     </Popover>
                   </div>
-                  {!showDetail && canManage ? (
-                    <Button
-                      ref={libraryActionRef}
-                      size="sm"
-                      variant="outline"
-                      disabled={busy || loading || (scope !== 'library' && !target)}
-                      onClick={() =>
-                        openDialog(scope === 'library' ? { type: 'import' } : { type: 'assign' })
-                      }
-                    >
-                      {scope === 'library' ? <UploadIcon /> : <PlusIcon />}
-                      {scope === 'library' ? '导入技能' : '添加技能'}
-                    </Button>
-                  ) : null}
-                  <FileSurfaceAction
-                    label="刷新技能库"
-                    disabled={busy || loading}
-                    onPress={refreshLibrary}
-                  >
-                    <RefreshCwIcon className={loading ? 'animate-spin' : undefined} />
-                  </FileSurfaceAction>
                 </div>
                 <div ref={gridRef} className="grid content-start gap-2 md:grid-cols-2">
                   {visibleSkills.map((skill) => {

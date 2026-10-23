@@ -1,6 +1,12 @@
+import {
+  ModuleHeader,
+  ModuleSidebar,
+  ModuleSidebarItem,
+  ModuleSidebarEmpty,
+} from './ModuleWorkspace'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDownToLineIcon,
   FileJsonIcon,
@@ -10,7 +16,6 @@ import {
 } from 'lucide-react'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
-import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert'
 import { Dialog, DialogHeader, DialogPopup, DialogTitle } from '~/components/ui/dialog'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
@@ -80,7 +85,14 @@ export function AutoOpsDeploymentsPage() {
       aria-label="项目部署"
       data-testid="deployments-page"
     >
-      <h1 className="sr-only">部署发布</h1>
+      {!project || !manager ? (
+        <>
+          <ModuleHeader title="部署发布" />
+          <ModuleSidebar label="部署服务">
+            <ModuleSidebarEmpty>项目不可用或无权访问。</ModuleSidebarEmpty>
+          </ModuleSidebar>
+        </>
+      ) : null}
       {project && manager ? (
         <ProjectDeployments
           key={projectId}
@@ -179,7 +191,11 @@ function ProjectDeployments({
       setDialog('packages')
     } else setError('指定内部版本不可用或无权访问，未自动改用其他来源。')
     // Consume the one-shot intent, so closing or refreshing never reopens it.
-    void navigate({ to: '/deployments', search: { projectId: ProjectId.make(projectId) }, replace: true })
+    void navigate({
+      to: '/deployments',
+      search: { projectId: ProjectId.make(projectId) },
+      replace: true,
+    })
   }, [overview, requestedSourceVersionId, handledSource, internal, navigate, projectId])
   useEffect(() => {
     const task = overview?.tasks.find((entry) => entry.id === followTaskId)
@@ -211,61 +227,104 @@ function ProjectDeployments({
       setFixedSourceId(null)
     }
   }
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div
-        className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-y border-border/60 px-3 py-1.5"
-        aria-label="部署工具栏"
-        onClickCapture={(event) => {
-          const button = event.target instanceof Element ? event.target.closest('button') : null
-          if (button) returnFocus.current = button
+  const capturePackageAction = (event: React.MouseEvent<HTMLElement>) => {
+    const button = event.target instanceof Element ? event.target.closest('button') : null
+    if (button) returnFocus.current = button
+  }
+  const navigation = (
+    <div className="space-y-1" aria-label="部署分类">
+      <ModuleSidebarItem
+        label="服务发布"
+        selected={view === 'services'}
+        onClick={() => setView('services')}
+      />
+      <ModuleSidebarItem
+        label="源码包"
+        icon={PackageIcon}
+        selected={view === 'packages'}
+        onClick={() => setView('packages')}
+      />
+    </div>
+  )
+  const packageActions = (
+    <div className="flex items-center gap-1" onClickCapture={capturePackageAction}>
+      <FileSurfaceAction
+        label="刷新源码包"
+        disabled={busy}
+        onPress={() => setRefresh((value) => value + 1)}
+      >
+        <RefreshCwIcon />
+      </FileSurfaceAction>
+      <FileSurfaceAction
+        label={`源码包${taskLabel}`}
+        disabled={!tasks.length}
+        onPress={() => {
+          setError(null)
+          setDialog('tasks')
         }}
       >
-        <ToggleGroup
-          aria-label="部署分类"
-          variant="segmented"
-          value={[view]}
-          onValueChange={(value) => {
-            if (value[0] === 'services' || value[0] === 'packages') setView(value[0])
-          }}
-        >
-          <Toggle value="services">服务发布</Toggle>
-          <Toggle value="packages">源码包</Toggle>
-        </ToggleGroup>
-        <span className="flex-1" />
-        <FileSurfaceAction
-          label="刷新源码包"
-          disabled={busy}
-          onPress={() => setRefresh((value) => value + 1)}
-        >
-          <RefreshCwIcon />
-        </FileSurfaceAction>
-        <FileSurfaceAction
-          label={taskLabel}
-          disabled={!tasks.length}
-          onPress={() => {
-            setError(null)
-            setDialog('tasks')
-          }}
-        >
-          {activeTasks.length ? <Spinner size="sm" /> : <HistoryIcon />}
-        </FileSurfaceAction>
-        <Button
-          ref={generateTrigger}
-          size="sm"
-          variant="outline"
-          disabled={!overview || busy || running || !internal.length}
-          onClick={() => {
-            setError(null)
-            setFixedSourceId(null)
-            setDialog('packages')
-          }}
-        >
-          <PackageIcon />
-          <span className="hidden sm:inline">生成部署包</span>
-          <span className="sm:hidden">生成包</span>
-        </Button>
-      </div>
+        {activeTasks.length ? <Spinner size="sm" /> : <HistoryIcon />}
+      </FileSurfaceAction>
+      <Button
+        ref={generateTrigger}
+        size="sm"
+        variant="outline"
+        disabled={!overview || busy || running || !internal.length}
+        onClick={() => {
+          setError(null)
+          setFixedSourceId(null)
+          setDialog('packages')
+        }}
+      >
+        <PackageIcon />
+        <span className="hidden sm:inline">生成部署包</span>
+        <span className="sm:hidden">生成包</span>
+      </Button>
+    </div>
+  )
+  const servicePackageActions = (
+    <div className="flex items-center gap-1" onClickCapture={capturePackageAction}>
+      <FileSurfaceAction
+        label={`源码包${taskLabel}`}
+        disabled={!tasks.length}
+        onPress={() => {
+          setError(null)
+          setDialog('tasks')
+        }}
+      >
+        {activeTasks.length ? <Spinner size="sm" /> : <HistoryIcon />}
+      </FileSurfaceAction>
+      <Button
+        ref={generateTrigger}
+        size="sm"
+        variant="outline"
+        disabled={!overview || busy || running || !internal.length}
+        onClick={() => {
+          setError(null)
+          setFixedSourceId(null)
+          setDialog('packages')
+        }}
+      >
+        <PackageIcon />
+        <span className="hidden sm:inline">生成部署包</span>
+        <span className="sm:hidden">生成包</span>
+      </Button>
+    </div>
+  )
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {view === 'packages' ? (
+        <>
+          <ModuleHeader title="源码包" actions={packageActions} />
+          {!overview?.releases.length ? (
+            <ModuleSidebar label="部署交付" header={navigation}>
+              <ModuleSidebarEmpty>
+                {overview ? '还没有部署包。' : '正在读取源码包…'}
+              </ModuleSidebarEmpty>
+            </ModuleSidebar>
+          ) : null}
+        </>
+      ) : null}
       {error && !dialog ? (
         <div className="shrink-0 border-b border-border/60 px-3 py-2">
           <Alert variant="error">
@@ -287,6 +346,9 @@ function ProjectDeployments({
           key={projectId}
           projectId={projectId}
           packages={overview?.releases ?? []}
+          navigation={navigation}
+          packageActions={servicePackageActions}
+          onRefreshPackages={() => setRefresh((value) => value + 1)}
         />
       ) : !overview ? (
         error ? null : (
@@ -302,6 +364,7 @@ function ProjectDeployments({
           versions={internal}
           selectedId={selectedPackageId}
           onSelect={setSelectedPackageId}
+          navigation={navigation}
         />
       )}
       <WorkspacePackagesDialog
@@ -346,12 +409,14 @@ function WorkspacePackages({
   versions,
   selectedId,
   onSelect,
+  navigation,
 }: {
   projectId: string
   releases: WorkspaceRelease[]
   versions: WorkspaceVersion[]
   selectedId: string
   onSelect: (id: string) => void
+  navigation: ReactNode
 }) {
   const [manifestOpen, setManifestOpen] = useState(false)
   const manifestTrigger = useRef<HTMLButtonElement | null>(null)
@@ -371,33 +436,18 @@ function WorkspacePackages({
     selected.sourceVersionId
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" aria-label="部署交付">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:w-80 md:flex-none md:border-r md:border-border/60">
-        <div className={FILE_SURFACE_SUBHEADER_CLASS}>
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">交付记录</span>
-        </div>
+      <ModuleSidebar label="部署交付" header={navigation}>
         <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
-          <div className="flex flex-col divide-y divide-border/60">
+          <div className="px-[var(--sidebar-content-inset)]">
             {releases.map((release) => (
-              <Button
+              <ModuleSidebarItem
                 key={release.id}
-                size="sm-multiline"
-                variant="ghost"
-                className="h-auto min-w-0 justify-start rounded-none px-3 py-2.5 text-left"
-                aria-pressed={release.id === selected.id}
-                data-pressed={release.id === selected.id || undefined}
+                label={release.name}
+                icon={PackageIcon}
+                description={dateLabel(release.createdAt)}
+                selected={release.id === selected.id}
                 onClick={() => onSelect(release.id)}
-              >
-                <PackageIcon className="self-start" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{release.name}</span>
-                  <time
-                    dateTime={release.createdAt}
-                    className="mt-1 block truncate text-xs font-normal text-muted-foreground"
-                  >
-                    {dateLabel(release.createdAt)}
-                  </time>
-                </span>
-              </Button>
+              />
             ))}
           </div>
         </ScrollArea>
@@ -409,7 +459,13 @@ function WorkspacePackages({
             size="sm"
             variant="ghost"
             render={
-              <Link to="/workspaces" search={{ projectId: ProjectId.make(projectId), versionId: selected.sourceVersionId }} />
+              <Link
+                to="/workspaces"
+                search={{
+                  projectId: ProjectId.make(projectId),
+                  versionId: selected.sourceVersionId,
+                }}
+              />
             }
           >
             查看工作区来源
@@ -436,16 +492,15 @@ function WorkspacePackages({
             ref={manifestTrigger}
             size="sm"
             variant="ghost"
-            className="md:hidden"
             onClick={() => setManifestOpen(true)}
           >
             <FileJsonIcon />
             查看交付清单
           </Button>
         </div>
-      </div>
+      </ModuleSidebar>
       <section
-        className="hidden min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:flex"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         aria-label="交付清单预览"
       >
         <ManifestPreview key={selected.id} projectId={projectId} release={selected} />
