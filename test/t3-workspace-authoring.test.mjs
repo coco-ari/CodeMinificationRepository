@@ -265,10 +265,6 @@ test('仓库解析与凭证版本一次冻结，同标识不重新选分支', as
       ),
     'WORKSPACE_REQUEST_CONFLICT',
   )
-  rejectsCode(
-    () => service.removeSource('project', created.source.id, mutation(service), 'owner'),
-    'WORKSPACE_SOURCE_IN_USE',
-  )
   await f.reopen()
   assert.equal(
     f.service.readCaptured('project', captured.id, 'owner').resolvedRepositories[0].commit,

@@ -40,7 +40,7 @@ const fromRow = (row) => row && ({
   executionBinding: normalizeExecutionBinding(row.execution_binding_json ? JSON.parse(row.execution_binding_json) : undefined),
   scopeState: row.scope_state || 'locked',
   scopeLocked: (row.scope_state || 'locked') === 'locked',
-  ...(row.workspace_type ? { workspaceType: row.workspace_type, workspaceVersionId: row.workspace_version_id } : {}),
+  ...(row.workspace_type ? { workspaceType: row.workspace_type, ...(row.workspace_version_id ? { workspaceVersionId: row.workspace_version_id } : {}) } : {}),
   compatibilityReadOnly: Boolean(row.compatibility_read_only),
   continuationVerified: Boolean(row.continuation_verified),
   ...(row.native_thread_id ? {nativeThreadId:row.native_thread_id} : {}),
@@ -70,6 +70,15 @@ export function initializeAutoOpsAccessSchema(db) {
       thread_id TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS t3_thread_inputs (
+      thread_id TEXT NOT NULL, run_id TEXT NOT NULL, input_id TEXT NOT NULL,
+      created_at TEXT NOT NULL, PRIMARY KEY(thread_id, run_id)
+    );
+    CREATE INDEX IF NOT EXISTS t3_thread_inputs_identity ON t3_thread_inputs(input_id);
+    CREATE TABLE IF NOT EXISTS t3_thread_input_references (
+      thread_id TEXT NOT NULL, input_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+      created_at TEXT NOT NULL, PRIMARY KEY(thread_id,input_id)
+    );
   `)
   if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === 'revoked_at'))
     db.exec('ALTER TABLE t3_thread_bindings ADD COLUMN revoked_at TEXT')
@@ -95,7 +104,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     requireProjectForUser: membershipForUser,
   })
   const bindingAudienceForUser = (userId, binding) => {
-    if (binding.executionBinding?.kind !== 'customer') return workspaceForUser(userId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
+    if (binding.executionBinding?.kind !== 'customer') return workspaceForUser(userId, binding.projectId, binding.workspaceType || 'internal', undefined, binding.environmentId)
     if (userId !== binding.ownerId || binding.visibility !== 'private') fail(403, 'CUSTOMER_OWNER_REQUIRED', '客户工作区对话仅限设备所有者访问')
     const membership = membershipForUser(userId, binding.projectId)
     if (!membership.environmentIds.includes(binding.environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
@@ -146,11 +155,8 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
         fail(400, 'INVALID_CUSTOMER_SCOPE', '客户工作区仅支持私有开发对话，不接入平台工作区或报告助手')
     }
     if (binding.workspaceType) {
-      if (!['internal', 'external'].includes(binding.workspaceType) || !binding.workspaceVersionId)
-        fail(400, 'INVALID_WORKSPACE_BINDING', '请选择有效的工作区版本')
-      const version = workspaceStore?.getVersion(binding.projectId, binding.workspaceVersionId)
-      if (workspaceStore && (!version || version.type !== binding.workspaceType || version.status !== 'published'))
-        fail(403, 'WORKSPACE_NOT_AVAILABLE', '此工作区版本尚未发布或已不可用')
+      if (!['internal', 'external'].includes(binding.workspaceType))
+        fail(400, 'INVALID_WORKSPACE_BINDING', '请选择有效的资料范围')
     }
     const project = catalog.projects.find((entry) => entry.id === binding.projectId)
     const agent = catalog.agents.find((entry) => entry.id === binding.agentId)
@@ -192,13 +198,14 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       visibility: input.visibility,
       createdAt: new Date(now()).toISOString(),
       executionBinding: normalizeExecutionBinding(input.executionBinding),
-      ...(input.workspaceType !== undefined || input.workspaceVersionId !== undefined ? {
-        workspaceType: input.workspaceType,
-        workspaceVersionId: identifier(input.workspaceVersionId, '工作区版本'),
+      ...(input.workspaceType !== undefined || input.workspaceVersionId !== undefined || (workspaceStore && input.executionBinding?.kind !== 'customer') ? {
+        workspaceType: input.workspaceType ?? requireMembership(current, input.projectId).workspaceAccess,
+        ...(input.workspaceVersionId !== undefined ? { workspaceVersionId: identifier(input.workspaceVersionId, '工作区版本') } : {}),
       } : {}),
     }
     if (!['private', 'project'].includes(binding.visibility)) fail(400, 'INVALID_VISIBILITY', '会话可见范围无效')
     bindingAudienceForUser(current.id, binding)
+    if (binding.workspaceVersionId) workspaceForUser(current.id, binding.projectId, binding.workspaceType, binding.workspaceVersionId, binding.environmentId)
     validateBinding(binding)
     if (binding.executionBinding.kind === 'customer') { requireCustomerAgentsEnabled(); customerRegistry.validateTarget(current.id, binding.projectId, binding.executionBinding) }
     return binding
@@ -214,8 +221,6 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
         fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
       return existing
     }
-    if (workspaceStore && !binding.workspaceType && binding.executionBinding.kind === 'platform')
-      fail(400, 'WORKSPACE_REQUIRED', '新对话必须先选择固定的工作区版本')
     bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
       binding.threadId, binding.projectId, binding.environmentId, binding.agentId,
       binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding),
@@ -227,7 +232,6 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   }
   const reserveThread = (principal, input) => {
     const current = refresh(principal), binding = bindingInput(current, input)
-    if (workspaceStore && !binding.workspaceType && binding.executionBinding.kind === 'platform') fail(400, 'WORKSPACE_REQUIRED', '新对话必须先选择固定的工作区版本')
     bindingDb.exec('BEGIN IMMEDIATE')
     try {
       const existing = getThreadBinding(binding.threadId)
@@ -303,9 +307,9 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   function resourceThreads(projectId, canRead) {
     return bindingDb.prepare('SELECT thread_id FROM t3_thread_bindings WHERE project_id=? AND revoked_at IS NULL').all(projectId)
       .map((row) => getThreadBinding(row.thread_id)).filter(canRead).map((binding) => {
-      const attachments = bindingDb.prepare('SELECT attachment_id, metadata_json FROM t3_attachment_access WHERE thread_id=?').all(binding.threadId).map((file) => {
+      const attachments = bindingDb.prepare('SELECT attachment_id, metadata_json, created_at FROM t3_attachment_access WHERE thread_id=?').all(binding.threadId).map((file) => {
         const metadata = file.metadata_json ? JSON.parse(file.metadata_json) : {}
-        return { id: file.attachment_id, name: metadata.name, mimeType: metadata.mimeType, sizeBytes: metadata.sizeBytes }
+        return { id: file.attachment_id, createdAt: file.created_at, name: metadata.name, mimeType: metadata.mimeType, sizeBytes: metadata.sizeBytes }
       })
       return { binding, attachments }
     })
@@ -324,6 +328,40 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     requireWorkspaceManager,
     threadAudience,
     getThreadBinding,
+    getRunInput(threadId, runId) {
+      const row = bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND run_id=?').get(identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
+      return row ? { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, createdAt: row.created_at } : undefined
+    },
+    bindRunInput(threadId, runId, inputId) {
+      this.requireToolThread(threadId)
+      for (const [value, label] of [[runId, '任务ID'], [inputId, '资料输入ID']]) identifier(value, label)
+      bindingDb.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at) VALUES(?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(threadId, runId, inputId, new Date(now()).toISOString())
+      const stored = this.getRunInput(threadId, runId)
+      if (stored.inputId !== inputId) fail(409, 'THREAD_INPUT_CONFLICT', '此任务已经固定另一份资料输入')
+      return stored
+    },
+    listThreadInputs(threadId) {
+      return bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? ORDER BY rowid').all(identifier(threadId, '会话ID'))
+        .map(row => ({ threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, createdAt: row.created_at }))
+    },
+    workspaceVersionReferences(projectId) {
+      return bindingDb.prepare('SELECT DISTINCT workspace_version_id AS id FROM t3_thread_bindings WHERE project_id=? AND workspace_version_id IS NOT NULL').all(identifier(projectId, '项目ID')).map(row => row.id)
+    },
+    retainInputReference(threadId, inputId, actorId) {
+      this.requireToolThread(threadId)
+      identifier(inputId, '资料输入ID'); identifier(actorId, '用户ID')
+      bindingDb.prepare('INSERT INTO t3_thread_input_references VALUES(?,?,?,?) ON CONFLICT(thread_id,input_id) DO NOTHING').run(threadId, inputId, actorId, new Date(now()).toISOString())
+    },
+    inputReferences(threadId) {
+      return bindingDb.prepare('SELECT input_id,actor_id FROM t3_thread_input_references WHERE thread_id=?').all(identifier(threadId, '会话ID')).map(row => ({ inputId: row.input_id, actorId: row.actor_id }))
+    },
+    requireRunInput(threadId, inputId) {
+      this.requireToolThread(threadId)
+      identifier(inputId, '资料输入ID')
+      const row = bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND input_id=? ORDER BY rowid LIMIT 1').get(threadId, inputId)
+      if (!row) fail(403, 'THREAD_INPUT_FORBIDDEN', '资料输入不属于此会话任务，请使用本轮输入标识')
+      return { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, createdAt: row.created_at }
+    },
     nativeSubagentParent,
     canSeeThread,
     visibleThreadIds(principal) {
@@ -374,7 +412,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       if (binding.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_ATTACHMENTS_DISABLED', '客户工作区首版未开放附件')
       if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史兼容会话仅供查看')
       validateBinding(binding)
-      workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId)
+      workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', undefined, binding.environmentId)
       bindingDb.prepare('INSERT INTO t3_attachment_access(attachment_id,owner_id,thread_id,created_at,metadata_json) VALUES(?,?,?,?,?) ON CONFLICT(attachment_id) DO NOTHING').run(
         identifier(attachmentId, '附件ID'), binding.ownerId, threadId, new Date(now()).toISOString(), JSON.stringify({name:metadata.name,mimeType:metadata.mimeType,sizeBytes:metadata.sizeBytes}),
       )
@@ -384,7 +422,10 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     forkBinding(principal, sourceThreadId, targetThreadId) {
       const source = requireThread(principal, sourceThreadId)
       if (source.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_FORK_DISABLED', '客户工作区首版未开放会话分支')
-      return bindThread(principal, { ...source, threadId: targetThreadId, visibility: 'private' })
+      const target = bindThread(principal, { ...source, threadId: targetThreadId, visibility: 'private' })
+      for (const input of this.listThreadInputs(sourceThreadId)) this.retainInputReference(targetThreadId, input.inputId, source.ownerId)
+      for (const reference of this.inputReferences(sourceThreadId)) this.retainInputReference(targetThreadId, reference.inputId, reference.actorId)
+      return target
     },
     recordLegacyNativeFork(sourceThreadId, targetThreadId, sourceNativeId, targetNativeId) {
       // 仅处理提供者真实分支响应；同一应用会话的回退副本不能覆盖当前原生身份。
@@ -408,6 +449,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     requireDeploymentActor,
     requireWorkspaceActor: requireWorkspaceManagerForUser,
     requireWorkspaceReader: (userId, projectId) => workspaceForUser(userId, projectId, 'internal'),
+    requireWorkspaceInputReader: (userId, projectId, workspaceType) => workspaceForUser(userId, projectId, workspaceType),
     requireCredentialActor,
     projectCapabilities(principal, projectId) { return projectCapabilities(refresh(principal).id, projectId) },
     listResourceThreads(principal, projectId) {
@@ -429,7 +471,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       if (binding.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_BUSINESS_TOOLS_DISABLED', '客户工作区首版未开放平台资料、报告和附件工具')
       if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史会话缺少可验证的原生续接记录，仅供查看')
       const scope = validateBinding(binding)
-      try { workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, binding.environmentId) }
+      try { workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', undefined, binding.environmentId) }
       catch (error) { if (error?.code === 'PROJECT_NOT_FOUND') fail(403, 'THREAD_SCOPE_REVOKED', '会话所属用户的项目授权已失效'); throw error }
       return scope
     },

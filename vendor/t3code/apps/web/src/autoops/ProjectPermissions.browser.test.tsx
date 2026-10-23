@@ -95,6 +95,22 @@ beforeEach(() => {
 })
 
 describe('项目入口使用服务端 capabilities', () => {
+  for (const Control of [WorkspaceScopeControl, ConversationWorkspaceControl]) {
+    it(Control.name + '在旧会话锁定范围后仍明确新轮读取当前工作区', async () => {
+      await using screen = await render(
+        <Control
+          projectId="p-one"
+          scope={{ ...scope(), scopeLocked: true }}
+          locked
+          disabled={false}
+          onChange={vi.fn()}
+        />,
+      )
+      await expect.element(screen.getByText('内部原始 · 当前工作区', { exact: true })).toBeVisible()
+      expect(screen.container.textContent).not.toContain('历史输入')
+      expect(screen.container.textContent).not.toContain('v-one')
+    })
+  }
   it('切项目时忽略旧角色显示，仅进入目标项目实际允许的模块', async () => {
     const value = host()
     value.projects[1]!.capabilities = permissions(false, false, false)
@@ -134,13 +150,11 @@ describe('项目入口使用服务端 capabilities', () => {
     mocks.readHost.mockReturnValue(value)
     await using screen = await render(
       <WorkspaceScopeControl
-        threadId="draft"
         projectId="p-one"
         scope={scope()}
         locked={false}
         disabled={false}
         onChange={vi.fn()}
-        onInitialize={vi.fn()}
       />,
     )
     await screen.getByRole('button', { name: '对话工作区' }).click()
@@ -159,13 +173,11 @@ describe('项目入口使用服务端 capabilities', () => {
     mocks.readHost.mockReturnValue(value)
     await using screen = await render(
       <ConversationWorkspaceControl
-        threadId="draft"
         projectId="p-one"
         scope={scope()}
         locked={false}
         disabled={false}
         onChange={vi.fn()}
-        onInitialize={vi.fn()}
       />,
     )
     await screen.getByRole('button', { name: '对话工作区' }).click()
@@ -175,38 +187,42 @@ describe('项目入口使用服务端 capabilities', () => {
     expect(mocks.load).not.toHaveBeenCalled()
   })
 
-  it('切换工作区项目时旧版本不会初始化或覆盖新项目草稿', async () => {
-    const initialize = vi.fn()
-    mocks.storedScope.mockImplementation((_threadId, projectId) => ({
-      ...scope(projectId),
-      workspaceVersionId: undefined,
-    }))
+  it('无需版本即可选择当前范围，切项目后不携带旧输入身份', async () => {
+    const change = vi.fn()
     await using screen = await render(
       <WorkspaceScopeControl
-        threadId="draft"
         projectId="p-one"
-        scope={scope()}
+        scope={{ ...scope(), workspaceVersionId: undefined }}
         locked={false}
         disabled={false}
-        onChange={vi.fn()}
-        onInitialize={initialize}
+        onChange={change}
       />,
     )
-    await vi.waitFor(() => expect(initialize).toHaveBeenCalledTimes(1))
-    initialize.mockClear()
-    mocks.load.mockImplementationOnce(() => new Promise(() => {}))
+    await screen.getByRole('button', { name: '对话工作区' }).click()
+    await page
+      .getByRole('menuitemradio', { name: '外部脱敏 · 当前已发布资料', exact: true })
+      .click()
+    expect(change).toHaveBeenCalledWith('external')
+    expect(mocks.load).not.toHaveBeenCalled()
+    const value = host()
+    value.projects[1]!.membership.workspaceAccess = 'external'
+    mocks.readHost.mockReturnValue(value)
     await screen.rerender(
       <WorkspaceScopeControl
-        threadId="draft-two"
         projectId="p-two"
-        scope={scope('p-two')}
+        scope={{ ...scope('p-two'), workspaceType: 'external', workspaceVersionId: undefined }}
         locked={false}
         disabled={false}
-        onChange={vi.fn()}
-        onInitialize={initialize}
+        onChange={change}
       />,
     )
-    expect(initialize).not.toHaveBeenCalled()
+    await screen.getByRole('button', { name: '对话工作区' }).click()
+    await expect
+      .element(page.getByRole('menuitemradio', { name: '内部原始 · 当前工作区', exact: true }))
+      .not.toBeInTheDocument()
+    await expect
+      .element(page.getByRole('menuitemradio', { name: '外部脱敏 · 当前已发布资料', exact: true }))
+      .toBeVisible()
     expect(screen.container.textContent).not.toContain('当前工作区版本')
   })
 })

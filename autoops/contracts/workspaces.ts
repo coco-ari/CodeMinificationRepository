@@ -37,6 +37,8 @@ export interface WorkspaceVersion {
     rulesVersion: string
     customRules?: number
   }
+  cacheKey?: string
+  cachePurpose?: 'source' | 'deployment' | 'external-input'
   isExample?: boolean
 }
 export interface WorkspaceFile {
@@ -49,7 +51,7 @@ export interface WorkspaceFile {
 export interface WorkspaceTask {
   id: string
   requestId?: string
-  type: 'external' | 'packages' | 'import' | 'snapshot'
+  type: 'external' | 'packages' | 'import' | 'snapshot' | 'sync' | 'input'
   status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
   stage: string
   message: string
@@ -57,6 +59,7 @@ export interface WorkspaceTask {
   versionId?: string
   releaseId?: string
   error?: string
+  failureCode?: string
 }
 export interface WorkspaceRelease {
   id: string

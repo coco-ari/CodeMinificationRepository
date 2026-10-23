@@ -162,6 +162,7 @@ export function AutoOpsThreadScopeControl({
     if (
       !executionChanged &&
       next.workspaceVersionId === scope.workspaceVersionId &&
+      next.workspaceType === scope.workspaceType &&
       next.environmentId === scope.environmentId &&
       next.agentId === scope.agentId &&
       next.visibility === scope.visibility
@@ -220,9 +221,7 @@ export function AutoOpsThreadScopeControl({
             environmentId: next.environmentId,
             agentId: next.agentId,
             visibility: next.visibility,
-            ...(next.workspaceType && next.workspaceVersionId
-              ? { workspaceType: next.workspaceType, workspaceVersionId: next.workspaceVersionId }
-              : {}),
+            ...(next.workspaceType ? { workspaceType: next.workspaceType } : {}),
           });
           await updateModel(created.draftId, created.threadId);
           toastManager.add({
@@ -254,25 +253,19 @@ export function AutoOpsThreadScopeControl({
       <div className="flex min-w-0 flex-initial items-center gap-1">
         {host.customerAgentsEnabled || scope.executionBinding?.kind === "customer" ? (
           <ConversationWorkspaceControl
-            threadId={threadId}
             projectId={projectId}
             scope={scope}
             locked={locked}
             disabled={disabled}
             onChange={(patch) => void apply(patch)}
-            onInitialize={(value) => setAutoOpsThreadScope(threadId, value)}
           />
         ) : (
           <WorkspaceScopeControl
-            threadId={threadId}
             projectId={projectId}
             scope={scope}
             locked={locked}
             disabled={disabled}
-            onChange={(version) =>
-              void apply({ workspaceType: version.type, workspaceVersionId: version.id })
-            }
-            onInitialize={(value) => setAutoOpsThreadScope(threadId, value)}
+            onChange={(type) => void apply({ workspaceType: type, workspaceVersionId: undefined })}
           />
         )}
         <ScopeComposerChoice

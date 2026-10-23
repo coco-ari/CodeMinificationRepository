@@ -20,6 +20,13 @@ export function createAutoOpsBusinessTools(options: {
   loadAttachmentBytes?(binding: BusinessBinding, id: string): PromiseLike<Uint8Array> | Uint8Array;
   storeArtifact(input: { binding: BusinessBinding; runId: string; name: string; mime: string; bytes: Uint8Array }): PromiseLike<BusinessArtifact> | BusinessArtifact;
   renderPdf?(content: string): PromiseLike<Uint8Array> | Uint8Array;
+  materialInput?: {
+    id: string; workspaceType: 'internal'|'external'; createdAt: string; revision: number;
+    sourceErrors?: ReadonlyArray<{sourceId:string;name:string;mountPath:string;code:string;message:string}>;
+    repositories: ReadonlyArray<{path:string;commit:string}>;
+    files: ReadonlyArray<{path:string;name:string;mime:string;size:number}>;
+    read(path:string): Promise<{contents:string;byteLength:number;truncated:boolean}>;
+  };
   workspaceStore?: ReturnType<typeof configuredWorkspaceStore>;
 }): {
   listMaterials(threadId: string): Promise<Record<string, unknown>>;

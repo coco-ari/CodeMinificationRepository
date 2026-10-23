@@ -13,7 +13,14 @@ import {
 import type { WorkspaceOverview, WorkspaceTask, WorkspaceVersion } from './workspaces'
 import '../index.css'
 
-const mocks = vi.hoisted(() => ({ read: vi.fn(), send: vi.fn(), accepted: vi.fn(), host: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  read: vi.fn(),
+  send: vi.fn(),
+  package: vi.fn(),
+  receipt: vi.fn(),
+  accepted: vi.fn(),
+  host: vi.fn(),
+}))
 vi.mock(import('./hostConfig'), async (original) => ({
   ...(await original()),
   readAutoOpsHost: mocks.host,
@@ -24,6 +31,14 @@ vi.mock(import('./workspaces'), async (original) => ({
   importWorkspaceRepository: mocks.send,
   generateExternalWorkspace: mocks.send,
   generateWorkspacePackages: mocks.send,
+}))
+vi.mock(import('./workspaceAuthoring'), async (original) => ({
+  ...(await original()),
+  inspectAuthoringRequest: mocks.receipt,
+}))
+vi.mock(import('./apiClient'), async (original) => ({
+  ...(await original()),
+  autoOpsRequest: mocks.package,
 }))
 const version: WorkspaceVersion = {
   id: 'version-one',
@@ -95,10 +110,7 @@ function Harness({
       ) : type === 'external' ? (
         <ExternalWorkspaceDialog
           {...common}
-          internalVersions={[version]}
-          onGenerate={(sourceVersionId, rules) =>
-            submission.submit({ type, sourceVersionId, rules })
-          }
+          onGenerate={(rules) => submission.submit({ type, rules })}
         />
       ) : (
         <WorkspacePackagesDialog
@@ -112,7 +124,7 @@ function Harness({
     </>
   )
 }
-const submitLabel = { import: '导入并保存版本', external: '生成外部版本', packages: '生成部署包' }
+const submitLabel = { import: '导入并保存版本', external: '更新外部工作区', packages: '生成部署包' }
 async function openAndFill(type: WorkspaceTask['type']) {
   await page.getByRole('button', { name: '打开操作', exact: true }).click()
   if (type === 'import')
@@ -130,6 +142,8 @@ function setup() {
   mocks.host.mockReturnValue({ principal: { id: 'owner-one' } })
   mocks.read.mockResolvedValue(overview())
   mocks.send.mockRejectedValue(unknown())
+  mocks.receipt.mockResolvedValue(null)
+  mocks.package.mockRejectedValue(unknown())
 }
 describe('工作区任务的未知提交恢复', () => {
   for (const type of ['import', 'external', 'packages'] as const) {
@@ -251,4 +265,57 @@ describe('工作区任务的未知提交恢复', () => {
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2))
     expect(mocks.send.mock.calls[1]).toEqual(first)
   })
+})
+
+function DeploymentInputHarness() {
+  const submission = useWorkspaceTaskSubmission('p-one', mocks.accepted)
+  return (
+    <>
+      <button
+        disabled={submission.busy}
+        onClick={() =>
+          void submission.submit({
+            type: 'deployment-packages',
+            sources: [{ sourceId: 'repo-one', refKind: 'commit', ref: 'a'.repeat(40) }],
+            contexts: [{ service: 'frontend', root: 'web', workingDirectory: '.' }],
+          })
+        }
+      >
+        生成独立源码包
+      </button>
+      <WorkspaceSubmissionNotice
+        label={submission.pendingLabel}
+        retryAvailable={submission.retryAvailable}
+        busy={submission.busy}
+        onCheck={submission.check}
+        onRetry={submission.retry}
+      />
+      <p>{submission.error}</p>
+    </>
+  )
+}
+it('独立 Git 打包丢响应后按原请求核对，不附加资料版本或重复任务', async () => {
+  setup()
+  await using screen = await render(<DeploymentInputHarness />)
+  await screen.getByRole('button', { name: '生成独立源码包' }).click()
+  await expect.element(page.getByRole('button', { name: '使用原请求重试' })).toBeEnabled()
+  expect(mocks.package).toHaveBeenCalledTimes(1)
+  const [path, options] = mocks.package.mock.calls[0]!
+  expect(path).toBe('/api/v1/projects/p-one/workspace/deployment-packages')
+  expect(options.body).toEqual({
+    requestId: expect.any(String),
+    sources: [{ sourceId: 'repo-one', refKind: 'commit', ref: 'a'.repeat(40) }],
+    contexts: [{ service: 'frontend', root: 'web', workingDirectory: '.' }],
+  })
+  mocks.receipt.mockResolvedValue({
+    requestId: options.body.requestId,
+    task: task('packages', options.body.requestId),
+  })
+  await screen.getByRole('button', { name: '核对任务', exact: true }).click()
+  await vi.waitFor(() =>
+    expect(mocks.accepted).toHaveBeenCalledWith(task('packages', options.body.requestId)),
+  )
+  expect(mocks.package).toHaveBeenCalledTimes(1)
+  expect(mocks.receipt).toHaveBeenCalledWith('p-one', options.body.requestId, false)
+  expect(sessionStorage.getItem('autoops:workspace-task:owner-one:p-one')).toBeNull()
 })

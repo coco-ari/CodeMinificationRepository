@@ -1,10 +1,9 @@
 import { AutoOpsRequestError } from './apiClient'
 import { useWorkspaceFileScroll } from './useWorkspaceFileScroll'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   FolderOpenIcon,
   GitBranchIcon,
-  HistoryIcon,
   KeyRoundIcon,
   MoreHorizontalIcon,
   PlusIcon,
@@ -36,6 +35,7 @@ import {
   type WorkspaceCredentialMetadata,
   type WorkspaceMaterialEntry,
   type WorkspaceRepositorySource,
+  type WorkspaceAuthoringOverview,
 } from './workspaceAuthoring'
 import {
   WorkspaceAuthoringFocus,
@@ -48,7 +48,16 @@ import {
   sourceRoles,
 } from './WorkspaceAuthoringDialogs'
 
-export type WorkspaceSection = 'current' | 'sources' | 'versions'
+export type WorkspaceSection = 'current' | 'sources'
+function sourceStatusLabel(
+  status: NonNullable<WorkspaceAuthoringOverview['sourceStatus']>[number] | undefined,
+) {
+  if (!status || status.status === 'unsynced') return '当前配置尚未同步'
+  if (status.status === 'synced') return `已同步 ${status.commit?.slice(0, 12) ?? ''}`
+  if (status.status === 'queued') return '等待同步'
+  if (status.status === 'syncing') return '正在同步'
+  return `同步失败：${status.error?.message ?? '请查看任务记录'}`
+}
 export function WorkspaceAuthoringNavigation({
   section,
   onChange,
@@ -70,12 +79,6 @@ export function WorkspaceAuthoringNavigation({
         selected={section === 'sources'}
         onClick={() => onChange('sources')}
       />
-      <ModuleSidebarItem
-        icon={HistoryIcon}
-        label="固定版本"
-        selected={section === 'versions'}
-        onClick={() => onChange('versions')}
-      />
     </div>
   )
 }
@@ -87,7 +90,7 @@ type AuthoringDialog =
   | { type: 'revoke-credential'; credential: WorkspaceCredentialMetadata }
   | { type: 'file'; action: 'mkdir' | 'save' | 'move' | 'delete'; entry?: WorkspaceMaterialEntry }
   | { type: 'upload' }
-  | { type: 'version' }
+  | { type: 'sync' }
   | null
 
 export function WorkspaceAuthoring({
@@ -96,20 +99,33 @@ export function WorkspaceAuthoring({
   manager,
   onSection,
   onAccepted,
+  navigation,
+  actions,
+  taskRevision = '',
+  taskActive = false,
 }: {
   projectId: string
   section: 'current' | 'sources'
   manager: boolean
   onSection: (section: WorkspaceSection) => void
   onAccepted: (receipt: AuthoringReceipt) => void
+  navigation?: ReactNode
+  actions?: ReactNode
+  taskRevision?: string
+  taskActive?: boolean
 }) {
-  const controller = useWorkspaceAuthoring(projectId, manager, (receipt) => {
-    if ('entry' in receipt && receipt.entry) {
-      setSelected(receipt.entry.path)
-      setTrail(undefined)
-    }
-    onAccepted(receipt)
-  })
+  const controller = useWorkspaceAuthoring(
+    projectId,
+    manager,
+    (receipt) => {
+      if ('entry' in receipt && receipt.entry) {
+        setSelected(receipt.entry.path)
+        setTrail(undefined)
+      }
+      onAccepted(receipt)
+    },
+    taskRevision,
+  )
   const [dialog, setDialog] = useState<AuthoringDialog>(null)
   const panelRoot = useRef<HTMLDivElement | null>(null)
   const dialogReturnFocus = useRef<HTMLElement | null>(null)
@@ -164,6 +180,9 @@ export function WorkspaceAuthoring({
       ? dialogReturnFocus.current
       : (panelRoot.current?.querySelector<HTMLElement>('[data-authoring-focus="toolbar"]') ?? null)
   const disabled = controller.busy || !overview
+  const syncDisabled =
+    disabled || taskActive || controller.hasPending() || !overview?.sources.length
+  const fileRevision = `${overview?.revision ?? 0}:${overview?.sourceStatus?.map((source) => `${source.sourceId}:${source.commit ?? ''}`).join(':') ?? ''}`
   useEffect(() => {
     if (controller.accessDenied) {
       setDialog(null)
@@ -178,12 +197,17 @@ export function WorkspaceAuthoring({
       <div ref={panelRoot} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ModuleSidebar
           label="工作区"
-          header={<WorkspaceAuthoringNavigation section={section} onChange={onSection} />}
+          header={
+            <>
+              {navigation}
+              <WorkspaceAuthoringNavigation section={section} onChange={onSection} />
+            </>
+          }
         >
           <div className="px-4 py-3 text-xs leading-relaxed text-sidebar-muted-foreground">
             {section === 'current'
-              ? '资料随保存更新；问答和部署继续使用明确的固定版本。'
-              : '来源保存后，在更新固定版本时统一获取仓库。'}
+              ? '资料保存后即可使用；对话每次运行读取当前工作区。'
+              : '来源保存后，点击同步源码获取最新代码。部署独立选择 Git 来源。'}
           </div>
         </ModuleSidebar>
         <ModuleHeader
@@ -191,6 +215,7 @@ export function WorkspaceAuthoring({
           detail={section === 'current' ? '当前资料' : '源码来源'}
           actions={
             <>
+              {actions}
               <FileSurfaceAction
                 label="刷新当前资料"
                 disabled={controller.busy}
@@ -233,9 +258,9 @@ export function WorkspaceAuthoring({
                       添加仓库凭证
                     </MenuItem>
                     <MenuSeparator />
-                    <MenuItem disabled={disabled} onClick={() => open({ type: 'version' })}>
-                      <HistoryIcon />
-                      更新固定版本
+                    <MenuItem disabled={syncDisabled} onClick={() => open({ type: 'sync' })}>
+                      <RefreshCwIcon />
+                      同步源码
                     </MenuItem>
                   </MenuPopup>
                 </Menu>
@@ -245,9 +270,7 @@ export function WorkspaceAuthoring({
         />
         <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5">
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {overview
-              ? `资料修订 ${overview.revision}${overview.hasUnpublishedChanges ? ' · 尚未更新到固定版本' : ''}`
-              : '正在读取资料…'}
+            {overview ? `资料修订 ${overview.revision}` : '正在读取资料…'}
             {!manager ? ' · 只读' : ''}
           </span>
           {manager ? (
@@ -266,10 +289,10 @@ export function WorkspaceAuthoring({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={disabled}
-                onClick={() => open({ type: 'version' })}
+                disabled={syncDisabled}
+                onClick={() => open({ type: 'sync' })}
               >
-                更新固定版本
+                同步源码
               </Button>
             </>
           ) : null}
@@ -372,7 +395,7 @@ export function WorkspaceAuthoring({
           section === 'current' ? (
             <WorkspaceCurrentFiles
               projectId={projectId}
-              revision={overview.revision}
+              revision={fileRevision}
               readingRevision={readingRevision}
               onDenied={controller.denyRead}
               selected={selected || null}
@@ -413,10 +436,11 @@ export function WorkspaceAuthoring({
                             → {source.mountPath}
                             {source.sourcePath ? `（仓库内 ${source.sourcePath}）` : ''}
                             <br />
-                            {overview.sourceStatus?.find((status) => status.sourceId === source.id)
-                              ?.status === 'synced'
-                              ? `已获取 ${overview.sourceStatus.find((status) => status.sourceId === source.id)?.commit?.slice(0, 12) ?? ''}`
-                              : '当前配置尚未获取'}
+                            {sourceStatusLabel(
+                              overview.sourceStatus?.find(
+                                (status) => status.sourceId === source.id,
+                              ),
+                            )}
                           </span>
                         }
                         control={
@@ -455,7 +479,7 @@ export function WorkspaceAuthoring({
                 </SettingsSection>
                 <Alert>
                   <AlertDescription>
-                    这里显示已保存的来源配置。保存配置不会自动获取代码；当前文件以最近一次成功生成的内容为准，失败时保留原固定版本。
+                    保存配置后需同步源码。同步成功后更新当前文件；失败会保留上次成功内容并显示原因，已有任务仍使用原输入。
                   </AlertDescription>
                 </Alert>
                 {manager ? (
@@ -562,7 +586,7 @@ export function WorkspaceAuthoring({
               controller.submit({ kind: 'source', action: 'remove', id: dialog.source.id })
             }
           >
-            移除「{dialog.source.name}」？已有固定版本保留；后续更新不再获取此仓库。
+            移除「{dialog.source.name}」？后续同步不再获取此仓库；已有任务与历史引用保留。
           </WorkspaceAuthoringConfirm>
         ) : null}
         {dialog?.type === 'revoke-credential' ? (
@@ -582,15 +606,15 @@ export function WorkspaceAuthoring({
             撤回「{dialog.credential.name}」后，使用此凭证的新获取操作将被拒绝。
           </WorkspaceAuthoringConfirm>
         ) : null}
-        {dialog?.type === 'version' ? (
+        {dialog?.type === 'sync' ? (
           <WorkspaceAuthoringConfirm
-            title="更新固定版本"
+            title="同步源码"
             controller={controller}
             onClose={close}
-            onConfirm={() => controller.submit({ kind: 'version', name: '' })}
+            onConfirm={() => controller.submit({ kind: 'sync' })}
           >
-            以资料修订 {overview?.revision}、{overview?.sources.length ?? 0}{' '}
-            个来源生成新的内部固定版本。所有来源成功后才可选用；问答和部署继续绑定原已选版本。
+            按已保存配置同步 {overview?.sources.length ?? 0} 个 Git
+            来源。同步完成后，下一次对话运行使用最新资料和源码；已提交任务的输入不会改变。
           </WorkspaceAuthoringConfirm>
         ) : null}
       </div>
@@ -609,7 +633,7 @@ export function WorkspaceCurrentFiles({
   onFolder,
 }: {
   projectId: string
-  revision: number
+  revision: number | string
   readingRevision: string
   onDenied: (cause: unknown) => void
   selected: string | null

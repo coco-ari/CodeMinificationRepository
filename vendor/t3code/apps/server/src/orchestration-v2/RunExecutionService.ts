@@ -1,4 +1,5 @@
 import { isCustomerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
+import { prepareBusinessRunContext } from "../../../../../../agent-demo/t3-adapters/thread-inputs.ts";
 import {
   forThread as autoOpsThreadSettings,
   applyProductSettings,
@@ -1593,8 +1594,22 @@ export const layer: Layer.Layer<
         const compact =
           input.message.attachments.length === 0 &&
           input.message.text.trim().toLowerCase() === "/compact";
-        const startTurn = compact
-          ? (input.session.compactThread?.(turnInput) ??
+        // 输入身份属于原生任务；失败重试与恢复复用原收据，不改写线程上的全局资料指针。
+        const startTurn = (customer ? Effect.succeed(undefined) : Effect.tryPromise({
+          try: (signal) => prepareBusinessRunContext(input.run.threadId, input.run.id, input.run.restartContinuationOfRunId, signal),
+          catch: (cause) => new ProviderAdapter.ProviderAdapterTurnStartError({
+            driver: input.session.driver, threadId: input.run.threadId,
+            providerThreadId: input.providerThread.id, runId: input.run.id, cause,
+          }),
+        })).pipe(Effect.flatMap((businessContext) => Effect.gen(function* () {
+          // 捕获可能等待源码同步，取消或队列归属变化后不得继续启动模型。
+          if (input.shouldStartProviderTurn && !(yield* input.shouldStartProviderTurn())) {
+            yield* Fiber.interrupt(providerEventFiber);
+            return;
+          }
+          const scopedInput = businessContext ? { ...turnInput, appContext: [...appContext, businessContext] } : turnInput;
+          return yield* compact
+          ? (input.session.compactThread?.(scopedInput) ??
             Effect.fail(
               new ProviderAdapter.ProviderAdapterTurnStartError({
                 driver: input.session.driver,
@@ -1604,7 +1619,8 @@ export const layer: Layer.Layer<
                 cause: "This provider does not support context compaction.",
               }),
             ))
-          : input.session.startTurn(turnInput);
+          : input.session.startTurn(scopedInput);
+        })));
         yield* Effect.andThen(shouldStart, startTurn).pipe(
           // Wait for acceptance so abandoned startup cannot leave a refresher
           // on the already-detached ingestion fiber.

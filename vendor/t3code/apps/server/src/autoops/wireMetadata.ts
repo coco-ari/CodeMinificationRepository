@@ -3,12 +3,11 @@ import { getThreadBinding } from '../../../../../../agent-demo/t3-adapters/acces
 
 function externalRoot(threadId: string): string | undefined {
   const binding = getThreadBinding(threadId);
-  return binding?.workspaceType === 'external' && binding.workspaceVersionId
-    ? `autoops/${binding.projectId}/workspaces/${binding.workspaceVersionId}`
-    : undefined;
+  if (binding?.workspaceType !== 'external') return undefined;
+  return `autoops/${binding.projectId}/current/external`;
 }
 
-/** Only transport metadata is mapped. Native state and free-form content retain their values. */
+/** 仅投影传输元数据，原生状态与自由文本保持原值。 */
 export function projectExternalWorkspaceMetadata(projection: OrchestrationV2ThreadProjection): OrchestrationV2ThreadProjection {
   const root = externalRoot(projection.thread.id);
   if (!root) return projection;
@@ -31,7 +30,7 @@ export function projectExternalWorkspaceEventMetadata(event: OrchestrationV2Doma
   }
   if (event.type.startsWith('thread.') && 'worktreePath' in event.payload && typeof event.payload.worktreePath === 'string') {
     const root = externalRoot(event.threadId);
-    // The discriminated event union is preserved; only the app-thread path changes.
+    // 保留事件联合类型，只替换传输中的会话目录。
     return root ? {...event,payload:{...event.payload,worktreePath:root}} as OrchestrationV2DomainEvent : event;
   }
   return event;

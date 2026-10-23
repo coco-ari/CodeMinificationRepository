@@ -353,7 +353,7 @@ export function WorkspaceSourceDialog({
           disabled={controller.busy}
         />
         <p className="text-xs text-muted-foreground">
-          保存只修改来源定义。更新固定版本时才获取仓库；多个来源的挂载目录不能重叠，也不能覆盖资料目录。仅检出所选目录，内部版本仍保留仓库
+          保存只修改来源定义。同步源码时才获取仓库；多个来源的挂载目录不能重叠，也不能覆盖资料目录。仅检出所选目录，内部工作区仍保留仓库
           Git 历史。
         </p>
         {error ? (
@@ -559,7 +559,9 @@ export function WorkspaceFileEditDialog({
         }}
       >
         {action === 'delete' ? (
-          <p className="break-all">删除「{entry?.path}」及其目录内容？已有固定版本仍然保留。</p>
+          <p className="break-all">
+            删除「{entry?.path}」及其目录内容？已有任务和历史引用仍然保留。
+          </p>
         ) : (
           <AuthoringField label="项目相对路径">
             <Input

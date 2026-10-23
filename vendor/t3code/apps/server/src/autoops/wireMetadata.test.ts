@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { OrchestrationV2DomainEvent, OrchestrationV2ThreadProjection } from '@t3tools/contracts';
 import * as DateTime from 'effect/DateTime';
 
-const mocks = vi.hoisted(() => ({ bindings:new Map<string,{projectId:string;workspaceType:'internal'|'external';workspaceVersionId:string}>() }));
+const mocks = vi.hoisted(() => ({ bindings:new Map<string,{projectId:string;workspaceType:'internal'|'external';workspaceVersionId?:string}>() }));
 vi.mock('../../../../../../agent-demo/t3-adapters/access.mjs', () => ({ getThreadBinding:(threadId:string) => mocks.bindings.get(threadId) }));
 import { projectThreadProjectionForWire, projectDomainEventForWire } from '../orchestration-v2/WireProjection.ts';
 import { buildBoundedThreadStreamSnapshot } from '../orchestration-v2/ThreadStream.ts';
 
 const RAW_ROOT='/home/tao/private-runtime/t3/workspaces/project-a';
-const SAFE_ROOT='autoops/project-a/workspaces/external-v1';
+const SAFE_ROOT='autoops/project-a/current/external';
 const NOW=DateTime.makeUnsafe('2026-10-22T00:00:00Z');
 function projection(): OrchestrationV2ThreadProjection {
   return {
@@ -28,7 +28,7 @@ describe('external workspace wire metadata', () => {
     mocks.bindings.set('thread-a',{projectId:'project-a',workspaceType:'external',workspaceVersionId:'external-v1'});
   });
 
-  it('maps HTTP and native RPC snapshot metadata to the fixed version without mutating native state', () => {
+  it('maps HTTP and native RPC snapshot metadata to the external scope without mutating native state', () => {
     const native=projection();
     const projected=projectThreadProjectionForWire(native);
     expect(projected.providerSessions[0]?.cwd).toBe(SAFE_ROOT);
@@ -40,6 +40,14 @@ describe('external workspace wire metadata', () => {
     expect(projected.messages).toBe(native.messages);
     expect(projected.providerSessions[0]?.model).toBe('grok-4.6');
     expect(projectThreadProjectionForWire(projected)).toEqual(projected);
+  });
+
+  it('新版外部会话没有固定版本时仍不暴露宿主目录', () => {
+    mocks.bindings.set('thread-a',{projectId:'project-a',workspaceType:'external'});
+    const projected=projectThreadProjectionForWire(projection());
+    expect(projected.providerSessions[0]?.cwd).toBe('autoops/project-a/current/external');
+    expect(projected.thread.worktreePath).toBe('autoops/project-a/current/external');
+    expect(projectDomainEventForWire(event('provider-session.updated',projection().providerSessions[0])).payload).toMatchObject({cwd:'autoops/project-a/current/external'});
   });
 
   it('uses the same metadata projection for bounded stream snapshots', () => {

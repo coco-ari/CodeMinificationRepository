@@ -192,7 +192,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       } catch (error) {
         const cancelled = signal.aborted, revoked = !authorized && [401, 403, 404].includes(error?.status)
         const message = cancelled ? '任务已取消，原有已发布版本仍可使用' : revoked ? '操作人权限已失效，工作区任务未执行' : error instanceof WorkspaceError ? error.message : '处理失败，请检查来源、Git 与可用存储后重试'
-        updateTask(id, task.id, { status: cancelled || revoked ? 'interrupted' : 'failed', stage: cancelled ? 'cancelled' : revoked ? 'interrupted' : 'failed', message, error: message })
+        updateTask(id, task.id, { status: cancelled || revoked ? 'interrupted' : 'failed', stage: cancelled ? 'cancelled' : revoked ? 'interrupted' : 'failed', message, error: message, ...(typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code) ? { failureCode: error.code } : {}) })
       } finally {
         await rm(temporary, { recursive: true, force: true }).catch(() => {})
       }
@@ -214,6 +214,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     if (signal?.aborted) { await rm(destination, { recursive: true, force: true }); throw new Error('cancelled') }
     const state = load(id)
     state.versions.unshift(version)
+    if (taskId && record.cachePurpose) { state.protectedReferences ??= {}; state.protectedReferences[`task:${taskId}`] = version.id }
     if (taskId) {
       const task = state.tasks.find((entry) => entry.id === taskId)
       Object.assign(task, { status: 'completed', stage: 'completed', versionId: version.id, message: version.status === 'pending_review' ? '脱敏完成，有文件需要确认后发布' : '工作区版本已发布' })
@@ -319,6 +320,24 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     try { await work } finally { initializing.delete(id) }
   }
 
+  async function packageSource(id, parent, input, { task, temporary, progress, signal }) {
+    const services = input.services
+        const releaseId = randomUUID(), output = join(temporary, 'release'), root = versionRoot(id, parent)
+        await mkdir(output, { recursive: true, mode: 0o700 })
+        progress('packaging', '正在按服务构建上下文生成源码 ZIP')
+        const { artifacts, contexts } = await buildWorkspacePackages({ root, parent, services, output, contexts: input.contexts }, signal)
+        progress('verifying', '正在校验部署包与固定来源')
+        const manifest = { schemaVersion: 1, projectId: id, releaseId, sourceVersionId: parent.id, source: publicVersion(parent).source, createdAt: now(), configurationRef: '由部署目标环境配置提供；源码包不注入平台凭据', services: artifacts.map((entry) => ({ ...entry, context: contexts.find((item) => item.service === entry.service) })), status: 'packaged', notice: '已生成源码交付包，尚未在目标服务器部署；构建、健康检查与回退由部署任务独立执行' }
+        await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2), { mode: 0o600 })
+        const destination = join(projectRoot(id), 'packages', releaseId)
+        await mkdir(dirname(destination), { recursive: true, mode: 0o700 }); await rename(output, destination)
+        if (signal.aborted) { await rm(destination, { recursive: true, force: true }); throw new Error('cancelled') }
+        const state = load(id), release = { id: releaseId, name: `源码发布 ${state.releases.length + 1}`, sourceVersionId: parent.id, createdAt: manifest.createdAt, services: artifacts, manifest }
+        state.releases.unshift(release)
+        Object.assign(state.tasks.find((entry) => entry.id === task.id), { status: 'completed', stage: 'completed', message: '源码部署包已生成并通过校验', releaseId })
+        save(id, state)
+  }
+
   return {
     ensureProject,
     stopAccepting: jobs.stopAccepting,
@@ -326,9 +345,58 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     async close(options) { jobs.stopAccepting(); await Promise.all([Promise.allSettled([...initializing.values()]), jobs.close(options)]) },
     overview(id) {
       const state = load(id)
-      return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal').map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
+      return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal' && !entry.cachePurpose).map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
     },
     getVersion(id, versionId) { return publicVersion(versionRecord(id, versionId)) },
+    findSourceCache(id, cacheKey) {
+      const version = load(id).versions.find(entry => entry.cacheKey === cacheKey && entry.status === 'published')
+      return version ? publicVersion(version) : undefined
+    },
+    retainVersion(id, versionId, reference) {
+      if (typeof reference !== 'string' || !reference || reference.length > 240) fail(400, 'WORKSPACE_REFERENCE_INVALID', '资料保护引用无效')
+      versionRecord(id, versionId)
+      const state = load(id)
+      state.protectedReferences ??= {}
+      state.protectedReferences[reference] = versionId
+      save(id, state)
+    },
+    releaseVersion(id, reference) {
+      const state = load(id)
+      if (state.protectedReferences?.[reference]) { delete state.protectedReferences[reference]; save(id, state) }
+    },
+    planCleanupVersions(id, versionIds, actorId, additionalReferences = []) {
+      authorize(actorId, id, 'cleanup')
+      const state = load(id)
+      if (!Array.isArray(versionIds) || versionIds.length > 500 || versionIds.some(value => typeof value !== 'string') || !Array.isArray(additionalReferences)) fail(400, 'WORKSPACE_CLEANUP_INVALID', '清理目标无效')
+      const protectedIds = new Set([...Object.values(state.protectedReferences ?? {}), ...additionalReferences])
+      for (const release of state.releases) protectedIds.add(release.sourceVersionId)
+      for (const version of state.versions) if (!versionIds.includes(version.id) && version.sourceVersionId) protectedIds.add(version.sourceVersionId)
+      const reasons = Object.fromEntries(versionIds.map(versionId => {
+        const values = Object.entries(state.protectedReferences ?? {}).filter(([, value]) => value === versionId).map(([reference]) => ({ kind: reference.startsWith('task:') ? 'unknown-task' : reference.split(':')[0], reference }))
+        if (additionalReferences.includes(versionId)) values.push({ kind: 'current-or-session', reference: '当前资料或会话授权引用' })
+        for (const release of state.releases) if (release.sourceVersionId === versionId) values.push({ kind: 'package', reference: release.id })
+        for (const version of state.versions) if (!versionIds.includes(version.id) && version.sourceVersionId === versionId) values.push({ kind: 'derived-version', reference: version.id })
+        return [versionId, values]
+      }))
+      return { activeTasks: state.tasks.filter(task => ['queued', 'running'].includes(task.status)).map(task => task.id), protected: versionIds.filter(value => protectedIds.has(value)), removable: state.versions.filter(value => versionIds.includes(value.id) && !protectedIds.has(value.id)).map(value => value.id), reasons }
+    },
+    pruneVersions(id, versionIds, actorId, additionalReferences = []) {
+      authorize(actorId, id, 'cleanup')
+      jobs.assertAccepting()
+      const state = load(id)
+      if (state.tasks.some(task => ['queued', 'running'].includes(task.status))) fail(409, 'WORKSPACE_TASK_ACTIVE', '工作区任务仍在运行，不能清理历史资料')
+      if (!Array.isArray(versionIds) || versionIds.length > 500 || versionIds.some(value => typeof value !== 'string')) fail(400, 'WORKSPACE_CLEANUP_INVALID', '清理目标无效')
+      const protectedIds = new Set([...Object.values(state.protectedReferences ?? {}), ...additionalReferences])
+      for (const release of state.releases) protectedIds.add(release.sourceVersionId)
+      for (const version of state.versions) if (!versionIds.includes(version.id) && version.sourceVersionId) protectedIds.add(version.sourceVersionId)
+      if (versionIds.some(value => protectedIds.has(value))) fail(409, 'WORKSPACE_VERSION_IN_USE', '资料仍被当前工作区、执行输入或交付物引用，不能清理')
+      const removed = state.versions.filter(version => versionIds.includes(version.id)).map(version => version.id)
+      state.versions = state.versions.filter(version => !removed.includes(version.id))
+      // 先持久化不可访问状态；删除失败仅留下不可见文件，不能让已删除数据再次变成可读版本。
+      save(id, state)
+      for (const versionId of removed) rmSync(join(projectRoot(id), 'versions', safeId(versionId)), { recursive: true, force: true })
+      return { removed }
+    },
     taskForRequest(id, type, requestId, actorId) {
       authorize(actorId, id, type)
       const task = load(id).tasks.find(task => task.type === type && task.requestId === requestId)
@@ -409,21 +477,28 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
           if (entry.workingDirectory !== '.') safePath(entry.workingDirectory)
         }
       }
-      return start(id, 'packages', input, async ({ task, temporary, progress, signal }) => {
-        const releaseId = randomUUID(), output = join(temporary, 'release'), root = versionRoot(id, parent)
-        await mkdir(output, { recursive: true, mode: 0o700 })
-        progress('packaging', '正在按服务构建上下文生成源码 ZIP')
-        const { artifacts, contexts } = await buildWorkspacePackages({ root, parent, services, output, contexts: input.contexts }, signal)
-        progress('verifying', '正在校验部署包与固定来源')
-        const manifest = { schemaVersion: 1, projectId: id, releaseId, sourceVersionId: parent.id, source: publicVersion(parent).source, createdAt: now(), configurationRef: '由部署目标环境配置提供；源码包不注入平台凭据', services: artifacts.map((entry) => ({ ...entry, context: contexts.find((item) => item.service === entry.service) })), status: 'packaged', notice: '已生成源码交付包，尚未在目标服务器部署；构建、健康检查与回退由部署任务独立执行' }
-        await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2), { mode: 0o600 })
-        const destination = join(projectRoot(id), 'packages', releaseId)
-        await mkdir(dirname(destination), { recursive: true, mode: 0o700 }); await rename(output, destination)
-        if (signal.aborted) { await rm(destination, { recursive: true, force: true }); throw new Error('cancelled') }
-        const state = load(id), release = { id: releaseId, name: `源码发布 ${state.releases.length + 1}`, sourceVersionId: parent.id, createdAt: manifest.createdAt, services: artifacts, manifest }
-        state.releases.unshift(release)
-        Object.assign(state.tasks.find((entry) => entry.id === task.id), { status: 'completed', stage: 'completed', message: '源码部署包已生成并通过校验', releaseId })
-        save(id, state)
+      return start(id, 'packages', input, context => packageSource(id, parent, input, context), actorId)
+    },
+    startSourcePackages(id, input, prepare, actorId) {
+      return start(id, 'packages', input, async context => {
+        const { temporary, signal, progress } = context
+        const prepared = await prepare({ signal, progress, materializeCache: async (cacheInput, materialize) => {
+          authorize(actorId, id, 'packages')
+          const previous = load(id).versions.find(version => version.cacheKey === cacheInput.cacheKey && version.status === 'published')
+          if (previous) { const state = load(id); state.protectedReferences ??= {}; state.protectedReferences[`task:${context.task.id}`] = previous.id; save(id, state); return publicVersion(previous) }
+          const root = join(temporary, 'source-cache', 'files')
+          await mkdir(root, { recursive: true, mode: 0o700 })
+          await materialize({ root, signal, progress, checkBudget: () => checkImportBudget(temporary) })
+          checkCompleteSource(root)
+          authorize(actorId, id, 'packages')
+          const version = publicVersion(await persistVersion(id, root, { id: randomUUID(), name: '部署源码输入', type: 'internal', status: 'published', createdAt: now(), source: cacheInput.source, cacheKey: cacheInput.cacheKey, cachePurpose: 'deployment', isExample: false }, undefined, signal))
+          const state = load(id); state.protectedReferences ??= {}; state.protectedReferences[`task:${context.task.id}`] = version.id; save(id, state)
+          return version
+        } })
+        authorize(actorId, id, 'packages')
+        const parent = source(id, prepared.sourceVersionId)
+        if (parent.cachePurpose !== 'deployment' || parent.source.documents?.length) fail(409, 'WORKSPACE_DEPLOYMENT_SOURCE_INVALID', '部署只允许使用独立源码输入')
+        await packageSource(id, parent, { ...input, services: prepared.contexts.map(value => value.service), contexts: prepared.contexts }, context)
       }, actorId)
     },
     packageFile(id, releaseId, service) {
@@ -439,14 +514,20 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     },
     startSnapshot(id, input, materialize, actorId) {
       if (typeof materialize !== 'function') fail(503, 'WORKSPACE_SNAPSHOT_UNAVAILABLE', '工作区来源读取尚未就绪')
-      return start(id, 'snapshot', input, async ({ task, temporary, progress, signal }) => {
+      const taskType = input.taskType ?? 'snapshot'
+      if (!['snapshot', 'sync', 'input'].includes(taskType)) fail(400, 'WORKSPACE_TASK_INVALID', '资料任务类型无效')
+      return start(id, taskType, input, async ({ task, temporary, progress, signal }) => {
+        if (input.cacheKey) {
+          const cached = load(id).versions.find(version => version.cacheKey === input.cacheKey && version.status === 'published')
+          if (cached) { const state = load(id); state.protectedReferences ??= {}; state.protectedReferences[`task:${task.id}`] = cached.id; save(id, state); updateTask(id, task.id, { status: 'completed', stage: 'completed', versionId: cached.id, message: '源码提交未变化，已复用固定输入' }); return }
+        }
         const root = join(temporary, 'version', 'files')
         await mkdir(root, { recursive: true, mode: 0o700 })
         await materialize({ root, signal, progress, checkBudget: () => checkImportBudget(temporary) })
         checkCompleteSource(root)
         progress('publishing', '正在校验源码和资料并保存固定版本')
         const count = load(id).versions.filter((entry) => entry.type === 'internal').length + 1
-        await persistVersion(id, root, { id: randomUUID(), name: `内部版本 v${String(count).padStart(3, '0')}`, type: 'internal', status: 'published', createdAt: now(), source: input.source, isExample: false }, task.id, signal)
+        await persistVersion(id, root, { id: randomUUID(), name: `内部版本 v${String(count).padStart(3, '0')}`, type: 'internal', status: 'published', createdAt: now(), source: input.source, isExample: false, ...(input.cacheKey ? { cacheKey: input.cacheKey, cachePurpose: input.cachePurpose ?? 'source' } : {}) }, task.id, signal)
       }, actorId)
     },
     startImport(id, input, actorId) {

@@ -41,8 +41,9 @@ export function configuredAutoOpsAccess() {
     bindingDb = new DatabaseSync(join(directory, 't3-autoops.sqlite'))
     bindingDb.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;')
     initializeAutoOpsAccessSchema(bindingDb)
-    const workspaceStore = configuredWorkspaceStore({ authorizeTask({ actorId, projectId }) {
+    const workspaceStore = configuredWorkspaceStore({ authorizeTask({ actorId, projectId, type }) {
       if (!configuredAccess) fail(503, 'WORKSPACE_AUTHORIZATION_REQUIRED', '工作区授权尚未就绪')
+      if (type === 'input') return configuredAccess.requireWorkspaceReader(actorId, projectId)
       return configuredAccess.requireWorkspaceActor(actorId, projectId)
     } })
     configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore })

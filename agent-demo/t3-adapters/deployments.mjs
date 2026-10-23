@@ -44,7 +44,7 @@ export function createDeploymentStore({dataDir, workspaceStore, access, agentPor
   if (!dataDir || !workspaceStore) fail(500, 'DEPLOYMENT_NOT_CONFIGURED', '部署验证存储尚未配置')
   if (!access || typeof access.requireDeploymentActor !== 'function') fail(500, 'DEPLOYMENT_AUTHORIZATION_REQUIRED', '部署任务必须配置当前授权检查')
   const directory = join(resolve(dataDir), 'deployment-center')
-  const denied = async () => fail(403, 'DEPLOYMENT_GIT_DISABLED', '部署只接受已发布内部工作区生成的固定源码包')
+  const denied = async () => fail(403, 'DEPLOYMENT_GIT_DISABLED', '部署只接受已经固定 Git 提交与构建上下文的源码包')
   const repository = new RepositoryService({directory, builder:{initialize:async () => {}, build:denied, history:denied, branches:denied}})
   const deployment = new DeploymentService(repository, {publicOrigin, authorizeTask({ task, target }) {
     const scope = deployment.projects.claimScope(task, target)
@@ -147,7 +147,8 @@ export function createDeploymentStore({dataDir, workspaceStore, access, agentPor
         const packageId = uuid(input.packageId, '源码包标识'), overview = workspaceStore.overview(projectId), selected = overview.releases.find((item) => item.id === packageId)
         if (!selected) fail(404, 'DEPLOYMENT_PACKAGE_NOT_FOUND', '当前项目中不存在此源码包')
         const version = workspaceStore.getVersion(projectId, selected.sourceVersionId), manifest = selected.manifest, artifact = manifest?.services?.find((item) => item.service === 'frontend')
-        if (version.type !== 'internal' || version.status !== 'published' || manifest.projectId !== projectId || manifest.releaseId !== packageId || manifest.sourceVersionId !== version.id || manifest.status !== 'packaged' || manifest.source?.contentHash !== version.source.contentHash || JSON.stringify(manifest.source?.repositories) !== JSON.stringify(version.source.repositories)) fail(409, 'DEPLOYMENT_SOURCE_INVALID', '只能发布来自已发布内部固定版本的源码包')
+        if (version.type !== 'internal' || version.status !== 'published' || (version.cachePurpose && version.cachePurpose !== 'deployment') || manifest.projectId !== projectId || manifest.releaseId !== packageId || manifest.sourceVersionId !== version.id || manifest.status !== 'packaged' || manifest.source?.contentHash !== version.source.contentHash || JSON.stringify(manifest.source?.repositories) !== JSON.stringify(version.source.repositories)) fail(409, 'DEPLOYMENT_SOURCE_INVALID', '源码包与固定 Git 来源不一致')
+        if (version.cachePurpose === 'deployment' && (!version.source.repositories.length || version.source.documents?.length)) fail(409, 'DEPLOYMENT_SOURCE_INVALID', '部署源码输入不能包含上传资料')
         if (!artifact || artifact.context?.service !== 'frontend' || typeof artifact.context?.workingDirectory !== 'string' || normalizedModule(artifact.context.workingDirectory) !== normalizedModule(target.config.module)) fail(409, 'DEPLOYMENT_CONTEXT_MISMATCH', '源码包构建目录与部署配置不一致，请为此构建上下文配置独立服务')
         const packed = workspaceStore.packageFile(projectId, packageId, 'frontend'), bytes = Buffer.from(packed.bytes)
         if (bytes.length !== artifact.size || sha(bytes) !== artifact.sha256) fail(409, 'DEPLOYMENT_PACKAGE_CHANGED', '源码包内容与固定清单不一致，已停止发布')

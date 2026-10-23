@@ -2863,6 +2863,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 input.context.projectionThreadId,
                 childThreadId,
                 input.nativeThreadId,
+                input.context.input.runId,
               ),
             );
             yield* emitProviderEvent({

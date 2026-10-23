@@ -113,6 +113,7 @@ describe('AutoOps host authentication boundary', () => {
           environmentId: 'test',
           agentId: 'agent',
           visibility: 'private',
+          workspaceType: 'internal',
         }),
       }),
     )
@@ -141,6 +142,8 @@ describe('AutoOps host authentication boundary', () => {
             agentId: 'release-agent',
             visibility: 'project',
             ownerId: 'alice',
+            workspaceType: 'internal',
+            workspaceVersionId: 'old-input',
           },
         }),
       })
@@ -167,6 +170,7 @@ describe('AutoOps host authentication boundary', () => {
       environmentId: 'production',
       agentId: 'release-agent',
       visibility: 'private',
+      workspaceType: 'internal',
     })
     fetch.mockResolvedValueOnce({
       ok: true,

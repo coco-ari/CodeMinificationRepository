@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import type { AutoOpsAccess } from './access.mjs'
 import { configuredWorkspaceStore, WorkspaceError, type WorkspaceStore } from './workspaces.mjs'
 import { createWorkspaceAuthoring } from './workspace-authoring/index.ts'
+import { createCurrentWorkspace } from './workspace-current.ts'
 import { createProjectCredentialService, type GitCredential } from './credentials.ts'
 import { createWorkspaceGit } from './workspace-git.ts'
 import { extractBusinessAttachment } from './business-documents.mjs'
@@ -23,6 +24,7 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   access: AutoOpsAccess; store: WorkspaceStore; authoring: Authoring; credentials: Credentials; git: Git
   extractAttachment?: typeof extractBusinessAttachment
 }) {
+  const currentWorkspace = createCurrentWorkspace({ access, store, authoring, credentials, git })
   let accepting = true
   let closing: Promise<void> | undefined
   const preparations = new Map<string, { revision: number; work: Promise<WorkspaceTask>; controller: AbortController }>()
@@ -34,11 +36,12 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     return access.requireWorkspaceActor(actorId, projectId)
   }
   const published = (projectId: string) => store.overview(projectId).internalVersions.filter(version => version.status === 'published')
-  function sourceViews(projectId: string, sources: WorkspaceRepositorySource[]) {
+  function sourceViews(projectId: string, sources: WorkspaceRepositorySource[], currentActor: string) {
     const versions = published(projectId)
     return sources.map(source => {
       const hash = configurationHash(source)
-      const version = versions.find(version => version.source.repositories.some(repository => repository.sourceId === source.id && repository.configurationHash === hash))
+      const synced = authoring.syncRecords?.(projectId, currentActor)?.find(record => record.sourceId === source.id && record.configurationHash === hash)
+      const version = synced?.versionId ? store.getVersion(projectId, synced.versionId) : versions.find(version => version.source.repositories.some(repository => repository.sourceId === source.id && repository.configurationHash === hash))
       const repository = version?.source.repositories.find(repository => repository.sourceId === source.id && repository.configurationHash === hash)
       return { source, version, repository }
     })
@@ -46,11 +49,15 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   function overview(projectId: string, actorId: string): WorkspaceAuthoringOverview {
     permitRead(projectId, actorId)
     const current = authoring.overview(projectId, actorId)
+    const records = authoring.syncRecords?.(projectId, actorId) ?? []
     const latest = published(projectId).find(version => version.source.authoringRevision !== undefined)
-    return { ...current, sourceStatus: sourceViews(projectId, current.sources).map(({ source, version, repository }) => ({
-      sourceId: source.id, status: version && repository ? 'synced' : 'unsynced',
-      ...(version && repository ? { versionId: version.id, commit: repository.commit, createdAt: version.createdAt } : {}),
-    })), ...(latest ? { publishedRevision: latest.source.authoringRevision! } : {}), hasUnpublishedChanges: latest?.source.authoringRevision !== current.revision }
+    return { ...current, ...(latest ? { publishedRevision: latest.source.authoringRevision! } : {}), hasUnpublishedChanges: latest?.source.authoringRevision !== current.revision, sourceStatus: sourceViews(projectId, current.sources, actorId).map(({ source, version, repository }) => {
+      const record = records.find(value => value.sourceId === source.id && value.configurationHash === configurationHash(source))
+      return { sourceId: source.id, status: record?.status ?? (version && repository ? 'synced' : 'unsynced'),
+        ...(version && repository ? { versionId: version.id, commit: repository.commit, createdAt: version.createdAt } : {}),
+        ...(record ? { updatedAt: record.updatedAt, requestId: record.requestId, ...(record.error ? { error: record.error } : {}) } : {}) }
+    }) }
+
   }
   function currentEntries(projectId: string, actorId: string) {
     const current = overview(projectId, actorId)
@@ -62,7 +69,7 @@ export function createWorkspaceManagement({ access, store, authoring, credential
         entries.set(directory, { path: directory, name: parts[index - 1]!, kind: 'directory', size: 0 })
       }
     }
-    for (const { source, version } of sourceViews(projectId, current.sources)) {
+    for (const { source, version } of sourceViews(projectId, current.sources, actorId)) {
       if (!version) continue
       for (const file of store.files(projectId, version.id)) {
         if (!file.path.startsWith(source.mountPath + '/')) continue
@@ -76,7 +83,7 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     const current = overview(projectId, actorId)
     const source = current.sources.find(source => path.startsWith(source.mountPath + '/'))
     if (!source) return undefined
-    const match = sourceViews(projectId, [source])[0]
+    const match = sourceViews(projectId, [source], actorId)[0]
     if (!match?.version) fail(404, 'WORKSPACE_SOURCE_UNSYNCED', '此源码来源尚未生成匹配当前配置的版本')
     const file = store.versionFile(projectId, match.version.id, path)
     const sha256 = createHash('sha256').update(file.bytes).digest('hex')
@@ -114,11 +121,12 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   }
   function receipt(projectId: string, requestId: string, actorId: string) {
     permitWrite(projectId, actorId)
-    const task = store.taskForRequest(projectId, 'snapshot', requestId, actorId)
+    const task = ['packages', 'external', 'sync', 'snapshot', 'input'].map(type => store.taskForRequest(projectId, type, requestId, actorId)).find(Boolean)
     let capture = authoring.captureByRequest(projectId, requestId, actorId)
-    if (task && !active(task) && capture?.status === 'active') capture = authoring.releaseCapture(projectId, capture.id, actorId)
+    if (task?.type === 'snapshot' && !active(task) && capture?.status === 'active') capture = authoring.releaseCapture(projectId, capture.id, actorId)
+    const externalPreparation = capture ? undefined : currentWorkspace.externalPreparationReceipt(projectId, requestId, actorId)
     return { result: authoring.receipt(projectId, requestId, actorId), ...(task ? { task } : {}),
-      ...(capture ? { capture: { id: capture.id, resolution: capture.resolution, ...(capture.resolutionError ? { resolutionError: capture.resolutionError } : {}) } } : {}) }
+      ...(capture ? { capture: { id: capture.id, resolution: capture.resolution, ...(capture.resolutionError ? { resolutionError: capture.resolutionError } : {}) } } : externalPreparation ? { capture: externalPreparation } : {}) }
   }
   function releaseAfterTask(projectId: string, captureId: string, requestId: string, actorId: string) {
     // 物化结束后仍须校验和持久化版本；只在原任务收据确认为终态后释放原件。
@@ -203,7 +211,7 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     return work
   }
   return {
-    authoring, credentials, overview, currentFile, currentContent, receipt, generate,
+    ...currentWorkspace, authoring, credentials, overview, currentFile, currentContent, receipt, generate,
     validateSource(source: WorkspaceRepositorySource) { return git.validateRepositorySource(source) },
     tree(projectId: string, directory: string, actorId: string) {
       const prefix = directory ? directory + '/' : ''
@@ -215,11 +223,12 @@ export function createWorkspaceManagement({ access, store, authoring, credential
       const entries = currentEntries(projectId, actorId).filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
       return { entries: entries.slice(0, limit), truncated: entries.length > limit }
     },
-    stopAccepting() { accepting = false; for (const preparation of preparations.values()) preparation.controller.abort() },
+    stopAccepting() { accepting = false; currentWorkspace.stopAccepting(); for (const preparation of preparations.values()) preparation.controller.abort() },
     close(): Promise<void> {
       this.stopAccepting()
       closing ??= (async () => {
         await Promise.allSettled([...preparations.values()].map(entry => entry.work))
+        await currentWorkspace.drain()
         const results = await Promise.allSettled([store.whenIdle(), ...previews])
         await Promise.allSettled([...captureReleases])
         credentials.stopAccepting()
@@ -257,7 +266,7 @@ export function configuredWorkspaceManagement(access: AutoOpsAccess): WorkspaceM
   })
   try {
     const git = createWorkspaceGit({ allowedOrigins: (process.env.AUTOOPS_WORKSPACE_GIT_ORIGINS ?? '').split(',').map(origin => origin.trim()).filter(Boolean) })
-    const authoring = createWorkspaceAuthoring({ dataDir, authorize: (actor, project, action) => action === 'read' ? access.requireWorkspaceReader(actor, project) : access.requireWorkspaceActor(actor, project) })
+    const authoring = createWorkspaceAuthoring({ dataDir, authorize: (actor, project, action) => action === 'read' ? access.requireWorkspaceReader(actor, project) : action === 'external-read' ? access.requireWorkspaceInputReader(actor, project, 'external') : access.requireWorkspaceActor(actor, project) })
     configured = { dataDir, service: createWorkspaceManagement({ access, store, authoring, credentials, git }) }
     return configured.service
   } catch (error) { credentials.close(); throw error }

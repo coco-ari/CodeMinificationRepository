@@ -215,7 +215,17 @@ beforeEach(() => {
   mocks.authoring.mockResolvedValue({
     projectId: 'p-one',
     revision: 1,
-    sources: [],
+    sources: [
+      {
+        id: 'source-one',
+        name: '前端源码',
+        url: 'https://github.com/example/frontend.git',
+        refKind: 'default',
+        ref: '',
+        role: 'frontend',
+        mountPath: 'frontend',
+      },
+    ],
     entries: [],
     limits: { maxFileBytes: 8388608, maxFiles: 1000, maxBytes: 67108864 },
     hasUnpublishedChanges: true,
@@ -250,8 +260,7 @@ describe('现有模块的公共框架响应式布局', () => {
             {area === 'workspaces' ? <AutoOpsWorkspacesPage /> : <AutoOpsDeploymentsPage />}
           </AppSidebarLayout>,
           {
-            router:
-              '/' + area + '?projectId=p-one' + (area === 'workspaces' ? '&versionId=v-one' : ''),
+            router: '/' + area + '?projectId=p-one',
           },
         )
         await vi.waitFor(() =>
@@ -261,16 +270,17 @@ describe('现有模块的公共框架响应式布局', () => {
           await expect
             .element(screen.getByRole('button', { name: '新建对话', exact: true }))
             .toBeVisible()
+          await expect
+            .element(screen.getByRole('button', { name: '上传资料', exact: true }))
+            .toBeEnabled()
+          expect(screen.container.textContent).not.toContain('固定版本')
           if (width < 1000) {
             await screen.getByRole('button', { name: '工作区操作', exact: true }).click()
+            await page.getByRole('menuitem', { name: '添加源码来源', exact: true }).click()
             await expect
-              .element(page.getByRole('menuitem', { name: '导入仓库', exact: true }))
+              .element(page.getByRole('dialog', { name: '添加源码来源', exact: true }))
               .toBeVisible()
-            await page.getByRole('menuitem', { name: '导入仓库', exact: true }).click()
-            await expect
-              .element(page.getByRole('dialog', { name: '导入仓库', exact: true }))
-              .toBeVisible()
-            await page.getByRole('button', { name: '取消', exact: true }).click()
+            await page.getByText('关闭', { exact: true }).click()
           }
         } else {
           await expect
@@ -388,6 +398,47 @@ describe('部署运行记录与所选详情分离', () => {
 })
 
 describe('部署与源码包分别使用服务端写权限', () => {
+  for (const view of ['服务发布', '源码包'] as const) {
+    it(view + '已加载后源码读取被拒绝，清理旧内容并关闭生成表单', async () => {
+      await page.viewport(1440, 600)
+      await using screen = await render(
+        <AppSidebarLayout>
+          <AutoOpsDeploymentsPage />
+        </AppSidebarLayout>,
+        { router: '/deployments?projectId=p-one' },
+      )
+      await expect
+        .element(screen.getByRole('heading', { name: '前端部署验证', exact: true }))
+        .toBeVisible()
+      if (view === '源码包') {
+        await screen.getByRole('button', { name: '源码包', exact: true }).click()
+        await expect
+          .element(screen.getByRole('button', { name: /^示例前端源码包\s/ }))
+          .toBeVisible()
+      }
+      const generate = page.getByRole('button', { name: '生成部署包', exact: true })
+      await expect.element(generate).toBeEnabled()
+      mocks.authoring.mockRejectedValue(
+        new AutoOpsRequestError('源码读取权限已撤回', 'FORBIDDEN', 403),
+      )
+      await generate.click()
+      await expect.element(screen.getByText('源码读取权限已撤回', { exact: true })).toBeVisible()
+      await expect
+        .element(page.getByRole('dialog', { name: '生成部署包', exact: true }))
+        .not.toBeInTheDocument()
+      await expect
+        .element(screen.getByRole('heading', { name: '前端部署验证', exact: true }))
+        .not.toBeInTheDocument()
+      await expect
+        .element(screen.getByRole('button', { name: /^示例前端源码包\s/ }))
+        .not.toBeInTheDocument()
+      await expect
+        .element(page.getByRole('button', { name: '发布', exact: true }))
+        .not.toBeInTheDocument()
+      await expect.element(generate).not.toBeInTheDocument()
+      expect(screen.container.querySelector('[data-module-error]')).toBeNull()
+    })
+  }
   for (const capability of ['deployment.execute', 'workspace.manage'] as const) {
     it('缺少 ' + capability + ' 时保留阅读并禁用对应写操作', async () => {
       await page.viewport(1440, 600)

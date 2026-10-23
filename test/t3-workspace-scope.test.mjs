@@ -34,9 +34,15 @@ async function completed(store,id) {
   assert.fail('任务未完成')
 }
 
-test('workspace selection is required, fixed and inherited by a private fork',async t=>{
+test('新会话默认内部当前资料，旧版本引用仍按固定范围继承私有分支',async t=>{
   const {workspaceStore,access,admin,internal}=await setup(t)
-  assert.throws(()=>access.bindThread(admin,{...scope,threadId:'missing'}),{code:'WORKSPACE_REQUIRED'})
+  const current=access.bindThread(admin,{...scope,threadId:'current'})
+  assert.equal(current.workspaceType,'internal')
+  assert.equal(current.workspaceVersionId,undefined)
+  assert.equal(access.requireToolThread('current').binding.workspaceVersionId,undefined)
+  const currentFork=access.forkBinding(admin,'current','current-copy')
+  assert.equal(currentFork.workspaceType,'internal')
+  assert.equal(currentFork.workspaceVersionId,undefined)
   const fixed={...scope,workspaceType:'internal',workspaceVersionId:internal.id}
   access.bindThread(admin,{...fixed,threadId:'raw'})
   const task=await completed(workspaceStore,workspaceStore.startExternal(scope.projectId,{sourceVersionId:internal.id,requestId:'external'}).id)

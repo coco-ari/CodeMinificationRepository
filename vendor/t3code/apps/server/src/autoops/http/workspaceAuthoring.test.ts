@@ -139,6 +139,25 @@ describe("工作区资料真实 HTTP 路由", () => {
     expect(controller.handle).not.toHaveBeenCalled();
   });
 
+  it("当前资料任务与清理入口均接入真实路由，并在读取正文前要求管理权限", async () => {
+    for (const route of ["sync", "external", "deployment-packages", "cleanup"]) {
+      for (const manager of [true, false]) {
+        await using fixture = setup({ manager });
+        const input = { requestId: "current-request", expectedRevision: 3, sources: [], contexts: [], dryRun: true, versionIds: [] };
+        const request = new Request(`http://localhost${base}/${route}`, {
+          method: "POST", headers: { "content-type": "application/json", "x-demo-csrf": "fixture-csrf" }, body: encodeJson(input),
+        });
+        const response = await fixture.app.handler(request);
+        expect(response.status).toBe(manager ? 200 : 403);
+        if (manager) expect(controller.handle).toHaveBeenCalledWith(expect.objectContaining({ method: "POST", input }));
+        else {
+          expect(request.bodyUsed).toBe(false);
+          expect(controller.handle).not.toHaveBeenCalled();
+        }
+      }
+    }
+  });
+
   it.effect("Node HTTP传输执行8MiB原始上传和2MiB JSON正文上限", () =>
     Effect.gen(function* () {
       const fixture = setup();

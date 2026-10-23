@@ -4,31 +4,32 @@ import { configuredAutoOpsAccess, AutoOpsAccessError } from './access.mjs'
 import { configuredBusinessArtifactStore } from './business-tools.mjs'
 import { extractBusinessAttachment } from './business-documents.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
+import { configuredWorkspaceManagement } from './workspace-management.ts'
 import { readScopedSkillResourceForThread } from './scoped-skills.mjs'
 
 const fail = (message) => { throw new AutoOpsAccessError(404, 'RESOURCE_NOT_FOUND', message || '资料不存在或无权访问') }
 const nameFor = (name) => name.replace(/[\/\\\u0000-\u001f]/g, '_').slice(0, 160) || 'file'
 const version = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16)
-export function createBusinessResourceCatalog({ access, artifactStore, readAttachment, workspaceStore = configuredWorkspaceStore() }) {
+export function createBusinessResourceCatalog({ access, artifactStore, readAttachment, workspaceStore = configuredWorkspaceStore(), workspaceInputs }) {
   const sameWorkspace = (source, target) => (source.workspaceType || null) === (target?.workspaceType || null) && (source.workspaceVersionId || null) === (target?.workspaceVersionId || null)
   function workspace(binding) {
-    if (!binding?.workspaceType && !binding?.workspaceVersionId) return null
+    if (!binding?.workspaceVersionId) return null
     if (!binding.workspaceType || !binding.workspaceVersionId || !workspaceStore) fail('会话固定工作区不可用')
     const version = workspaceStore.getVersion(binding.projectId, binding.workspaceVersionId)
     if (version.type !== binding.workspaceType) fail('工作区不属于当前会话范围')
     return { version, files: workspaceStore.files(binding.projectId, binding.workspaceVersionId) }
   }
-  function catalog(project, resourceThreads, binding) {
+  function catalog(project, resourceThreads, binding, currentInput = false) {
     const entries = []
     const add = (path, resource) => entries.push({ path, ...resource })
     const prefix = `autoops/${project.id}`
-    const selected = workspace(binding)
+    const selected = currentInput ? null : workspace(binding)
     if (selected) {
       for (const file of selected.files) {
         const path = `${prefix}/workspaces/${binding.workspaceVersionId}/${file.path}`
         add(path, { type: 'workspace', id: file.path, relativePath: file.path, workspaceVersionId: binding.workspaceVersionId, projectId: project.id, name: file.name, mime: file.mime, size: file.size, sourceUrl: `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(path)}` })
       }
-    } else {
+    } else if (!binding?.workspaceType && !currentInput) {
       for (const doc of project.documents)
         add(`${prefix}/documents/${doc.id}/${version(doc.content)}/${nameFor(doc.name)}`, { type: 'document', id: doc.id, name: doc.name, mime: doc.mime, content: doc.content, sourceUrl: `/api/agent-demo/t3/autoops/projects/${project.id}/documents/${doc.id}` })
       for (const environment of project.environments)
@@ -37,10 +38,10 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     for (const { binding: source, attachments } of resourceThreads) {
       if (!sameWorkspace(source, binding) || (binding?.environmentId && source.environmentId !== binding.environmentId)) continue
       for (const file of attachments) {
-        add(`${prefix}/threads/${source.threadId}/attachments/${file.id}/${nameFor(file.name || file.id)}`, { type: 'attachment', id: file.id, threadId: source.threadId, name: file.name || file.id, mime: file.mimeType || 'application/octet-stream', size: file.sizeBytes || 0, sourceUrl: `/api/agent-demo/t3/autoops/attachments/${file.id}` })
+        add(`${prefix}/threads/${source.threadId}/attachments/${file.id}/${nameFor(file.name || file.id)}`, { type: 'attachment', id: file.id, threadId: source.threadId, createdAt: file.createdAt, name: file.name || file.id, mime: file.mimeType || 'application/octet-stream', size: file.sizeBytes || 0, sourceUrl: `/api/agent-demo/t3/autoops/attachments/${file.id}` })
       }
       for (const file of artifactStore?.list(source.threadId) || [])
-        add(`${prefix}/threads/${source.threadId}/reports/${file.id}/${nameFor(file.name)}`, { type: 'report', id: file.id, threadId: source.threadId, name: file.name, mime: file.mime, size: file.size, sourceUrl: `/api/agent-demo/t3/autoops/files/${file.id}` })
+        add(`${prefix}/threads/${source.threadId}/reports/${file.id}/${nameFor(file.name)}`, { type: 'report', id: file.id, threadId: source.threadId, createdAt: file.created_at, name: file.name, mime: file.mime, size: file.size, sourceUrl: `/api/agent-demo/t3/autoops/files/${file.id}` })
     }
     return entries
   }
@@ -52,17 +53,18 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     access.requireEnvironment(principal, projectId, environmentId)
     let binding = access.getThreadBinding(threadId)
     const parameters = new URLSearchParams(query || '')
-    const workspaceType = parameters.get('workspaceType'), workspaceVersionId = parameters.get('workspaceVersionId')
-    if (parameters.size && (parameters.size !== 2 || !['internal', 'external'].includes(workspaceType) || !workspaceVersionId)) fail('工作区范围参数无效')
+    const workspaceType = parameters.get('workspaceType'), workspaceVersionId = parameters.get('workspaceVersionId'), inputId = parameters.get('inputId')
+    if ([...parameters.keys()].some(key => !['workspaceType', 'workspaceVersionId', 'inputId'].includes(key)) || parameters.size !== new Set(parameters.keys()).size || (parameters.size && !['internal', 'external'].includes(workspaceType)) || (workspaceVersionId && inputId)) fail('工作区范围参数无效')
     if (binding) {
       access.requireThread(principal, threadId)
       if (binding.projectId !== projectId || binding.environmentId !== environmentId) fail()
-      if (parameters.size && (binding.workspaceType !== workspaceType || binding.workspaceVersionId !== workspaceVersionId)) fail('会话固定工作区不能切换，请新建对话')
+      if (parameters.size && (binding.workspaceType !== workspaceType || (workspaceVersionId && binding.workspaceVersionId !== workspaceVersionId))) fail('会话资料范围不能切换，请新建对话')
+      if (parameters.size && !workspaceVersionId) binding = { ...binding, workspaceVersionId: undefined }
     } else if (parameters.size) binding = { projectId, environmentId, workspaceType, workspaceVersionId }
-    else throw new AutoOpsAccessError(409, 'WORKSPACE_REQUIRED', '请先选择工作区版本')
+    else throw new AutoOpsAccessError(409, 'WORKSPACE_REQUIRED', '请先选择资料范围')
     workspace(binding)
     access.requireWorkspace(principal, projectId, binding.workspaceType || 'internal', binding.workspaceVersionId, environmentId)
-    return { project, environmentId, threadId, binding }
+    return { project, environmentId, threadId, binding, inputId }
   }
   function projectAtCwd(principal, cwd) {
     return scopeAtCwd(principal, cwd).project
@@ -75,7 +77,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     if (typeof path !== 'string' || path.startsWith('/') || path.includes('\\') || path.split('/').some((part) => part === '..' || part === '.') || path.includes('\0')) fail()
   }
   const entriesWithFolders = (files) => {
-    const result = new Map(files.map((file) => [file.path, { path: file.path, kind: 'file' }]))
+    const result = new Map(files.map((file) => [file.path, { path: file.path, kind: file.type === 'directory' ? 'directory' : 'file' }]))
     for (const file of files) {
       const parts = file.path.split('/')
       for (let i = 1; i < parts.length; i++) {
@@ -90,8 +92,77 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     const prefix = directory ? directory + '/' : ''
     return entriesWithFolders(files).filter((entry) => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'))
   }
+  const inputs = () => workspaceInputs ??= configuredWorkspaceManagement(access)
+  const inputRoot = (projectId, inputId) => `autoops/${projectId}/inputs/${inputId}`
+  function inputIdentity(path) {
+    assertPath(path)
+    const match = path.match(/^autoops\/([^/]+)\/inputs\/([^/]+)(?:\/(.*))?$/)
+    return match ? { projectId: match[1], inputId: match[2], relativePath: match[3] || '' } : undefined
+  }
+  function inputCatalog(projectId, inputId, actorId, workspaceType) {
+    const capture = inputs().readInput(projectId, inputId, actorId)
+    if (workspaceType && capture.workspaceType !== workspaceType) fail('资料输入不属于当前范围')
+    const root = inputRoot(projectId, inputId)
+    const files = inputs().inputFiles(projectId, inputId, actorId).map(file => ({
+      ...file, path: `${root}/${file.path}`, relativePath: file.path, type: 'input', inputId, actorId, projectId,
+      id: file.id, name: file.path.split('/').at(-1), sourceUrl: `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(`${root}/${file.path}`)}`,
+    }))
+    for (const directory of capture.directories) files.push({ path: `${root}/${directory}`, type: 'directory', inputId, actorId, projectId })
+    return { capture, files, root, actorId }
+  }
+  function userInput(principal, identity, workspaceType) {
+    access.requireProject(principal, identity.projectId)
+    const actors = [principal.id]
+    for (const { binding } of access.listResourceThreads(principal, identity.projectId)) {
+      if (access.listThreadInputs(binding.threadId).some(value => value.inputId === identity.inputId)) actors.push(binding.ownerId)
+      for (const reference of access.inputReferences(binding.threadId)) if (reference.inputId === identity.inputId) actors.push(reference.actorId)
+    }
+    for (const actor of new Set(actors)) {
+      let selected
+      try { selected = inputCatalog(identity.projectId, identity.inputId, actor, workspaceType) }
+      catch (error) { if (error.code === 'WORKSPACE_INPUT_NOT_FOUND') continue; throw error }
+      access.requireWorkspace(principal, identity.projectId, selected.capture.workspaceType)
+      return selected
+    }
+    fail()
+  }
+  function threadInput(threadId, inputId, reference = false) {
+    const { binding } = access.requireToolThread(threadId)
+    const own = access.listThreadInputs(threadId).some(value => value.inputId === inputId)
+    const retained = reference ? access.inputReferences(threadId).find(value => value.inputId === inputId) : undefined
+    if (!own && !retained) fail('资料输入不属于此会话任务或已验证引用')
+    access.requireWorkspaceInputReader(binding.ownerId, binding.projectId, binding.workspaceType || 'internal')
+    return inputCatalog(binding.projectId, inputId, retained?.actorId ?? binding.ownerId, binding.workspaceType || 'internal')
+  }
+  async function scopedInput(principal, scope, path) {
+    const identity = path ? inputIdentity(path) : undefined
+    if (identity && (identity.projectId !== scope.project.id || (scope.inputId && scope.inputId !== identity.inputId))) fail()
+    const inputId = identity?.inputId ?? scope.inputId
+    if (inputId) return userInput(principal, { projectId: scope.project.id, inputId }, scope.binding.workspaceType)
+    const capture = await inputs().captureAvailableInput(scope.project.id, { workspaceType: scope.binding.workspaceType }, principal.id)
+    scopeAtCwd(principal, scope.cwd)
+    return userInput(principal, { projectId: scope.project.id, inputId: capture.id }, scope.binding.workspaceType)
+  }
+  async function latestEntries(principal, input, listing) {
+    const scope = { ...scopeAtCwd(principal, input.cwd), cwd: input.cwd }
+    const selected = await scopedInput(principal, scope, input.directoryPath)
+    const files = selected.files.filter(file => !input.imageOnly || file.mime?.startsWith('image/'))
+    let matches
+    if (listing) matches = directChildren(files, input.directoryPath?.replace(/\/$/, '') || selected.root)
+    else if (input.query.startsWith('./') || input.query.endsWith('/')) {
+      const query = input.query.replace(/^\.\//, '')
+      if (query) assertPath(query)
+      const separator = query.lastIndexOf('/'), directory = separator < 0 ? '' : query.slice(0, separator), prefix = query.slice(separator + 1).toLocaleLowerCase()
+      matches = directChildren(files, selected.root + (directory ? '/' + directory : '')).filter(entry => entry.path.split('/').at(-1).toLocaleLowerCase().startsWith(prefix))
+    } else matches = entriesWithFolders(files).filter(entry => entry.path.startsWith(selected.root + '/') && entry.path.slice(selected.root.length + 1).toLocaleLowerCase().includes(input.query.toLocaleLowerCase()))
+    matches = matches.filter(entry => !input.kind || entry.kind === input.kind)
+    const limit = listing ? 500 : input.limit
+    return { entries: matches.slice(0, limit), truncated: matches.length > limit }
+  }
   function findVisible(principal, path) {
     assertPath(path)
+    const identity = inputIdentity(path)
+    if (identity) { const found = userInput(principal, identity).files.find(file => file.path === path && file.type !== 'directory'); if (!found) fail(); return found }
     const project = access.requireProject(principal, path.split('/')[1])
     const parts = path.split('/')
     const selected = parts[2] === 'workspaces' ? workspaceStore?.getVersion(project.id, parts[3]) : null
@@ -103,6 +174,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     return found
   }
   async function bytes(resource) {
+    if (resource.type === 'input') return inputs().readInputFile(resource.projectId, resource.inputId, resource.relativePath, resource.actorId).bytes
     if (resource.type === 'workspace') return workspaceStore.readBytes(resource.projectId, resource.workspaceVersionId, resource.relativePath)
     if (resource.type === 'document') return Buffer.from(resource.content)
     if (resource.type === 'environment') {
@@ -126,6 +198,10 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     throw new AutoOpsAccessError(415, 'RESOURCE_NOT_TEXT', extracted.extraction?.message || fallback)
   }
   async function contents(resource) {
+    if (resource.type === 'input') {
+      const result = await inputs().readInputContent(resource.projectId, resource.inputId, resource.relativePath, resource.actorId)
+      return requireExtractedText({ content: result.contents, extraction: result.extraction }, '正文暂不可用，请查看原件')
+    }
     if (resource.type === 'workspace') return (await workspaceContents(resource)).contents
     const data = await bytes(resource)
     const extracted = await extractBusinessAttachment({ id: resource.id, name: resource.name, mime: resource.mime, bytes: data })
@@ -140,15 +216,16 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     const content = requireExtractedText(extracted, '该资料的正文不可提取，请查看原件')
     return { contents: content, byteLength: Buffer.byteLength(content), truncated: false }
   }
-  function forThread(threadId) {
+  function forThread(threadId, currentInput = false) {
     const target = access.requireToolThread(threadId)
-    return catalog(target.project, access.listToolResourceThreads(threadId), target.binding).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
+    return catalog(target.project, access.listToolResourceThreads(threadId), target.binding, currentInput).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
   }
 
   return {
     projectAtCwd,
     search(principal, input) {
       const scope = scopeAtCwd(principal, input.cwd), { project } = scope
+      if (scope.binding.workspaceType && !scope.binding.workspaceVersionId) return latestEntries(principal, input, false)
       const needle = input.query.toLocaleLowerCase()
       const workspacePrefix = scope.binding.workspaceVersionId ? `autoops/${project.id}/workspaces/${scope.binding.workspaceVersionId}/` : undefined
       const workspaceAncestors = workspacePrefix ? new Set(['autoops', `autoops/${project.id}`, `autoops/${project.id}/workspaces`, workspacePrefix.slice(0, -1)]) : undefined
@@ -179,6 +256,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     },
     list(principal, input) {
       const { project, environmentId, binding } = scopeAtCwd(principal, input.cwd)
+      if (binding.workspaceType && !binding.workspaceVersionId) return latestEntries(principal, input, true)
       const directory = input.directoryPath?.replace(/\/$/, '') || ''
       const matches = directChildren(visible(principal, project, binding).filter((entry) => entry.environmentId === undefined || entry.environmentId === environmentId), directory)
       return { entries: matches.slice(0, 500), truncated: matches.length > 500 }
@@ -186,6 +264,14 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     async read(principal, input) {
       const { project, environmentId, binding } = scopeAtCwd(principal, input.cwd)
       assertPath(input.relativePath)
+      if (binding.workspaceType && !binding.workspaceVersionId) {
+        const selected = await scopedInput(principal, { project, environmentId, binding, cwd: input.cwd, inputId: scopeAtCwd(principal, input.cwd).inputId }, input.relativePath)
+        const file = selected.files.find(file => file.path === input.relativePath && file.type !== 'directory')
+        if (!file) fail()
+        const text = await contents(file)
+        scopeAtCwd(principal, input.cwd); userInput(principal, inputIdentity(file.path), binding.workspaceType)
+        return { relativePath: file.path, contents: text, byteLength: Buffer.byteLength(text), truncated: false, exists: true }
+      }
       const resource = visible(principal, project, binding).find((entry) => entry.path === input.relativePath)
       if (!resource) fail()
       if (resource.path.split('/')[1] !== project.id || (resource.environmentId !== undefined && resource.environmentId !== environmentId)) fail()
@@ -211,6 +297,12 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       const entries = []
       for (const path of paths) {
         assertPath(path)
+        const identity = inputIdentity(path)
+        if (identity) {
+          const selected = userInput(principal, identity), file = selected.files.find(file => file.path === path)
+          entries.push(file ? file.type === 'directory' ? { kind: 'directory' } : { kind: 'file', byteLength: file.size, mimeType: file.mime } : path === selected.root || entriesWithFolders(selected.files).some(entry => entry.path === path && entry.kind === 'directory') ? { kind: 'directory' } : null)
+          continue
+        }
         if (path === 'autoops') { entries.push({kind:'directory'}); continue }
         const project = access.requireProject(principal, path.split('/')[1])
         const parts = path.split('/')
@@ -227,21 +319,71 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       return {entries}
     },
     requireContext(threadId, context) {
-      const allowed = entriesWithFolders(forThread(threadId))
+      let allowed
       for (const record of context?.records || []) if (record.kind === 'mention') {
         assertPath(record.path)
+        const identity = inputIdentity(record.path)
+        if (identity) {
+          const { binding } = access.requireToolThread(threadId)
+          if (identity.projectId !== binding.projectId) fail()
+          const actors = [binding.ownerId]
+          for (const source of access.listToolResourceThreads(threadId)) {
+            if (source.binding.workspaceType !== binding.workspaceType) continue
+            if (access.listThreadInputs(source.binding.threadId).some(value => value.inputId === identity.inputId)) actors.push(source.binding.ownerId)
+          }
+          let selected
+          for (const actor of new Set(actors)) {
+            try { selected = inputCatalog(identity.projectId, identity.inputId, actor, binding.workspaceType || 'internal'); break }
+            catch (error) { if (error.code !== 'WORKSPACE_INPUT_NOT_FOUND') throw error }
+          }
+          if (!selected || !(record.path === selected.root || entriesWithFolders(selected.files).some(entry => entry.path === record.path))) fail()
+          access.retainInputReference(threadId, identity.inputId, selected.actorId)
+          continue
+        }
+        allowed ??= entriesWithFolders(forThread(threadId))
         if (!allowed.some((entry) => entry.path === record.path)) fail('引用不属于当前环境或授权受众，或其资料版本已改变')
       }
     },
-    async readForThread(threadId, path) {
+    async readForThread(threadId, path, inputId, referenceInputIds = [], history) {
       assertPath(path)
+      if (inputId) access.requireRunInput(threadId, inputId)
+      const identity = inputIdentity(path)
+      if (identity) {
+        if (!inputId) fail('读取本轮资料必须提供任务输入身份')
+        threadInput(threadId, inputId)
+        const history = access.listThreadInputs(threadId)
+        const currentIndex = history.findIndex(value => value.inputId === inputId), targetIndex = history.findIndex(value => value.inputId === identity.inputId)
+        if (identity.inputId !== inputId && !(targetIndex >= 0 && targetIndex < currentIndex) && !referenceInputIds.includes(identity.inputId)) fail('不能读取后来轮次或不在本轮上下文中的资料输入')
+        const selected = threadInput(threadId, identity.inputId, true)
+        if (identity.projectId !== selected.capture.projectId) fail()
+        const unavailable = selected.capture.sourceErrors?.find(source => identity.relativePath === source.mountPath || identity.relativePath.startsWith(source.mountPath + '/'))
+        if (unavailable) throw new AutoOpsAccessError(503, 'WORKSPACE_INPUT_SOURCE_UNAVAILABLE', unavailable.message)
+        const file = selected.files.find(file => file.path === path && file.type !== 'directory')
+        if (file) {
+          const content = await contents(file)
+          threadInput(threadId, inputId); threadInput(threadId, identity.inputId, true)
+          return { path, name: file.name, mime: file.mime, content, source: 'workspace_input', inputId: identity.inputId, capturedAt: selected.capture.createdAt, sourceUrl: file.sourceUrl }
+        }
+        if (path !== selected.root && !entriesWithFolders(selected.files).some(entry => entry.path === path && entry.kind === 'directory')) fail()
+        return { path, kind: 'directory', sourceErrors: selected.capture.sourceErrors ?? [], entries: selected.files.filter(file => file.type !== 'directory' && file.path.startsWith(path + '/')).map(({ path, name, mime }) => ({ path, name, mime })) }
+      }
       if(path.startsWith('autoops/skills/'))return readScopedSkillResourceForThread(process.env.AUTOOPS_T3_DATA_DIR,threadId,path,access)
-      const resources = forThread(threadId)
+      const historical = path.startsWith(`autoops/${access.requireToolThread(threadId).binding.projectId}/workspaces/`)
+      const resources = forThread(threadId, Boolean(inputId) && !historical).filter(resource => {
+        if (!inputId || !['attachment', 'report'].includes(resource.type)) return true
+        const mentioned = history?.referencePaths?.some(path => resource.path === path || resource.path.startsWith(path + '/'))
+        if (mentioned && typeof resource.createdAt === 'string' && resource.createdAt <= history.acceptedAt) return true
+        if (resource.type === 'attachment') return history?.attachmentIds?.includes(resource.id) ?? false
+        const artifact = artifactStore?.read(resource.id)
+        if (!artifact || artifact.threadId !== threadId) return false
+        const runs = access.listThreadInputs(threadId), currentIndex = runs.findIndex(value => value.inputId === inputId), artifactIndex = runs.findIndex(value => value.runId === artifact.runId)
+        return artifactIndex >= 0 && artifactIndex <= currentIndex
+      })
       const resource = resources.find((entry) => entry.path === path)
       if (resource) {
         const read = resource.type === 'workspace' ? await workspaceContents(resource) : null
         const content = read ? read.contents : await contents(resource)
-        if (!forThread(threadId).some((entry) => entry.path === path)) fail()
+        if (!forThread(threadId, Boolean(inputId) && !historical).some((entry) => entry.path === path)) fail()
         return { path, name: resource.name, mime: resource.mime, content, ...(read ? { source: 'workspace_snapshot', workspaceVersionId: resource.workspaceVersionId, byteLength: read.byteLength, truncated: read.truncated } : {}), sourceUrl: resource.sourceUrl || `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(path)}` }
       }
       const folder = entriesWithFolders(resources).find((entry) => entry.path === path && entry.kind === 'directory')

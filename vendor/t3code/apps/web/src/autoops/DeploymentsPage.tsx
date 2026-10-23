@@ -6,7 +6,7 @@ import {
   ModuleSidebarItem,
   ModuleSidebarEmpty,
 } from './ModuleWorkspace'
-import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
@@ -29,15 +29,17 @@ import {
   FileSurfaceAction,
 } from '~/components/files/fileSurfaceChrome'
 import { readAutoOpsHost } from './hostConfig'
+import { isAutoOpsAccessError } from './apiClient'
 import { useAutoOpsProjectId } from './projectNavigation'
 import { DeploymentsPanel } from './DeploymentsPanel'
-import { WorkspacePackagesDialog, WorkspaceTasksDialog, WorkspaceSubmissionNotice } from './WorkspaceActions'
+import { WorkspaceTasksDialog, WorkspaceSubmissionNotice } from './WorkspaceActions'
+import { DeploymentSourcesDialog } from './deployment'
+import { loadAuthoring, type WorkspaceRepositorySource } from './workspaceAuthoring'
 import {
   cancelWorkspaceTask,
   workspacePackageUrl,
   type WorkspaceRelease,
   type WorkspaceTask,
-  type WorkspaceVersion,
 } from './workspaces'
 
 const dateLabel = (value: string) => new Date(value).toLocaleString('zh-CN')
@@ -116,7 +118,10 @@ function ProjectDeployments({
   requestedSourceVersionId: string | null | undefined
 }) {
   const navigate = useNavigate()
-  const canManage = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.['workspace.manage'] === true
+  const canManage =
+    readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.[
+      'workspace.manage'
+    ] === true
   const [view, setView] = useState<'services' | 'packages'>(() =>
     requestedSourceVersionId !== undefined || readSelection(projectId, 'view') === 'packages'
       ? 'packages'
@@ -126,8 +131,10 @@ function ProjectDeployments({
   const [actionError, setError] = useState<string | null>(null)
   const [mutationBusy, setBusy] = useState(false)
   const [dialog, setDialog] = useState<'packages' | 'tasks' | null>(null)
-  const [sourceId, setSourceId] = useState(() => readSelection(projectId, 'package-source') ?? '')
-  const [fixedSourceId, setFixedSourceId] = useState<string | null>(null)
+  const [sources, setSources] = useState<WorkspaceRepositorySource[]>([])
+  const [sourcesError, setSourcesError] = useState<string | null>(null)
+  const [sourceAccessDenied, setSourceAccessDenied] = useState(false)
+  const [sourcesRevision, refreshSources] = useState(0)
   const [handledSource, setHandledSource] = useState<string | null | undefined>(undefined)
   const [followTaskId, setFollowTaskId] = useState<string | null>(null)
   const submission = useWorkspaceTaskSubmission(projectId, (task) => {
@@ -136,8 +143,16 @@ function ProjectDeployments({
     refreshOverview()
   })
   const busy = mutationBusy || submission.busy
-  const error = submission.error ?? actionError ?? loadError
-  const submissionNotice = <WorkspaceSubmissionNotice label={submission.pendingLabel} retryAvailable={submission.retryAvailable && canManage} busy={busy} onCheck={submission.check} onRetry={submission.retry} />
+  const error = submission.error ?? actionError ?? sourcesError ?? loadError
+  const submissionNotice = (
+    <WorkspaceSubmissionNotice
+      label={submission.pendingLabel}
+      retryAvailable={submission.retryAvailable && canManage}
+      busy={busy}
+      onCheck={submission.check}
+      onRetry={submission.retry}
+    />
+  )
   const [selectedPackageId, setSelectedPackageId] = useState(
     () => readSelection(projectId, 'package') ?? '',
   )
@@ -147,15 +162,36 @@ function ProjectDeployments({
   const tasks = overview?.tasks.filter((task) => task.type === 'packages') ?? []
   const activeTasks = tasks.filter(taskActive)
   const taskLabel = activeTasks.length ? `${activeTasks.length} 个源码包任务执行中` : '任务记录'
-  const internal = overview?.internalVersions ?? []
-  const source = internal.find((version) => version.id === sourceId) ?? internal[0]
-  const fixedSource = internal.find((version) => version.id === fixedSourceId)
+  const refresh = () => {
+    refreshOverview()
+    refreshSources((value) => value + 1)
+  }
+  useEffect(() => {
+    const controller = new AbortController()
+    const principal = readAutoOpsHost()?.principal.id
+    void loadAuthoring(projectId, controller.signal)
+      .then((value) => {
+        if (controller.signal.aborted || readAutoOpsHost()?.principal.id !== principal) return
+        if (value.projectId !== projectId) throw new Error('源码来源返回了其他项目，已停止显示。')
+        setSources(value.sources)
+        setSourcesError(null)
+        setSourceAccessDenied(false)
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted || readAutoOpsHost()?.principal.id !== principal) return
+        setSources([])
+        setSourcesError(cause instanceof Error ? cause.message : '读取源码来源失败。')
+        if (isAutoOpsAccessError(cause)) {
+          setSourceAccessDenied(true)
+          setDialog(null)
+          refreshOverview()
+        }
+      })
+    return () => controller.abort()
+  }, [projectId, sourcesRevision, dialog, refreshOverview])
   useEffect(() => {
     saveSelection(projectId, 'view', view)
   }, [projectId, view])
-  useEffect(() => {
-    if (source) saveSelection(projectId, 'package-source', source.id)
-  }, [projectId, source])
   useEffect(() => {
     if (selectedPackageId) saveSelection(projectId, 'package', selectedPackageId)
   }, [projectId, selectedPackageId])
@@ -167,23 +203,19 @@ function ProjectDeployments({
     )
       return
     setHandledSource(requestedSourceVersionId)
-    const requested = internal.find(
-      (version) => version.id === requestedSourceVersionId && version.status === 'published',
+    const requested = overview.releases.find(
+      (release) => release.sourceVersionId === requestedSourceVersionId,
     )
     setView('packages')
-    if (requested) {
-      setSourceId(requested.id)
-      setFixedSourceId(requested.id)
-      returnFocus.current = generateTrigger.current
-      setDialog('packages')
-    } else setError('指定内部版本不可用或无权访问，未自动改用其他来源。')
-    // Consume the one-shot intent, so closing or refreshing never reopens it.
+    if (requested) setSelectedPackageId(requested.id)
+    else setError('该历史来源没有可用源码包。新部署请重新选择 Git 仓库与提交。')
+    // 历史深链只定位原交付，不把旧资料作为新部署输入。
     void navigate({
       to: '/deployments',
       search: { projectId: ProjectId.make(projectId) },
       replace: true,
     })
-  }, [overview, requestedSourceVersionId, handledSource, internal, navigate, projectId])
+  }, [overview, requestedSourceVersionId, handledSource, navigate, projectId])
   useEffect(() => {
     const task = overview?.tasks.find((entry) => entry.id === followTaskId)
     if (!task || taskActive(task)) return
@@ -211,7 +243,6 @@ function ProjectDeployments({
   const changeDialog = (open: boolean) => {
     if (!open) {
       setDialog(null)
-      setFixedSourceId(null)
     }
   }
   const capturePackageAction = (event: React.MouseEvent<HTMLElement>) => {
@@ -235,11 +266,7 @@ function ProjectDeployments({
   )
   const packageActions = (
     <div className="flex items-center gap-1" onClickCapture={capturePackageAction}>
-      <FileSurfaceAction
-        label="刷新源码包"
-        disabled={busy}
-        onPress={() => refreshOverview()}
-      >
+      <FileSurfaceAction label="刷新源码包" disabled={busy} onPress={refresh}>
         <RefreshCwIcon />
       </FileSurfaceAction>
       <FileSurfaceAction
@@ -256,10 +283,9 @@ function ProjectDeployments({
         ref={generateTrigger}
         size="sm"
         variant="outline"
-        disabled={!canManage || !overview || busy || running || !internal.length}
+        disabled={!canManage || !overview || busy || running || !sources.length}
         onClick={() => {
           setError(null)
-          setFixedSourceId(null)
           setDialog('packages')
         }}
       >
@@ -270,6 +296,18 @@ function ProjectDeployments({
     </div>
   )
 
+  if (sourceAccessDenied)
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <ModuleHeader title="部署发布" />
+        <div className="p-3">
+          <Alert variant="error">{sourcesError ?? '项目不可用或无权访问。'}</Alert>
+          <Button className="mt-2" size="sm" variant="outline" onClick={refresh}>
+            重新核对权限
+          </Button>
+        </div>
+      </div>
+    )
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {view === 'packages' ? (
@@ -290,17 +328,14 @@ function ProjectDeployments({
             <AlertTitle>源码包操作未完成</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
-          <Button
-            className="mt-2"
-            size="xs"
-            variant="outline"
-            onClick={() => refreshOverview()}
-          >
+          <Button className="mt-2" size="xs" variant="outline" onClick={refresh}>
             重新加载
           </Button>
         </div>
       ) : null}
-      {!dialog && submission.pendingLabel ? <div className="shrink-0 border-b border-border/60 px-3 py-2">{submissionNotice}</div> : null}
+      {!dialog && submission.pendingLabel ? (
+        <div className="shrink-0 border-b border-border/60 px-3 py-2">{submissionNotice}</div>
+      ) : null}
       {view === 'services' ? (
         <DeploymentsPanel
           key={`${readAutoOpsHost()?.principal.id}:${projectId}`}
@@ -308,7 +343,7 @@ function ProjectDeployments({
           packages={overview?.releases ?? []}
           navigation={navigation}
           packageActions={{
-            generateDisabled: !canManage || !overview || busy || running || !internal.length,
+            generateDisabled: !canManage || !overview || busy || running || !sources.length,
             tasksDisabled: !tasks.length,
             tasksLabel: `源码包${taskLabel}`,
             tasksActive: activeTasks.length > 0,
@@ -320,11 +355,10 @@ function ProjectDeployments({
             onGenerate: (trigger) => {
               returnFocus.current = trigger
               setError(null)
-              setFixedSourceId(null)
               setDialog('packages')
             },
           }}
-          onRefreshPackages={() => refreshOverview()}
+          onRefreshPackages={refresh}
         />
       ) : !overview ? (
         error ? null : (
@@ -337,25 +371,26 @@ function ProjectDeployments({
         <WorkspacePackages
           projectId={projectId}
           releases={overview.releases}
-          versions={internal}
           selectedId={selectedPackageId}
           onSelect={setSelectedPackageId}
           navigation={navigation}
         />
       )}
-      <WorkspacePackagesDialog
+      <DeploymentSourcesDialog
         open={dialog === 'packages'}
         onOpenChange={changeDialog}
         finalFocus={() => returnFocus.current}
-        disabled={!canManage || !overview || busy || running || !internal.length}
-        internalVersions={fixedSource ? [fixedSource] : internal}
-        initialSourceId={fixedSource?.id ?? source?.id}
+        disabled={!canManage || !overview || busy || running || !sources.length}
+        sources={sources}
         submissionNotice={submissionNotice}
+        pendingRequest={!!submission.pendingLabel}
+        canRetryPending={submission.retryAvailable}
         error={error}
-        onGenerate={(id, services, contexts) => {
-          setSourceId(id)
-          return canManage ? submission.submit({ type: 'packages', sourceVersionId: id, services, contexts }) : Promise.resolve(false)
-        }}
+        onGenerate={(selectedSources, contexts) =>
+          canManage
+            ? submission.submit({ type: 'deployment-packages', sources: selectedSources, contexts })
+            : Promise.resolve(false)
+        }
       />
       <WorkspaceTasksDialog
         open={dialog === 'tasks'}
@@ -383,14 +418,12 @@ function DeploymentEmpty({ title, description }: { title: string; description: s
 function WorkspacePackages({
   projectId,
   releases,
-  versions,
   selectedId,
   onSelect,
   navigation,
 }: {
   projectId: string
   releases: WorkspaceRelease[]
-  versions: WorkspaceVersion[]
   selectedId: string
   onSelect: (id: string) => void
   navigation: ReactNode
@@ -405,12 +438,9 @@ function WorkspacePackages({
     return (
       <DeploymentEmpty
         title="还没有部署包"
-        description="选择内部版本，按需生成前端、后端或两者的源码包。"
+        description="选择 Git 仓库与提交，按需生成前端、后端或两者的源码包。"
       />
     )
-  const sourceName =
-    versions.find((version) => version.id === selected.sourceVersionId)?.name ??
-    selected.sourceVersionId
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" aria-label="部署交付">
       <ModuleSidebar label="部署交付" header={navigation}>
@@ -429,24 +459,6 @@ function WorkspacePackages({
           </div>
         </ScrollArea>
         <div className="flex shrink-0 flex-col gap-2 border-t border-border/60 px-3 py-3">
-          <p className="truncate text-xs text-muted-foreground" title={sourceName}>
-            来源：{sourceName}
-          </p>
-          <Button
-            size="sm"
-            variant="ghost"
-            render={
-              <Link
-                to="/workspaces"
-                search={{
-                  projectId: ProjectId.make(projectId),
-                  versionId: selected.sourceVersionId,
-                }}
-              />
-            }
-          >
-            查看工作区来源
-          </Button>
           {selected.services.map((service) => (
             <div key={service.service} className="flex min-w-0 items-center gap-2">
               <Button

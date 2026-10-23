@@ -1,7 +1,7 @@
 import type { AutoOpsAccess, AutoOpsPrincipal } from './access.mjs'
 import { configuredWorkspaceStore, WorkspaceError, type WorkspaceStore } from './workspaces.mjs'
 import { configuredWorkspaceManagement, type WorkspaceManagement } from './workspace-management.ts'
-import type { WorkspaceAuthoringMutation, WorkspaceExtractionRetryInput, WorkspaceDeleteInput, WorkspaceMoveInput, WorkspaceRepositorySource, WorkspaceSourceInput, WorkspaceTextSaveInput, WorkspaceUploadInput } from '../../autoops/contracts/workspace-authoring.ts'
+import type { WorkspaceAuthoringMutation, WorkspaceDeploymentSourceInput, WorkspaceExtractionRetryInput, WorkspaceDeleteInput, WorkspaceMoveInput, WorkspaceRepositorySource, WorkspaceSourceInput, WorkspaceTextSaveInput, WorkspaceUploadInput } from '../../autoops/contracts/workspace-authoring.ts'
 import type { CredentialCreate, CredentialReplace, CredentialRevoke } from './credentials.ts'
 
 export interface WorkspaceAuthoringHttpResult {
@@ -52,6 +52,13 @@ export async function handleWorkspaceAuthoringRequest({ access, principal, url, 
       if (!bytes) fail(400, 'WORKSPACE_UPLOAD_MISSING', '上传内容为空')
       return ok(await service.authoring.upload(projectId, body as unknown as WorkspaceUploadInput, bytes, actor))
     }
+    if (action === 'cleanup') {
+      if (!Array.isArray(body.versionIds) || body.versionIds.some(value => typeof value !== 'string')) fail(400, 'WORKSPACE_CLEANUP_INVALID', '清理目标无效')
+      return ok(body.dryRun === true ? service.planCleanupVersions(projectId, body.versionIds as string[], actor) : service.cleanupVersions(projectId, body.versionIds as string[], actor))
+    }
+    if (action === 'deployment-packages') return { status: 202, body: { task: service.startDeploymentPackages(projectId, body as unknown as WorkspaceDeploymentSourceInput, actor) } }
+    if (action === 'sync') return { status: 202, body: { task: await service.sync(projectId, body as unknown as WorkspaceAuthoringMutation, actor) } }
+    if (action === 'external') return { status: 202, body: { task: await service.generateCurrentExternal(projectId, body as unknown as { requestId: string; rules?: Array<{ find: string; replace: string }>; expectedRevision?: number }, actor) } }
     if (action === 'versions') return { status: 202, body: { task: await service.generate(projectId, body as unknown as WorkspaceAuthoringMutation, actor) } }
     const command = object(body.input)
     if (action === 'sources') {
@@ -60,7 +67,12 @@ export async function handleWorkspaceAuthoringRequest({ access, principal, url, 
         if (command.credentialId) service.credentials.referenceVersion(actor, projectId, identifier(command.credentialId))
         return ok(service.authoring.saveSource(projectId, command as unknown as WorkspaceSourceInput & WorkspaceAuthoringMutation, actor))
       }
-      if (body.action === 'remove') return ok(service.authoring.removeSource(projectId, identifier(command.id), command as unknown as WorkspaceAuthoringMutation, actor))
+      if (body.action === 'remove') {
+        const sourceId = identifier(command.id)
+        const result = service.authoring.removeSource(projectId, sourceId, command as unknown as WorkspaceAuthoringMutation, actor)
+        store.releaseVersion(projectId, `current:${sourceId}`)
+        return ok(result)
+      }
     }
     if (action === 'credentials') {
       if (body.action === 'create') return ok(service.credentials.create(actor, projectId, command as unknown as CredentialCreate))

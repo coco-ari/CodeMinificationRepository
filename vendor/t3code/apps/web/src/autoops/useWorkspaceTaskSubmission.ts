@@ -2,7 +2,9 @@ import { useRef, useState } from 'react'
 import { sha256 } from '@noble/hashes/sha2'
 import { bytesToHex } from '@noble/hashes/utils'
 import { randomUUID } from '~/lib/utils'
-import { AutoOpsRequestError } from './apiClient'
+import { AutoOpsRequestError, autoOpsRequest } from './apiClient'
+import type { WorkspaceRepositoryRefKind } from './workspaceAuthoring'
+import { inspectAuthoringRequest } from './workspaceAuthoring'
 import type { WorkspaceBuildContext } from '../../../../../../autoops/contracts/workspaces.ts'
 import { readAutoOpsHost } from './hostConfig'
 import {
@@ -15,8 +17,18 @@ import {
 
 export type WorkspaceTaskInput =
   | { type: 'import'; repositoryUrl: string; branch: string }
-  | { type: 'external'; sourceVersionId: string; rules: Array<{ find: string; replace: string }> }
-  | { type: 'packages'; sourceVersionId: string; services: Array<'frontend' | 'backend'>; contexts?: WorkspaceBuildContext[] }
+  | { type: 'external'; sourceVersionId?: string; rules: Array<{ find: string; replace: string }> }
+  | {
+      type: 'packages'
+      sourceVersionId: string
+      services: Array<'frontend' | 'backend'>
+      contexts?: WorkspaceBuildContext[]
+    }
+  | {
+      type: 'deployment-packages'
+      sources: Array<{ sourceId: string; refKind?: WorkspaceRepositoryRefKind; ref?: string }>
+      contexts: WorkspaceBuildContext[]
+    }
 
 type PendingSubmission = {
   requestId: string
@@ -24,7 +36,14 @@ type PendingSubmission = {
   digest: string
   input?: WorkspaceTaskInput
 }
-const taskNames = { import: '导入仓库', external: '生成外部版本', packages: '生成部署包' }
+const taskNames = {
+  import: '导入仓库',
+  external: '更新外部工作区',
+  packages: '生成部署包',
+  'deployment-packages': '生成部署包',
+}
+const taskType = (type: WorkspaceTaskInput['type']) =>
+  type === 'deployment-packages' ? 'packages' : type
 const keyFor = (projectId: string) =>
   'autoops:workspace-task:' + (readAutoOpsHost()?.principal.id ?? '') + ':' + projectId
 
@@ -38,7 +57,10 @@ function readPending(key: string): PendingSubmission | null {
       value.requestId.length <= 160 &&
       typeof value.digest === 'string' &&
       /^[a-f0-9]{64}$/.test(value.digest) &&
-      (value.type === 'import' || value.type === 'external' || value.type === 'packages')
+      (value.type === 'import' ||
+        value.type === 'external' ||
+        value.type === 'packages' ||
+        value.type === 'deployment-packages')
     ) {
       return { requestId: value.requestId, type: value.type, digest: value.digest }
     }
@@ -95,13 +117,32 @@ export function useWorkspaceTaskSubmission(
     const overview = await loadWorkspaces(projectId)
     if (overview.projectId !== projectId)
       throw new Error('任务核对返回了其他项目，已停止本次操作。')
-    return overview.tasks.find(
-      (task) => task.type === submission.type && task.requestId === submission.requestId,
+    const task = overview.tasks.find(
+      (task) => task.type === taskType(submission.type) && task.requestId === submission.requestId,
     )
+    if (task) return task
+    if (submission.type === 'external' || submission.type === 'deployment-packages') {
+      const receipt = await inspectAuthoringRequest(projectId, submission.requestId, false)
+      if (receipt && 'task' in receipt && receipt.task.type === taskType(submission.type))
+        return receipt.task
+    }
+    return undefined
   }
   const send = (submission: PendingSubmission) => {
     const input = submission.input
     if (!input) throw new Error('请重新填写原输入并提交，以继续核对上次任务。')
+    if (input.type === 'deployment-packages')
+      return autoOpsRequest<{ task: WorkspaceTask }>(
+        `/api/v1/projects/${encodeURIComponent(projectId)}/workspace/deployment-packages`,
+        {
+          label: '部署源码包',
+          body: {
+            requestId: submission.requestId,
+            sources: input.sources,
+            contexts: input.contexts,
+          },
+        },
+      ).then(({ task }) => task)
     if (input.type === 'import')
       return importWorkspaceRepository(
         projectId,
@@ -176,14 +217,19 @@ export function useWorkspaceTaskSubmission(
       sending = true
       const task = await send(submission)
       if (
-        task.type !== submission.type ||
+        task.type !== taskType(submission.type) ||
         (task.requestId && task.requestId !== submission.requestId)
       ) {
         throw new Error('任务收据与本次请求不一致，提交结果尚未确认，请先核对任务。')
       }
       return confirm(task)
     } catch (cause) {
-      if (sending && cause instanceof AutoOpsRequestError && !cause.uncertain) clear()
+      if (
+        cause instanceof AutoOpsRequestError &&
+        !cause.uncertain &&
+        (sending || cause.code === 'CAPTURE_FAILED')
+      )
+        clear()
       setError(cause instanceof Error ? cause.message : '提交结果尚未确认，请先核对任务。')
       return false
     } finally {

@@ -18,7 +18,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   if (!(await stat(root)).isDirectory()) throw new Error('发行路径不是目录')
   if (!(await stat(join(root, 'node_modules'))).isDirectory()) throw new Error('发行目录缺少运行依赖')
   const adapters = join(root, 'agent-demo/t3-adapters')
-  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts']) {
+  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'thread-inputs.ts']) {
     const path = await realpath(join(adapters, file))
     if (!within(root, path) || !(await stat(path)).isFile()) throw new Error(`发行工作区文件缺失或越界：${file}`)
   }
@@ -44,7 +44,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
       dataDir, taskLimits: { maxConcurrent: 1, maxQueued: 0 }, onTaskDiagnostic: (event) => diagnostics.push(event),
       // 这是隔离冒烟的限定授权桩，不装配或改变生产授权服务。
       authorizeTask(scope) {
-        if (scope.actorId !== actorId || scope.projectId !== projectId || !['packages', 'snapshot'].includes(scope.type))
+        if (scope.actorId !== actorId || scope.projectId !== projectId || !['packages', 'snapshot', 'input', 'sync'].includes(scope.type))
           throw Object.assign(new Error('冒烟授权范围不符'), { status: 403 })
         authorizations++
       },
@@ -87,17 +87,21 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     const authorize = (actor, project) => assert.ok(actor === actorId && project === projectId, '新增模块越过隔离范围')
     authoring = createWorkspaceAuthoring({ dataDir, authorize })
     credentials = createProjectCredentialService({ databasePath: join(dataDir, 'credentials.sqlite'), keyPath: join(dataDir, 'credentials.key'), initializeKeyIfNew: true, authorize })
-    const access = { requireWorkspaceActor: authorize, requireWorkspaceReader: authorize, requireCredentialActor: authorize }
+    const access = { requireWorkspaceActor: authorize, requireWorkspaceReader: authorize, requireWorkspaceInputReader: authorize, requireCredentialActor: authorize, workspaceVersionReferences: () => [] }
     management = createWorkspaceManagement({ access, store, authoring, credentials, git: createWorkspaceGit() })
-    const document = Buffer.from('# 发行验收\n\n这份资料应保持在固定版本中。')
+    const document = Buffer.from('# 发行验收\n\n这份资料应保持在原轮次输入中。')
     const uploaded = await authoring.upload(projectId, { requestId: randomUUID(), expectedRevision: 0, path: 'docs/发行验收.md', size: document.length, sha256: createHash('sha256').update(document).digest('hex'), conflict: 'replace' }, document, actorId)
-    const snapshot = await management.generate(projectId, { requestId: randomUUID(), expectedRevision: uploaded.revision }, actorId)
-    await store.whenIdle()
-    const completed = store.overview(projectId).tasks.find(entry => entry.id === snapshot.id)
-    assert.equal(completed?.status, 'completed', completed?.error || '发行资料固定版本没有完成')
-    assert.deepEqual(Buffer.from(store.readBytes(projectId, completed.versionId, 'docs/发行验收.md')), document)
-    assert.equal(management.receipt(projectId, snapshot.requestId, actorId).task.id, snapshot.id)
-    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, authoringVersionId: completed.versionId }
+    const firstRequest = { requestId: randomUUID(), workspaceType: 'internal' }
+    const first = await management.captureAgentInput(projectId, firstRequest, actorId)
+    assert.deepEqual(Buffer.from(management.readInputFile(projectId, first.id, 'docs/发行验收.md', actorId).bytes), document)
+    const updated = '# 当前资料\n\n下一轮应自动读取本次更新。'
+    authoring.saveText(projectId, { requestId: randomUUID(), expectedRevision: uploaded.revision, path: 'docs/发行验收.md', expectedContentRevision: uploaded.entry.revision, contents: updated }, actorId)
+    const second = await management.captureAgentInput(projectId, { requestId: randomUUID(), workspaceType: 'internal' }, actorId)
+    assert.equal((await management.readInputContent(projectId, second.id, 'docs/发行验收.md', actorId)).contents, updated)
+    assert.deepEqual(Buffer.from(management.readInputFile(projectId, first.id, 'docs/发行验收.md', actorId).bytes), document)
+    assert.equal((await management.captureAgentInput(projectId, firstRequest, actorId)).id, first.id)
+    assert.equal(store.overview(projectId).internalVersions.length, overview.internalVersions.length, '每轮输入不应新增日常版本')
+    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, currentInput: second.id, previousInputPreserved: true, repeatedRequestPreserved: true }
   } finally {
     try {
       const results = await Promise.allSettled([store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()])

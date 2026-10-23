@@ -63,6 +63,7 @@ export interface CodexExecutionHost {
     parentThreadId: ThreadId,
     childThreadId: ThreadId,
     nativeThreadId: string,
+    parentRunId?: string,
   ) => unknown;
   readonly recordFork: (
     sourceThreadId: ThreadId | null,

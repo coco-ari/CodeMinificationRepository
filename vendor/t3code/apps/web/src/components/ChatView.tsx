@@ -3229,7 +3229,7 @@ export default function ChatView(props: ChatViewProps) {
     ? autoOpsResourceCwd(threadId, activeThread?.projectId, businessScope)
     : null;
   const businessFilesAvailable =
-    businessWorkspaceCwd !== null && businessScope?.workspaceVersionId !== undefined;
+    businessWorkspaceCwd !== null && businessScope?.workspaceType !== undefined;
   const activeWorkspaceRoot =
     businessWorkspaceCwd ?? activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   useLayoutEffect(() => {

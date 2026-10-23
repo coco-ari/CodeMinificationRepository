@@ -27,6 +27,11 @@ export function id(value: unknown): string {
     fail(400, 'WORKSPACE_ID_INVALID', '对象标识无效')
   return value
 }
+export function requestIdentifier(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_:\-]{0,159}$/.test(value))
+    fail(400, 'WORKSPACE_REQUEST_ID_INVALID', '原请求标识无效')
+  return value
+}
 export function path(value: unknown, allowRoot = false): string {
   if (allowRoot && value === '') return ''
   if (

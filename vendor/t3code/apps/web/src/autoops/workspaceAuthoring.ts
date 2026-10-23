@@ -44,6 +44,7 @@ export type AuthoringCommand =
   | { kind: "document"; action: "delete"; path: string; expectedContentRevision: string }
   | { kind: "document"; action: "extract"; path: string; expectedContentRevision: string }
   | { kind: "version"; name: string }
+  | { kind: "sync" }
   | {
       kind: "upload";
       path: string;
@@ -121,7 +122,7 @@ export async function inspectAuthoringRequest(
   }>(projectId, `/requests/${encodeURIComponent(requestId)}`, undefined, signal);
   if (capture?.resolution === "failed")
     throw new AutoOpsRequestError(
-      capture.resolutionError?.message ?? "固定版本输入准备失败，请修正后重新提交。",
+      capture.resolutionError?.message ?? "工作区输入准备失败，请修正后重新提交。",
       "CAPTURE_FAILED",
       409,
       false,
@@ -136,10 +137,10 @@ export async function submitAuthoring(
 ): Promise<AuthoringReceipt> {
   const { command, requestId, expectedRevision } = submission;
   if (command.kind === "upload") throw new Error("请重新选择原文件后继续上传。");
-  if (command.kind === "version") {
+  if (command.kind === "version" || command.kind === "sync") {
     const result = await request<{ task: WorkspaceTask }>(
       projectId,
-      "/versions",
+      command.kind === "sync" ? "/sync" : "/versions",
       { requestId, expectedRevision },
       signal,
     );

@@ -7,6 +7,11 @@ export interface WorkspaceStore {
   ensureProject(project: { id: string; name: string; documents?: ReadonlyArray<{ id: string; name: string; mime?: string; content: string }> }): Promise<void>;
   overview(projectId: string): WorkspaceOverview;
   getVersion(projectId: string, versionId: string): WorkspaceVersion;
+  findSourceCache(projectId: string, cacheKey: string): WorkspaceVersion | undefined;
+  retainVersion(projectId: string, versionId: string, reference: string): void;
+  releaseVersion(projectId: string, reference: string): void;
+  planCleanupVersions(projectId: string, versionIds: string[], actorId: string, additionalReferences?: string[]): { activeTasks: string[]; protected: string[]; removable: string[]; reasons: Record<string, Array<{ kind: string; reference: string }>> };
+  pruneVersions(projectId: string, versionIds: string[], actorId: string, additionalReferences?: string[]): { removed: string[] };
   taskForRequest(projectId: string, type: string, requestId: string, actorId: string): WorkspaceTask | undefined;
   files(projectId: string, versionId: string): WorkspaceFile[];
   tree(projectId: string, versionId: string, directory?: string): { entries: Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number }>; truncated: boolean };
@@ -23,7 +28,8 @@ export interface WorkspaceStore {
   startExternal(projectId: string, input: { sourceVersionId: string; rules?: Array<{ find: string; replace: string }>; requestId: string }, actorId?: string): WorkspaceTask;
   confirmExternal(projectId: string, versionId: string, input: { confirmedPaths: string[]; excludedPaths: string[] }): WorkspaceVersion;
   startPackages(projectId: string, input: { sourceVersionId: string; services: Array<'frontend' | 'backend'>; requestId: string; contexts?: WorkspaceBuildContext[] }, actorId?: string): WorkspaceTask;
-  startSnapshot(projectId: string, input: { requestId: string; captureId: string; source: Omit<WorkspaceSource, 'contentHash'> }, materialize: (input: { root: string; signal: AbortSignal; progress: (stage: string, message: string) => void; checkBudget: () => void }) => Promise<void>, actorId: string): WorkspaceTask;
+  startSourcePackages(projectId: string, input: unknown, prepare: (context: { signal: AbortSignal; progress: (stage: string, message: string) => void; materializeCache: (input: { cacheKey: string; source: Omit<WorkspaceSource, 'contentHash'> }, materialize: (input: { root: string; signal: AbortSignal; progress: (stage: string, message: string) => void; checkBudget: () => void }) => Promise<void>) => Promise<WorkspaceVersion> }) => Promise<{ sourceVersionId: string; contexts: WorkspaceBuildContext[] }>, actorId: string): WorkspaceTask;
+  startSnapshot(projectId: string, input: { requestId: string; captureId: string; taskType?: 'sync' | 'input' | 'snapshot'; cacheKey?: string; cachePurpose?: 'source' | 'deployment' | 'external-input'; source: Omit<WorkspaceSource, 'contentHash'> }, materialize: (input: { root: string; signal: AbortSignal; progress: (stage: string, message: string) => void; checkBudget: () => void }) => Promise<void>, actorId: string): WorkspaceTask;
   packageFile(projectId: string, releaseId: string, service: string): { bytes: Uint8Array; name: string; mime: string };
   startImport(projectId: string, input: { repositoryUrl: string; branch?: string; requestId: string }, actorId?: string): WorkspaceTask;
   cancelTask(projectId: string, taskId: string): WorkspaceTask;

@@ -111,9 +111,7 @@ export function readAutoOpsThreadScope(
     environmentId: environment.id,
     agentId: project.agents[0].id,
     visibility: 'private',
-    ...(project.membership?.workspaceAccess === 'external'
-      ? { workspaceType: 'external' as const }
-      : {}),
+    workspaceType: project.membership?.workspaceAccess === 'external' ? 'external' : 'internal',
   }
 }
 export function setAutoOpsThreadScope(threadId: string, scope: AutoOpsThreadScope): void {
@@ -150,9 +148,7 @@ export async function inheritAutoOpsThreadScope(
     environmentId: source.environmentId,
     agentId: source.agentId,
     visibility: 'private',
-    ...(source.workspaceType
-      ? { workspaceType: source.workspaceType, workspaceVersionId: source.workspaceVersionId }
-      : {}),
+    ...(source.workspaceType ? { workspaceType: source.workspaceType } : {}),
   })
 }
 export async function authorizeThreadLaunch({

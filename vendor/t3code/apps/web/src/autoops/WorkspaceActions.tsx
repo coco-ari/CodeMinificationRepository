@@ -1,4 +1,11 @@
-import { useId, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useId,
+  useRef,
+  useState,
+  type ComponentProps,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import {
   ArrowDownToLineIcon,
   ChevronDownIcon,
@@ -93,7 +100,11 @@ function useWorkspaceSubmit() {
 }
 
 export function WorkspaceSubmissionNotice({
-  label, busy, onCheck, onRetry, retryAvailable,
+  label,
+  busy,
+  onCheck,
+  onRetry,
+  retryAvailable,
 }: {
   label: string | null
   retryAvailable: boolean
@@ -105,13 +116,27 @@ export function WorkspaceSubmissionNotice({
   return (
     <Alert variant="warning" role="status">
       <div className="flex min-w-0 flex-col gap-2">
-        <p>上次{label}的结果尚未确认。先核对任务；重试会继续使用原输入，关闭弹窗不会取消后台任务。</p>
+        <p>
+          上次{label}的结果尚未确认。先核对任务；重试会继续使用原输入，关闭弹窗不会取消后台任务。
+        </p>
         {!retryAvailable ? <p>刷新后需重新填写原输入并提交，系统会先核对上次任务。</p> : null}
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void onCheck()}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void onCheck()}
+          >
             核对任务
           </Button>
-          <Button type="button" size="sm" variant="outline" disabled={busy || !retryAvailable} onClick={() => void onRetry()}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy || !retryAvailable}
+            onClick={() => void onRetry()}
+          >
             使用原请求重试
           </Button>
         </div>
@@ -277,28 +302,17 @@ export function ExternalWorkspaceDialog({
   open,
   onOpenChange,
   finalFocus,
-  internalVersions,
-  initialSourceId,
   disabled,
   onGenerate,
   error,
   submissionNotice,
 }: DialogProps & {
-  internalVersions: readonly WorkspaceVersion[]
-  initialSourceId?: string | undefined
   disabled: boolean
-  onGenerate: (sourceId: string, rules: RedactionRule[]) => Promise<boolean>
+  onGenerate: (rules: RedactionRule[]) => Promise<boolean>
 }) {
-  const [sourceId, setSourceId] = useState(initialSourceId ?? '')
   const [rules, setRules] = useState<Array<RedactionRule & { id: string }>>([])
-  const [renderedOpen, setRenderedOpen] = useState(open)
-  if (renderedOpen !== open) {
-    setRenderedOpen(open)
-    if (open) setSourceId(initialSourceId ?? '')
-  }
-  const source = internalVersions.find((version) => version.id === sourceId) ?? internalVersions[0]
   const operation = useWorkspaceSubmit()
-  const unavailable = disabled || operation.pending || !source
+  const unavailable = disabled || operation.pending
   return (
     <Dialog
       open={open}
@@ -312,11 +326,10 @@ export function ExternalWorkspaceDialog({
           onKeyDown={preventCompositionSubmit}
           onSubmit={(event) => {
             event.preventDefault()
-            if (unavailable || !source) return
+            if (unavailable) return
             void operation.submit(
               () =>
                 onGenerate(
-                  source.id,
                   rules.filter((rule) => rule.find).map(({ find, replace }) => ({ find, replace })),
                 ),
               () => onOpenChange(false),
@@ -324,18 +337,12 @@ export function ExternalWorkspaceDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>生成外部版本</DialogTitle>
+            <DialogTitle>更新外部工作区</DialogTitle>
           </DialogHeader>
           <DialogPanel>
-            <SourceVersionPicker
-              versions={internalVersions}
-              value={source?.id ?? ''}
-              onChange={setSourceId}
-              disabled={disabled || operation.pending}
-            />
             <p className="text-muted-foreground text-xs">
-              从内部固定版本去除所有 Git
-              历史并脱敏，保持目录结构。原始工作区不会被修改；生成后需检查并发布。
+              从当前资料和已同步源码生成外部工作区，去除 Git 历史并脱敏，保持目录结构。
+              原始资料不会被修改；生成后需复核并发布，外部对话才会使用新内容。
             </p>
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2">
@@ -419,7 +426,7 @@ export function ExternalWorkspaceDialog({
             </Button>
             <Button type="submit" disabled={unavailable}>
               {operation.pending ? <Spinner size="sm" /> : <ShieldCheckIcon />}
-              {operation.pending ? '正在提交…' : '生成外部版本'}
+              {operation.pending ? '正在提交…' : '更新外部工作区'}
             </Button>
           </DialogFooter>
         </form>
@@ -442,13 +449,19 @@ export function WorkspacePackagesDialog({
   internalVersions: readonly WorkspaceVersion[]
   initialSourceId?: string | undefined
   disabled: boolean
-  onGenerate: (sourceId: string, services: Service[], contexts: WorkspaceBuildContext[]) => Promise<boolean>
+  onGenerate: (
+    sourceId: string,
+    services: Service[],
+    contexts: WorkspaceBuildContext[],
+  ) => Promise<boolean>
 }) {
   const [sourceId, setSourceId] = useState(initialSourceId ?? '')
   const [frontend, setFrontend] = useState(true)
   const [backend, setBackend] = useState(true)
   const contextId = useId()
-  const [contextInputs, setContextInputs] = useState<Record<string, { root: string; workingDirectory: string }>>({})
+  const [contextInputs, setContextInputs] = useState<
+    Record<string, { root: string; workingDirectory: string }>
+  >({})
   const [renderedOpen, setRenderedOpen] = useState(open)
   if (renderedOpen !== open) {
     setRenderedOpen(open)
@@ -457,10 +470,18 @@ export function WorkspacePackagesDialog({
   const source = internalVersions.find((version) => version.id === sourceId) ?? internalVersions[0]
   const contextFor = (service: Service) => {
     const standalone = source?.source.repositories.some((repository) => repository.path === service)
-    return contextInputs[`${source?.id}:${service}`] ?? { root: standalone ? service : '.', workingDirectory: '.' }
+    return (
+      contextInputs[`${source?.id}:${service}`] ?? {
+        root: standalone ? service : '.',
+        workingDirectory: '.',
+      }
+    )
   }
   const changeContext = (service: Service, field: 'root' | 'workingDirectory', value: string) =>
-    setContextInputs((current) => ({ ...current, [`${source?.id}:${service}`]: { ...contextFor(service), [field]: value } }))
+    setContextInputs((current) => ({
+      ...current,
+      [`${source?.id}:${service}`]: { ...contextFor(service), [field]: value },
+    }))
   const operation = useWorkspaceSubmit()
   const unavailable = disabled || operation.pending || !source
   return (
@@ -479,10 +500,16 @@ export function WorkspacePackagesDialog({
             if (unavailable || !source || (!frontend && !backend)) return
             void operation.submit(
               () =>
-                onGenerate(source.id, [
-                  ...(frontend ? ['frontend' as const] : []),
-                  ...(backend ? ['backend' as const] : []),
-                ], (['frontend', 'backend'] as const).filter((service) => service === 'frontend' ? frontend : backend).map((service) => ({ service, ...contextFor(service) }))),
+                onGenerate(
+                  source.id,
+                  [
+                    ...(frontend ? ['frontend' as const] : []),
+                    ...(backend ? ['backend' as const] : []),
+                  ],
+                  (['frontend', 'backend'] as const)
+                    .filter((service) => (service === 'frontend' ? frontend : backend))
+                    .map((service) => ({ service, ...contextFor(service) })),
+                ),
               () => onOpenChange(false),
             )
           }}
@@ -507,18 +534,34 @@ export function WorkspacePackagesDialog({
                 <Checkbox checked={backend} disabled={unavailable} onCheckedChange={setBackend} />
                 后端源码包
               </Label>
-              {(['frontend', 'backend'] as const).filter((service) => service === 'frontend' ? frontend : backend).map((service) => (
-                <div key={service} className="grid min-w-0 gap-2 sm:grid-cols-2">
-                  <div className="min-w-0 space-y-1">
-                    <Label htmlFor={`${contextId}-${service}-root`}>{service === 'frontend' ? '前端' : '后端'}构建上下文</Label>
-                    <Input id={`${contextId}-${service}-root`} value={contextFor(service).root} disabled={unavailable} onChange={(event) => changeContext(service, 'root', event.target.value)} />
+              {(['frontend', 'backend'] as const)
+                .filter((service) => (service === 'frontend' ? frontend : backend))
+                .map((service) => (
+                  <div key={service} className="grid min-w-0 gap-2 sm:grid-cols-2">
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor={`${contextId}-${service}-root`}>
+                        {service === 'frontend' ? '前端' : '后端'}构建上下文
+                      </Label>
+                      <Input
+                        id={`${contextId}-${service}-root`}
+                        value={contextFor(service).root}
+                        disabled={unavailable}
+                        onChange={(event) => changeContext(service, 'root', event.target.value)}
+                      />
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <Label htmlFor={`${contextId}-${service}-directory`}>包内构建目录</Label>
+                      <Input
+                        id={`${contextId}-${service}-directory`}
+                        value={contextFor(service).workingDirectory}
+                        disabled={unavailable}
+                        onChange={(event) =>
+                          changeContext(service, 'workingDirectory', event.target.value)
+                        }
+                      />
+                    </div>
                   </div>
-                  <div className="min-w-0 space-y-1">
-                    <Label htmlFor={`${contextId}-${service}-directory`}>包内构建目录</Label>
-                    <Input id={`${contextId}-${service}-directory`} value={contextFor(service).workingDirectory} disabled={unavailable} onChange={(event) => changeContext(service, 'workingDirectory', event.target.value)} />
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
             <p className="text-muted-foreground text-xs">
               “.” 表示根目录。构建上下文应包含共享依赖和锁文件，包内构建目录相对此上下文。排除 Git
@@ -667,7 +710,7 @@ export function WorkspaceTasksDialog({
               <EmptyHeader>
                 <EmptyTitle>暂无任务记录</EmptyTitle>
                 <EmptyDescription>
-                  导入仓库、生成工作区或部署包后，可在这里查看进度与结果。
+                  同步源码或更新外部工作区后，可在这里查看进度与结果。
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -683,13 +726,17 @@ export function WorkspaceTasksDialog({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium">
-                        {task.type === 'snapshot' ? '生成内部版本' : task.type === 'import'
-                          ? '仓库导入'
-                          : task.type === 'external'
-                            ? '外部工作区生成'
-                            : task.type === 'packages'
-                              ? '部署包生成'
-                              : '工作区任务'}
+                        {task.type === 'sync'
+                          ? '同步源码'
+                          : task.type === 'snapshot'
+                            ? '历史资料快照'
+                            : task.type === 'import'
+                              ? '仓库导入'
+                              : task.type === 'external'
+                                ? '外部工作区生成'
+                                : task.type === 'packages'
+                                  ? '部署包生成'
+                                  : '工作区任务'}
                       </span>
                       <Badge
                         size="sm"

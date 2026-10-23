@@ -1,3 +1,5 @@
+import type { WorkspaceBuildContext } from './workspaces.ts'
+
 export type WorkspaceSourceRole = 'frontend' | 'backend' | 'shared' | 'documentation' | 'other'
 export type WorkspaceRepositoryRefKind = 'default' | 'branch' | 'tag' | 'commit'
 
@@ -69,10 +71,13 @@ export interface WorkspaceAuthoringOverview {
   limits: { maxFileBytes: number; maxFiles: number; maxBytes: number }
   sourceStatus?: Array<{
     sourceId: string
-    status: 'unsynced' | 'synced'
+    status: 'unsynced' | 'queued' | 'syncing' | 'synced' | 'failed'
     versionId?: string
     commit?: string
     createdAt?: string
+    updatedAt?: string
+    requestId?: string
+    error?: { code: string; message: string }
   }>
   publishedRevision?: number
   hasUnpublishedChanges?: boolean
@@ -139,4 +144,53 @@ export interface WorkspaceMaterialContent {
   sha256: string
   extraction: WorkspaceExtraction
   contents?: string
+}
+
+export interface WorkspaceInputRepository extends WorkspaceResolvedRepository {
+  source: WorkspaceRepositorySource
+  versionId: string
+}
+export interface WorkspaceInputCapture {
+  id: string
+  projectId: string
+  requestId: string
+  workspaceType: 'internal' | 'external'
+  revision: number
+  createdAt: string
+  status: 'active' | 'released'
+  repositories: WorkspaceInputRepository[]
+  files: WorkspaceCapturedFile[]
+  directories: string[]
+  captureId?: string
+  externalVersionId?: string
+  sourceErrors?: Array<{
+    sourceId: string
+    name: string
+    mountPath: string
+    code: string
+    message: string
+  }>
+}
+export interface WorkspaceDeploymentSourceInput {
+  requestId: string
+  sources: Array<{ sourceId: string; refKind?: WorkspaceRepositoryRefKind; ref?: string }>
+  contexts: WorkspaceBuildContext[]
+}
+export interface WorkspaceDeploymentSourceCapture {
+  id: string
+  projectId: string
+  requestId: string
+  versionId: string
+  repositories: WorkspaceInputRepository[]
+  contexts: WorkspaceBuildContext[]
+}
+export interface WorkspaceSourceSyncRecord {
+  sourceId: string
+  configurationHash: string
+  requestId: string
+  status: 'queued' | 'syncing' | 'synced' | 'failed'
+  updatedAt: string
+  versionId?: string
+  commit?: string
+  error?: { code: string; message: string }
 }

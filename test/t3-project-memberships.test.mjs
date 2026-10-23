@@ -49,12 +49,13 @@ test('项目动作投影复用真实成员与环境授权，关闭部署及撤�
   const { access, admin, member, guest, catalog, call, lastTaskActor } = setup(t, { deploymentEnabled: () => enabled })
   const capabilities = (principal) => access.bootstrap(principal).projects.find((entry) => entry.id === base.projectId)?.capabilities
   assert.deepEqual(capabilities(admin), { 'workspace.read': true, 'workspace.manage': true, 'credential.use': true, 'credential.manage': true, 'deployment.read': true, 'deployment.execute': true })
-  for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'credential.use': false, 'credential.manage': false, 'deployment.read': false, 'deployment.execute': false })
+  for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'credential.use': principal === member, 'credential.manage': false, 'deployment.read': false, 'deployment.execute': false })
   access.requireCredentialActor(admin.id, base.projectId, 'credential.manage')
   access.requireCredentialActor(admin.id, base.projectId, 'credential.use')
   access.requireWorkspaceReader(member.id, base.projectId)
+  access.requireCredentialActor(member.id, base.projectId, 'credential.use')
+  assert.throws(() => access.requireCredentialActor(guest.id, base.projectId, 'credential.use'), { code: 'CREDENTIAL_USE_FORBIDDEN' })
   for (const principal of [member, guest]) {
-    assert.throws(() => access.requireCredentialActor(principal.id, base.projectId, 'credential.use'))
     assert.throws(() => access.requireCredentialActor(principal.id, base.projectId, 'credential.manage'))
   }
   assert.throws(() => access.requireCredentialActor(admin.id, base.projectId, 'credential.export'), {code:'CREDENTIAL_ACTION_FORBIDDEN'})

@@ -33,23 +33,22 @@ const labels = {
   document: "修改资料",
   upload: "上传资料",
   version: "更新固定版本",
+  sync: "同步源码",
 };
 const credentialRecoveryNotice =
   "浏览器未保存凭证秘密，也无法在刷新后比较原秘密。请先核对原请求；没有收据时仅重新填写原输入，使用原请求重试。";
 export function readAuthoringPending(key: string): Pending | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as Pending | null;
-    if (
-      !(
-        value &&
-        typeof value.requestId === "string" &&
-        value.requestId.length <= 160 &&
-        Number.isSafeInteger(value.expectedRevision) &&
-        ((typeof value.digest === "string" && /^[a-f0-9]{64}$/.test(value.digest)) ||
-          (value.kind === "credential" && value.digestVersion === 2 && value.digest === null)) &&
-        Object.hasOwn(labels, value.kind)
-      )
-    )
+    if (!(
+      value &&
+      typeof value.requestId === "string" &&
+      value.requestId.length <= 160 &&
+      Number.isSafeInteger(value.expectedRevision) &&
+      ((typeof value.digest === "string" && /^[a-f0-9]{64}$/.test(value.digest)) ||
+        (value.kind === "credential" && value.digestVersion === 2 && value.digest === null)) &&
+      Object.hasOwn(labels, value.kind)
+    ))
       return null;
     const result: Pending = {
       requestId: value.requestId,
@@ -75,6 +74,7 @@ export function useWorkspaceAuthoring(
   projectId: string,
   canManage: boolean,
   onTask: (receipt: AuthoringReceipt) => void,
+  refreshKey = "",
 ) {
   const principal = readAutoOpsHost()?.principal.id ?? "";
   const storageKey = `autoops:workspace-authoring:${principal}:${projectId}`;
@@ -151,7 +151,7 @@ export function useWorkspaceAuthoring(
           }
         });
     return () => abort.abort();
-  }, [projectId, principal, generation, canManage]);
+  }, [projectId, principal, generation, canManage, refreshKey]);
 
   const remember = (value: Pending) => {
     sessionStorage.setItem(storageKey, JSON.stringify(value));

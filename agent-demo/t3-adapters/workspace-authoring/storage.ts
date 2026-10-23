@@ -18,4 +18,14 @@ CREATE INDEX authoring_entries_hash ON authoring_entries(hash);
 CREATE INDEX authoring_capture_files_hash ON authoring_capture_files(hash);
 `,
 }
-export const openAuthoringDatabase = (filename: string) => openDatabase(filename, [migration])
+const currentInputs = {
+  version: 2,
+  name: 'workspace-current-inputs',
+  sql: `
+CREATE TABLE authoring_inputs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, workspace_type TEXT NOT NULL CHECK(workspace_type IN ('internal','external')), value TEXT NOT NULL, UNIQUE(project_id,request_id)) STRICT;
+CREATE TABLE authoring_source_sync (project_id TEXT NOT NULL, source_id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(project_id,source_id)) STRICT;
+CREATE TABLE authoring_deployment_inputs (project_id TEXT NOT NULL, request_id TEXT NOT NULL, actor_id TEXT NOT NULL, fingerprint TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(project_id,request_id)) STRICT;
+`,
+}
+export const openAuthoringDatabase = (filename: string) =>
+  openDatabase(filename, [migration, currentInputs])

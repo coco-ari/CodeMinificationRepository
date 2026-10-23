@@ -4,8 +4,7 @@ import {
   ModuleSidebarItem,
   ModuleSidebarEmpty,
 } from './ModuleWorkspace'
-import { Link } from '@tanstack/react-router'
-import { ProjectId } from '@t3tools/contracts'
+import { DeploymentSourceDetails } from './deployment'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   FileTextIcon,
@@ -587,7 +586,7 @@ export function DeploymentsPanel({
               <>
                 {!frontendPackages.length ? (
                   <p className="shrink-0 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
-                    还没有前端源码包，请在“源码包”中从内部固定版本生成。
+                    还没有前端源码包，请在“源码包”中选择 Git 来源生成。
                   </p>
                 ) : !online ? (
                   <p className="shrink-0 border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">
@@ -657,22 +656,11 @@ export function DeploymentsPanel({
                         '尚无成功记录'}
                     </span>
                     {activeTask ? <span>{deploymentStageLabel(activeTask.stage)}中</span> : null}
-                    {target.currentRelease?.sourceIdentity?.sourceVersionId ? (
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        render={
-                          <Link
-                            to="/workspaces"
-                            search={{
-                              projectId: ProjectId.make(projectId),
-                              versionId: target.currentRelease.sourceIdentity.sourceVersionId,
-                            }}
-                          />
-                        }
-                      >
-                        查看已确认版本来源
-                      </Button>
+                    {target.currentRelease?.sourceIdentity ? (
+                      <DeploymentSourceDetails
+                        source={target.currentRelease.sourceIdentity}
+                        label="查看已确认版本来源"
+                      />
                     ) : null}
                   </div>
                   {runtimeStatus?.state === 'uncertain' ? (
@@ -764,22 +752,8 @@ export function DeploymentsPanel({
                                 </span>
                               ) : null}
                             </span>
-                            {release.sourceIdentity?.sourceVersionId ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                render={
-                                  <Link
-                                    to="/workspaces"
-                                    search={{
-                                      projectId: ProjectId.make(projectId),
-                                      versionId: release.sourceIdentity.sourceVersionId,
-                                    }}
-                                  />
-                                }
-                              >
-                                查看来源
-                              </Button>
+                            {release.sourceIdentity ? (
+                              <DeploymentSourceDetails source={release.sourceIdentity} />
                             ) : null}
                             <Button
                               size="sm"

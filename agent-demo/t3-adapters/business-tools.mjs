@@ -65,31 +65,36 @@ export function configuredBusinessArtifactStore() {
  * by its registry, never a model argument. All resource callbacks must already
  * enforce the current canonical history/attachment boundary.
  */
-export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, loadAttachmentBytes, storeArtifact, renderPdf, workspaceStore = configuredWorkspaceStore() }) {
+export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, loadAttachmentBytes, storeArtifact, renderPdf, materialInput, workspaceStore = configuredWorkspaceStore() }) {
   const authorize = async (threadId) => {
     const authorized = await authorizeThread(threadId)
     if (!authorized?.binding || !authorized.project || !authorized.agent) fail('THREAD_FORBIDDEN', '会话授权已失效')
     return authorized
   }
   const workspace = (binding) => {
+    if (materialInput) {
+      if (materialInput.workspaceType !== (binding.workspaceType || 'internal')) fail('WORKSPACE_FORBIDDEN', '资料输入不属于当前会话范围')
+      return { version: { id: materialInput.id, type: materialInput.workspaceType, source: { repositories: materialInput.repositories } }, files: materialInput.files }
+    }
     if (!binding.workspaceVersionId && !binding.workspaceType) return null
     if (!binding.workspaceVersionId || !binding.workspaceType || !workspaceStore) fail('WORKSPACE_UNAVAILABLE', '会话固定工作区不可用')
     const version = workspaceStore.getVersion(binding.projectId, binding.workspaceVersionId)
     if (version.type !== binding.workspaceType) fail('WORKSPACE_FORBIDDEN', '工作区不属于当前会话范围')
     return { version, files: workspaceStore.files(binding.projectId, binding.workspaceVersionId) }
   }
-  const workspacePath = (binding, relativePath) => `autoops/${binding.projectId}/workspaces/${binding.workspaceVersionId}/${relativePath}`
+  const workspacePath = (binding, relativePath) => materialInput ? `autoops/${binding.projectId}/inputs/${materialInput.id}/${relativePath}` : `autoops/${binding.projectId}/workspaces/${binding.workspaceVersionId}/${relativePath}`
   const workspaceSource = (binding, path) => `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(workspacePath(binding, path))}`
-  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: `autoops/${binding.projectId}/workspaces/${version.id}`, source: { contentHash: version.source?.contentHash, repositories: version.type === 'external' ? [] : version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) } })
+  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: workspacePath(binding, '').replace(/\/$/, ''), ...(materialInput ? { inputId: materialInput.id, capturedAt: materialInput.createdAt, revision: materialInput.revision, sourceErrors: materialInput.sourceErrors ?? [] } : {}), source: { contentHash: version.source?.contentHash, repositories: version.type === 'external' ? [] : version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) } })
   return {
     async listMaterials(threadId) {
       const { project, binding } = await authorize(threadId)
       const attachments = await loadAttachments(binding)
+      await authorize(threadId)
       const selected = workspace(binding)
       return {
         project: { id: project.id, name: project.name },
         environmentId: binding.environmentId,
-        ...(selected ? { source: 'workspace_snapshot', workspace: workspaceIdentity(selected, binding), documentCount: selected.files.length, truncated: selected.files.length > 250 } : {}),
+        ...(selected ? { source: materialInput ? 'workspace_input' : 'workspace_snapshot', workspace: workspaceIdentity(selected, binding), documentCount: selected.files.length, truncated: selected.files.length > 250 } : {}),
         documents: selected ? selected.files.slice(0, 250).map(({ path, name, mime, size }) => ({ id: path, name, path: workspacePath(binding, path), mime, size })) : project.documents.map(({ id, name, mime }) => ({ id, name, mime })),
         attachments: attachments.map(({ id, name, mime, readable }) => ({ id, name, mime, ...(readable === undefined ? {} : { readable }) })),
       }
@@ -99,9 +104,15 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
       const selected = workspace(binding)
       if (selected) {
         const file = selected.files.find((entry) => entry.path === id || workspacePath(binding, entry.path) === id)
-        if (!file) fail('DOCUMENT_FORBIDDEN', '资料不属于会话固定工作区版本')
-        const read = workspaceStore.read(binding.projectId, binding.workspaceVersionId, file.path)
-        return { id: file.path, name: file.name, mime: file.mime, content: read.contents, byteLength: read.byteLength, truncated: read.truncated, source: 'workspace_snapshot', workspaceType: binding.workspaceType, workspaceVersionId: binding.workspaceVersionId, sourceUrl: workspaceSource(binding, file.path) }
+        if (!file) {
+          const relative = id.startsWith(workspacePath(binding, '')) ? id.slice(workspacePath(binding, '').length) : id
+          const unavailable = materialInput?.sourceErrors?.find(source => relative === source.mountPath || relative.startsWith(source.mountPath + '/'))
+          if (unavailable) fail('WORKSPACE_INPUT_SOURCE_UNAVAILABLE', unavailable.message)
+          fail('DOCUMENT_FORBIDDEN', '资料不属于本轮输入')
+        }
+        const read = materialInput ? await materialInput.read(file.path) : workspaceStore.read(binding.projectId, binding.workspaceVersionId, file.path)
+        await authorize(threadId)
+        return { id: file.path, name: file.name, mime: file.mime, content: read.contents, byteLength: read.byteLength, truncated: read.truncated, source: materialInput ? 'workspace_input' : 'workspace_snapshot', workspaceType: binding.workspaceType, ...(materialInput ? { inputId: materialInput.id } : { workspaceVersionId: binding.workspaceVersionId }), sourceUrl: workspaceSource(binding, file.path) }
       }
       const document = project.documents.find((entry) => entry.id === id)
       if (!document) fail('DOCUMENT_FORBIDDEN', '资料不存在或不属于当前项目')
@@ -116,6 +127,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
       const bytes = typeof file.content === 'string' ? undefined : file.bytes || await loadAttachmentBytes?.(binding, file.id)
       if (typeof file.content !== 'string' && !bytes) fail('ATTACHMENT_UNAVAILABLE', '附件内容不可用')
       const extracted = typeof file.content === 'string' ? file : await extractBusinessAttachment({ id, name: file.name, mime: file.mime, bytes })
+      await authorize(threadId)
       if (typeof extracted.content !== 'string') fail('UNSUPPORTED_ATTACHMENT', extracted.extraction?.message || '此文件暂不能提取为文本')
       return { id, name: file.name, mime: file.mime, content: extracted.content, extraction: extracted.extraction, sourceUrl }
     },
@@ -123,7 +135,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
       const { binding, project } = await authorize(threadId)
       if (binding.environmentId !== environmentId) fail('ENVIRONMENT_FORBIDDEN', '只能查询会话固定环境')
       const selected = workspace(binding)
-      if (selected) return { environmentId, environmentName: project.environments.find((environment) => environment.id === environmentId)?.name, source: 'workspace_snapshot', workspace: workspaceIdentity(selected, binding), notice: '当前会话读取固定工作区文件快照；未接入服务器实时观测，不能据此判断部署或运行状态。' }
+      if (selected) return { environmentId, environmentName: project.environments.find((environment) => environment.id === environmentId)?.name, source: materialInput ? 'workspace_input' : 'workspace_snapshot', workspace: workspaceIdentity(selected, binding), notice: '当前任务读取已固定的资料输入；未接入服务器实时观测，不能据此判断部署或运行状态。' }
       const context = contextFor(binding)
       return { environmentId, environmentName: project.environments.find((environment) => environment.id === environmentId)?.name, source: 'demo_fixture_snapshot', observedAt: context.resourceSnapshot.collectedAt, resources: context.resources, resourceSnapshot: context.resourceSnapshot, notice: '这是测试主服务提供的演示夹具，不是生产环境实时观测。' }
     },
@@ -135,6 +147,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
       if (!TEXT_REPORT_MIMES.has(input.mime) && input.mime !== 'application/pdf') fail('INVALID_TOOL_INPUT', '报告类型不支持')
       if (input.mime === 'application/pdf' && !renderPdf) fail('PDF_UNAVAILABLE', 'PDF 生成尚未就绪，可生成 Markdown 或 CSV')
       const bytes = input.mime === 'application/pdf' ? await renderPdf(content) : Buffer.from(content, 'utf8')
+      await authorize(threadId)
       return { ...await storeArtifact({ binding, runId, name, mime: input.mime, bytes }), status: 'saved', published: binding.visibility === 'project' }
     },
   }

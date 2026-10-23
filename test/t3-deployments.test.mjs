@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp, rm, readdir} from 'node:fs/promises'
+import {mkdtemp, rm, readdir, mkdir, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {randomUUID} from 'node:crypto'
@@ -187,8 +187,39 @@ test('固定包上下文、项目来源和配置变化拒绝发布，服务器�
   await assert.rejects(f.request('/tasks','POST',base),{status:409})
   f.workspaceStore.getVersion=(...args)=>({...getVersion(...args),status:'pending_review'})
   await assert.rejects(f.request('/tasks','POST',base),{status:409})
+  for (const cachePurpose of ['source', 'external-input']) {
+    f.workspaceStore.getVersion=(...args)=>({...getVersion(...args),cachePurpose})
+    await assert.rejects(f.request('/tasks','POST',base),{status:409,code:'DEPLOYMENT_SOURCE_INVALID'})
+  }
   f.workspaceStore.getVersion=getVersion
   assert.equal(readState(f.dataDir).deployments.tasks.length,0)
+})
+
+test('独立 Git 源码包无需日常工作区版本，清单固定多仓提交并沿用部署收据', async t => {
+  const f = await fixture(t,{listener:true}), r = await records(f)
+  await agent(f,'/register',{registrationToken:r.server.registrationToken,capabilities:['static-site-v1']})
+  const repositories = [{path:'app',commit:'a'.repeat(40)},{path:'shared',commit:'b'.repeat(40)}]
+  const requestId = randomUUID()
+  const prepare = async ({materializeCache}) => {
+    const version = await materializeCache({cacheKey:'deployment-test',source:{repositories,documents:[]}},async ({root}) => {
+      await mkdir(join(root,'app'),{recursive:true}); await mkdir(join(root,'shared'),{recursive:true})
+      await writeFile(join(root,'app','package.json'),JSON.stringify({name:'isolated-app'}))
+      await writeFile(join(root,'shared','README.md'),'共享源码')
+    })
+    return {sourceVersionId:version.id,contexts:[{service:'frontend',root:'.',workingDirectory:'app'}]}
+  }
+  const input = {requestId,sources:[{sourceId:'app'},{sourceId:'shared'}],contexts:[{service:'frontend',root:'.',workingDirectory:'app'}]}
+  const completed = await finish(f.workspaceStore,'p-one',f.workspaceStore.startSourcePackages('p-one',input,prepare,principal.id))
+  assert.equal(f.workspaceStore.startSourcePackages('p-one',input,prepare,principal.id).id,completed.id)
+  const pack = f.workspaceStore.overview('p-one').releases.find(value=>value.id===completed.releaseId)
+  assert.equal(f.workspaceStore.overview('p-one').internalVersions.some(value=>value.id===pack.sourceVersionId),false)
+  assert.deepEqual(pack.manifest.source.repositories,repositories)
+  assert.deepEqual(pack.manifest.source.documents,[])
+  const target=(await f.request('/targets','POST',{...r.targetInput,requestId:randomUUID(),config:{...r.targetInput.config,module:'app'}})).body.target
+  const submitted={targetId:target.id,action:'deploy',service:'frontend',packageId:pack.id,configKey:target.configKey,requestId:randomUUID()}
+  const task=(await f.request('/tasks','POST',submitted)).body.task
+  assert.deepEqual(task.sourceIdentity.repositories,repositories)
+  assert.equal((await f.request('/tasks','POST',submitted)).body.task.id,task.id)
 })
 
 test('未启用部署也要授权，合法GET显示真实关闭状态，其余操作503',async()=>{

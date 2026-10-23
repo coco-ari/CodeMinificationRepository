@@ -308,3 +308,30 @@ describe("工作区资料传输与收据边界", () => {
     (path) => expect(validMaterialPath(path)).toBe(false),
   );
 });
+
+it("源码同步使用当前修订和原请求，核对时接回同一任务", async () => {
+  setup();
+  const task = { id: "sync-task", type: "sync", requestId: "sync-request", status: "queued" };
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ task })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ result: null, task })));
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    const result = await submitAuthoring("p", {
+      requestId: "sync-request",
+      expectedRevision: 8,
+      command: { kind: "sync" },
+    });
+    expect(fetcher.mock.calls[0]![0]).toBe("/api/agent-demo/t3/api/v1/projects/p/workspace/sync");
+    expect(JSON.parse(fetcher.mock.calls[0]![1].body)).toEqual({
+      requestId: "sync-request",
+      expectedRevision: 8,
+    });
+    expect(result).toEqual({ requestId: "sync-request", task });
+    expect(await inspectAuthoringRequest("p", "sync-request", false)).toEqual(result);
+    expect(fetcher.mock.calls[1]![0]).toContain("/requests/sync-request");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

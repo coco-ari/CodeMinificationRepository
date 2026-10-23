@@ -1,6 +1,9 @@
 import type { AutoOpsThreadScope } from './hostConfig'
 
-type WorkspacePathScope = Pick<AutoOpsThreadScope, 'projectId' | 'workspaceType' | 'workspaceVersionId'>
+type WorkspacePathScope = Pick<
+  AutoOpsThreadScope,
+  'projectId' | 'workspaceType' | 'workspaceVersionId'
+>
 
 const unsafePathCharacters = /[\\\p{Cc}\p{Cs}\u2028\u2029]/u
 
@@ -11,13 +14,26 @@ function validRelativePath(path: string, allowTrailingSlash = false): boolean {
   return parts.length > 0 && parts.every((part) => part !== '' && part !== '.' && part !== '..')
 }
 
-/** Resolve only identities from the currently selected immutable workspace. */
-export function workspaceRelativePath(path: string, scope: WorkspacePathScope | undefined): string | null {
-  if (!scope || !['internal', 'external'].includes(scope.workspaceType ?? '') ||
-    !/^[a-zA-Z0-9_-]+$/.test(scope.projectId) ||
-    !scope.workspaceVersionId || !/^[a-zA-Z0-9_-]+$/.test(scope.workspaceVersionId)) return null
-  const prefix = `autoops/${scope.projectId}/workspaces/${scope.workspaceVersionId}/`
-  if (!path.startsWith(prefix)) return null
+/** 当前候选使用不可变输入身份，显式旧引用只接受原绑定版本。 */
+export function workspaceRelativePath(
+  path: string,
+  scope: WorkspacePathScope | undefined,
+): string | null {
+  if (
+    !scope ||
+    !['internal', 'external'].includes(scope.workspaceType ?? '') ||
+    !/^[a-zA-Z0-9_-]+$/.test(scope.projectId)
+  )
+    return null
+  const currentPrefix = new RegExp(`^autoops/${scope.projectId}/inputs/[a-zA-Z0-9_-]+/`).exec(
+    path,
+  )?.[0]
+  const prefix =
+    currentPrefix ??
+    (scope.workspaceVersionId && /^[a-zA-Z0-9_-]+$/.test(scope.workspaceVersionId)
+      ? `autoops/${scope.projectId}/workspaces/${scope.workspaceVersionId}/`
+      : null)
+  if (!prefix || !path.startsWith(prefix)) return null
   const relative = path.slice(prefix.length)
   return validRelativePath(relative) ? relative : null
 }
@@ -43,9 +59,13 @@ export function completeWorkspaceCommonPrefix(
   const relativeQuery = explicitRelative ? query.slice(2) : query
   if (relativeQuery && !validRelativePath(relativeQuery, true)) return null
   const candidates: string[][] = []
+  let referenceRoot: string | undefined
   for (const entry of entries) {
     const relative = workspaceRelativePath(entry.path, scope)
     if (relative === null) return null
+    const root = entry.path.slice(0, entry.path.length - relative.length)
+    if (referenceRoot && referenceRoot !== root) return null
+    referenceRoot = root
     candidates.push(Array.from(relative + (entry.kind === 'directory' ? '/' : '')))
   }
   const first = candidates[0]!

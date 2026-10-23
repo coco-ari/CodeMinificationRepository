@@ -2,7 +2,7 @@ import { autoOpsRequest } from './apiClient'
 import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from './hostConfig'
 import { formatWorkspacePathQuery, workspaceRelativePath } from './pathCompletion'
 
-/** A directory stays editable until a file or folder is explicitly committed as a reference. */
+/** 目录补全保持可编辑，只有明确选择后才提交固定文件引用。 */
 export function autoOpsWorkspaceDirectoryCompletion(
   path: string,
   scope: Pick<AutoOpsThreadScope, 'projectId' | 'workspaceType' | 'workspaceVersionId'> | undefined,
@@ -11,15 +11,16 @@ export function autoOpsWorkspaceDirectoryCompletion(
   return relative === null ? null : formatWorkspacePathQuery(`${relative}/`)
 }
 
-/** Display workspace-relative directories while keeping resource identities canonical. */
+/** 展示工作区相对目录，资源身份仍保留完整输入标识。 */
 export function autoOpsResourcePathDescription(
   path: string,
   scope: Pick<AutoOpsThreadScope, 'projectId' | 'workspaceVersionId'> | undefined,
 ): string {
-  const prefix = scope?.workspaceVersionId
-    ? `autoops/${scope.projectId}/workspaces/${scope.workspaceVersionId}/`
-    : undefined
-  const displayPath = prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path
+  const relative = workspaceRelativePath(
+    path,
+    scope ? { ...scope, workspaceType: 'internal' } : undefined,
+  )
+  const displayPath = relative ?? path
   return displayPath.slice(0, Math.max(0, displayPath.lastIndexOf('/')))
 }
 
@@ -40,7 +41,7 @@ export function autoOpsBusinessPath(value: string | undefined): string | null {
     return null
   if (
     parts.length > 2 &&
-    !['documents', 'environments', 'threads', 'workspaces'].includes(parts[2] ?? '')
+    !['documents', 'environments', 'threads', 'workspaces', 'inputs'].includes(parts[2] ?? '')
   )
     return null
   return path
@@ -49,18 +50,21 @@ export function autoOpsResourceCwd(
   threadId: string | null,
   projectId: string | undefined,
   scopeOverride?: AutoOpsThreadScope,
+  historicalVersionId?: string,
 ): string | null {
   if (!threadId || !projectId || !readAutoOpsHost()) return null
   const scope = scopeOverride ?? readAutoOpsThreadScope(threadId, projectId)
+  if (historicalVersionId && historicalVersionId !== scope?.workspaceVersionId) return null
+  // 日常浏览跟随当前资料，只有显式历史引用才恢复原版本目录。
   return scope && scope.executionBinding?.kind !== 'customer'
-    ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}${scope.workspaceType && scope.workspaceVersionId ? `?workspaceType=${scope.workspaceType}&workspaceVersionId=${encodeURIComponent(scope.workspaceVersionId)}` : ''}`
+    ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}${scope.workspaceType ? `?workspaceType=${scope.workspaceType}${historicalVersionId ? `&workspaceVersionId=${encodeURIComponent(historicalVersionId)}` : ''}` : ''}`
     : null
 }
 export function isAutoOpsResourceCwd(value: string | null): boolean {
   return (
     !!readAutoOpsHost() &&
     !!value &&
-    /^autoops:\/\/projects\/[a-zA-Z0-9_-]+\/environments\/[a-zA-Z0-9_-]+\/threads\/[a-zA-Z0-9_-]+(?:\?workspaceType=(?:internal|external)&workspaceVersionId=[a-zA-Z0-9_-]+)?$/.test(
+    /^autoops:\/\/projects\/[a-zA-Z0-9_-]+\/environments\/[a-zA-Z0-9_-]+\/threads\/[a-zA-Z0-9_-]+(?:\?workspaceType=(?:internal|external)(?:&workspaceVersionId=[a-zA-Z0-9_-]+|&inputId=[a-zA-Z0-9_-]+)?)?$/.test(
       value,
     )
   )
@@ -69,7 +73,9 @@ export function isAutoOpsWorkspaceResourceCwd(value: string | null): boolean {
   return (
     isAutoOpsResourceCwd(value) &&
     !!value &&
-    /\?workspaceType=(?:internal|external)&workspaceVersionId=[a-zA-Z0-9_-]+$/.test(value)
+    /\?workspaceType=(?:internal|external)(?:&workspaceVersionId=[a-zA-Z0-9_-]+|&inputId=[a-zA-Z0-9_-]+)?$/.test(
+      value,
+    )
   )
 }
 export function autoOpsResourceRequestUrl(url: string, mode: 'metadata' | 'inline'): string {

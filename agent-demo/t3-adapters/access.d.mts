@@ -48,6 +48,7 @@ export interface AutoOpsProject {
 }
 export interface AutoOpsAgent { id: string; name: string; description: string; projectIds: string[]; capabilities: string[] }
 export interface ToolScope { binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
+export interface ThreadInputBinding { readonly threadId: string; readonly runId: string; readonly inputId: string; readonly createdAt: string }
 export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
 export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
@@ -65,6 +66,7 @@ export interface AutoOpsAccess {
   requireWorkspaceManager(principal: AutoOpsPrincipal, projectId: string): ProjectMembership;
   requireWorkspaceActor(userId: string, projectId: string): ProjectMembership;
   requireWorkspaceReader(userId: string, projectId: string): ProjectMembership;
+  requireWorkspaceInputReader(userId: string, projectId: string, workspaceType: 'internal'|'external'): ProjectMembership;
   requireCredentialActor(userId: string, projectId: string, action: 'credential.use' | 'credential.manage'): ProjectMembership;
   requireDeploymentActor(userId:string, projectId:string, environmentId:string): ProjectMembership;
   projectCapabilities(principal:AutoOpsPrincipal, projectId:string): ProjectCapabilities;
@@ -72,6 +74,13 @@ export interface AutoOpsAccess {
   listToolResourceThreads(threadId:string): ResourceThread[];
   threadAudience(binding: ThreadBinding): string[];
   getThreadBinding(threadId: string): ThreadBinding | undefined;
+  getRunInput(threadId: string, runId: string): ThreadInputBinding | undefined;
+  bindRunInput(threadId: string, runId: string, inputId: string): ThreadInputBinding;
+  listThreadInputs(threadId: string): ThreadInputBinding[];
+  workspaceVersionReferences(projectId: string): string[];
+  retainInputReference(threadId: string, inputId: string, actorId: string): void;
+  inputReferences(threadId: string): Array<{inputId:string;actorId:string}>;
+  requireRunInput(threadId: string, inputId: string): ThreadInputBinding;
   nativeSubagentParent(threadId: string): string | undefined;
   canSeeThread(principal: AutoOpsPrincipal, threadId: string, includeDeleted?: boolean): boolean;
   visibleThreadIds(principal: AutoOpsPrincipal): string[];

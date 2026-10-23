@@ -15,20 +15,19 @@ import {
 } from '~/components/ui/menu'
 import { Tooltip, TooltipTrigger, TooltipPopup } from '~/components/ui/tooltip'
 import { readAutoOpsHost } from './hostConfig'
-import type { WorkspaceOverview, WorkspaceVersion } from './workspaces'
 
-/** 平台与客户工作区入口共用选择器展示和已发布版本过滤。 */
-export function availableWorkspaceVersions(
+/** 平台范围只决定可见边界；每次运行的输入由服务端捕获。 */
+export function availableWorkspaceScopes(
   projectId: string,
-  overview: WorkspaceOverview,
-): WorkspaceVersion[] {
+): Array<{ value: 'internal' | 'external'; label: string }> {
   const project = readAutoOpsHost()?.projects.find((entry) => entry.id === projectId)
   if (project?.capabilities?.['workspace.read'] !== true) return []
-  const membership = project.membership
   return [
-    ...(membership?.workspaceAccess === 'external' ? [] : overview.internalVersions),
-    ...overview.externalVersions,
-  ].filter((version) => version.status === 'published')
+    ...(project.membership?.workspaceAccess === 'external'
+      ? []
+      : [{ value: 'internal' as const, label: '内部原始 · 当前工作区' }]),
+    { value: 'external' as const, label: '外部脱敏 · 当前已发布资料' },
+  ]
 }
 
 export function ScopeComposerChoice({

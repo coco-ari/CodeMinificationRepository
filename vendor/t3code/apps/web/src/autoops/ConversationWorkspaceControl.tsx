@@ -4,40 +4,34 @@ import { autoOpsProjectHref } from "./projectNavigation";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderGit2Icon, LaptopIcon } from "lucide-react";
 import { MenuItem } from "~/components/ui/menu";
-import { ScopeComposerChoice, availableWorkspaceVersions } from "./scopeSelection";
-import { loadWorkspaces, type WorkspaceVersion } from "./workspaces";
+import { ScopeComposerChoice, availableWorkspaceScopes } from "./scopeSelection";
 import {
   customerRequest,
   loadCustomerWorkspaces,
   type CustomerWorkspace,
   type CustomerDevice,
 } from "./customerAgents";
-import { readAutoOpsThreadScope, readAutoOpsHost, type AutoOpsThreadScope } from "./hostConfig";
+import { readAutoOpsHost, type AutoOpsThreadScope } from "./hostConfig";
 const localKey = (workspace: CustomerWorkspace) =>
   `customer:${workspace.deviceId}:${workspace.registeredWorkspaceId}`;
 export function ConversationWorkspaceControl({
-  threadId,
   projectId,
   scope,
   locked,
   disabled,
   onChange,
-  onInitialize,
 }: {
-  threadId: string;
   projectId: string;
   scope: AutoOpsThreadScope;
   locked: boolean;
   disabled: boolean;
   onChange: (patch: Partial<AutoOpsThreadScope>) => void;
-  onInitialize: (scope: AutoOpsThreadScope) => void;
 }) {
   const navigate = useNavigate();
   const host = readAutoOpsHost();
   const canReadPlatform = autoOpsAreaAvailable("workspaces", host, projectId);
   const [loaded, setData] = useState<{
     projectId: string;
-    versions: WorkspaceVersion[];
     workspaces: CustomerWorkspace[];
     devices: CustomerDevice[];
   } | null>(null);
@@ -47,36 +41,20 @@ export function ConversationWorkspaceControl({
   useEffect(() => {
     const controller = new AbortController();
     void Promise.allSettled([
-      canReadPlatform ? loadWorkspaces(projectId, controller.signal) : Promise.resolve(null),
       loadCustomerWorkspaces(projectId, controller.signal),
       customerRequest<{ devices: CustomerDevice[] }>("devices", undefined, controller.signal),
-    ]).then(([platform, customer, devices]) => {
+    ]).then(([customer, devices]) => {
       if (controller.signal.aborted) return;
       setData({
         projectId,
-        versions:
-          platform.status === "fulfilled" && platform.value
-            ? availableWorkspaceVersions(projectId, platform.value)
-            : [],
         workspaces: customer.status === "fulfilled" ? customer.value.workspaces : [],
         devices: devices.status === "fulfilled" ? devices.value.devices : [],
       });
-      const failed = [platform, customer, devices].find((result) => result.status === "rejected");
+      const failed = [customer, devices].find((result) => result.status === "rejected");
       setError(failed?.status === "rejected" ? "部分工作区未能加载，请刷新重试" : null);
     });
     return () => controller.abort();
   }, [projectId, attempt, canReadPlatform]);
-  useEffect(() => {
-    if (locked || disabled || !data) return;
-    const current = readAutoOpsThreadScope(threadId, projectId);
-    if (!current || current.executionBinding?.kind === "customer" || current.workspaceVersionId)
-      return;
-    const initial = data.versions.find(
-      (entry) => entry.type === (current.workspaceType ?? "internal"),
-    );
-    if (initial)
-      onInitialize({ ...current, workspaceType: initial.type, workspaceVersionId: initial.id });
-  }, [data, error, threadId, projectId, locked, disabled, onInitialize]);
   const target = scope.executionBinding?.kind === "customer" ? scope.executionBinding : null;
   const currentWorkspace = target
     ? data?.workspaces.find(
@@ -85,20 +63,24 @@ export function ConversationWorkspaceControl({
           entry.registeredWorkspaceId === target.registeredWorkspaceId,
       )
     : undefined;
-  const currentVersion = data?.versions.find((entry) => entry.id === scope.workspaceVersionId);
+  const platformOptions = availableWorkspaceScopes(projectId);
+  const currentType =
+    scope.workspaceType ??
+    (host?.projects.find((entry) => entry.id === projectId)?.membership?.workspaceAccess ===
+    "external"
+      ? "external"
+      : "internal");
   const selected = target
     ? `customer:${target.deviceId}:${target.registeredWorkspaceId}`
-    : `platform:${scope.workspaceVersionId ?? ""}`;
+    : `platform:${currentType}`;
   const currentDevice = target ? data?.devices.find((entry) => entry.id === target.deviceId) : null;
   const summary = target
     ? `${currentDevice?.label ?? "客户电脑"} · ${currentWorkspace?.label ?? "已登记工作区"}`
-    : currentVersion
-      ? `${currentVersion.type === "internal" ? "内部" : "外部"} · ${currentVersion.name}`
-      : "选择工作区";
+    : `${currentType === "external" ? "外部脱敏" : "内部原始"} · 当前工作区`;
   const options = [
-    ...(data?.versions ?? []).map((entry) => ({
-      value: `platform:${entry.id}`,
-      label: `平台 · ${entry.type === "internal" ? "内部原始" : "外部脱敏"} · ${entry.name}`,
+    ...platformOptions.map((entry) => ({
+      value: `platform:${entry.value}`,
+      label: `平台 · ${entry.label}`,
     })),
     ...(data?.workspaces ?? [])
       .filter(
@@ -124,7 +106,7 @@ export function ConversationWorkspaceControl({
       value={selected}
       options={options}
       locked={locked}
-      disabled={disabled || (!data && !error)}
+      disabled={disabled || (!options.length && !data && !error)}
       onChange={(value) => {
         const workspace = data?.workspaces.find((entry) => localKey(entry) === value);
         if (workspace) {
@@ -143,12 +125,12 @@ export function ConversationWorkspaceControl({
           });
           return;
         }
-        const version = data?.versions.find((entry) => `platform:${entry.id}` === value);
-        if (version)
+        const choice = platformOptions.find((entry) => `platform:${entry.value}` === value);
+        if (choice)
           onChange({
             executionBinding: { kind: "platform" },
-            workspaceType: version.type,
-            workspaceVersionId: version.id,
+            workspaceType: choice.value,
+            workspaceVersionId: undefined,
           });
       }}
       footer={
@@ -159,10 +141,16 @@ export function ConversationWorkspaceControl({
           ) : null}
           <MenuItem onClick={() => setAttempt((value) => value + 1)}>刷新已登记工作区</MenuItem>
           {canReadPlatform ? (
-            <MenuItem onClick={() => void navigate({ href: autoOpsProjectHref("workspaces", projectId) })}>查看平台工作区</MenuItem>
+            <MenuItem
+              onClick={() => void navigate({ href: autoOpsProjectHref("workspaces", projectId) })}
+            >
+              查看平台工作区
+            </MenuItem>
           ) : null}
           {readAutoOpsHost()?.customerAgentsEnabled ? (
-            <MenuItem onClick={() => void navigate({ href: autoOpsProjectHref("devices", projectId) })}>
+            <MenuItem
+              onClick={() => void navigate({ href: autoOpsProjectHref("devices", projectId) })}
+            >
               连接我的电脑…
             </MenuItem>
           ) : null}

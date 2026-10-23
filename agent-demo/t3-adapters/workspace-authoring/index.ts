@@ -15,6 +15,9 @@ import {
 import { resolve, join, dirname, extname } from 'node:path'
 import type { SQLOutputValue } from 'node:sqlite'
 import type {
+  WorkspaceInputCapture,
+  WorkspaceSourceSyncRecord,
+  WorkspaceDeploymentSourceCapture,
   WorkspaceAuthoringCapture,
   WorkspaceAuthoringMutation,
   WorkspaceAuthoringOverview,
@@ -49,10 +52,11 @@ import {
   path,
   plainText,
   revision,
+  requestIdentifier,
 } from './rules.ts'
 
 export { WorkspaceAuthoringError } from './rules.ts'
-export type WorkspaceAuthoringAction = 'read' | 'manage'
+export type WorkspaceAuthoringAction = 'read' | 'external-read' | 'manage'
 export interface WorkspaceAuthoringOptions {
   dataDir: string
   authorize: (actorId: string, projectId: string, action: WorkspaceAuthoringAction) => unknown
@@ -96,6 +100,26 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
   db.prepare(
     "UPDATE authoring_extractions SET status='unavailable',code='DOCUMENT_INTERRUPTED',message='服务重启中断了正文提取，原件仍可下载，请重新处理' WHERE status='pending'",
   ).run()
+
+  // 同步没有后台自治重放；重启后保留最近成功源码，并把未完成请求明确标为失败。
+  for (const row of db
+    .prepare('SELECT project_id,source_id,value FROM authoring_source_sync')
+    .all()) {
+    const value = JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord
+    if (value.status === 'queued' || value.status === 'syncing')
+      db.prepare('UPDATE authoring_source_sync SET value=? WHERE project_id=? AND source_id=?').run(
+        JSON.stringify({
+          ...value,
+          status: 'failed',
+          error: {
+            code: 'WORKSPACE_SYNC_INTERRUPTED',
+            message: '服务重启中断了源码同步，请核对原任务',
+          },
+        }),
+        row.project_id!,
+        row.source_id!,
+      )
+  }
 
   function authorize(
     projectId: string,
@@ -627,14 +651,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       return mutation(projectId, actorId, 'remove-source', input, { sourceId }, () => {
         if (!sources(projectId).some((source) => source.id === sourceId))
           fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '仓库来源不存在')
-        if (
-          db
-            .prepare(
-              "SELECT 1 FROM authoring_capture_sources s JOIN authoring_captures c ON c.id=s.capture_id WHERE c.project_id=? AND s.source_id=? AND c.status='active'",
-            )
-            .get(projectId, sourceId)
-        )
-          fail(409, 'WORKSPACE_SOURCE_IN_USE', '固定输入仍在使用此来源，请先核对原任务结果')
+        // 已接受输入保留独立来源定义和提交，移除当前配置不改变任何历史输入。
         db.prepare('DELETE FROM authoring_sources WHERE project_id=? AND id=?').run(
           projectId,
           sourceId,
@@ -774,7 +791,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         .prepare(
           'SELECT result FROM authoring_receipts WHERE project_id=? AND request_id=? AND actor_id=?',
         )
-        .get(projectId, id(requestId), actorId)
+        .get(projectId, requestIdentifier(requestId), actorId)
       return row ? (JSON.parse(text(row, 'result')) as WorkspaceAuthoringResult) : null
     },
     tree(projectId: string, directoryPath: string, actorId: string) {
@@ -857,13 +874,14 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
     },
     capture(
       projectId: string,
-      expectedRevision: number,
+      expectedRevision: number | undefined,
       actorId: string,
       requestId: string,
+      selection?: { sources: WorkspaceRepositorySource[]; documents: boolean },
     ): WorkspaceAuthoringCapture {
-      authorize(projectId, actorId, 'manage', true)
-      revision(expectedRevision)
-      id(requestId)
+      authorize(projectId, actorId, 'read', true)
+      if (expectedRevision !== undefined) revision(expectedRevision)
+      requestIdentifier(requestId)
       return transaction.run(() => {
         if (
           db
@@ -875,20 +893,24 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           .prepare('SELECT * FROM authoring_captures WHERE project_id=? AND request_id=?')
           .get(projectId, requestId)
         if (previous) {
-          if (previous.actor_id !== actorId || previous.revision !== expectedRevision)
+          if (
+            previous.actor_id !== actorId ||
+            (expectedRevision !== undefined && previous.revision !== expectedRevision)
+          )
             fail(409, 'WORKSPACE_REQUEST_CONFLICT', '固定输入请求已用于其他修订或操作人')
           return captureFrom(previous)
         }
         ensureProject(projectId)
-        checkRevision(projectId, expectedRevision)
+        const capturedRevision = expectedRevision ?? projectRevision(projectId)
+        checkRevision(projectId, capturedRevision)
         const captureId = randomUUID(),
-          configured = sources(projectId)
+          configured = selection?.sources ?? sources(projectId)
         db.prepare('INSERT INTO authoring_captures VALUES(?,?,?,?,?,?,?, ?,NULL,?)').run(
           captureId,
           projectId,
           actorId,
           requestId,
-          expectedRevision,
+          capturedRevision,
           now(),
           'active',
           configured.length ? 'pending' : 'resolved',
@@ -907,7 +929,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
             source.sourcePath ?? null,
             source.credentialId ?? null,
           )
-        for (const entry of rows(projectId)) {
+        for (const entry of selection?.documents === false ? [] : rows(projectId)) {
           if (entry.kind === 'directory')
             db.prepare('INSERT INTO authoring_capture_directories VALUES(?,?)').run(
               captureId,
@@ -930,25 +952,30 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       })
     },
     readCaptured(projectId: string, captureId: string, actorId: string) {
-      authorize(projectId, actorId, 'manage')
-      return captureFrom(captureRow(projectId, captureId))
+      authorize(projectId, actorId, 'read')
+      const owned = captureRow(projectId, captureId)
+      if (owned.actor_id !== actorId)
+        fail(404, 'WORKSPACE_CAPTURE_NOT_FOUND', '固定输入不存在或无权访问')
+      return captureFrom(owned)
     },
     captureByRequest(
       projectId: string,
       requestId: string,
       actorId: string,
     ): WorkspaceAuthoringCapture | null {
-      authorize(projectId, actorId, 'manage')
+      authorize(projectId, actorId, 'read')
       const row = db
         .prepare(
           'SELECT * FROM authoring_captures WHERE project_id=? AND request_id=? AND actor_id=?',
         )
-        .get(projectId, id(requestId), actorId)
+        .get(projectId, requestIdentifier(requestId), actorId)
       return row ? captureFrom(row) : null
     },
     readCapturedFile(projectId: string, captureId: string, filePath: string, actorId: string) {
-      authorize(projectId, actorId, 'manage')
+      authorize(projectId, actorId, 'read')
       const captured = captureRow(projectId, captureId)
+      if (captured.actor_id !== actorId)
+        fail(404, 'WORKSPACE_CAPTURE_NOT_FOUND', '固定输入不存在或无权访问')
       if (captured.status !== 'active')
         fail(410, 'WORKSPACE_CAPTURE_RELEASED', '固定输入已交接或释放，请读取对应任务版本')
       const file = db
@@ -963,15 +990,38 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         sha256: text(file, 'hash'),
       }
     },
+    readCapturedContent(
+      projectId: string,
+      captureId: string,
+      filePath: string,
+      actorId: string,
+    ): WorkspaceMaterialContent {
+      const file = api.readCapturedFile(projectId, captureId, filePath, actorId)
+      const extracted = db
+        .prepare('SELECT content FROM authoring_extractions WHERE hash=? AND mime=?')
+        .get(file.sha256, file.mime)
+      return {
+        path: filePath,
+        revision: file.revision,
+        mime: file.mime,
+        size: file.bytes.byteLength,
+        sha256: file.sha256,
+        extraction: extraction(file.sha256, file.mime),
+        ...(typeof extracted?.content === 'string' ? { contents: extracted.content } : {}),
+      }
+    },
     freezeCaptureRepositories(
       projectId: string,
       captureId: string,
       resolved: WorkspaceResolvedRepository[],
       actorId: string,
     ) {
-      authorize(projectId, actorId, 'manage', true)
+      authorize(projectId, actorId, 'read', true)
       return transaction.run(() => {
-        const captured = captureFrom(captureRow(projectId, captureId))
+        const owned = captureRow(projectId, captureId)
+        if (owned.actor_id !== actorId)
+          fail(404, 'WORKSPACE_CAPTURE_NOT_FOUND', '固定输入不存在或无权访问')
+        const captured = captureFrom(owned)
         if (captured.status !== 'active' || captured.resolution === 'failed')
           fail(409, 'WORKSPACE_CAPTURE_STATE', '固定输入已经结束或来源解析失败')
         if (!Array.isArray(resolved) || resolved.length !== captured.sources.length)
@@ -1045,8 +1095,10 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       error: { code: string; message: string },
       actorId: string,
     ) {
-      authorize(projectId, actorId, 'manage', true)
+      authorize(projectId, actorId, 'read', true)
       const captured = captureRow(projectId, captureId)
+      if (captured.actor_id !== actorId)
+        fail(404, 'WORKSPACE_CAPTURE_NOT_FOUND', '固定输入不存在或无权访问')
       if (captured.resolution === 'resolved')
         fail(409, 'WORKSPACE_CAPTURE_STATE', '来源已经固定，不能改写解析结果')
       if (typeof error.code !== 'string' || !/^[A-Z][A-Z0-9_]{0,79}$/.test(error.code))
@@ -1063,15 +1115,174 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       return captureFrom(captureRow(projectId, captureId))
     },
     releaseCapture(projectId: string, captureId: string, actorId: string) {
-      authorize(projectId, actorId, 'manage', true)
-      captureRow(projectId, captureId)
+      authorize(projectId, actorId, 'read', true)
+      if (captureRow(projectId, captureId).actor_id !== actorId)
+        fail(404, 'WORKSPACE_CAPTURE_NOT_FOUND', '固定输入不存在或无权访问')
       db.prepare("UPDATE authoring_captures SET status='released' WHERE id=? AND project_id=?").run(
         captureId,
         projectId,
       )
-      const captured = captureFrom(captureRow(projectId, captureId))
+      const owned = captureRow(projectId, captureId)
+      if (owned.actor_id !== actorId)
+        fail(404, 'WORKSPACE_CAPTURE_NOT_FOUND', '固定输入不存在或无权访问')
+      const captured = captureFrom(owned)
       collectUnusedQuietly()
       return captured
+    },
+    inputByRequest(
+      projectId: string,
+      requestId: string,
+      actorId: string,
+      workspaceType: 'internal' | 'external',
+    ): WorkspaceInputCapture | null {
+      authorize(projectId, actorId, workspaceType === 'internal' ? 'read' : 'external-read')
+      const row = db
+        .prepare('SELECT * FROM authoring_inputs WHERE project_id=? AND request_id=?')
+        .get(projectId, requestIdentifier(requestId))
+      if (!row) return null
+      if (row.actor_id !== actorId || row.workspace_type !== workspaceType)
+        fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已固定其他操作人或资料范围')
+      return JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+    },
+    saveInput(value: WorkspaceInputCapture, actorId: string): WorkspaceInputCapture {
+      authorize(
+        value.projectId,
+        actorId,
+        value.workspaceType === 'internal' ? 'read' : 'external-read',
+        true,
+      )
+      const previous = api.inputByRequest(
+        value.projectId,
+        value.requestId,
+        actorId,
+        value.workspaceType,
+      )
+      if (previous) {
+        if (JSON.stringify(previous) !== JSON.stringify(value))
+          fail(409, 'WORKSPACE_REQUEST_CONFLICT', '本轮资料输入已经固定')
+        return previous
+      }
+      db.prepare('INSERT INTO authoring_inputs VALUES(?,?,?,?,?,?)').run(
+        id(value.id),
+        value.projectId,
+        actorId,
+        requestIdentifier(value.requestId),
+        value.workspaceType,
+        JSON.stringify(value),
+      )
+      return structuredClone(value)
+    },
+    readInput(projectId: string, inputId: string, actorId: string): WorkspaceInputCapture {
+      const row = db
+        .prepare('SELECT * FROM authoring_inputs WHERE project_id=? AND id=?')
+        .get(id(projectId), id(inputId))
+      if (!row || row.actor_id !== actorId)
+        fail(404, 'WORKSPACE_INPUT_NOT_FOUND', '本轮资料输入不存在或无权访问')
+      const value = JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+      authorize(projectId, actorId, value.workspaceType === 'internal' ? 'read' : 'external-read')
+      return value
+    },
+    releaseInput(projectId: string, inputId: string, actorId: string): WorkspaceInputCapture {
+      const value = api.readInput(projectId, inputId, actorId)
+      authorize(
+        projectId,
+        actorId,
+        value.workspaceType === 'internal' ? 'read' : 'external-read',
+        true,
+      )
+      if (value.status === 'released') return value
+      const released = { ...value, status: 'released' as const }
+      db.prepare('UPDATE authoring_inputs SET value=? WHERE project_id=? AND id=?').run(
+        JSON.stringify(released),
+        projectId,
+        inputId,
+      )
+      if (value.captureId) api.releaseCapture(projectId, value.captureId, actorId)
+      return released
+    },
+    syncRecords(projectId: string, actorId: string): WorkspaceSourceSyncRecord[] {
+      authorize(projectId, actorId, 'read')
+      return db
+        .prepare('SELECT value FROM authoring_source_sync WHERE project_id=?')
+        .all(projectId)
+        .map((row) => JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord)
+    },
+    recordSync(projectId: string, value: WorkspaceSourceSyncRecord, actorId: string) {
+      authorize(projectId, actorId, 'read', true)
+      db.prepare(
+        'INSERT INTO authoring_source_sync VALUES(?,?,?) ON CONFLICT(project_id,source_id) DO UPDATE SET value=excluded.value',
+      ).run(projectId, value.sourceId, JSON.stringify(value))
+    },
+    deploymentInput(
+      projectId: string,
+      requestId: string,
+      fingerprint: string,
+      actorId: string,
+    ): WorkspaceDeploymentSourceCapture | null {
+      authorize(projectId, actorId, 'manage')
+      const row = db
+        .prepare('SELECT * FROM authoring_deployment_inputs WHERE project_id=? AND request_id=?')
+        .get(projectId, requestIdentifier(requestId))
+      if (!row) return null
+      if (row.actor_id !== actorId || row.fingerprint !== fingerprint)
+        fail(409, 'WORKSPACE_REQUEST_CONFLICT', '部署请求已经固定其他来源或构建上下文')
+      return JSON.parse(text(row, 'value')) as WorkspaceDeploymentSourceCapture
+    },
+    saveDeploymentInput(
+      value: WorkspaceDeploymentSourceCapture,
+      fingerprint: string,
+      actorId: string,
+    ) {
+      authorize(value.projectId, actorId, 'manage', true)
+      const previous = api.deploymentInput(value.projectId, value.requestId, fingerprint, actorId)
+      if (previous) return previous
+      db.prepare('INSERT INTO authoring_deployment_inputs VALUES(?,?,?,?,?)').run(
+        value.projectId,
+        value.requestId,
+        actorId,
+        fingerprint,
+        JSON.stringify(value),
+      )
+      return value
+    },
+    inputProtectionSummary(projectId: string, actorId: string) {
+      authorize(projectId, actorId, 'manage')
+      const inputs = db
+        .prepare(
+          "SELECT id,request_id,value FROM authoring_inputs WHERE project_id=? AND json_extract(value,'$.status')='active' ORDER BY id LIMIT 501",
+        )
+        .all(projectId)
+      const captures = db
+        .prepare(
+          "SELECT c.id,c.request_id,COUNT(f.path) AS file_count FROM authoring_captures c LEFT JOIN authoring_capture_files f ON f.capture_id=c.id WHERE c.project_id=? AND c.status='active' AND NOT EXISTS(SELECT 1 FROM authoring_inputs i WHERE i.id=c.id) GROUP BY c.id ORDER BY c.id LIMIT 501",
+        )
+        .all(projectId)
+      return {
+        inputs: inputs.slice(0, 500).map((row) => {
+          const value = JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+          return {
+            inputId: value.id,
+            requestId: value.requestId,
+            kind: value.requestId.startsWith('picker:') ? 'picker' : 'accepted-input',
+            fileCount: value.files.length,
+            versionIds: [
+              ...new Set([
+                ...value.repositories.map((item) => item.versionId),
+                ...(value.externalVersionId ? [value.externalVersionId] : []),
+              ]),
+            ],
+          }
+        }),
+        pendingCaptures: captures
+          .slice(0, 500)
+          .map((row) => ({
+            captureId: text(row, 'id'),
+            requestId: text(row, 'request_id'),
+            fileCount: Number(row.file_count),
+            reason: '原请求尚未交接，保留未知结果与原件',
+          })),
+        truncated: inputs.length > 500 || captures.length > 500,
+      }
     },
     collectUnused(projectId: string, actorId: string) {
       authorize(projectId, actorId, 'manage', true)
