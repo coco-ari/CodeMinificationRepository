@@ -61,7 +61,8 @@ export function WorkspaceFileBrowser({
     } catch {
       /* 无效的历史位置不影响当前浏览。 */
     }
-    const restored = new WeakSet<HTMLElement>()
+    const restoredVertical = new WeakSet<HTMLElement>()
+    const restoredHorizontal = new WeakSet<HTMLElement>()
     const observed = new WeakSet<Element>()
     let interrupted = false
     const viewports = () => fileScrollViewports(element)
@@ -76,23 +77,28 @@ export function WorkspaceFileBrowser({
           }
         }
         const position = saved[index]
-        if (
-          !position ||
-          restored.has(viewport) ||
-          position.top > viewport.scrollHeight - viewport.clientHeight ||
-          position.left > viewport.scrollWidth - viewport.clientWidth
-        )
-          return
-        viewport.scrollTop = position.top
-        viewport.scrollLeft = position.left
-        restored.add(viewport)
+        if (!position) return
+        // 窗口尺寸或换行变化后，分别钳制两轴；内容继续绘制时仍可恢复原位置。
+        if (!restoredVertical.has(viewport)) {
+          const maxTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+          viewport.scrollTop = Math.min(position.top, maxTop)
+          if (position.top <= maxTop) restoredVertical.add(viewport)
+        }
+        if (!restoredHorizontal.has(viewport)) {
+          const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth)
+          viewport.scrollLeft = Math.min(position.left, maxLeft)
+          if (position.left <= maxLeft) restoredHorizontal.add(viewport)
+        }
       })
     }
     const remember = () => {
       if (!interrupted && saved.length > viewports().length) return
       if (
         interrupted ||
-        viewports().every((viewport, index) => !saved[index] || restored.has(viewport))
+        viewports().every(
+          (viewport, index) =>
+            !saved[index] || (restoredVertical.has(viewport) && restoredHorizontal.has(viewport)),
+        )
       )
         saveSelection(
           key,

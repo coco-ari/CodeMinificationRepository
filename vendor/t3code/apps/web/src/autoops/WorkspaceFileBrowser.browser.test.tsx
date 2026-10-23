@@ -143,12 +143,46 @@ describe('工作区文件浏览职责边界', () => {
       { router: false },
     )
     const viewport = screen.container.querySelector<HTMLElement>('.file-preview-virtualizer')!
-    expect(viewport.scrollLeft).toBe(0)
+    expect(viewport.scrollLeft).toBe(20)
+    expect(viewport.scrollTop).toBe(600)
     await act(() => {
       screen.container.querySelector<HTMLButtonElement>('button:last-of-type')!.click()
     })
     await vi.waitFor(() => expect(viewport.scrollLeft).toBe(80))
     expect(viewport.scrollTop).toBe(600)
+  })
+  it('布局不再横向溢出时仍恢复纵向位置，并保留用户后续滚动', async () => {
+    mocks.codeViewport = true
+    mocks.contentWidth = 200
+    sessionStorage.setItem(
+      stateKey('p-one:files:v-one'),
+      JSON.stringify({ selected: 'src/index.ts' }),
+    )
+    sessionStorage.setItem(
+      stateKey('p-one:scroll:v-one:src/index.ts'),
+      JSON.stringify([{ top: 600, left: 80 }]),
+    )
+    // 这里只检验文件视口合同，不依赖路由。
+    await using screen = await render(
+      <WorkspaceFileBrowser projectId="p-one" version={version} />,
+      { router: false },
+    )
+    const viewport = screen.container.querySelector<HTMLElement>('.file-preview-virtualizer')!
+    await vi.waitFor(() => expect(viewport.scrollTop).toBe(600))
+    expect(viewport.scrollWidth).toBe(viewport.clientWidth)
+    expect(viewport.scrollLeft).toBe(0)
+    await act(() => {
+      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 200 }))
+      viewport.scrollTop = 800
+      viewport.dispatchEvent(new Event('scroll'))
+      screen.container.querySelector<HTMLButtonElement>('button:last-of-type')!.click()
+    })
+    await vi.waitFor(() => expect(viewport.scrollWidth).toBe(600))
+    expect(viewport.scrollTop).toBe(800)
+    expect(viewport.scrollLeft).toBe(0)
+    expect(
+      JSON.parse(sessionStorage.getItem(stateKey('p-one:scroll:v-one:src/index.ts'))!),
+    ).toEqual([{ top: 800, left: 0 }])
   })
   it.each([false, true])('异步排版后恢复阅读位置，代码视口=%s', async (codeViewport) => {
     mocks.codeViewport = codeViewport
@@ -171,12 +205,33 @@ describe('工作区文件浏览职责边界', () => {
     const viewport = screen.container.querySelector<HTMLElement>(
       '.file-preview-virtualizer, [data-slot="scroll-area-viewport"]',
     )!
-    expect(viewport.scrollTop).toBe(0)
+    expect(viewport.scrollTop).toBe(40)
     await act(() => {
       screen.container.querySelector<HTMLButtonElement>('button:last-of-type')!.click()
     })
     await vi.waitFor(() => expect(viewport.scrollTop).toBe(600))
     expect(viewport.scrollLeft).toBe(40)
+  })
+  it('最终可滚动高度小于历史位置时恢复到有效底部，横向独立恢复', async () => {
+    mocks.codeViewport = true
+    mocks.contentHeight = 400
+    sessionStorage.setItem(
+      stateKey('p-one:files:v-one'),
+      JSON.stringify({ selected: 'src/index.ts' }),
+    )
+    sessionStorage.setItem(
+      stateKey('p-one:scroll:v-one:src/index.ts'),
+      JSON.stringify([{ top: 600, left: 80 }]),
+    )
+    // 这里只检验文件视口合同，不依赖路由。
+    await using screen = await render(
+      <WorkspaceFileBrowser projectId="p-one" version={version} />,
+      { router: false },
+    )
+    const viewport = screen.container.querySelector<HTMLElement>('.file-preview-virtualizer')!
+    await vi.waitFor(() => expect(viewport.scrollTop).toBe(300))
+    expect(viewport.scrollTop).toBe(viewport.scrollHeight - viewport.clientHeight)
+    expect(viewport.scrollLeft).toBe(80)
   })
   it('用户已开始滚动时，迟到排版不覆盖新的阅读位置', async () => {
     mocks.codeViewport = true
