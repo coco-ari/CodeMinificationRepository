@@ -6,7 +6,21 @@
 
 2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在顶部选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
 
-### 顶部项目与模块导航（t3-top-navigation-2，仅网页）
+### 当前预览：客户 Agent、技能库与部署整合（t3-customer-deployment-preview-1）
+
+2026-10-23，将合并提交 `9085944f` 部署到原独立预览 `28887/28888`，程序与网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-deployment-preview-1`。此前该端口仍是旧部署程序和顶部导航网页，所以没有客户接入入口。现在通过“更多功能 → 我的电脑”进入，也可直接访问 `http://172.29.22.6:28887/agent-demo.html#/devices`；这是账号级模块，不在外观设置内。新环境尚无已配对设备，需要客户在本机连接并登记目录后才会显示。
+
+网关与 worker 同时显式启用 `AUTOOPS_CUSTOMER_AGENTS=1` 并指向随包 `dist/customer-agent.zip`，保留已有数据、端口、部署配置和平台技能中央库。新配置仅写各自用户级 unit 下的 `zzzzzz-customer-preview.conf`；未切换 `8787` 或技能预览 `18897`，未重启部署 Agent `28889` 或 Nginx 站点 `28890`。已有应用、服务、目标、4 个部署任务、3 条发布记录、源码包、项目工作区文件与绑定逐项比较一致，部署站点 SHA-256 仍为 `05cfb58e9c16ec826922bddbbb1240990f2b9fb024579cc5634532ff157c0545`。正式与技能预览进程 PID 前后均未变化。
+
+完整发布清单 SHA-256 为 `312502ba055a78f95778f8525785939eff00384febb4c62e46a789994ef0fee3`，4178 文件、59 相对链接，以及官方同版 Linux 原生依赖 2038 文件/21 包校验通过。原生清单为 `63cf4ad2df72ab6bea04c0d24ce1af589210b20c3b63ec4a94ae56fc2f3dc35b`。入口 `agentDemo-C1Gveg97.js`，实际 HTML SHA-256 为 `0326c2c5460eeab6a64a2b3104c43f83491dfcc94a6f9e337530ef67cba982b5`。客户 ZIP 为 1,042,682 字节，SHA-256 `211ed216ea24c09c0019e76999828b21b4b99b830c569ba5890aa4be7ea53c95`。
+
+实际 ZeroTier 网页刷新后检查了“更多功能 → 我的电脑”的导航、空列表和原部署详情；API 验证健康、启用标志、本人设备和目录列表、3 个平台技能/6 条分配及部署数据正常。认证下载的真实 ZIP 哈希一致，匿名设备读取和下载返回 401。没有在该预览配对电脑、创建对话或发送模型请求；真实客户多轮、审批及恢复结果仍以架构文档的隔离验收记录为准，不能据此宣称普通公网或 Windows 已通过。本次 ZeroTier HTTP 测试地址的客户端 `connect` 命令需显式加已有的 `--allow-insecure`；公网接入仍需 HTTPS/WSS，网页生成命令默认不添加该选项。
+
+切换先关闭网关并复核对话、工作区加工及部署任务空闲，再关闭 worker，备份完整 `data` 与旧根状态文件。首次备份遇到旧 `state.json` 为 root 私有文件，脚本已自动恢复旧服务并确认健康；随后使用权限 0600 的受保护副本完成备份，未更改原文件权限。有效恢复点为 `/home/tao/autoops-agent-demo/backups/customer-deployment-preview-20261023-2/data-before.tgz`，7,102,533 字节，SHA-256 `e90ee1c9b91a5c8d0e1eeb59692ebd4437225ff3d2ec30c52b613904e4cfdd51`，394 个归档条目已验证。第一次失败目录只保留配置和恢复结果，不是完整恢复点。本次上传缓存、临时状态副本与半份归档已清理，最终可用磁盘约 315 MiB。
+
+只回退本次程序时，先确认平台与客户运行均空闲，再移除上述两个 unit 的专用 drop-in，用户级 `daemon-reload` 并只重启这两项服务，即恢复旧部署程序和顶部导航网页。保留当前数据库与新 release，不用旧备份覆盖后续业务数据。旧程序无法提供客户接入界面，因此已有客户执行必须先妥善结束。发布、备份、保留性及 API 无密钥摘要保存在本 worktree 的 `.deployment/customer-preview-evidence/`。
+
+### 历史顶部项目与模块导航（t3-top-navigation-2，仅网页）
 
 2026-10-23，按确认后的结构，将全局项目选择和模块导航移到全宽 `52px` 顶部栏。桌面显示问答、工作区、部署发布及“更多功能”，窄屏合并为“切换模块”；搜索菜单只列已授权、已闭环功能，不增加 MCP 或插件占位。问答与设置保留自己的侧栏，工作区和部署不挂载空侧栏，正文占满剩余宽高，并移除重复的页面标题行。
 
@@ -16,7 +30,7 @@
 
 首轮 `ui-first` 在窄屏复现原固定右面板按钮遮挡模块入口，修正后通过；后续 `ui-verified` 的截图等待跨越 iframe 文档导航而失败，改为宿主页等待绘制并重新校验真实正文，未注入内容或放松内容断言。`ui-final`、`ui-complete` 各 18/18 通过，补充原始设置深链回归后最终 19/19。早期报告保留，最终构建与部署版逐文件哈希一致。
 
-当前运行程序仍为 `t3-deployment-validation-1`，网页为 `releases/t3-top-navigation-2/dist/web`，基础为保留的 `t3-top-navigation-1`。最终增量归档 SHA-256 `76a115a3ce10cfe7efd83881ca90147b7f38626585429e8a8c84c405b4fe5a3c`，完整清单 `9b3af42d155de94788f927c995f0b0469fe72d3fde52e51c9ef1ec333e170ee2`，原生清单 `bcca38e3fa612dee42653e420d4c19f364ef5580b83d768b643ac709938186c8`。3893 文件、59 相对链接及官方同版原生依赖 2038 文件/21 包校验通过；实际 HTML SHA-256 `5612c74c2de35726d8c1324bb3b0e2e258be63a8e9418ae1b20d12472afc7905`。
+当时运行程序仍为 `t3-deployment-validation-1`，网页为 `releases/t3-top-navigation-2/dist/web`，基础为保留的 `t3-top-navigation-1`。最终增量归档 SHA-256 `76a115a3ce10cfe7efd83881ca90147b7f38626585429e8a8c84c405b4fe5a3c`，完整清单 `9b3af42d155de94788f927c995f0b0469fe72d3fde52e51c9ef1ec333e170ee2`，原生清单 `bcca38e3fa612dee42653e420d4c19f364ef5580b83d768b643ac709938186c8`。3893 文件、59 相对链接及官方同版原生依赖 2038 文件/21 包校验通过；实际 HTML SHA-256 `5612c74c2de35726d8c1324bb3b0e2e258be63a8e9418ae1b20d12472afc7905`。
 
 本轮未主动重启 worker，但 `00:21:52` 内核 OOM 杀死验证 worker，systemd 于 `00:21:55` 自动恢复，MainPID 从 `202045` 变为 `205547`。静态切换脚本的进程保护断言正确失败，随后通过只读检查核实新网页、服务恢复与原部署站点不变，并保存真实原因到 `top-navigation-static-switch.json`。最终完整验收期间 `205547` 稳定，原部署站点 HTML SHA-256 仍为 `05cfb58e9c16ec826922bddbbb1240990f2b9fb024579cc5634532ff157c0545`。验收结束可用磁盘约 558 MiB（97%），可用内存约 78 MiB。没有清理共享数据或调整其它服务；不能宣称全程无重启。原 8787/18887 网关没有切换。
 
@@ -52,7 +66,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 | 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
 | 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
 | 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
-| 程序 / 网页 | `releases/t3-deployment-validation-1` / `releases/t3-top-navigation-2/dist/web` |
+| 当前程序 / 网页 | `releases/t3-customer-deployment-preview-1` / 同目录 `dist/web` |
 
 固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
 
