@@ -2416,7 +2416,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const skillsCwd = customerScope
     ? null
     : isAutoOpsHosted()
-      ? (autoOpsSkillContext?.context?.cwd ?? null)
+      ? (autoOpsSkillContext?.authorizedContext?.cwd ?? null)
       : gitCwd;
   const compactCommandAvailable =
     !customerScope && providerSupportsManualCompaction(selectedProviderEntry);
@@ -2427,10 +2427,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ? (selectedProviderStatus.workspaceSnapshots
             ?.find((snapshot) => snapshot.cwd === skillsCwd)
             ?.skills.filter((skill) =>
-              autoOpsSkillContext?.context?.skills.some((allowed) => allowed.name === skill.name),
+              autoOpsSkillContext?.authorizedContext?.skills.some(
+                (allowed) => allowed.name === skill.name,
+              ),
             ) ?? NO_PROVIDER_SKILLS)
         : resolveProviderSkillsForCwd(selectedProviderStatus, skillsCwd)
     : NO_PROVIDER_SKILLS;
+  const displayProviderSkills =
+    isAutoOpsHosted() && !customerScope
+      ? (selectedProviderStatus?.workspaceSnapshots
+          ?.find((snapshot) => snapshot.cwd === autoOpsSkillContext?.context?.cwd)
+          ?.skills.filter((skill) =>
+            autoOpsSkillContext?.context?.skills.some((known) => known.name === skill.name),
+          ) ?? NO_PROVIDER_SKILLS)
+      : selectedProviderSkills;
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, skillsCwd)
     : NO_PROVIDER_SLASH_COMMANDS;
@@ -2961,10 +2971,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           : "未找到匹配的本地技能。";
       return isAutoOpsHosted()
         ? (autoOpsSkillContext?.error ??
-            (!autoOpsSkillContext
+            (!autoOpsSkillContext || autoOpsSkillContext.isRefreshing
               ? "正在读取当前范围的技能…"
               : selectedProviderSkills.length === 0
-                ? autoOpsSkillContext.context?.skills.length
+                ? autoOpsSkillContext.authorizedContext?.skills.length
                   ? "正在同步当前范围的技能，请稍候…"
                   : "当前助手与项目暂无可用技能，可在“更多功能 → 技能库”查看分配。"
                 : "未找到匹配的技能，请更换名称。"))
@@ -7527,7 +7537,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     contextRecords={composerContextRecords}
                     buildContextClipboardFragment={buildContextClipboardFragmentStable}
                     importContextFragment={importContextFragmentStable}
-                    skills={selectedProviderSkills}
+                    skills={displayProviderSkills}
                     containerClassName={cn(isComposerResting && "min-w-0 flex-1")}
                     className={cn(
                       showMobilePendingAnswerActions && "max-sm:pb-12",
