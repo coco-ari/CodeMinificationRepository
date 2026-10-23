@@ -3,6 +3,7 @@ import { sha256 } from '@noble/hashes/sha2'
 import { bytesToHex } from '@noble/hashes/utils'
 import { randomUUID } from '~/lib/utils'
 import { AutoOpsRequestError } from './apiClient'
+import type { WorkspaceBuildContext } from '../../../../../../autoops/contracts/workspaces.ts'
 import { readAutoOpsHost } from './hostConfig'
 import {
   generateExternalWorkspace,
@@ -15,7 +16,7 @@ import {
 export type WorkspaceTaskInput =
   | { type: 'import'; repositoryUrl: string; branch: string }
   | { type: 'external'; sourceVersionId: string; rules: Array<{ find: string; replace: string }> }
-  | { type: 'packages'; sourceVersionId: string; services: Array<'frontend' | 'backend'> }
+  | { type: 'packages'; sourceVersionId: string; services: Array<'frontend' | 'backend'>; contexts?: WorkspaceBuildContext[] }
 
 type PendingSubmission = {
   requestId: string
@@ -120,6 +121,7 @@ export function useWorkspaceTaskSubmission(
       input.sourceVersionId,
       input.services,
       submission.requestId,
+      input.contexts,
     )
   }
   const perform = async (input: WorkspaceTaskInput | null, checkOnly = false): Promise<boolean> => {

@@ -53,6 +53,14 @@ function checkImportBudget(directory) {
   checkImportFiles(directory)
 }
 
+function checkCompleteSource(root) {
+  const indexed = scan(root)
+  for (const file of indexed.files.filter((entry) => !entry.path.split('/').includes('.git'))) {
+    const bytes = readFileSync(checkedFile(root, file.path))
+    if (bytes.subarray(0, 100).toString().startsWith('version https://git-lfs.github.com/spec/v1')) fail(422, 'WORKSPACE_LFS_UNSUPPORTED', '该仓库包含未下载的 Git LFS 文件，不能将指针当作完整源码发布')
+  }
+}
+
 function redact(text, rules) {
   let replacements = 0
   const replace = (pattern, value) => { text = text.replace(pattern, (...args) => { replacements++; return typeof value === 'function' ? value(...args) : value }) }
@@ -321,6 +329,12 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal').map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
     },
     getVersion(id, versionId) { return publicVersion(versionRecord(id, versionId)) },
+    taskForRequest(id, type, requestId, actorId) {
+      authorize(actorId, id, type)
+      const task = load(id).tasks.find(task => task.type === type && task.requestId === requestId)
+      if (task && task.actorId !== actorId) fail(409, 'WORKSPACE_REQUEST_CONFLICT', '该请求标识属于另一位操作人')
+      return task ? publicTask(task) : undefined
+    },
     files(id, versionId) { return clone(versionRecord(id, versionId).files.map(({ binary: _binary, executable: _executable, ...file }) => file)) },
     tree(id, versionId, directory = '') { return versionTree(id, versionId, directory) },
     managementTree(id, versionId, directory = '') { return versionTree(id, versionId, directory, true) },
@@ -360,7 +374,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         const versionId = randomUUID(), count = load(id).versions.filter((entry) => entry.type === 'external').length + 1
         const report = { removedGitEntries: sourceIndex.removedGitEntries, replacements, pendingFiles, excludedFiles: [], rulesVersion: RULES_VERSION, customRules: rules.length }
         // source 只保存提交与相对路径；自定义匹配原文从不进入可见元数据。
-        await persistVersion(id, root, { id: versionId, name: `外部脱敏 v${String(count).padStart(3, '0')}`, type: 'external', status: pendingFiles.length ? 'pending_review' : 'published', sourceVersionId: parent.id, createdAt: now(), source: { repositories: clone(parent.source.repositories) }, report, isExample: parent.isExample }, task.id, signal)
+        await persistVersion(id, root, { id: versionId, name: `外部脱敏 v${String(count).padStart(3, '0')}`, type: 'external', status: pendingFiles.length ? 'pending_review' : 'published', sourceVersionId: parent.id, createdAt: now(), source: { repositories: parent.source.repositories.map(({ path, commit }) => ({ path, commit })) }, report, isExample: parent.isExample }, task.id, signal)
       }, actorId)
     },
     confirmExternal(id, versionId, input) {
@@ -385,11 +399,21 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     startPackages(id, input, actorId) {
       const parent = source(id, input.sourceVersionId), services = input.services
       if (!Array.isArray(services) || !services.length || services.length > 2 || new Set(services).size !== services.length || services.some((entry) => !['frontend', 'backend'].includes(entry))) fail(400, 'WORKSPACE_SERVICES_INVALID', '请选择前端、后端或两者')
+      if (parent.source.authoringRevision !== undefined && input.contexts === undefined) fail(400, 'WORKSPACE_BUILD_CONTEXT_REQUIRED', '请明确选择各服务的构建上下文与构建目录')
+      if (input.contexts !== undefined) {
+        if (!Array.isArray(input.contexts) || input.contexts.length !== services.length || new Set(input.contexts.map((entry) => entry?.service)).size !== services.length)
+          fail(400, 'WORKSPACE_BUILD_CONTEXT_INVALID', '每项服务必须指定唯一构建上下文')
+        for (const entry of input.contexts) {
+          if (!entry || !services.includes(entry.service) || typeof entry.root !== 'string' || typeof entry.workingDirectory !== 'string') fail(400, 'WORKSPACE_BUILD_CONTEXT_INVALID', '构建上下文无效')
+          if (entry.root !== '.') safePath(entry.root)
+          if (entry.workingDirectory !== '.') safePath(entry.workingDirectory)
+        }
+      }
       return start(id, 'packages', input, async ({ task, temporary, progress, signal }) => {
         const releaseId = randomUUID(), output = join(temporary, 'release'), root = versionRoot(id, parent)
         await mkdir(output, { recursive: true, mode: 0o700 })
         progress('packaging', '正在按服务构建上下文生成源码 ZIP')
-        const { artifacts, contexts } = await buildWorkspacePackages({ root, parent, services, output }, signal)
+        const { artifacts, contexts } = await buildWorkspacePackages({ root, parent, services, output, contexts: input.contexts }, signal)
         progress('verifying', '正在校验部署包与固定来源')
         const manifest = { schemaVersion: 1, projectId: id, releaseId, sourceVersionId: parent.id, source: publicVersion(parent).source, createdAt: now(), configurationRef: '由部署目标环境配置提供；源码包不注入平台凭据', services: artifacts.map((entry) => ({ ...entry, context: contexts.find((item) => item.service === entry.service) })), status: 'packaged', notice: '已生成源码交付包，尚未在目标服务器部署；构建、健康检查与回退由部署任务独立执行' }
         await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2), { mode: 0o600 })
@@ -413,6 +437,18 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       if (sha(bytes) !== entry.sha256) fail(409, 'WORKSPACE_PACKAGE_CHANGED', '部署包校验失败，请重新生成')
       return { bytes, name: entry.name, mime: 'application/zip' }
     },
+    startSnapshot(id, input, materialize, actorId) {
+      if (typeof materialize !== 'function') fail(503, 'WORKSPACE_SNAPSHOT_UNAVAILABLE', '工作区来源读取尚未就绪')
+      return start(id, 'snapshot', input, async ({ task, temporary, progress, signal }) => {
+        const root = join(temporary, 'version', 'files')
+        await mkdir(root, { recursive: true, mode: 0o700 })
+        await materialize({ root, signal, progress, checkBudget: () => checkImportBudget(temporary) })
+        checkCompleteSource(root)
+        progress('publishing', '正在校验源码和资料并保存固定版本')
+        const count = load(id).versions.filter((entry) => entry.type === 'internal').length + 1
+        await persistVersion(id, root, { id: randomUUID(), name: `内部版本 v${String(count).padStart(3, '0')}`, type: 'internal', status: 'published', createdAt: now(), source: input.source, isExample: false }, task.id, signal)
+      }, actorId)
+    },
     startImport(id, input, actorId) {
       const repositoryUrl = validateRepository(input.repositoryUrl)
       let branch
@@ -430,11 +466,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         if (/^120000 /m.test(entries)) fail(422, 'WORKSPACE_LINK_UNSUPPORTED', '该仓库包含符号链接，请先将所需源码整合为普通文件')
         progress('checkout', '正在检出固定提交并检查文件')
         await git(['checkout', '--detach', commit], root, mergedSignal)
-        const indexed = scan(root)
-        for (const file of indexed.files.filter((entry) => !entry.path.split('/').includes('.git'))) {
-          const bytes = readFileSync(checkedFile(root, file.path))
-          if (bytes.subarray(0, 100).toString().startsWith('version https://git-lfs.github.com/spec/v1')) fail(422, 'WORKSPACE_LFS_UNSUPPORTED', '该仓库包含未下载的 Git LFS 文件，不能将指针当作完整源码发布')
-        }
+        checkCompleteSource(root)
         progress('publishing', '正在保存内部固定版本')
         const count = load(id).versions.filter((entry) => entry.type === 'internal').length + 1
         await persistVersion(id, root, { id: versionId, name: `内部导入 v${String(count).padStart(3, '0')}`, type: 'internal', status: 'published', createdAt: now(), source: { repositories: [{ path: '.', commit }], repositoryHost: new URL(repositoryUrl).hostname, branch }, isExample: false }, task.id, signal)

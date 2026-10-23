@@ -16,15 +16,16 @@ export function autoOpsApiUrl(path: string): string {
   const host = readAutoOpsHost()
   if (!host) throw new AutoOpsRequestError('项目工作台未连接。', 'HOST_UNAVAILABLE', undefined)
   const url = new URL(`${host.gatewayBasePath}${path}`, host.httpBaseUrl)
-  if (!path.startsWith('/autoops/') ||
-      !url.pathname.startsWith(`${host.gatewayBasePath}/autoops/`) ||
+  const namespace = path.startsWith('/autoops/') ? '/autoops/' : '/api/v1/'
+  if (!path.startsWith(namespace) ||
+      !url.pathname.startsWith(`${host.gatewayBasePath}${namespace}`) ||
       url.origin !== new URL(host.httpBaseUrl).origin) {
     throw new AutoOpsRequestError('业务请求地址无效。', 'INVALID_REQUEST_PATH', undefined)
   }
   return `${url.pathname}${url.search}`
 }
 
-function errorDetails(value: unknown): { message?: string; code?: string } {
+export function errorDetails(value: unknown): { message?: string; code?: string } {
   if (!value || typeof value !== 'object') return {}
   const record = value as Record<string, unknown>
   const nested = record.error && typeof record.error === 'object'

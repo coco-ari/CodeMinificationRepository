@@ -6,6 +6,7 @@ import { configuredAutoOpsAccess } from '../../../../../../agent-demo/t3-adapter
 import { createBusinessHttpContext } from './http/context.ts'
 import { responseError } from './http/responses.ts'
 import { workspacesRoutes } from './http/workspaces.ts'
+import { workspaceAuthoringRoutes } from './http/workspaceAuthoring.ts'
 import { deploymentsRoutes } from './http/deployments.ts'
 import { skillsRoutes } from './http/skills.ts'
 import { conversationsRoutes } from './http/conversations.ts'
@@ -18,14 +19,14 @@ export const layer = Layer.unwrap(Effect.sync(() => {
   const context = createBusinessHttpContext(access)
   const { principal } = context
   return Layer.mergeAll(
-    workspacesRoutes(context), deploymentsRoutes(context), skillsRoutes(context),
+    workspacesRoutes(context), workspaceAuthoringRoutes(context), deploymentsRoutes(context), skillsRoutes(context),
     conversationsRoutes(context), resourcesRoutes(context),
     HttpRouter.middleware((handler) => Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const path = new URL(request.url, "http://localhost").pathname;
       const read = request.method === "GET" || request.method === "HEAD";
       const permitted = (read && (path === "/.well-known/t3/environment" || path === "/api/auth/session" || path === "/api/projects" || path === "/ws" || path.startsWith("/api/orchestration/") || path.startsWith("/api/assets/"))) ||
-        path.startsWith("/autoops/") || path === "/mcp" || path.startsWith("/mcp/") ||
+        path.startsWith("/autoops/") || path.startsWith('/api/v1/projects/') || path === "/mcp" || path.startsWith("/mcp/") ||
         (request.method === "POST" && (path === "/api/auth/websocket-ticket" || path.startsWith("/api/attachments/upload/")));
       return permitted ? yield* handler : HttpServerResponse.jsonUnsafe({ error: "AutoOps route not available" }, { status: 404 });
     }), { global: true }),

@@ -322,3 +322,24 @@ test('客户程序允许纯合同，但不能穿透独立后端的公开服务',
     result.result.violations.some((row) => row.rule.name === '客户执行不能引入平台存储及业务'),
   )
 })
+
+test('当前资料公开入口允许协作，外部调用方不能穿透事务存储', async (t) => {
+  const f = await fixture(t)
+  const base = 'agent-demo/t3-adapters/'
+  await f.write(base + 'workspace-authoring/storage.ts', 'export const state = () => true\n')
+  await f.write(base + 'workspace-authoring/index.ts', "export { state } from './storage.ts'\n")
+  await f.write(
+    base + 'workspace-management.ts',
+    "export { state } from './workspace-authoring/index.ts'\n",
+  )
+  assert.equal(f.run().status, 0)
+  await f.write(
+    base + 'workspace-management.ts',
+    "export { state } from './workspace-authoring/storage.ts'\n",
+  )
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.ok(
+    result.result.violations.some((row) => row.rule.name === '当前资料存储只通过公开入口被调用'),
+  )
+})

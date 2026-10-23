@@ -81,10 +81,12 @@ describe('统一业务请求边界', () => {
       .rejects.toMatchObject({ code: 'INVALID_RESPONSE', uncertain: false })
   })
   it('禁止请求跳出业务命名空间或带出凭据', () => {
-    for (const path of ['https://other.test/autoops/a', '//other.test', '/autoops/../../logout']) {
+    for (const path of ['https://other.test/autoops/a', '//other.test', '/autoops/../../logout', '/api/v1/../auth', '/api/v10/projects']) {
       expect(() => autoOpsApiUrl(path)).toThrow(AutoOpsRequestError)
     }
     expect(autoOpsApiUrl('/autoops/projects/p/workspaces?directory=a%20b'))
       .toBe('/api/agent-demo/t3/autoops/projects/p/workspaces?directory=a%20b')
+    expect(autoOpsApiUrl('/api/v1/projects/p/workspace/authoring'))
+      .toBe('/api/agent-demo/t3/api/v1/projects/p/workspace/authoring')
   })
 })

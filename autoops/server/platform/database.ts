@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- SQLite 事务基础设施使用同步 Node 标识，不依赖 T3 Effect 运行环境。
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import type { Transaction } from './ports.ts'

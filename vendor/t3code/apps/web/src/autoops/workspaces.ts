@@ -1,4 +1,5 @@
 import { autoOpsApiUrl, autoOpsRequest } from './apiClient'
+import type { WorkspaceBuildContext } from '../../../../../../autoops/contracts/workspaces.ts'
 import type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../../../../../autoops/contracts/workspaces.ts'
 export type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../../../../../autoops/contracts/workspaces.ts'
 
@@ -32,8 +33,8 @@ export const generateExternalWorkspace = (projectId: string, sourceVersionId: st
 export const publishWorkspace = (projectId: string, versionId: string, confirmedPaths: string[], excludedPaths: string[]) =>
   request<WorkspaceVersion>(projectId, `/versions/${encodeURIComponent(versionId)}/publish`, { confirmedPaths, excludedPaths })
 
-export const generateWorkspacePackages = (projectId: string, sourceVersionId: string, services: Array<'frontend' | 'backend'>, requestId: string) =>
-  request<WorkspaceTask>(projectId, '/packages', { sourceVersionId, services, requestId })
+export const generateWorkspacePackages = (projectId: string, sourceVersionId: string, services: Array<'frontend' | 'backend'>, requestId: string, contexts?: WorkspaceBuildContext[]) =>
+  request<WorkspaceTask>(projectId, '/packages', { sourceVersionId, services, requestId, ...(contexts ? { contexts } : {}) })
 
 export const importWorkspaceRepository = (projectId: string, repositoryUrl: string, branch: string, requestId: string) =>
   request<WorkspaceTask>(projectId, '/import', { repositoryUrl, branch, requestId })

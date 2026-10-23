@@ -48,7 +48,7 @@
     "test:autoops": "node --test --test-concurrency=1 \"autoops/**/*.test.ts\" \"autoops/**/*.test.mjs\"",
     "verify:autoops": "pnpm run check:autoops && pnpm run test:autoops",
     "check:runtime:boundaries": "node scripts/check-runtime-boundaries.mjs",
-    "check:runtime:types": "tsc --noEmit && pnpm --dir vendor/t3code/apps/web exec tsc-rs --noEmit && pnpm --dir vendor/t3code/apps/server exec tsc-rs --noEmit && tsc --noEmit --project agent-demo/customer-agent/tsconfig.json",
+    "check:runtime:types": "tsc --noEmit && pnpm --dir vendor/t3code/apps/web exec tsc-rs --noEmit && pnpm --dir vendor/t3code/apps/server exec tsc-rs --noEmit && tsc --noEmit --project agent-demo/t3-adapters/tsconfig.json && tsc --noEmit --project agent-demo/customer-agent/tsconfig.json",
     "check:runtime": "prettier --check scripts/check-runtime-boundaries.mjs test/runtime-boundaries.test.mjs .github/workflows/runtime.yml docs/runtime-modules.md && node scripts/check.mjs && pnpm run check:runtime:boundaries && pnpm run check:runtime:types",
     "test:runtime:node": "node --test --test-timeout=120000 --test-concurrency=1 \"test/**/*.test.mjs\" \"agent-demo/t3-adapters/**/*.test.mjs\"",
     "test:runtime:server": "pnpm --dir vendor/t3code/apps/server exec vp test run src/autoops",

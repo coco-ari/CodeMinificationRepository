@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../agent-demo/t3-adapters/access.mjs'
@@ -10,6 +10,7 @@ import { createBusinessArtifactStore } from '../agent-demo/t3-adapters/business-
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
 import { createAutoOpsBusinessTools } from '../agent-demo/t3-adapters/business-tools.mjs'
 import { createWorkspaceStore } from '../agent-demo/t3-adapters/workspaces.mjs'
+import { extractBusinessAttachment, renderBusinessPdf } from '../agent-demo/t3-adapters/business-documents.mjs'
 
 test('业务@目录只接受资源身份，保留版本/目录/环境与共享受众，拒绝任意宿主路径', async () => {
   const directory = mkdtempSync(join(tmpdir(), 't3-resource-'))
@@ -273,4 +274,83 @@ test('真实生成的脱敏快照同时驱动MCP文档与原生@读取，原始�
   const originalGit = workspaceStore.files('p-autoops', internal.id).find(({path}) => path.endsWith('/.git/config'))
   assert.ok(originalGit)
   await assert.rejects(catalog.readForThread('external', `autoops/p-autoops/workspaces/${internal.id}/${originalGit.path}`), /资料不存在/)
+})
+
+
+async function fixedPdfFixture(t) {
+  const dataDir = mkdtempSync(join(tmpdir(), 't3-fixed-pdf-'))
+  const sessions = new DatabaseSync(':memory:'), bindings = new DatabaseSync(':memory:')
+  sessions.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
+  initializeAutoOpsAccessSchema(bindings)
+  sessions.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('fixed-pdf').digest('hex'), 'u-admin', 'csrf', Date.now() + 60_000)
+  let access
+  const store = createWorkspaceStore({ dataDir, authorizeTask: ({ actorId, projectId }) => access.requireWorkspaceActor(actorId, projectId) })
+  access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, workspaceStore: store })
+  const principal = access.authenticateCookie('demo_session=fixed-pdf')
+  await store.ensureProject(access.requireProject(principal, 'p-autoops'))
+  const bytes = await renderBusinessPdf('# 固定原件资料\n\n实际PDF正文，撤权后不可迟到返回。')
+  const task = store.startSnapshot('p-autoops', { requestId: 'pdf-version', captureId: 'pdf-capture', source: { repositories: [] } }, async ({ root }) => { writeFileSync(join(root, 'manual.pdf'), bytes) }, principal.id)
+  await store.whenIdle()
+  const completed = store.overview('p-autoops').tasks.find(entry => entry.id === task.id)
+  assert.equal(completed.status, 'completed', completed.error)
+  const path = `autoops/p-autoops/workspaces/${completed.versionId}/manual.pdf`
+  const catalog = createBusinessResourceCatalog({ access, workspaceStore: store })
+  const bind = threadId => {
+    access.bindThread(principal, { threadId, projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: 'internal', workspaceVersionId: completed.versionId })
+    return `autoops://projects/p-autoops/environments/env-test/threads/${threadId}`
+  }
+  t.after(async () => { await store.close(); sessions.close(); bindings.close(); rmSync(dataDir, { recursive: true, force: true }) })
+  return { access, principal, bytes, path, catalog, bind }
+}
+
+test('固定PDF真实解析期间撤回会话，工具与原生预览都拒绝迟到正文', async t => {
+  const f = await fixedPdfFixture(t)
+  f.bind('pdf-tool-late')
+  const tool = f.catalog.readForThread('pdf-tool-late', f.path)
+  f.access.markThreadDeleted('pdf-tool-late')
+  await assert.rejects(tool)
+  const cwd = f.bind('pdf-preview-late')
+  const preview = f.catalog.read(f.principal, { cwd, relativePath: f.path })
+  f.access.markThreadDeleted('pdf-preview-late')
+  await assert.rejects(preview)
+  f.bind('pdf-healthy')
+  assert.match((await f.catalog.readForThread('pdf-healthy', f.path)).content, /实际PDF正文/)
+})
+
+test('跨入口占满真实文档Worker预算，固定PDF明确返回可重试忙状态且恢复后可读取', async t => {
+  const f = await fixedPdfFixture(t)
+  const cwd = f.bind('pdf-busy')
+  const attachment = { id: 'held-pdf', name: '占用预算.pdf', mime: 'application/pdf', bytes: f.bytes }
+  const held = [extractBusinessAttachment(attachment), extractBusinessAttachment(attachment)]
+  try {
+    await assert.rejects(f.catalog.readForThread('pdf-busy', f.path), { status: 503, code: 'DOCUMENT_BUSY' })
+    await assert.rejects(f.catalog.read(f.principal, { cwd, relativePath: f.path }), { status: 503, code: 'DOCUMENT_BUSY' })
+  } finally { await Promise.allSettled(held) }
+  const content = await f.catalog.readForThread('pdf-busy', f.path)
+  assert.match(content.content, /实际PDF正文/)
+  assert.equal(content.source, 'workspace_snapshot')
+  assert.equal(content.truncated, false)
+})
+
+test('异步附件读取期间撤回会话，原文下载与正文预览都不能返回旧权限数据', async t => {
+  const sessions = new DatabaseSync(':memory:'), bindings = new DatabaseSync(':memory:')
+  sessions.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
+  initializeAutoOpsAccessSchema(bindings)
+  sessions.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('late-attachment').digest('hex'), 'u-admin', 'csrf', Date.now() + 60_000)
+  const access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings })
+  const principal = access.authenticateCookie('demo_session=late-attachment')
+  t.after(() => { sessions.close(); bindings.close() })
+  for (const operation of ['resource', 'read']) {
+    const threadId = `late-${operation}`, attachmentId = `file-${operation}`
+    access.bindThread(principal, { threadId, projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'private' })
+    access.recordThreadAttachment(principal, attachmentId, threadId, { name: '私有正文.txt', mimeType: 'text/plain', sizeBytes: 12 })
+    let resume
+    const pendingBytes = new Promise(resolve => { resume = resolve })
+    const catalog = createBusinessResourceCatalog({ access, readAttachment: async () => pendingBytes })
+    const path = `autoops/p-autoops/threads/${threadId}/attachments/${attachmentId}/私有正文.txt`
+    const pending = operation === 'resource' ? catalog.resource(principal, path) : catalog.read(principal, { cwd: `autoops://projects/p-autoops/environments/env-test/threads/${threadId}`, relativePath: path })
+    access.markThreadDeleted(threadId)
+    resume(Buffer.from('不应返回的私有正文'))
+    await assert.rejects(pending)
+  }
 })

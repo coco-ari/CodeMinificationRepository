@@ -28,6 +28,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/c
 import { Spinner } from '~/components/ui/spinner'
 import { formatBytes } from '~/lib/formatBytes'
 import { randomUUID } from '~/lib/utils'
+import type { WorkspaceBuildContext } from '../../../../../../autoops/contracts/workspaces.ts'
 import {
   workspaceFileDownloadUrl,
   type WorkspaceOverview,
@@ -441,17 +442,25 @@ export function WorkspacePackagesDialog({
   internalVersions: readonly WorkspaceVersion[]
   initialSourceId?: string | undefined
   disabled: boolean
-  onGenerate: (sourceId: string, services: Service[]) => Promise<boolean>
+  onGenerate: (sourceId: string, services: Service[], contexts: WorkspaceBuildContext[]) => Promise<boolean>
 }) {
   const [sourceId, setSourceId] = useState(initialSourceId ?? '')
   const [frontend, setFrontend] = useState(true)
   const [backend, setBackend] = useState(true)
+  const contextId = useId()
+  const [contextInputs, setContextInputs] = useState<Record<string, { root: string; workingDirectory: string }>>({})
   const [renderedOpen, setRenderedOpen] = useState(open)
   if (renderedOpen !== open) {
     setRenderedOpen(open)
     if (open) setSourceId(initialSourceId ?? '')
   }
   const source = internalVersions.find((version) => version.id === sourceId) ?? internalVersions[0]
+  const contextFor = (service: Service) => {
+    const standalone = source?.source.repositories.some((repository) => repository.path === service)
+    return contextInputs[`${source?.id}:${service}`] ?? { root: standalone ? service : '.', workingDirectory: '.' }
+  }
+  const changeContext = (service: Service, field: 'root' | 'workingDirectory', value: string) =>
+    setContextInputs((current) => ({ ...current, [`${source?.id}:${service}`]: { ...contextFor(service), [field]: value } }))
   const operation = useWorkspaceSubmit()
   const unavailable = disabled || operation.pending || !source
   return (
@@ -473,7 +482,7 @@ export function WorkspacePackagesDialog({
                 onGenerate(source.id, [
                   ...(frontend ? ['frontend' as const] : []),
                   ...(backend ? ['backend' as const] : []),
-                ]),
+                ], (['frontend', 'backend'] as const).filter((service) => service === 'frontend' ? frontend : backend).map((service) => ({ service, ...contextFor(service) }))),
               () => onOpenChange(false),
             )
           }}
@@ -498,9 +507,21 @@ export function WorkspacePackagesDialog({
                 <Checkbox checked={backend} disabled={unavailable} onCheckedChange={setBackend} />
                 后端源码包
               </Label>
+              {(['frontend', 'backend'] as const).filter((service) => service === 'frontend' ? frontend : backend).map((service) => (
+                <div key={service} className="grid min-w-0 gap-2 sm:grid-cols-2">
+                  <div className="min-w-0 space-y-1">
+                    <Label htmlFor={`${contextId}-${service}-root`}>{service === 'frontend' ? '前端' : '后端'}构建上下文</Label>
+                    <Input id={`${contextId}-${service}-root`} value={contextFor(service).root} disabled={unavailable} onChange={(event) => changeContext(service, 'root', event.target.value)} />
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <Label htmlFor={`${contextId}-${service}-directory`}>包内构建目录</Label>
+                    <Input id={`${contextId}-${service}-directory`} value={contextFor(service).workingDirectory} disabled={unavailable} onChange={(event) => changeContext(service, 'workingDirectory', event.target.value)} />
+                  </div>
+                </div>
+              ))}
             </div>
             <p className="text-muted-foreground text-xs">
-              从内部版本生成 ZIP，保留构建所需目录与依赖声明，排除 Git
+              “.” 表示根目录。构建上下文应包含共享依赖和锁文件，包内构建目录相对此上下文。排除 Git
               和缓存。下载后传输到对应服务器解压部署。
             </p>
             {submissionNotice}
@@ -662,7 +683,7 @@ export function WorkspaceTasksDialog({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium">
-                        {task.type === 'import'
+                        {task.type === 'snapshot' ? '生成内部版本' : task.type === 'import'
                           ? '仓库导入'
                           : task.type === 'external'
                             ? '外部工作区生成'

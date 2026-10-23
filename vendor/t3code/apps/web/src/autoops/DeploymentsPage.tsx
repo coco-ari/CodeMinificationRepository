@@ -364,9 +364,9 @@ function ProjectDeployments({
         initialSourceId={fixedSource?.id ?? source?.id}
         submissionNotice={submissionNotice}
         error={error}
-        onGenerate={(id, services) => {
+        onGenerate={(id, services, contexts) => {
           setSourceId(id)
-          return canManage ? submission.submit({ type: 'packages', sourceVersionId: id, services }) : Promise.resolve(false)
+          return canManage ? submission.submit({ type: 'packages', sourceVersionId: id, services, contexts }) : Promise.resolve(false)
         }}
       />
       <WorkspaceTasksDialog

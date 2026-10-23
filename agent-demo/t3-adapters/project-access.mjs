@@ -24,11 +24,15 @@ export function createProjectAccess({ catalog, fail, deploymentEnabled }) {
     if (!deploymentEnabled()) fail(503, 'DEPLOYMENT_DISABLED', '部署验证尚未启用')
     return membership
   }
+  function requireCredentialActor(userId, projectId, action) {
+    if (!['credential.use', 'credential.manage'].includes(action)) fail(403, 'CREDENTIAL_ACTION_FORBIDDEN', '凭证操作未授权')
+    return requireWorkspaceManagerForUser(userId, projectId)
+  }
   function projectCapabilities(userId, projectId) {
     const membership = membershipForUser(userId, projectId)
     const manage = canManageWorkspace(membership)
     const deployment = manage && membership.environmentIds.length > 0 && deploymentEnabled()
-    return { 'workspace.read': true, 'workspace.manage': manage, 'deployment.read': manage, 'deployment.execute': deployment }
+    return { 'workspace.read': true, 'workspace.manage': manage, 'credential.use': manage, 'credential.manage': manage, 'deployment.read': manage, 'deployment.execute': deployment }
   }
-  return { membershipForUser, requireWorkspaceManagerForUser, requireDeploymentActor, projectCapabilities }
+  return { membershipForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, projectCapabilities }
 }

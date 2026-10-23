@@ -1,0 +1,4 @@
+{
+  "extends": "../../autoops/tsconfig.json",
+  "include": ["./**/*.ts"]
+}

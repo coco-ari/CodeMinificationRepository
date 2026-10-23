@@ -64,6 +64,8 @@ export interface AutoOpsAccess {
   requireWorkspace(principal: AutoOpsPrincipal, projectId: string, type: 'internal' | 'external', versionId?: string, environmentId?: string): ProjectMembership;
   requireWorkspaceManager(principal: AutoOpsPrincipal, projectId: string): ProjectMembership;
   requireWorkspaceActor(userId: string, projectId: string): ProjectMembership;
+  requireWorkspaceReader(userId: string, projectId: string): ProjectMembership;
+  requireCredentialActor(userId: string, projectId: string, action: 'credential.use' | 'credential.manage'): ProjectMembership;
   requireDeploymentActor(userId:string, projectId:string, environmentId:string): ProjectMembership;
   projectCapabilities(principal:AutoOpsPrincipal, projectId:string): ProjectCapabilities;
   listResourceThreads(principal:AutoOpsPrincipal, projectId:string): ResourceThread[];

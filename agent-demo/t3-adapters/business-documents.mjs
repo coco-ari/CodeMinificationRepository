@@ -16,8 +16,12 @@ function limitsFor(options={}) {
   }
   return limits
 }
-function runWorker(job,limits) {
-  return new Promise((resolveResult,reject)=>{
+// 所有入口共享进程总预算，防止预览、附件和资料上传各自扩张解析进程。
+let activeWorkers = 0
+async function runWorker(job,limits) {
+  if (activeWorkers >= 2) throw new BusinessDocumentError('DOCUMENT_BUSY', '文档处理繁忙，请稍后重试；原件仍可下载。')
+  activeWorkers++
+  try { return await new Promise((resolveResult,reject)=>{
     const worker = new Worker(resolve(resourcesDirectory(),'business-documents.worker.mjs'), {
       workerData:{job,limits,resourcesDirectory:resourcesDirectory()},execArgv:[],
       resourceLimits:{maxOldGenerationSizeMb:256,stackSizeMb:4},
@@ -31,10 +35,10 @@ function runWorker(job,limits) {
     worker.once('message',result=>result.error?finish(new BusinessDocumentError(result.error.code,result.error.message)):finish(null,result.value))
     worker.once('error',error=>finish(new BusinessDocumentError(error.code==='ERR_WORKER_OUT_OF_MEMORY'?'DOCUMENT_RESOURCE_LIMIT':'DOCUMENT_WORKER_ERROR','文档解析或渲染失败，请检查文件。')))
     worker.once('exit',()=>finish(new BusinessDocumentError('DOCUMENT_WORKER_EXIT','文档处理没有完成。')))
-  })
+  }) } finally { activeWorkers-- }
 }
 
-/** Receives already-authorized bytes only. Never fetches a URL or opens a supplied path. */
+/** 只接收已授权的字节，不获取 URL，也不打开调用方提供的路径。 */
 export async function extractBusinessAttachment({id,name,mime,bytes},options={}) {
   if(!(bytes instanceof Uint8Array))throw new TypeError('Attachment bytes must be a Uint8Array')
   const limits=limitsFor(options),file={id,name,mime,size:bytes.byteLength}
@@ -43,7 +47,7 @@ export async function extractBusinessAttachment({id,name,mime,bytes},options={})
   catch(error){return {...file,readable:false,extraction:{status:'unavailable',code:error.code||'DOCUMENT_PARSER_ERROR',message:error.message}}}
 }
 
-/** PDFKit embeds the tracked OFL CJK font. No browser, network, shell or macros. */
+/** PDFKit 嵌入已登记的 OFL 中文字体，不调用浏览器、网络、命令行或宏。 */
 export async function renderBusinessPdf(content,options={}) {
   const limits=limitsFor(options)
   if(typeof content!=='string'||!content.trim()||content.length>limits.maxTextCharacters)throw new BusinessDocumentError('INVALID_PDF_TEXT','PDF 正文为空或超过长度上限。')

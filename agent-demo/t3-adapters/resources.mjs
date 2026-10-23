@@ -117,12 +117,28 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     if (!readAttachment) throw new AutoOpsAccessError(503, 'ATTACHMENT_READER_UNAVAILABLE', '附件读取暂时不可用')
     return readAttachment(resource.id)
   }
+  function requireExtractedText(extracted, fallback) {
+    if (typeof extracted.content === 'string') return extracted.content
+    const code = extracted.extraction?.code
+    const retryable = new Set(['DOCUMENT_BUSY', 'DOCUMENT_WORKER_ERROR', 'DOCUMENT_WORKER_EXIT', 'DOCUMENT_RESOURCE_LIMIT'])
+    if (code === 'DOCUMENT_TIMEOUT' || retryable.has(code))
+      throw new AutoOpsAccessError(code === 'DOCUMENT_TIMEOUT' ? 504 : 503, code, extracted.extraction.message || '文档处理暂时不可用，请稍后重试')
+    throw new AutoOpsAccessError(415, 'RESOURCE_NOT_TEXT', extracted.extraction?.message || fallback)
+  }
   async function contents(resource) {
-    if (resource.type === 'workspace') return workspaceStore.read(resource.projectId, resource.workspaceVersionId, resource.relativePath).contents
+    if (resource.type === 'workspace') return (await workspaceContents(resource)).contents
     const data = await bytes(resource)
     const extracted = await extractBusinessAttachment({ id: resource.id, name: resource.name, mime: resource.mime, bytes: data })
-    if (typeof extracted.content !== 'string') throw new AutoOpsAccessError(415, 'RESOURCE_NOT_TEXT', extracted.extraction?.message || '该资料请通过原始文件预览')
-    return extracted.content
+    return requireExtractedText(extracted, '该资料请通过原始文件预览')
+  }
+  async function workspaceContents(resource) {
+    try { return workspaceStore.read(resource.projectId, resource.workspaceVersionId, resource.relativePath) }
+    catch (error) { if (error.status !== 415) throw error }
+    const data = workspaceStore.readBytes(resource.projectId, resource.workspaceVersionId, resource.relativePath)
+    // 解析只接收已授权且通过固定版本校验的字节，不从变化中的资料目录读取。
+    const extracted = await extractBusinessAttachment({ id: resource.id, name: resource.name, mime: resource.mime, bytes: data })
+    const content = requireExtractedText(extracted, '该资料的正文不可提取，请查看原件')
+    return { contents: content, byteLength: Buffer.byteLength(content), truncated: false }
   }
   function forThread(threadId) {
     const target = access.requireToolThread(threadId)
@@ -173,14 +189,24 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       const resource = visible(principal, project, binding).find((entry) => entry.path === input.relativePath)
       if (!resource) fail()
       if (resource.path.split('/')[1] !== project.id || (resource.environmentId !== undefined && resource.environmentId !== environmentId)) fail()
+      const recheck = () => {
+        const current = scopeAtCwd(principal, input.cwd)
+        if (!visible(principal, current.project, current.binding).some(entry => entry.path === resource.path && (entry.environmentId === undefined || entry.environmentId === current.environmentId))) fail()
+      }
       if (resource.type === 'workspace') {
-        const file = workspaceStore.read(resource.projectId, resource.workspaceVersionId, resource.relativePath)
+        const file = await workspaceContents(resource)
+        recheck()
         return { relativePath: resource.path, contents: file.contents, byteLength: file.byteLength, truncated: file.truncated, exists: true }
       }
       const text = await contents(resource)
+      recheck()
       return { relativePath: resource.path, contents: text, byteLength: Buffer.byteLength(text), truncated: false, exists: true }
     },
-    async resource(principal, path) { const resource = findVisible(principal, path); return { ...resource, bytes: await bytes(resource) } },
+    async resource(principal, path) {
+      const resource = findVisible(principal, path), data = await bytes(resource)
+      findVisible(principal, path)
+      return { ...resource, bytes: data }
+    },
     async metadata(principal, paths) {
       const entries = []
       for (const path of paths) {
@@ -213,8 +239,10 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       const resources = forThread(threadId)
       const resource = resources.find((entry) => entry.path === path)
       if (resource) {
-        const read = resource.type === 'workspace' ? workspaceStore.read(resource.projectId, resource.workspaceVersionId, resource.relativePath) : null
-        return { path, name: resource.name, mime: resource.mime, content: read ? read.contents : await contents(resource), ...(read ? { source: 'workspace_snapshot', workspaceVersionId: resource.workspaceVersionId, byteLength: read.byteLength, truncated: read.truncated } : {}), sourceUrl: resource.sourceUrl || `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(path)}` }
+        const read = resource.type === 'workspace' ? await workspaceContents(resource) : null
+        const content = read ? read.contents : await contents(resource)
+        if (!forThread(threadId).some((entry) => entry.path === path)) fail()
+        return { path, name: resource.name, mime: resource.mime, content, ...(read ? { source: 'workspace_snapshot', workspaceVersionId: resource.workspaceVersionId, byteLength: read.byteLength, truncated: read.truncated } : {}), sourceUrl: resource.sourceUrl || `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(path)}` }
       }
       const folder = entriesWithFolders(resources).find((entry) => entry.path === path && entry.kind === 'directory')
       if (!folder) fail()

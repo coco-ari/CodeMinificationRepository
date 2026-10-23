@@ -65,13 +65,18 @@ const privateBoundaries = [
     owner:
       '^' +
       web +
-      'autoops/(?:WorkspacesPage\\.tsx|WorkspaceFileBrowser\\.tsx|workspaceViewState\\.ts)$',
+      'autoops/(?:WorkspacesPage\\.tsx|WorkspaceFileBrowser\\.tsx|WorkspaceAuthoringPanel\\.tsx|useWorkspaceFileScroll\\.ts|workspaceViewState\\.ts)$',
   },
   {
     name: '工作区内部只能由工作区服务调用',
     internal: '^agent-demo/t3-adapters/workspace-(?:jobs|files|packages|package-worker)\\.mjs$',
     owner:
       '^agent-demo/t3-adapters/(?:workspaces|workspace-(?:jobs|files|packages|package-worker))\\.mjs$',
+  },
+  {
+    name: '当前资料存储只通过公开入口被调用',
+    internal: '^agent-demo/t3-adapters/workspace-authoring/(?!index\\.ts$)',
+    owner: '^agent-demo/t3-adapters/workspace-authoring/',
   },
   {
     name: '部署项目存储只由部署引擎调用',

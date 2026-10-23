@@ -41,3 +41,18 @@ test('font provenance hash matches deployed OFL licensed asset',async()=>{
  const font=await readFile(new URL('../agent-demo/t3-adapters/business-documents.font.otf',import.meta.url));assert.equal(createHash('sha256').update(font).digest('hex'),sources.font.sha256);
  const license=await readFile(new URL('../agent-demo/t3-adapters/business-documents.font.LICENSE',import.meta.url),'utf8');assert.match(license,/SIL OPEN FONT LICENSE Version 1.1/);
 })
+
+
+test('各入口共享文档处理总并发预算，忙时保留原件并允许之后重试', async () => {
+ const input = { id:'并发资料', name:'资料.txt', mime:'text/plain', bytes:Buffer.from('工作区资料') }
+ const first = extractBusinessAttachment(input)
+ const second = renderBusinessPdf('共享资料与问答报告的解析预算')
+ const busy = await extractBusinessAttachment(input)
+ assert.equal(busy.readable,false)
+ assert.equal(busy.extraction.code,'DOCUMENT_BUSY')
+ assert.equal(busy.content,undefined)
+ const [text,pdf] = await Promise.all([first,second])
+ assert.equal(text.content,'工作区资料')
+ assert.equal(pdf.subarray(0,5).toString(),'%PDF-')
+ assert.equal((await extractBusinessAttachment(input)).content,'工作区资料')
+})

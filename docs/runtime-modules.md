@@ -43,6 +43,41 @@
 - 工作区页面只组合路由、任务和表单；[WorkspaceFileBrowser](../vendor/t3code/apps/web/src/autoops/WorkspaceFileBrowser.tsx) 适配原生文件浏览与固定版本读取，workspaceViewState 仅供工作区内部共享阅读偏好。技能页面保留选择、对话框与导航，[useSkillLibraryCatalog](../vendor/t3code/apps/web/src/autoops/useSkillLibraryCatalog.ts) 负责目录读取、变更与撤权；旧页面写入结果不能覆盖新页面状态。
 - [BusinessRuntime](../vendor/t3code/apps/server/src/autoops/BusinessRuntime.ts) 在现有 Effect 宿主中装配业务生命周期，[business-runtime.mjs](../agent-demo/t3-adapters/business-runtime.mjs) 只协调各模块公开停止/关闭端口。初始化失败同样释放已取得资源；已停止的配置实例不会被惰性读取重新创建。具体排空策略及验收见下表与关闭测试。
 
+## 工作区来源与资料维护验收
+
+本节属于第三步新增能力，不改写第二步已完成基线。产品定义维护在[工作台设计](../examples/project-workbench-design.md#仓库来源与日常资料维护)。
+
+| 公开入口                                                                                     | 唯一数据所有者与调用边界                                                                                                                 | 失败影响与验证路径                                                                                                                                |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [workspace-authoring/index.ts](../agent-demo/t3-adapters/workspace-authoring/index.ts)       | `workspace-authoring/` 自有 SQLite 与不可变原件；维护来源配置、当前资料、修订、解析及捕获引用。其他模块不能引用 storage/rules 或修改其表 | 原件与收据事务一致；并发修订、同名策略、容量、捕获保护、自动回收、重启恢复及正文重提取由 `t3-workspace-authoring.test.mjs` 验证                   |
+| [credentials.ts](../agent-demo/t3-adapters/credentials.ts)                                   | `project-credentials/state.sqlite` 与外置主密钥；只有公开凭证版本引用可被来源保存。现有授权模块独立裁决 use/manage；接口不返回秘密       | 现有库丢失密钥拒绝启动，撤销优先于固定引用；加密、原请求、授权、关闭由 `t3-workspace-credentials.test.mjs` 验证；浏览器不持久化秘密或其可猜测摘要 |
+| [workspace-git.ts](../agent-demo/t3-adapters/workspace-git.ts)                               | 无业务表，只负责受限 HTTPS 获取和固定提交；Git 历史随内部版本保留，子目录获取不是权限隔离                                                | 显式源地址白名单、DNS/IP 固定、禁重定向/凭证助手/自动子模块与 LFS、限时/限量；本地真实 Git 夹具见 `t3-workspace-git.test.mjs`                     |
+| [workspace-management.ts](../agent-demo/t3-adapters/workspace-management.ts)                 | 组合资料、凭证和既有 workspaces 公共接口；现有队列和版本索引仍由 workspaces 拥有，没有第二份任务状态                                     | 全部来源成功才发布；固定输入保护持续到持久终态，未知请求按原 ID 核对；来源预览有并发和关闭排空；见 management 与 lifecycle 测试                   |
+| [workspace-authoring-http.ts](../agent-demo/t3-adapters/workspace-authoring-http.ts)         | 通过 `/api/v1/projects/:id/workspace` 暴露业务动作；T3 HTTP 层先裁决身份、CSRF 和内部管理权限，再读取字节                                | 声明长度超限返回 413；无长度流超限可能关闭连接，此时客户端保留原 ID 核对。定向真实 Node 端口测试验证未调用写入控制器                              |
+| [WorkspaceAuthoringPanel](../vendor/t3code/apps/web/src/autoops/WorkspaceAuthoringPanel.tsx) | 组合 T3 文件浏览、SettingsRow、Menu、Dialog；当前资料与固定版本共用公开阅读恢复 hook；凭证明文仅留当前表单内存                           | 原请求恢复、切项目、撤权、迟到结果、上下文不变、滚动与响应式分别在 Web unit/browser 测试覆盖                                                      |
+
+组合回归使用真实临时 SQLite、PDF/DOCX 解析、固定文件、队列和 ZIP Worker；双仓来源与单仓服务上下文生成的 ZIP 解包后执行夹具构建，旧会话读取固定 PDF，外部二进制必须复核。Git 网络端口使用隔离传输夹具，不把它计作远端私有仓库已通过。
+
+本批扩展 Node 适配器独立严格 TypeScript 门禁。仅独立 Node 模块标注原生 API 的 Effect 诊断范围；T3 内部仍保持原 Effect 规则，HTTP 继续使用 Effect/Schema。公共文档 Worker 对全部调用方合计最多两个在途任务，忙时明确可重试，不能无限派生解析进程。正文提取失败保留原件，管理者可按原件修订显式重试；重试本身有原请求收据，不改变资料修订或重复创建版本。资料所有者在写入、解析完成和捕获释放后自动清理无引用原件，保护所有项目当前引用、活动捕获及在途解析；清理失败可后续或重启重试，不把已成功写入误报成失败。
+
+发行须复制公共 SQLite 基础文件及合同，同时保留原动态文档依赖。`verify-t3-workspace-release.mjs` 从实际发行目录加载新增服务，在独立临时数据中上传资料、生成固定版本和打包，不能借开发目录掩盖缺依赖。新目录和密钥必须纳入原有数据备份；程序回退继续使用当前业务数据，不用旧备份覆盖新上传资料。
+
+### 本批新增能力验证（2026-10-23）
+
+| 证据层次           | 实际结果                                                                                                                                                                                                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS 检查与回归   | `check:runtime`、网页构建、实际 T3 Worker 构建、`verify:autoops` 通过；Node 全量 458 通过、1 项 Linux 内核锁条件跳过，收尾后资料所有者 19 项和 management/lifecycle 12 项再次通过；Server 114 通过、2 项未配置真实 Codex CLI 的原有探测跳过。Web 最终结果见本批提交对应 CI |
+| 真实公共 HTTPS     | `octocat/Hello-World` 的默认分支固定到 `7fd1a60b01f91b314f59955a4e4d4e80d8edf11d`；完整获取、README 读取与三条历史通过。私有认证仍只使用隔离传输夹具，未验证真实远端凭证                                                                                                   |
+| 本机隔离 UI 写流程 | 上传两份资料、阅读滚动 780 → 刷新 780、文本编辑、同名另存、移动、删除、目录建立/删除；配置公开 Git 来源后真实生成版本 `b856be70-7747-4532-930d-f631032d05ad`，页面选择该版本并核对源码提交及上传资料                                                                       |
+| 未知结果与解析恢复 | 上传服务端已保存后丢响应或停止传输，界面保留原请求，核对后恢复；每次仅一个 POST 和一个文件条目。坏 PDF 显式重提取后仍准确返回 `PDF_INVALID`，原件摘要与内容修订不变，保留下载                                                                                              |
+| 页面与交互         | 通过产品外观设置验证浅深色，1440×900、390×844、1440×420 的当前资料/来源页面及上传/来源弹窗；长路径、短窗内部滚动、菜单、Esc 和焦点恢复分别记录。静态截图不替代上述真实写入证据                                                                                             |
+| 本机服务重启       | 使用新 Worker 重启隔离网关与服务，资料修订 9、两个固定版本及生成请求的原收据前后深等一致；没有操作生产服务或使用生产数据                                                                                                                                                   |
+| 发行目录冒烟       | 候选包 4223 文件，复用未修改的客户 ZIP；从实际候选目录加载新模块，在独立数据内上传原件、生成固定版本并完成真实 ZIP Worker 校验。未把本机校验称为 Linux 原生依赖或生产部署验证                                                                                              |
+
+无凭据真实证据位于本 worktree `.deployment/workspace-authoring-evidence/`：`public-git-result.json`、`restart-result.json`、`ui/fixed-selection.json`、`ui/real-ui-theme.json`、`ui/unknown-extract.json`；最初定位与断言错误的报告保留，不计入产品失败或通过。早期 `fixed-version-generated.png` 截于轮询完成之前，只显示旧示例，不能证明新版本；以 `fixed-version-actual-selected.png` 和对应 JSON 为准。
+
+本批尚未部署到 `192.168.31.157:28887`。真实远端私有 HTTPS 凭证、Linux 新发行切换及有效 PDF 的原生浏览器插件呈现未在本批实测；没有调用真实模型执行新资料问答。既有第二步的生产证据不替代这些新增能力的验证。
+
 ## 可执行门禁
 
 准备 Node.js 24.22.0、根锁定 pnpm 与 T3 锁定工作区依赖；Linux 是部署及完整运行链路 CI 环境。首次安装：

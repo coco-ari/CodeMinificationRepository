@@ -48,8 +48,17 @@ test('项目动作投影复用真实成员与环境授权，关闭部署及撤�
   let enabled = true
   const { access, admin, member, guest, catalog, call, lastTaskActor } = setup(t, { deploymentEnabled: () => enabled })
   const capabilities = (principal) => access.bootstrap(principal).projects.find((entry) => entry.id === base.projectId)?.capabilities
-  assert.deepEqual(capabilities(admin), { 'workspace.read': true, 'workspace.manage': true, 'deployment.read': true, 'deployment.execute': true })
-  for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'deployment.read': false, 'deployment.execute': false })
+  assert.deepEqual(capabilities(admin), { 'workspace.read': true, 'workspace.manage': true, 'credential.use': true, 'credential.manage': true, 'deployment.read': true, 'deployment.execute': true })
+  for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'credential.use': false, 'credential.manage': false, 'deployment.read': false, 'deployment.execute': false })
+  access.requireCredentialActor(admin.id, base.projectId, 'credential.manage')
+  access.requireCredentialActor(admin.id, base.projectId, 'credential.use')
+  access.requireWorkspaceReader(member.id, base.projectId)
+  for (const principal of [member, guest]) {
+    assert.throws(() => access.requireCredentialActor(principal.id, base.projectId, 'credential.use'))
+    assert.throws(() => access.requireCredentialActor(principal.id, base.projectId, 'credential.manage'))
+  }
+  assert.throws(() => access.requireCredentialActor(admin.id, base.projectId, 'credential.export'), {code:'CREDENTIAL_ACTION_FORBIDDEN'})
+  assert.throws(() => access.requireWorkspaceReader(guest.id, base.projectId), {code:'WORKSPACE_FORBIDDEN'})
   enabled = false
   assert.equal(capabilities(admin)['deployment.read'], true)
   assert.equal(capabilities(admin)['deployment.execute'], false)
@@ -67,6 +76,7 @@ test('项目动作投影复用真实成员与环境授权，关闭部署及撤�
   membership.status = 'disabled'
   assert.equal(capabilities(admin), undefined)
   assert.throws(() => access.requireDeploymentActor(admin.id, base.projectId, base.environmentId), { code: 'PROJECT_NOT_FOUND' })
+  assert.throws(() => access.requireCredentialActor(admin.id, base.projectId, 'credential.use'), {code:'PROJECT_NOT_FOUND'})
 })
 
 test('项目身份独立于全局角色，兼容内部成员且外部默认不授予原始权限', t => {

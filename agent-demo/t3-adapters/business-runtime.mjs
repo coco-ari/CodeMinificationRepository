@@ -4,6 +4,7 @@ import { stopConfiguredDeploymentStore, closeConfiguredDeploymentStore } from '.
 import { closeConfiguredPreferences } from './preferences.mjs'
 import { closeConfiguredSettingsPreferences } from './settings-preferences.mjs'
 import { closeConfiguredBusinessArtifactStore } from './business-tools.mjs'
+import { stopConfiguredWorkspaceManagement, closeConfiguredWorkspaceManagement } from './workspace-management.ts'
 
 // 宿主只协调已有模块，不拥有另一份任务状态，也不初始化尚未使用的可选存储。
 export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
@@ -16,6 +17,7 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
     if (stopped) return
     stopped = true
     stopConfiguredAutoOpsAccess()
+    stopConfiguredWorkspaceManagement()
     stopConfiguredWorkspaceStore()
     stopConfiguredDeploymentStore()
   }
@@ -30,7 +32,8 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
         if (!workspaceFinished) void closeConfiguredWorkspaceStore({force:true}).catch(() => {})
         console.warn(JSON.stringify({event:'autoops.shutdown.drain_budget_exceeded', workspacePending:!workspaceFinished, deploymentPending:!deploymentFinished, code:'AUTOOPS_SHUTDOWN_PENDING'}))
       }, budget)
-      const results = await Promise.allSettled([workspace, deployment]).finally(() => clearTimeout(timer))
+      const authoring = closeConfiguredWorkspaceManagement()
+      const results = await Promise.allSettled([workspace, deployment, authoring]).finally(() => clearTimeout(timer))
       const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
       if (errors.length) throw new AggregateError(errors, '业务任务关闭失败')
     })()

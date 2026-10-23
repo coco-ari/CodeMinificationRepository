@@ -7,6 +7,8 @@ import { AutoOpsWorkspacesPage } from './WorkspacesPage'
 import { AutoOpsDeploymentsPage } from './DeploymentsPage'
 import type { WorkspaceOverview } from './workspaces'
 import type { DeploymentOverview, StaticDeploymentConfig } from './deployments'
+import { AutoOpsRequestError } from './apiClient'
+import { saveSelection } from './workspaceViewState'
 import '../index.css'
 import './theme.css'
 
@@ -14,12 +16,18 @@ vi.mock(import('../localEnvironment'), () => ({ isLocalEnvironmentDisabled: () =
 
 const mocks = vi.hoisted(() => ({
   host: vi.fn(),
+  authoring: vi.fn(),
+  authoringSend: vi.fn(),
   workspace: vi.fn(),
   deployment: vi.fn(),
   task: vi.fn(),
   releases: vi.fn(),
 }))
 vi.mock(import('./hostConfig'), async (original) => ({
+  ...(await original()),
+  readAutoOpsHost: mocks.host,
+}))
+vi.mock(import('./hostSnapshot'), async (original) => ({
   ...(await original()),
   readAutoOpsHost: mocks.host,
 }))
@@ -44,6 +52,30 @@ vi.mock(import('./workspaces'), async (original) => ({
     truncated: false,
   })),
   searchWorkspaceFiles: vi.fn(async () => ({ entries: [], truncated: false })),
+}))
+vi.mock(import('./workspaceAuthoring'), async (original) => ({
+  ...(await original()),
+  loadAuthoring: mocks.authoring,
+  submitAuthoring: mocks.authoringSend,
+  loadAuthoringContent: vi.fn(async () => ({
+    path: 'docs/说明.txt',
+    revision: 'content-one',
+    size: 15,
+    mime: 'text/plain',
+    sha256: 'original-hash',
+    extraction: {
+      status: 'unavailable' as const,
+      contentHash: 'original-hash',
+      parserVersion: 'parser-one',
+    },
+    contents: '原件已保存',
+  })),
+  loadAuthoringCredentials: vi.fn(async () => ({ credentials: [] })),
+  loadAuthoringTree: vi.fn(async () => ({
+    entries: [{ path: 'docs', name: 'docs', kind: 'directory' as const, size: 0 }],
+    truncated: false,
+  })),
+  searchAuthoringFiles: vi.fn(async () => ({ entries: [], truncated: false })),
 }))
 vi.mock(import('./deployments'), async (original) => ({
   ...(await original()),
@@ -180,6 +212,15 @@ beforeEach(() => {
     ],
   })
   mocks.workspace.mockResolvedValue(workspace())
+  mocks.authoring.mockResolvedValue({
+    projectId: 'p-one',
+    revision: 1,
+    sources: [],
+    entries: [],
+    limits: { maxFileBytes: 8388608, maxFiles: 1000, maxBytes: 67108864 },
+    hasUnpublishedChanges: true,
+  })
+  mocks.authoringSend.mockReset()
   const data = deployment()
   mocks.deployment.mockResolvedValue(data)
   mocks.releases.mockResolvedValue({
@@ -208,7 +249,10 @@ describe('现有模块的公共框架响应式布局', () => {
           <AppSidebarLayout>
             {area === 'workspaces' ? <AutoOpsWorkspacesPage /> : <AutoOpsDeploymentsPage />}
           </AppSidebarLayout>,
-          { router: '/' + area + '?projectId=p-one' },
+          {
+            router:
+              '/' + area + '?projectId=p-one' + (area === 'workspaces' ? '&versionId=v-one' : ''),
+          },
         )
         await vi.waitFor(() =>
           expect(screen.container.querySelector('[data-module-error]')).toBeNull(),
@@ -240,7 +284,9 @@ describe('现有模块的公共框架响应式布局', () => {
             .element(page.getByRole('dialog', { name: '确认发布', exact: true }))
             .toBeVisible()
           await page.getByRole('button', { name: '取消', exact: true }).click()
-          await expect.element(screen.getByRole('button', { name: '发布', exact: true })).toHaveFocus()
+          await expect
+            .element(screen.getByRole('button', { name: '发布', exact: true }))
+            .toHaveFocus()
         }
         await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
@@ -292,6 +338,113 @@ describe('部署与源码包分别使用服务端写权限', () => {
         await expect.element(packages).toBeDisabled()
         await expect.element(release).toBeEnabled()
       }
+      expect(screen.container.querySelector('[data-module-error]')).toBeNull()
+    })
+  }
+})
+
+describe('当前资料保留满高文件区域和原生操作', () => {
+  for (const manager of [true, false]) {
+    it('正文提取失败时' + (manager ? '管理员按原件修订重试' : '只读用户只看状态'), async () => {
+      await page.viewport(390, 844)
+      const data = await mocks.authoring()
+      data.entries = [
+        {
+          id: 'material-one',
+          path: 'docs/说明.txt',
+          name: '说明.txt',
+          kind: 'file',
+          revision: 'content-one',
+          updatedAt: '2026-10-23T00:00:00Z',
+          size: 15,
+          mime: 'text/plain',
+          editable: true,
+          extraction: {
+            status: 'unavailable',
+            contentHash: 'original-hash',
+            parserVersion: 'parser-one',
+            message: '解析器暂时不可用',
+          },
+        },
+      ]
+      mocks.authoring.mockResolvedValue(data)
+      const host = mocks.host()
+      host.projects[0].capabilities['workspace.manage'] = manager
+      mocks.host.mockReturnValue(host)
+      saveSelection('p-one:authoring:file', 'docs/说明.txt')
+      mocks.authoringSend.mockRejectedValue(
+        new AutoOpsRequestError('连接中断', 'CONNECTION_FAILED', undefined, true),
+      )
+      await using screen = await render(
+        <AppSidebarLayout>
+          <AutoOpsWorkspacesPage />
+        </AppSidebarLayout>,
+        { router: '/workspaces?projectId=p-one' },
+      )
+      await expect
+        .element(page.getByText('原件已保存，正文不可提取：解析器暂时不可用', { exact: true }))
+        .toBeVisible()
+      const retry = page.getByRole('button', { name: '重新提取正文', exact: true })
+      if (manager) {
+        await retry.click()
+        await vi.waitFor(() => expect(mocks.authoringSend).toHaveBeenCalledTimes(1))
+        expect(mocks.authoringSend.mock.calls[0]![1]).toMatchObject({
+          command: {
+            kind: 'document',
+            action: 'extract',
+            path: 'docs/说明.txt',
+            expectedContentRevision: 'content-one',
+          },
+          expectedRevision: 1,
+        })
+        await expect.element(retry).toBeDisabled()
+        await expect
+          .element(page.getByRole('button', { name: '按原请求核对', exact: true }))
+          .toBeVisible()
+      } else {
+        await expect.element(retry).not.toBeInTheDocument()
+        expect(mocks.authoringSend).not.toHaveBeenCalled()
+      }
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(391)
+    })
+  }
+  for (const [width, height] of [
+    [1440, 600],
+    [390, 844],
+  ] as const) {
+    it('当前资料在 ' + width + 'px 能上传和管理来源，菜单关闭恢复入口焦点', async () => {
+      await page.viewport(width, height)
+      await using screen = await render(
+        <AppSidebarLayout>
+          <AutoOpsWorkspacesPage />
+        </AppSidebarLayout>,
+        { router: '/workspaces?projectId=p-one' },
+      )
+      await expect
+        .element(page.getByRole('button', { name: '上传资料', exact: true }))
+        .toBeEnabled()
+      expect(
+        screen.container.querySelector('section[aria-label="当前资料文件浏览"]'),
+      ).not.toBeNull()
+      await page.getByRole('button', { name: '工作区操作', exact: true }).click()
+      await page.getByRole('menuitem', { name: '添加源码来源', exact: true }).click()
+      await expect
+        .element(page.getByRole('dialog', { name: '添加源码来源', exact: true }))
+        .toBeVisible()
+      await page.getByText('关闭', { exact: true }).click()
+      await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+      await expect
+        .element(page.getByRole('button', { name: '工作区操作', exact: true }))
+        .toHaveFocus()
+      await page.getByRole('button', { name: '上传资料', exact: true }).click()
+      await expect
+        .element(page.getByRole('dialog', { name: '上传项目资料', exact: true }))
+        .toBeVisible()
+      await page.getByText('关闭', { exact: true }).click()
+      await expect
+        .element(page.getByRole('button', { name: '上传资料', exact: true }))
+        .toHaveFocus()
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
       expect(screen.container.querySelector('[data-module-error]')).toBeNull()
     })
   }

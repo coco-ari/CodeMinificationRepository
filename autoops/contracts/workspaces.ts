@@ -1,8 +1,21 @@
+export interface WorkspaceBuildContext {
+  service: 'frontend' | 'backend'
+  root: string
+  workingDirectory: string
+}
 export interface WorkspaceSource {
-  repositories: Array<{ path: string; commit: string }>
+  repositories: Array<{
+    path: string
+    commit: string
+    sourceId?: string
+    configurationHash?: string
+  }>
   contentHash: string
   repositoryHost?: string
   branch?: string
+  authoringRevision?: number
+  captureId?: string
+  documents?: Array<{ path: string; sha256: string; revision: string }>
 }
 export interface WorkspaceVersion {
   id: string
@@ -36,7 +49,7 @@ export interface WorkspaceFile {
 export interface WorkspaceTask {
   id: string
   requestId?: string
-  type: 'external' | 'packages' | 'import'
+  type: 'external' | 'packages' | 'import' | 'snapshot'
   status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
   stage: string
   message: string

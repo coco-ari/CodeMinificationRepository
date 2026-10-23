@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import { page } from 'vite-plus/test/browser'
 import { render } from '../../test/render'
 import { AutoOpsRequestError } from './apiClient'
@@ -58,7 +58,7 @@ function Harness({
   type = 'import',
   projectId = 'p-one',
 }: {
-  type?: WorkspaceTask['type']
+  type?: 'import' | 'external' | 'packages'
   projectId?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -104,8 +104,8 @@ function Harness({
         <WorkspacePackagesDialog
           {...common}
           internalVersions={[version]}
-          onGenerate={(sourceVersionId, services) =>
-            submission.submit({ type, sourceVersionId, services })
+          onGenerate={(sourceVersionId, services, contexts) =>
+            submission.submit({ type, sourceVersionId, services, contexts })
           }
         />
       )}
@@ -124,16 +124,17 @@ async function openAndFill(type: WorkspaceTask['type']) {
     await page.getByRole('textbox', { name: '规则 1 原始文本' }).fill('private-example-value')
   }
 }
-beforeEach(() => {
+function setup() {
   vi.resetAllMocks()
   sessionStorage.clear()
   mocks.host.mockReturnValue({ principal: { id: 'owner-one' } })
   mocks.read.mockResolvedValue(overview())
   mocks.send.mockRejectedValue(unknown())
-})
+}
 describe('工作区任务的未知提交恢复', () => {
   for (const type of ['import', 'external', 'packages'] as const) {
     it(type + ' 重复点击先核对收据，始终发送原输入和原请求键', async () => {
+      setup()
       await using screen = await render(<Harness type={type} />)
       await openAndFill(type)
       await page.getByRole('button', { name: submitLabel[type], exact: true }).click()
@@ -161,6 +162,7 @@ describe('工作区任务的未知提交恢复', () => {
   }
 
   it('刷新查到已接受任务后只采纳收据，不再次提交', async () => {
+    setup()
     await using screen = await render(<Harness />)
     await openAndFill('import')
     await page.getByRole('button', { name: submitLabel.import }).click()
@@ -175,6 +177,7 @@ describe('工作区任务的未知提交恢复', () => {
   })
 
   it('核对读取失败不重发，变更输入不能覆盖未确认请求', async () => {
+    setup()
     await using screen = await render(<Harness />)
     await openAndFill('import')
     await page.getByRole('button', { name: submitLabel.import }).click()
@@ -191,6 +194,7 @@ describe('工作区任务的未知提交恢复', () => {
   })
 
   it('重新进入页面仅恢复摘要，需原输入匹配才用原键继续', async () => {
+    setup()
     await using first = await render(<Harness />)
     await openAndFill('import')
     await page.getByRole('button', { name: submitLabel.import }).click()
@@ -210,6 +214,7 @@ describe('工作区任务的未知提交恢复', () => {
   })
 
   it('切项目后不会把待确认请求改绑到新项目', async () => {
+    setup()
     await using first = await render(<Harness />)
     await openAndFill('import')
     await page.getByRole('button', { name: submitLabel.import }).click()
@@ -224,5 +229,26 @@ describe('工作区任务的未知提交恢复', () => {
     expect(mocks.send.mock.calls[1]![0]).toBe('p-two')
     expect(mocks.send.mock.calls[1]![3]).not.toBe(initial[3])
     expect(sessionStorage.getItem('autoops:workspace-task:owner-one:p-one')).not.toBeNull()
+  })
+  it('源码包上下文随原请求固定，修改构建目录不会替换未知任务', async () => {
+    setup()
+    await using screen = await render(<Harness type="packages" />)
+    await openAndFill('packages')
+    await page.getByRole('textbox', { name: '前端构建上下文', exact: true }).fill('monorepo')
+    await page.getByRole('textbox', { name: '包内构建目录', exact: true }).nth(0).fill('apps/web')
+    await page.getByRole('button', { name: submitLabel.packages, exact: true }).click()
+    await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1))
+    const first = mocks.send.mock.calls[0]!
+    expect(first[4]).toEqual([
+      { service: 'frontend', root: 'monorepo', workingDirectory: 'apps/web' },
+      { service: 'backend', root: '.', workingDirectory: '.' },
+    ])
+    await page.getByRole('textbox', { name: '前端构建上下文', exact: true }).fill('changed-root')
+    await page.getByRole('button', { name: submitLabel.packages, exact: true }).click()
+    await vi.waitFor(() => expect(document.body.textContent).toContain('修改输入不会覆盖原请求'))
+    expect(mocks.send).toHaveBeenCalledTimes(1)
+    await page.getByRole('button', { name: '使用原请求重试', exact: true }).click()
+    await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2))
+    expect(mocks.send.mock.calls[1]).toEqual(first)
   })
 })

@@ -18,7 +18,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   if (!(await stat(root)).isDirectory()) throw new Error('发行路径不是目录')
   if (!(await stat(join(root, 'node_modules'))).isDirectory()) throw new Error('发行目录缺少运行依赖')
   const adapters = join(root, 'agent-demo/t3-adapters')
-  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs']) {
+  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts']) {
     const path = await realpath(join(adapters, file))
     if (!within(root, path) || !(await stat(path)).isFile()) throw new Error(`发行工作区文件缺失或越界：${file}`)
   }
@@ -31,7 +31,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   const temporaryRoot = await realpath(tmpdir()), prefix = 'autoops-workspace-release-'
   const dataDir = await mkdtemp(join(temporaryRoot, prefix))
   const previousResources = process.env.AUTOOPS_BUSINESS_RESOURCES_DIR
-  let store
+  let store, management, authoring, credentials
   try {
     process.env.AUTOOPS_BUSINESS_RESOURCES_DIR = adapters
     const [{ createWorkspaceStore }, { inspectZip }] = await Promise.all([
@@ -44,7 +44,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
       dataDir, taskLimits: { maxConcurrent: 1, maxQueued: 0 }, onTaskDiagnostic: (event) => diagnostics.push(event),
       // 这是隔离冒烟的限定授权桩，不装配或改变生产授权服务。
       authorizeTask(scope) {
-        if (scope.actorId !== actorId || scope.projectId !== projectId || scope.type !== 'packages')
+        if (scope.actorId !== actorId || scope.projectId !== projectId || !['packages', 'snapshot'].includes(scope.type))
           throw Object.assign(new Error('冒烟授权范围不符'), { status: 403 })
         authorizations++
       },
@@ -77,9 +77,33 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     assert.equal(manifest.services[0].service, 'frontend')
     assert.equal(manifest.services[0].size, archive.bytes.length)
     assert.equal(manifest.services[0].sha256, createHash('sha256').update(archive.bytes).digest('hex'))
-    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id }
+    // 从发行目录真实加载并初始化新增模块，避免开发依赖或遗漏文件掩盖启动失败。
+    const [{ createWorkspaceManagement }, { createWorkspaceAuthoring }, { createProjectCredentialService }, { createWorkspaceGit }] = await Promise.all([
+      import(pathToFileURL(join(adapters, 'workspace-management.ts')).href),
+      import(pathToFileURL(join(adapters, 'workspace-authoring/index.ts')).href),
+      import(pathToFileURL(join(adapters, 'credentials.ts')).href),
+      import(pathToFileURL(join(adapters, 'workspace-git.ts')).href),
+    ])
+    const authorize = (actor, project) => assert.ok(actor === actorId && project === projectId, '新增模块越过隔离范围')
+    authoring = createWorkspaceAuthoring({ dataDir, authorize })
+    credentials = createProjectCredentialService({ databasePath: join(dataDir, 'credentials.sqlite'), keyPath: join(dataDir, 'credentials.key'), initializeKeyIfNew: true, authorize })
+    const access = { requireWorkspaceActor: authorize, requireWorkspaceReader: authorize, requireCredentialActor: authorize }
+    management = createWorkspaceManagement({ access, store, authoring, credentials, git: createWorkspaceGit() })
+    const document = Buffer.from('# 发行验收\n\n这份资料应保持在固定版本中。')
+    const uploaded = await authoring.upload(projectId, { requestId: randomUUID(), expectedRevision: 0, path: 'docs/发行验收.md', size: document.length, sha256: createHash('sha256').update(document).digest('hex'), conflict: 'replace' }, document, actorId)
+    const snapshot = await management.generate(projectId, { requestId: randomUUID(), expectedRevision: uploaded.revision }, actorId)
+    await store.whenIdle()
+    const completed = store.overview(projectId).tasks.find(entry => entry.id === snapshot.id)
+    assert.equal(completed?.status, 'completed', completed?.error || '发行资料固定版本没有完成')
+    assert.deepEqual(Buffer.from(store.readBytes(projectId, completed.versionId, 'docs/发行验收.md')), document)
+    assert.equal(management.receipt(projectId, snapshot.requestId, actorId).task.id, snapshot.id)
+    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, authoringVersionId: completed.versionId }
   } finally {
-    try { await store?.close() }
+    try {
+      const results = await Promise.allSettled([store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()])
+      const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
+      if (errors.length) throw new AggregateError(errors, '发行冒烟资源关闭失败')
+    }
     finally {
       if (previousResources === undefined) delete process.env.AUTOOPS_BUSINESS_RESOURCES_DIR
       else process.env.AUTOOPS_BUSINESS_RESOURCES_DIR = previousResources

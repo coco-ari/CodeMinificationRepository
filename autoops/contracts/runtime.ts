@@ -2,6 +2,8 @@
 export interface ProjectCapabilities {
   'workspace.read': boolean
   'workspace.manage': boolean
+  'credential.use'?: boolean
+  'credential.manage'?: boolean
   'deployment.read': boolean
   'deployment.execute': boolean
 }

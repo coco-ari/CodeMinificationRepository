@@ -22,7 +22,8 @@ export function createT3Gateway(target, { timeout = 30000 } = {}) {
       incoming.on('error', () => res.destroy())
     })
     const skillImport = req.method === 'POST' && req.url.split('?')[0] === T3_GATEWAY_PATH + '/autoops/skill-library'
-    remote.setTimeout(skillImport ? Math.max(timeout, 120000) : timeout, () => remote.destroy(new Error('T3 gateway timeout')))
+    const workspaceWrite = req.method === 'POST' && req.url.startsWith(T3_GATEWAY_PATH + '/api/v1/projects/')
+    remote.setTimeout(workspaceWrite ? Math.max(timeout, 180000) : skillImport ? Math.max(timeout, 120000) : timeout, () => remote.destroy(new Error('T3 gateway timeout')))
     remote.on('error', () => {
       if (res.headersSent) return res.destroy()
       res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' })

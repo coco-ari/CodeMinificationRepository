@@ -85,7 +85,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
   const { refresh } = identity
-  const { membershipForUser, requireWorkspaceManagerForUser, requireDeploymentActor, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
+  const { membershipForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
   const customerRegistry = suppliedCustomerRegistry || createCustomerRegistry({
     db: bindingDb, now,
     requireOwner(userId) {
@@ -407,6 +407,8 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     },
     requireDeploymentActor,
     requireWorkspaceActor: requireWorkspaceManagerForUser,
+    requireWorkspaceReader: (userId, projectId) => workspaceForUser(userId, projectId, 'internal'),
+    requireCredentialActor,
     projectCapabilities(principal, projectId) { return projectCapabilities(refresh(principal).id, projectId) },
     listResourceThreads(principal, projectId) {
       projectFor(principal, projectId)

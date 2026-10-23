@@ -1,3 +1,8 @@
+import {
+  WorkspaceAuthoring,
+  WorkspaceAuthoringNavigation,
+  type WorkspaceSection,
+} from './WorkspaceAuthoringPanel'
 import { WorkspaceFileBrowser } from './WorkspaceFileBrowser'
 import { readSelection, saveSelection } from './workspaceViewState'
 import { useWorkspaceOverview } from './useWorkspaceOverview'
@@ -122,6 +127,21 @@ function ProjectWorkspaces({
       'workspace.manage'
     ] === true
   const externalOnly = membership?.workspaceAccess === 'external'
+  const [section, setSection] = useState<WorkspaceSection>(() => {
+    if (externalOnly || requestedVersionId !== undefined) return 'versions'
+    const saved = readSelection(`${projectId}:section`)
+    return saved === 'sources' || saved === 'versions' ? saved : 'current'
+  })
+  const chooseSection = (next: WorkspaceSection) => {
+    saveSelection(`${projectId}:section`, next)
+    setSection(next)
+    if (requestedVersionId !== undefined && next !== 'versions')
+      void navigate({
+        to: '/workspaces',
+        search: { projectId: ProjectId.make(projectId) },
+        replace: true,
+      })
+  }
   const [versionQuery, setVersionQuery] = useState('')
   const [selectedTab, setTab] = useState<Tab>(() =>
     externalOnly || readSelection(`${projectId}:tab`) === 'external' ? 'external' : 'internal',
@@ -181,7 +201,7 @@ function ProjectWorkspaces({
     const task = overview?.tasks.find((entry) => entry.id === followTaskId)
     if (!task || taskActive(task)) return
     if (task.versionId && task.status === 'completed') {
-      if (task.type === 'import') setSelectedInternal(task.versionId)
+      if (task.type === 'import' || task.type === 'snapshot') setSelectedInternal(task.versionId)
       if (task.type === 'external') setSelectedExternal(task.versionId)
       setInvalidVersion(false)
     }
@@ -243,6 +263,7 @@ function ProjectWorkspaces({
     actionDisabled ||
     (tab === 'internal' ? overview?.import?.supported === false : !internal.length)
   const chooseVersion = (id: string) => {
+    saveSelection(`${projectId}:section`, 'versions')
     setInvalidVersion(false)
     if (tab === 'internal') setSelectedInternal(id)
     else setSelectedExternal(id)
@@ -276,37 +297,59 @@ function ProjectWorkspaces({
         从此版本部署
       </Link>
     ) : null
+  if (!externalOnly && section !== 'versions')
+    return (
+      <WorkspaceAuthoring
+        projectId={projectId}
+        section={section}
+        manager={manager}
+        onSection={chooseSection}
+        onAccepted={(receipt) => {
+          if ('task' in receipt) {
+            setFollowTaskId(receipt.task.id)
+            setTab('internal')
+            chooseSection('versions')
+            refreshOverview()
+          }
+        }}
+      />
+    )
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <ModuleSidebar
-        label="工作区版本"
+        label="固定版本"
         search={{ value: versionQuery, onChange: setVersionQuery, label: '搜索工作区版本' }}
         header={
-          <ToggleGroup
-            aria-label="工作区分类"
-            variant="segmented"
-            value={[tab]}
-            onValueChange={(value) => {
-              const next = value[0]
-              if (next === 'internal' || next === 'external') {
-                saveSelection(`${projectId}:tab`, next)
-                setTab(next)
-                setInvalidVersion(false)
-                if (requestedVersionId !== undefined)
-                  void navigate({
-                    to: '/workspaces',
-                    search: { projectId: ProjectId.make(projectId) },
-                    replace: true,
-                  })
-              }
-            }}
-          >
-            {availableTabs.map((item) => (
-              <Toggle key={item.id} value={item.id}>
-                {item.name}
-              </Toggle>
-            ))}
-          </ToggleGroup>
+          <>
+            {!externalOnly ? (
+              <WorkspaceAuthoringNavigation section="versions" onChange={chooseSection} />
+            ) : null}
+            <ToggleGroup
+              aria-label="工作区分类"
+              variant="segmented"
+              value={[tab]}
+              onValueChange={(value) => {
+                const next = value[0]
+                if (next === 'internal' || next === 'external') {
+                  saveSelection(`${projectId}:tab`, next)
+                  setTab(next)
+                  setInvalidVersion(false)
+                  if (requestedVersionId !== undefined)
+                    void navigate({
+                      to: '/workspaces',
+                      search: { projectId: ProjectId.make(projectId) },
+                      replace: true,
+                    })
+                }
+              }}
+            >
+              {availableTabs.map((item) => (
+                <Toggle key={item.id} value={item.id}>
+                  {item.name}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+          </>
         }
       >
         <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
