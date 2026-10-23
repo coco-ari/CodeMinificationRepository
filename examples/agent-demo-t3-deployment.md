@@ -6,7 +6,15 @@
 
 2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在顶部选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
 
-### 当前程序与网页：技能标签和正文读取（t3-skill-flow-0714cc89）
+### 当前程序与网页：第二步模块化及标签修复（t3-step2-b6f25a04）
+
+2026-10-23，核对实际运行旧版 `t3-modular-81a5c2f8` 后，先发布完整模块化基线 578a51f3，再发布真实验收发现的技能换版标签修复 `b6f25a04dcf418c31535269644e029e65b46dceb`。当前完整网关、T3 Worker、网页与客户 ZIP 位于 `/home/tao/autoops-agent-demo/releases/t3-step2-b6f25a04`。使用原 `/home/tao/autoops-deployment-validation/data`，仅切换 28887/28888 验证服务；逐模块证据及待验项统一见[运行模块验收记录](../docs/runtime-modules.md#本轮修复与当前发行2026-10-23b6f25a04)。
+
+当前完整归档 SHA-256 `37d3c8f731908eab2ac09af1a846ffdbb3e323d162c56298df2171cc5611c31f`；目标完整清单 `014eb6c1c075244faa6e4f2c95d0782f5441ba855268e177d7c467ef53dceaaf`，原生依赖清单 `b0e395f21131afcb0ca5f00c44f8030870aed28cc10e489bc32f7576c821e5d3`。保留 1130 个旧哈希静态资源，实际 HTML SHA-256 `ea4de16ec2cd0faef5631a8d2e7494b317523172b076d928093e8fcd0b77f324`。归档使用 `COPYFILE_DISABLE=1` 与 `tar --no-xattrs`，完整清单校验通过后才切换。
+
+当前两项服务增加 `zzzzzzzzzzzz-step2-b6f25a04.conf`，停止预算 90 秒；继承本轮首批 Worker 的 `SuccessExitStatus=130`，对应锁定 Effect 的纯中断退出，其他错误仍按失败处理。当前恢复点 `/home/tao/autoops-agent-demo/backups/t3-step2-b6f25a04-20261023` 包含原有效配置、SQLite 一致性副本、业务文件、前后摘要与可执行 `rollback-program.sh`。`rollback-program.sh --check` 已通过；执行同脚本可恢复 578a51f3 程序并保留当前数据，未实际执行降级。若已有客户持久命令，必须先核对原收据，不能绕过脚本保护。首批 578a51f3 的恢复点仍保留，但其检查要求首批配置仍为当前配置，不能越过补丁层直接执行；下文旧版回退命令仅为历史记录。
+
+### 历史程序与网页：技能标签和正文读取（t3-skill-flow-0714cc89）
 
 2026-10-23，修复提交 `0714cc892b8cf268de58b1955f38c95e963ffbb0` 已推送后部署到 `172.29.22.6:28887/28888`，程序与网页使用 `/home/tao/autoops-agent-demo/releases/t3-skill-flow-0714cc89` 及其 `dist/web`。消息区改用会话授权技能快照，复用 T3 原生技能标签显示名称与图标，复制仍保留原始 `$技能名`。执行上下文明示 `instructionsPath`，模型通过现有 `read_project_material` 读取固定版本 `SKILL.md`，继续使用原生 skill 输入和只读权限。
 
@@ -88,7 +96,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 | 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
 | 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
 | 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
-| 当前程序 / 网页 | `releases/t3-skill-flow-0714cc89` / 同目录 `dist/web` |
+| 当前程序 / 网页 | `releases/t3-step2-b6f25a04` / 同目录 `dist/web` |
 
 固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
 

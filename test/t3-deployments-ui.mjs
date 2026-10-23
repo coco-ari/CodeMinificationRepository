@@ -43,7 +43,7 @@ async function run(name, action) {
 function assertSafeUrl() {
   const url = new URL(page.url())
   assert.equal(url.origin, origin)
-  assert(/^#\/(?:draft\/[^/]+|workspaces(?:\?.*)?|settings\/appearance)$/.test(url.hash), '禁止激活任何已存在对话')
+  assert(/^#\/(?:draft\/[^/]+|(?:workspaces|deployments)(?:\?.*)?|settings\/appearance)$/.test(url.hash), '禁止激活任何已存在对话')
 }
 const panel = () => page.locator('[aria-label="服务发布"]').filter({visible:true})
 const details = () => page.locator('[aria-label="部署详情"]').filter({visible:true})
@@ -142,6 +142,7 @@ async function closeSidebar() {
   if (await sidebar.evaluate(element => !!element.closest('[inert]') || element.getBoundingClientRect().right <= 1)) return
   const toggle = sidebar.locator('[data-sidebar="trigger"]').filter({visible:true}).first()
   if (await toggle.isVisible()) await toggle.click()
+  else if (await page.evaluate(() => innerWidth < 768)) await page.keyboard.press('Escape')
   else await page.getByRole('button', {name:'切换主侧栏', exact:true}).filter({visible:true}).first().click()
   await until(async () => !await sidebar.isVisible() || await sidebar.evaluate(element => element.getBoundingClientRect().right <= 1), '折叠原生侧栏，截图不包含历史对话列表')
 }
@@ -179,26 +180,37 @@ async function select(label, text) {
   await option.waitFor(); await option.click()
 }
 async function workspace(session) {
-  await page.goto(origin + '/agent-demo.html#/workspaces')
-  await page.getByRole('combobox', {name:'工作区项目',exact:true}).waitFor({timeout:60000})
+  await page.goto(origin + '/agent-demo.html#/workspaces?projectId=' + projectId)
+  await page.getByTestId('workspace-page').waitFor({timeout:60000})
   await closeSidebar(); await dismissToasts()
-  if (!(await page.getByRole('combobox', {name:'工作区项目',exact:true}).innerText()).includes(session.project.name)) await select('工作区项目', session.project.name)
   assertSafeUrl()
 }
+async function openModuleSidebar() {
+  const sidebar = page.locator('[data-app-sidebar]').filter({visible:true})
+  if (!await sidebar.isVisible() || await sidebar.evaluate(element => element.getBoundingClientRect().right <= 1)) {
+    await page.getByTestId('project-area-navigation').getByRole('button', {name:'切换主侧栏',exact:true}).click()
+    await until(() => sidebar.evaluate(element => element.getBoundingClientRect().right > 40), '主侧栏应展开到可操作区域')
+  }
+  return sidebar
+}
+async function deploymentView(name) {
+  const sidebar = await openModuleSidebar()
+  await sidebar.getByRole('button', {name,exact:true}).click()
+  await closeSidebar()
+}
 async function services(session) {
-  await workspace(session)
-  await toggle('工作区分类','部署发布').click()
-  await toggle('部署发布分类','服务发布').click()
+  await page.goto(origin + '/agent-demo.html#/deployments?projectId=' + projectId)
+  await page.getByTestId('deployments-page').waitFor({timeout:60000})
+  await deploymentView('服务发布')
+  await dismissToasts()
   await panel().waitFor()
+  const sidebar = await openModuleSidebar()
   const environmentLabel = session.project.environments.find(item => item.id === environmentId).name
-  await until(async () => await panel().getByRole('combobox', {name:'部署环境',exact:true}).isEnabled(), '部署环境应读取完成')
-  if (!(await panel().getByRole('combobox', {name:'部署环境',exact:true}).innerText()).includes(environmentLabel)) await select('部署环境', environmentLabel)
-  // The native compact workspace intentionally restores the mobile detail
-  // surface. Return through its real control before choosing the target again.
-  const back = panel().getByRole('button', {name:'返回服务列表',exact:true})
-  if (session.touch && await back.isVisible()) await back.click()
-  const target = panel().locator('[aria-label="部署服务列表"]').getByRole('button', {name:new RegExp(targetName)})
-  await target.waitFor(); await target.click(); await details().waitFor()
+  const environment = sidebar.getByRole('combobox', {name:'部署环境',exact:true})
+  await until(async () => await environment.isEnabled(), '部署环境应读取完成')
+  if (!(await environment.innerText()).includes(environmentLabel)) await select('部署环境', environmentLabel)
+  const target = sidebar.getByRole('button', {name:new RegExp(targetName)})
+  await target.waitFor(); await target.click(); await closeSidebar(); await details().waitFor()
   await toggle('部署详情分类','任务日志').click()
   if (selectedTaskId) {
     const overview = await get(api + '/deployments?environmentId=' + environmentId)
@@ -258,16 +270,12 @@ async function geometry(session, label) {
   const result = {session:session.name,label,panel:box,detail}; report.geometry.push(result)
   await screenshot(`${session.name}-${label}`); return result
 }
-async function dialogAndMenu() {
+async function configurationAndDialog() {
   await dismissToasts()
-  const menu = details().getByRole('button', {name:'服务操作',exact:true})
-  await menu.click(); await page.getByRole('menuitem', {name:'查看部署配置',exact:true}).waitFor()
-  await page.keyboard.press('Escape')
-  await until(() => menu.evaluate(element => document.activeElement === element), 'Escape 应恢复服务操作按钮焦点')
-  await menu.click(); await page.getByRole('menuitem', {name:'查看部署配置',exact:true}).click()
+  await toggle('部署详情分类','配置').click()
   await details().getByText('站点检查地址', {exact:true}).waitFor()
   await toggle('部署详情分类','任务日志').click()
-  const trigger = details().getByRole('button', {name:'发布',exact:true})
+  const trigger = panel().getByRole('button', {name:'发布',exact:true})
   await until(async () => await trigger.isEnabled(), '真实 Agent 完成任务后发布入口应恢复')
   await trigger.click()
   const dialog = page.getByRole('dialog', {name:'确认发布',exact:true}); await dialog.waitFor()
@@ -278,7 +286,7 @@ async function dialogAndMenu() {
   assert(await dialog.evaluate(element => element.contains(document.activeElement)), 'Tab 焦点应留在原生 Dialog 内')
   await page.keyboard.press('Escape'); await dialog.waitFor({state:'hidden'})
   await until(() => trigger.evaluate(element => document.activeElement === element), 'Escape 应恢复真实发布触发器焦点')
-  return {nativeMenu:true, dialogBounds:box, escapeRestoresFocus:true, submitted:false}
+  return {configurationTab:true, dialogBounds:box, escapeRestoresFocus:true, submitted:false}
 }
 async function collectTask(taskId) {
   let cursor = 0, task, logs = []
@@ -313,7 +321,7 @@ async function scrollLogs(label) {
 }
 async function publish(session) {
   await services(session)
-  const button = details().getByRole('button', {name:'发布',exact:true}); await until(() => button.isEnabled(), '真实发布入口应可用')
+  const button = panel().getByRole('button', {name:'发布',exact:true}); await until(() => button.isEnabled(), '真实发布入口应可用')
   await button.click(); const dialog = page.getByRole('dialog', {name:'确认发布',exact:true}); await dialog.waitFor()
   const choice = dialog.getByRole('combobox', {name:'发布源码包',exact:true})
   await choice.click()
@@ -347,7 +355,6 @@ async function publish(session) {
   }
   assert.equal(task?.status, 'succeeded', '真实发布必须成功，失败详情保留在本次任务日志证据中')
   await page.reload(); await panel().waitFor({timeout:60000})
-  if (session.touch) await panel().locator('[aria-label="部署服务列表"]').getByRole('button',{name:new RegExp(targetName)}).click()
   await until(async () => {
     const selection = await page.evaluate(key => JSON.parse(sessionStorage.getItem(key) || 'null'), `autoops:deployments:${session.principalId}:${projectId}:selection`)
     return selection?.taskId === selectedTaskId
@@ -357,21 +364,23 @@ async function publish(session) {
   return report.publish
 }
 async function packages(session) {
-  await toggle('部署发布分类','源码包').click()
-  const surface = page.locator('[aria-label="部署交付"]'); await surface.waitFor()
-  await surface.getByRole('button', {name:new RegExp(fixture.package.name)}).click()
-  const link = surface.getByRole('link', {name:'下载前端 ZIP',exact:true}); await link.waitFor()
+  await deploymentView('源码包')
+  const sidebar = await openModuleSidebar()
+  const date = await page.evaluate(value => new Date(value).toLocaleString('zh-CN'), fixture.package.createdAt)
+  await sidebar.getByRole('button', {name:fixture.package.name + ' ' + date, exact:true}).click()
+  await openModuleSidebar()
+  const link = sidebar.getByRole('link', {name:'下载前端 ZIP',exact:true}); await link.waitFor()
   const href = await link.getAttribute('href')
   assert.equal(href, `${api}/workspaces/packages/${fixture.package.id}/frontend/download`)
   const bytes = await download(link, 'frontend.zip'); assert.equal(createHash('sha256').update(bytes).digest('hex'), report.fixture.frontendSha256)
   let manifestDialog = false
-  if (session.touch) { await page.getByRole('button', {name:'查看交付清单',exact:true}).click(); await page.getByRole('dialog', {name:'交付清单',exact:true}).waitFor(); manifestDialog=true }
+  if (session.touch) { await sidebar.getByRole('button', {name:'查看交付清单',exact:true}).click(); await page.getByRole('dialog', {name:'交付清单',exact:true}).waitFor(); manifestDialog=true }
   const manifestLink = page.getByRole('link', {name:'下载交付清单',exact:true}).filter({visible:true}); await manifestLink.waitFor()
   const manifestHref = await manifestLink.getAttribute('href'); assert.equal(manifestHref, `${api}/workspaces/packages/${fixture.package.id}/manifest`)
   const manifest = JSON.parse((await download(manifestLink, 'manifest.json')).toString('utf8')); assert.equal(manifest.releaseId, fixture.package.id)
   await screenshot(`${session.name}-source-package-manifest`)
   if (manifestDialog) { await page.keyboard.press('Escape'); await page.getByRole('dialog', {name:'交付清单',exact:true}).waitFor({state:'hidden'}); await until(() => page.getByRole('button',{name:'查看交付清单',exact:true}).evaluate(element => element===document.activeElement), '清单Dialog应恢复触发器焦点') }
-  await toggle('部署发布分类','服务发布').click(); await services(session)
+  await services(session)
   return {frontendDownloadVerified:true, sha256:report.fixture.frontendSha256, manifestDownloadVerified:true, manifestDialog}
 }
 async function download(link, name) {
@@ -390,11 +399,14 @@ async function environmentIsolation(session) {
   const real = await get(api + '/deployments?environmentId=env-prod')
   assert.equal(real.targets.length, 0, '仅允许对预先确认为空的生产环境做只读隔离验证')
   assert.equal(real.tasks.length, 0)
+  const sidebar = await openModuleSidebar()
   await select('部署环境', prod.name)
-  await until(async () => !await page.locator('[aria-label="部署服务列表"]').getByRole('button',{name:new RegExp(targetName)}).isVisible(), '切换空环境不能保留测试环境目标')
+  await until(async () => !await sidebar.getByRole('button',{name:new RegExp(targetName)}).isVisible(), '切换空环境不能保留测试环境目标')
   assert.equal(await page.locator('pre[aria-label="部署增量日志"]').filter({visible:true}).count(), 0, '空环境不得串入原任务日志')
   await panel().getByText('还没有可用的部署服务器',{exact:true}).or(panel().getByText('还没有前端服务',{exact:true})).waitFor()
+  await closeSidebar()
   await screenshot(`${session.name}-production-empty-readonly`)
+  await openModuleSidebar()
   await select('部署环境', session.project.environments.find(item => item.id === environmentId).name)
   await services(session)
   return {productionReadOnly:true,noTargetOrTaskLeak:true}
@@ -411,26 +423,26 @@ try {
   }
   for (const mode of ['light','dark']) await run(`desktop-${mode}-flows`, async () => {
     await page.setViewportSize({width:1440,height:900}); await theme(desktop,mode)
-    const geometryResult=await geometry(desktop,mode), interaction=await dialogAndMenu(), scrolling=await scrollLogs(`desktop-${mode}-earlier-logs`)
+    const geometryResult=await geometry(desktop,mode), interaction=await configurationAndDialog(), scrolling=await scrollLogs(`desktop-${mode}-earlier-logs`)
     return {geometry:geometryResult,interaction,scrolling}
   })
   await run('desktop-short-window-and-artifacts', async () => {
     await page.setViewportSize({width:1440,height:600}); await services(desktop)
-    return {geometry:await geometry(desktop,'short-600'),interaction:await dialogAndMenu(),scrolling:await scrollLogs('desktop-short-earlier-logs'),packages:await packages(desktop),environment:await environmentIsolation(desktop)}
+    return {geometry:await geometry(desktop,'short-600'),interaction:await configurationAndDialog(),scrolling:await scrollLogs('desktop-short-earlier-logs'),packages:await packages(desktop),environment:await environmentIsolation(desktop)}
   })
   const touch = await login('touch-admin',true)
   for (const mode of ['light','dark']) await run(`touch-${mode}-flows`,async()=>{
     page=touch.page; await theme(touch,mode)
-    const result={geometry:await geometry(touch,mode),interaction:await dialogAndMenu(),scrolling:await scrollLogs(`touch-${mode}-earlier-logs`)}
-    await page.getByRole('button',{name:'返回服务列表',exact:true}).click()
-    await page.locator('[aria-label="部署服务列表"]').getByRole('button',{name:new RegExp(targetName)}).waitFor()
+    const result={geometry:await geometry(touch,mode),interaction:await configurationAndDialog(),scrolling:await scrollLogs(`touch-${mode}-earlier-logs`)}
+    const sidebar = await openModuleSidebar()
+    await sidebar.getByRole('button',{name:new RegExp(targetName)}).waitFor()
     await services(touch); return {...result,mobileListDetail:true}
   })
   await run('touch-source-package-and-environment',async()=>({packages:await packages(touch),environment:await environmentIsolation(touch)}))
   const guest = await login('guest-readonly',false,'guest')
   await run('guest-denied',async()=>{
     await workspace(guest)
-    assert.equal(await toggle('工作区分类','部署发布').count(),0)
+    assert.equal(await page.getByTestId('project-area-navigation').getByRole('button',{name:'部署发布',exact:true}).count(),0)
     assert.equal(await page.getByRole('combobox',{name:'部署环境',exact:true}).count(),0)
     assert.equal(guest.deploymentReads,0,'外部账号界面不应自动访问部署接口')
     await get(api+'/deployments?environmentId='+environmentId,403)
