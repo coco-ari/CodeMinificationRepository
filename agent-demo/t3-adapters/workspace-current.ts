@@ -611,6 +611,14 @@ export function createCurrentWorkspace({
     access.requireWorkspaceActor(actor, project)
     const task = store.taskForRequest(project, 'packages', requestId, actor)
     if (task?.status !== 'failed') return false
+    // 同一请求仍被其他资料操作使用时，失败部署不能代替其所有者归还捕获。
+    if (
+      works.has(JSON.stringify([project, requestId, actor])) ||
+      ['external', 'sync', 'snapshot', 'input'].some((type) =>
+        store.taskForRequest(project, type, requestId, actor),
+      )
+    )
+      return false
     const captured = authoring.captureByRequest(project, requestId, actor)
     // 仅归还已知失败部署的源码捕获；未知解析、其他资料输入和文档引用继续受保护。
     if (

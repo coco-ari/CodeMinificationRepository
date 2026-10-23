@@ -1050,3 +1050,73 @@ test('部署正在运行时重复核对不释放捕获，缺少任务或解析�
     'active',
   )
 })
+
+test('跨API复用原请求时失败部署不释放活跃Agent捕获或其他任务尚未确认的输入', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const input = {
+    requestId: 'deployment-reused-by-agent',
+    sources: [{ sourceId: source.id }],
+    contexts: [{ service: 'frontend', root: 'apps/web', workingDirectory: '.' }],
+  }
+  const failed = await legacyDeploymentFailure(f, input, 'resolved')
+  const original = f.authoring.captureByRequest(projectId, input.requestId, owner)
+  const entered = deferred(),
+    gate = deferred()
+  f.control.beforeFetch = async () => {
+    entered.resolve()
+    await gate.promise
+  }
+  const saveInput = f.authoring.saveInput
+  f.authoring.saveInput = () => {
+    throw Object.assign(new Error('隔离输入收据未知'), { code: 'FIXTURE_INPUT_RECEIPT_UNKNOWN' })
+  }
+  const agentInput = { requestId: input.requestId, workspaceType: 'internal' }
+  const capturing = f.service.captureAgentInput(projectId, agentInput, owner)
+  const rejected = assert.rejects(
+    capturing,
+    (error) => error.code === 'FIXTURE_INPUT_RECEIPT_UNKNOWN',
+  )
+  try {
+    // 解析已有固定提交后的续体尚未入队：这里仅有活跃编排，不能依赖其他任务来保护。
+    await Promise.resolve()
+    assert.equal(f.store.taskForRequest(projectId, 'input', input.requestId, owner), undefined)
+    assert.equal(
+      f.service.reconcileFailedDeploymentCapture(projectId, input.requestId, owner),
+      false,
+    )
+    assert.deepEqual(f.service.receipt(projectId, input.requestId, owner).task, failed)
+    assert.equal(f.authoring.captureByRequest(projectId, input.requestId, owner).status, 'active')
+    await entered.promise
+    assert.equal(
+      f.store.taskForRequest(projectId, 'input', input.requestId, owner).status,
+      'running',
+    )
+    assert.equal(f.service.startDeploymentPackages(projectId, input, owner).id, failed.id)
+    assert.equal(f.authoring.captureByRequest(projectId, input.requestId, owner).status, 'active')
+  } finally {
+    gate.resolve()
+  }
+  await rejected
+  await new Promise((resolve) => setImmediate(resolve))
+  const originalTask = f.store.taskForRequest(projectId, 'input', input.requestId, owner)
+  assert.equal(originalTask.status, 'completed')
+  assert.equal(f.authoring.inputByRequest(projectId, input.requestId, owner, 'internal'), null)
+  // 编排已结束但其他类型任务仍证明输入结果待核对；失败部署不得提前清理。
+  assert.deepEqual((await f.http(`requests/${input.requestId}`)).body.task, failed)
+  assert.equal(
+    (await f.http('deployment-packages', { method: 'POST', input })).body.task.id,
+    failed.id,
+  )
+  assert.equal(f.authoring.captureByRequest(projectId, input.requestId, owner).status, 'active')
+  assert.equal(f.calls.fetch.length, 1)
+  f.authoring.saveInput = saveInput
+  const recovered = await f.service.captureAgentInput(projectId, agentInput, owner)
+  assert.equal(recovered.captureId, original.id)
+  assert.equal(recovered.repositories[0].versionId, originalTask.versionId)
+  assert.equal(f.calls.fetch.length, 1)
+  assert.match(
+    f.service.readInputFile(projectId, recovered.id, 'apps/web/README.md', owner).bytes.toString(),
+    /固定源码/,
+  )
+})
