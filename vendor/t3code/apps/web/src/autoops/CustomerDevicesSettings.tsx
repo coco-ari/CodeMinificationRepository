@@ -38,6 +38,7 @@ import {
 } from "./customerAgents";
 import { readAutoOpsHost } from "./hostConfig";
 import { downloadMedia } from "~/components/media/mediaContent";
+import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 
 /** Owner-global devices use the same shell as skills and workspaces. Project
  * navigation never changes account operations or the device list's scope. */
@@ -72,6 +73,8 @@ export function AutoOpsCustomerDevicesPage() {
 function CustomerDevicesContent() {
   const host = readAutoOpsHost()!;
   const [query, setQuery] = useState("");
+  const requiresSecureConnection = window.location.protocol === "http:" &&
+    !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
   const [devices, setDevices] = useState<CustomerDevice[]>([]);
   const [workspaces, setWorkspaces] = useState<CustomerWorkspace[]>([]);
   const [deviceRead, setDeviceRead] = useState({ loading: true, error: null as string | null });
@@ -224,7 +227,7 @@ function CustomerDevicesContent() {
   };
   const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await writeTextToClipboard(text);
       toastManager.add({ type: "success", title: "已复制" });
     } catch {
       toastManager.add({ type: "error", title: "复制失败，请手动选择文本" });
@@ -489,6 +492,13 @@ function CustomerDevicesContent() {
               <DownloadIcon />
               下载连接程序
             </Button>
+            {requiresSecureConnection ? (
+              <p role="note" className="text-sm text-muted-foreground">
+                当前地址使用 HTTP，连接程序默认拒绝连接。正式使用请改用 HTTPS 地址；
+                仅在确认是可信测试网络时，由你在下方连接命令末尾显式添加
+                <code> --allow-insecure</code>。配对码和执行数据在该模式下不加密传输。
+              </p>
+            ) : null}
             <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
               <li>
                 在已安装 Node.js 24.10+ 且已登录 Codex 的电脑中，先解压下载的

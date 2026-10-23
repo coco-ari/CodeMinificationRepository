@@ -16,6 +16,12 @@ import {
 } from "./mainAppLocation.logic";
 
 export function isSidebarUtilityPage(pathname: string) {
+  if (
+    isAutoOpsHosted() &&
+    AUTOOPS_AREAS.some(
+      (area) => area.path !== "/" && (pathname === area.path || pathname.startsWith(`${area.path}/`)),
+    )
+  ) return false;
   return (
     pathname === "/settings" ||
     pathname.startsWith("/settings/") ||
@@ -34,11 +40,7 @@ let hostedMainLocation: { principalId: string; location: AutoOpsMainLocation | n
 export function MainAppLocationTracker() {
   const projectId = useAutoOpsProjectId();
   const href = useLocation({
-    select: (location) => (
-      isSidebarUtilityPage(location.pathname) &&
-      !(isAutoOpsHosted() && AUTOOPS_AREAS.some((area) => area.path !== '/' && area.path === location.pathname))
-        ? null : location.href
-    ),
+    select: (location) => (isSidebarUtilityPage(location.pathname) ? null : location.href),
   });
   useEffect(() => {
     if (href === null) return;

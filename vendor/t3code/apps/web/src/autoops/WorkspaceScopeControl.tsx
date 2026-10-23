@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ScopeReadError } from './ScopeReadError'
 import { autoOpsProjectHref } from './projectNavigation'
 import { autoOpsAreaAvailable } from './projectNavigation.logic'
 import { useNavigate } from '@tanstack/react-router'
@@ -57,7 +58,7 @@ export function WorkspaceScopeControl({ threadId, projectId, scope, locked, disa
   const summary = selected ? `${selected.type === 'internal' ? '内部' : '外部'} · ${selected.name}`
     : scope.workspaceVersionId ? `${scope.workspaceType === 'external' ? '外部脱敏' : '内部原始'} · 固定版本`
     : loading ? '正在读取工作区…' : project?.membership?.workspaceAccess === 'external' ? '暂无已发布外部版本' : '选择工作区'
-  return <ScopeComposerChoice
+  return <><ScopeComposerChoice
     label="对话工作区" summary={summary} icon={scope.workspaceType === 'external' ? ShieldCheckIcon : FolderGit2Icon}
     value={scope.workspaceVersionId ?? ''} locked={locked} disabled={disabled || loading}
     options={versions.map((version) => ({ value: version.id, label: `${version.type === 'internal' ? '内部原始' : '外部脱敏'} · ${version.name}` }))}
@@ -67,4 +68,6 @@ export function WorkspaceScopeControl({ threadId, projectId, scope, locked, disa
       {canRead ? <MenuItem onClick={() => void navigate({ href: autoOpsProjectHref('workspaces', projectId) })}>{project?.capabilities?.['workspace.manage'] === true ? '管理工作区' : '查看工作区'}</MenuItem> : null}
     </>}
   />
+    {locked && error ? <ScopeReadError label="工作区读取失败" error={error} busy={loading} onRetry={() => setAttempt((value) => value + 1)} /> : null}
+  </>
 }

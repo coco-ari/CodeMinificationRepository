@@ -2735,6 +2735,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = ((): ComposerCommandItem[] => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
+      if (workspaceEntries.error) return [];
       if (
         workspacePathCompletion &&
         (workspaceEntries.isPending ||
@@ -2991,7 +2992,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ? `没有匹配的拉取请求 ${composerTrigger.query}.`
         : "此仓库中没有拉取请求。";
     }
-    return composerTriggerKind === "path" ? "没有匹配的文件或文件夹。" : "没有匹配的命令。";
+    return composerTriggerKind === "path"
+      ? (workspaceEntries.error ?? "没有匹配的文件或文件夹。")
+      : "没有匹配的命令。";
   })();
 
   const setPromptFromTraits = (nextPrompt: string) => {
@@ -7083,6 +7086,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       workspacePathCompletion && composerTriggerKind === "path"
                     }
                     emptyStateText={composerMenuEmptyState}
+                    error={composerTriggerKind === "path" ? workspaceEntries.error : null}
+                    onRetry={() => {
+                      workspaceEntries.refresh();
+                      scheduleComposerFocus();
+                    }}
                     activeItemId={activeComposerMenuItem?.id ?? null}
                     onHighlightedItemChange={onComposerMenuItemHighlightedStable}
                     onSelect={onSelectComposerItemStable}

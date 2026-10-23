@@ -300,6 +300,7 @@ export function SkillAssignmentDialog({
   )
   const [targetId, setTargetId] = useState(assignment?.targetId ?? initialTargetId ?? '')
   const [selectedVersionId, setVersionId] = useState(assignment?.versionId ?? '')
+  const [projectEnabled, setProjectEnabled] = useState(assignment?.enabled ?? true)
   const [workspaceTypes, setWorkspaceTypes] = useState<SkillWorkspaceType[]>(
     assignment?.workspaceTypes ?? ['internal'],
   )
@@ -426,6 +427,24 @@ export function SkillAssignmentDialog({
               </SelectPopup>
             </Select>
           </Field>
+          {targetType === 'project' ? (
+            <Field label="项目使用方式">
+              <Select
+                value={projectEnabled ? 'enabled' : 'disabled'}
+                disabled={busy}
+                onValueChange={(value) => setProjectEnabled(value !== 'disabled')}
+              >
+                <SelectTrigger aria-label="项目技能使用方式"><SelectValue /></SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="enabled">在此项目启用</SelectItem>
+                  <SelectItem value="disabled">在此项目停用，阻止助手继承</SelectItem>
+                </SelectPopup>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                项目停用只影响所选项目。取消单独分配则恢复沿用助手设置。
+              </p>
+            </Field>
+          ) : null}
           <Field label="可用工作区">
             <div className="flex flex-wrap gap-4">
               <label className="flex min-h-9 items-center gap-2 text-sm">
@@ -470,9 +489,11 @@ export function SkillAssignmentDialog({
                     targetType,
                     targetId: target.id,
                     workspaceTypes,
-                    enabled: true,
+                    enabled: targetType === 'project' ? projectEnabled : true,
                   },
-                  '分配已保存，新对话将使用该版本；已有对话保持其固定版本。',
+                  targetType === 'project' && !projectEnabled
+                    ? '已在此项目停用技能，不再继承助手分配；其他项目不受影响。'
+                    : '分配已保存，新对话将使用该版本；已有对话保持其固定版本。',
                 ))
               )
                 onClose()

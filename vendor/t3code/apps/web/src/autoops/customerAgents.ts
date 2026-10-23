@@ -1,4 +1,4 @@
-import { autoOpsRequest } from './apiClient'
+import { autoOpsRequest, isAutoOpsAccessError } from './apiClient'
 import { ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import type { ProviderInstanceEntry } from "~/providerInstances";
@@ -65,7 +65,8 @@ export async function loadCustomerCapabilities(target: CustomerTarget, signal?: 
 }
 export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
   const target = scope?.executionBinding?.kind === "customer" ? scope.executionBinding : null;
-  const key = target ? customerTargetKey(target) : null;
+  const principalId = readAutoOpsHost()?.principal.id;
+  const key = target ? `${principalId}/${customerTargetKey(target)}` : null;
   const [state, setState] = useState<{
     key: string;
     catalog: CustomerCapabilities | null;
@@ -96,8 +97,9 @@ export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
         if (!controller.signal.aborted)
           setState((current) => ({
             key,
-            catalog: current?.key === key ? current.catalog : null,
-            device: current?.key === key ? current.device : null,
+            // 读取失败后停止提供新的模型和技能候选；历史消息由原生会话保留。
+            catalog: null,
+            device: !isAutoOpsAccessError(cause) && current?.key === key ? current.device : null,
             error: cause instanceof Error ? cause.message : "无法读取客户运行器",
           }));
       }
