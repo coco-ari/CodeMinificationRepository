@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import { page } from 'vite-plus/test/browser'
+import { page, userEvent } from 'vite-plus/test/browser'
 import { EnvironmentId } from '@t3tools/contracts'
 import { render } from '../../test/render'
 import { AppSidebarLayout } from '~/components/AppSidebarLayout'
@@ -287,6 +287,26 @@ describe('现有模块的公共框架响应式布局', () => {
           await expect
             .element(screen.getByRole('button', { name: '发布', exact: true }))
             .toHaveFocus()
+          if (width < 640) {
+            const title = screen
+              .getByRole('heading', { name: '前端部署验证', exact: true })
+              .element()
+            expect(title.clientWidth).toBeGreaterThanOrEqual(title.scrollWidth)
+            const more = screen.getByRole('button', { name: '部署更多操作', exact: true })
+            await more.click()
+            await expect
+              .element(page.getByRole('menuitem', { name: '刷新部署状态', exact: true }))
+              .toBeVisible()
+            await expect
+              .element(page.getByRole('menuitem', { name: '源码包任务记录', exact: true }))
+              .toBeDisabled()
+            await page.getByRole('menuitem', { name: '生成部署包', exact: true }).click()
+            await expect
+              .element(page.getByRole('dialog', { name: '生成部署包', exact: true }))
+              .toBeVisible()
+            await userEvent.keyboard('{Escape}')
+            await expect.element(more).toHaveFocus()
+          }
         }
         await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
@@ -308,6 +328,63 @@ describe('现有模块的公共框架响应式布局', () => {
       })
     }
   }
+})
+
+describe('部署运行记录与所选详情分离', () => {
+  it('恢复失败跨日志、配置和记录保持可见，新的成功收据才解除提示', async () => {
+    await page.viewport(1440, 600)
+    const data = deployment()
+    data.tasks[0] = {
+      ...data.tasks[0]!,
+      status: 'failed',
+      stage: 'rollback',
+      result: { rollback: { status: 'failed' } },
+    }
+    mocks.deployment.mockResolvedValue(data)
+    await using screen = await render(
+      <AppSidebarLayout>
+        <AutoOpsDeploymentsPage />
+      </AppSidebarLayout>,
+      { router: '/deployments?projectId=p-one' },
+    )
+    await expect.element(screen.getByText('运行状态待核对', { exact: true })).toBeVisible()
+    await expect
+      .element(screen.getByText('上次确认版本：36bccae65190', { exact: true }))
+      .toBeVisible()
+    for (const name of ['配置', '发布记录', '任务日志']) {
+      await screen.getByRole('radio', { name, exact: true }).click()
+      await expect.element(screen.getByText('运行状态待核对', { exact: true })).toBeVisible()
+    }
+    await screen.getByRole('button', { name: '查看待核对任务', exact: true }).click()
+    const release = {
+      ...data.targets[0]!.currentRelease!,
+      id: 'release-recovered',
+      revision: 'recovered1234',
+      createdAt: '2026-10-24T00:00:00Z',
+    }
+    mocks.deployment.mockResolvedValue({
+      ...data,
+      targets: [{ ...data.targets[0], currentRelease: release }],
+      tasks: [
+        {
+          ...data.tasks[0],
+          id: 'task-recovered',
+          status: 'succeeded',
+          createdAt: release.createdAt,
+          updatedAt: release.createdAt,
+          result: { release },
+        },
+        ...data.tasks,
+      ],
+    })
+    await screen.getByRole('button', { name: '刷新部署状态', exact: true }).click()
+    await expect
+      .element(screen.getByText('上次确认版本：recovered123', { exact: true }))
+      .toBeVisible()
+    await expect
+      .element(screen.getByText('运行状态待核对', { exact: true }))
+      .not.toBeInTheDocument()
+  })
 })
 
 describe('部署与源码包分别使用服务端写权限', () => {

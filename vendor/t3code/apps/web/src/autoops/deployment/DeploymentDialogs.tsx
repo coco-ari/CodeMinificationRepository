@@ -394,6 +394,7 @@ export function ReleaseDialog({
   releases,
   rollbackId,
   action,
+  allowCurrentRelease = false,
   busy,
   error,
   onSubmit,
@@ -407,6 +408,7 @@ export function ReleaseDialog({
   releases: DeploymentRelease[]
   rollbackId: string
   action: 'deploy' | 'rollback'
+  allowCurrentRelease?: boolean
   busy: boolean
   error: string | null
   onSubmit: (input: Omit<DeploymentSubmission, 'requestId'>) => Promise<void>
@@ -419,12 +421,20 @@ export function ReleaseDialog({
   const [packageId, setPackageId] = useState(compatible[0]?.id ?? '')
   const selectedPackage = compatible.find((entry) => entry.id === packageId)
   const selectedRelease = releases.find((entry) => entry.id === rollbackId)
+  const confirmationConfig = action === 'rollback' ? selectedRelease?.config : target.config
+  const recoveringCurrent =
+    action === 'rollback' && allowCurrentRelease && selectedRelease?.current === true
+  const confirmationLabel =
+    action === 'deploy' ? '确认发布' : recoveringCurrent ? '尝试重新恢复上次确认版本' : '确认回退'
   const zip = selectedPackage?.services.find((entry) => entry.service === 'frontend')
   const unavailable =
     busy ||
+    !confirmationConfig ||
     (action === 'deploy'
       ? !selectedPackage
-      : !selectedRelease || selectedRelease.current || selectedRelease.available === false)
+      : !selectedRelease ||
+        (selectedRelease.current && !allowCurrentRelease) ||
+        selectedRelease.available === false)
   return (
     <Dialog open={dialog.open} onOpenChange={dialog.onOpenChange}>
       <DialogPopup className="sm:max-w-xl" finalFocus={dialog.finalFocus}>
@@ -443,7 +453,7 @@ export function ReleaseDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>{action === 'deploy' ? '确认发布' : '确认回退'}</DialogTitle>
+            <DialogTitle>{confirmationLabel}</DialogTitle>
           </DialogHeader>
           <DialogPanel>
             <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
@@ -453,9 +463,34 @@ export function ReleaseDialog({
               <dd>{environmentName}</dd>
               <dt className="text-muted-foreground">服务器</dt>
               <dd className="min-w-0 break-words">{serverName}</dd>
-              <dt className="text-muted-foreground">构建目录</dt>
-              <dd className="break-all font-mono">{normalizeDirectory(target.config.module)}</dd>
+              {confirmationConfig ? (
+                <>
+                  <dt className="text-muted-foreground">构建目录</dt>
+                  <dd className="break-all font-mono">
+                    {normalizeDirectory(confirmationConfig.module)}
+                  </dd>
+                  <dt className="text-muted-foreground">产物目录</dt>
+                  <dd className="break-all font-mono">{confirmationConfig.artifactPath}</dd>
+                  <dt className="text-muted-foreground">站点检查地址</dt>
+                  <dd className="break-all">{confirmationConfig.health.url}</dd>
+                  <dt className="text-muted-foreground">健康检查</dt>
+                  <dd className="min-w-0 break-words">
+                    HTTP {confirmationConfig.health.status}，
+                    {confirmationConfig.health.timeoutSeconds} 秒内，每{' '}
+                    {confirmationConfig.health.intervalSeconds} 秒检查
+                  </dd>
+                  <dt className="text-muted-foreground">检查响应包含</dt>
+                  <dd className="min-w-0 break-words">
+                    {confirmationConfig.health.bodyIncludes || '未指定'}
+                  </dd>
+                </>
+              ) : null}
             </dl>
+            {action === 'rollback' && !confirmationConfig ? (
+              <Alert variant="error" role="alert">
+                历史配置不可用，无法确认回退。请重新加载发布记录后核对。
+              </Alert>
+            ) : null}
             {action === 'deploy' ? (
               <>
                 <Field label="前端源码包">
@@ -502,14 +537,19 @@ export function ReleaseDialog({
               </>
             ) : (
               <p className="break-all text-sm">
-                将恢复版本 {selectedRelease?.revision?.slice(0, 12) ?? selectedRelease?.id}{' '}
+                {recoveringCurrent
+                  ? '当前运行结果待核查，本次尝试重新恢复上次确认版本'
+                  : '将恢复版本'}{' '}
+                {selectedRelease?.revision?.slice(0, 12) ?? selectedRelease?.id}{' '}
                 及其历史配置，随后执行健康检查。
               </p>
             )}
             <p className="text-xs text-muted-foreground">
               {action === 'deploy'
                 ? '本次使用固定源码包和配置快照。构建完成后切换站点；健康检查失败时由部署执行器尝试恢复上一版本。'
-                : '回退通过原部署执行器完成；若本机产物已清理，会尝试从历史源码包重建。'}
+                : recoveringCurrent
+                  ? '执行器会先核对现场状态；若无法安全恢复，将保留失败结果，需要核对部署任务。'
+                  : '回退通过原部署执行器完成；若本机产物已清理，会尝试从历史源码包重建。'}
             </p>
             {error ? (
               <Alert variant="error" role="alert">
@@ -534,7 +574,7 @@ export function ReleaseDialog({
               ) : (
                 <RotateCcwIcon />
               )}
-              {action === 'deploy' ? '确认发布' : '确认回退'}
+              {confirmationLabel}
             </Button>
           </DialogFooter>
         </form>

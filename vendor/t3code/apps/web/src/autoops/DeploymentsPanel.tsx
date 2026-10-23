@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   FileTextIcon,
   HistoryIcon,
+  MoreHorizontalIcon,
+  PackageIcon,
   PlusIcon,
   RefreshCwIcon,
   RocketIcon,
@@ -17,9 +19,10 @@ import {
   ServerIcon,
   SettingsIcon,
 } from 'lucide-react'
-import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '~/components/ui/alert'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '~/components/ui/menu'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import { Spinner } from '~/components/ui/spinner'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
@@ -52,6 +55,7 @@ import {
   dateLabel,
   errorLabel,
   packageDirectory,
+  deriveDeploymentRuntimeStatus,
 } from './deployment'
 
 type PendingSubmission =
@@ -59,6 +63,14 @@ type PendingSubmission =
   | { kind: 'target'; input: DeploymentTargetSubmission }
 type Selection = { environmentId: string; targetId: string; taskId: string }
 type DetailTab = 'logs' | 'history' | 'config'
+type PackageActions = {
+  generateDisabled: boolean
+  tasksDisabled: boolean
+  tasksLabel: string
+  tasksActive: boolean
+  onGenerate: (trigger: HTMLElement | null) => void
+  onTasks: (trigger: HTMLElement | null) => void
+}
 
 const storageKey = (projectId: string, suffix: string) =>
   `autoops:deployments:${readAutoOpsHost()?.principal.id ?? ''}:${projectId}:${suffix}`
@@ -104,7 +116,7 @@ export function DeploymentsPanel({
   projectId: string
   packages: WorkspaceRelease[]
   navigation: ReactNode
-  packageActions: ReactNode
+  packageActions: PackageActions | null
   onRefreshPackages: () => void
 }) {
   const canExecute =
@@ -130,6 +142,7 @@ export function DeploymentsPanel({
   const [rollbackId, setRollbackId] = useState('')
   const submitGuard = useRef(false)
   const returnFocus = useRef<HTMLElement | null>(null)
+  const moreTrigger = useRef<HTMLButtonElement | null>(null)
   const revokeAccess = useCallback((cause: unknown) => {
     // 撤权立即清除展示数据；原始提交收据保留，恢复权限后仍使用同一请求标识核对。
     accessDeniedRef.current = true
@@ -164,6 +177,7 @@ export function DeploymentsPanel({
       ? selection.taskId
       : (targetTasks[0]?.id ?? '')
   const activeTask = targetTasks.find((task) => !deploymentTaskFinished(task))
+  const runtimeStatus = target ? deriveDeploymentRuntimeStatus(target, targetTasks) : null
   const server = overview?.servers.find((entry) => entry.id === target?.serverId)
   const online = !!server?.online && !server.revoked
   const staticReady = online && !!server?.capabilities?.includes('static-site-v1')
@@ -420,17 +434,87 @@ export function DeploymentsPanel({
         detail={target?.name}
         actions={
           <>
-            <FileSurfaceAction
-              label="刷新部署状态"
-              disabled={busy}
-              onPress={() => {
-                reload()
-                onRefreshPackages()
-              }}
-            >
-              <RefreshCwIcon />
-            </FileSurfaceAction>
-            {packageActions}
+            <div className="hidden items-center gap-1 sm:flex">
+              <FileSurfaceAction
+                label="刷新部署状态"
+                disabled={busy}
+                onPress={() => {
+                  reload()
+                  onRefreshPackages()
+                }}
+              >
+                <RefreshCwIcon />
+              </FileSurfaceAction>
+              {packageActions ? (
+                <>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={packageActions.tasksLabel}
+                    title={packageActions.tasksLabel}
+                    disabled={packageActions.tasksDisabled}
+                    onClick={(event) => packageActions.onTasks(event.currentTarget)}
+                  >
+                    {packageActions.tasksActive ? <Spinner size="sm" /> : <HistoryIcon />}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={packageActions.generateDisabled}
+                    onClick={(event) => packageActions.onGenerate(event.currentTarget)}
+                  >
+                    <PackageIcon />
+                    生成部署包
+                  </Button>
+                </>
+              ) : null}
+            </div>
+            <div className="sm:hidden">
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      ref={moreTrigger}
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="部署更多操作"
+                    />
+                  }
+                >
+                  {packageActions?.tasksActive ? <Spinner size="sm" /> : <MoreHorizontalIcon />}
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  <MenuItem
+                    disabled={busy}
+                    onClick={() => {
+                      reload()
+                      onRefreshPackages()
+                    }}
+                  >
+                    <RefreshCwIcon />
+                    刷新部署状态
+                  </MenuItem>
+                  {packageActions ? (
+                    <>
+                      <MenuItem
+                        disabled={packageActions.tasksDisabled}
+                        onClick={() => packageActions.onTasks(moreTrigger.current)}
+                      >
+                        {packageActions.tasksActive ? <Spinner size="sm" /> : <HistoryIcon />}
+                        {packageActions.tasksLabel}
+                      </MenuItem>
+                      <MenuItem
+                        disabled={packageActions.generateDisabled}
+                        onClick={() => packageActions.onGenerate(moreTrigger.current)}
+                      >
+                        <PackageIcon />
+                        生成部署包
+                      </MenuItem>
+                    </>
+                  ) : null}
+                </MenuPopup>
+              </Menu>
+            </div>
             <Button
               size="sm"
               disabled={releaseDisabled || !frontendPackages.length || !target}
@@ -561,16 +645,16 @@ export function DeploymentsPanel({
                   ) : null}
                   <div
                     className="flex min-w-0 basis-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                    aria-label="当前运行状态"
+                    aria-label="部署运行记录"
                   >
                     <span className="min-w-0 truncate">
-                      {server?.name ?? '服务器不可用'} · {online ? '在线' : '离线'}
+                      {server?.name ?? '服务器不可用'} · 执行器{online ? '在线' : '离线'}
                     </span>
                     <span className="min-w-0 truncate">
-                      当前版本：
-                      {target.currentRelease?.revision?.slice(0, 12) ??
-                        target.currentRelease?.id.slice(0, 8) ??
-                        '尚未发布'}
+                      上次确认版本：
+                      {runtimeStatus?.confirmedRelease?.revision?.slice(0, 12) ??
+                        runtimeStatus?.confirmedRelease?.id.slice(0, 8) ??
+                        '尚无成功记录'}
                     </span>
                     {activeTask ? <span>{deploymentStageLabel(activeTask.stage)}中</span> : null}
                     {target.currentRelease?.sourceIdentity?.sourceVersionId ? (
@@ -587,10 +671,39 @@ export function DeploymentsPanel({
                           />
                         }
                       >
-                        查看运行版本来源
+                        查看已确认版本来源
                       </Button>
                     ) : null}
                   </div>
+                  {runtimeStatus?.state === 'uncertain' ? (
+                    <Alert variant="warning" className="basis-full">
+                      <AlertTitle>运行状态待核对</AlertTitle>
+                      <AlertDescription>
+                        <p>{runtimeStatus.message}</p>
+                      </AlertDescription>
+                      <AlertAction>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label="查看待核对任务"
+                          onClick={() => {
+                            setDetailTab('logs')
+                            setSelection({
+                              environmentId,
+                              targetId: target.id,
+                              taskId: runtimeStatus.attentionTaskId ?? '',
+                            })
+                          }}
+                        >
+                          查看任务
+                        </Button>
+                      </AlertAction>
+                    </Alert>
+                  ) : runtimeStatus?.state === 'updating' ? (
+                    <p className="basis-full text-xs text-muted-foreground">
+                      {runtimeStatus.message}
+                    </p>
+                  ) : null}
                 </div>
                 {detailTab === 'logs' ? (
                   <>
@@ -630,8 +743,8 @@ export function DeploymentsPanel({
                                   {release.revision?.slice(0, 12) ?? release.id.slice(0, 8)}
                                 </span>
                                 {release.current ? (
-                                  <Badge size="sm" variant="success">
-                                    当前
+                                  <Badge size="sm" variant="secondary">
+                                    上次确认
                                   </Badge>
                                 ) : null}
                               </span>
@@ -672,7 +785,9 @@ export function DeploymentsPanel({
                               size="sm"
                               variant="outline"
                               disabled={
-                                releaseDisabled || release.current || release.available === false
+                                releaseDisabled ||
+                                (release.current && runtimeStatus?.state !== 'uncertain') ||
+                                release.available === false
                               }
                               onClick={() => openDialog('rollback', release.id)}
                             >
@@ -742,6 +857,7 @@ export function DeploymentsPanel({
           packages={frontendPackages}
           releases={releases}
           rollbackId={rollbackId}
+          allowCurrentRelease={runtimeStatus?.state === 'uncertain'}
           action={dialog === 'rollback' ? 'rollback' : 'deploy'}
           busy={busy || !!pending || !canExecute}
           error={error}

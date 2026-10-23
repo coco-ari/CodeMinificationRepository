@@ -269,35 +269,7 @@ function ProjectDeployments({
       </Button>
     </div>
   )
-  const servicePackageActions = (
-    <div className="flex items-center gap-1" onClickCapture={capturePackageAction}>
-      <FileSurfaceAction
-        label={`源码包${taskLabel}`}
-        disabled={!tasks.length}
-        onPress={() => {
-          setError(null)
-          setDialog('tasks')
-        }}
-      >
-        {activeTasks.length ? <Spinner size="sm" /> : <HistoryIcon />}
-      </FileSurfaceAction>
-      <Button
-        ref={generateTrigger}
-        size="sm"
-        variant="outline"
-        disabled={!canManage || !overview || busy || running || !internal.length}
-        onClick={() => {
-          setError(null)
-          setFixedSourceId(null)
-          setDialog('packages')
-        }}
-      >
-        <PackageIcon />
-        <span className="hidden sm:inline">生成部署包</span>
-        <span className="sm:hidden">生成包</span>
-      </Button>
-    </div>
-  )
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {view === 'packages' ? (
@@ -335,7 +307,23 @@ function ProjectDeployments({
           projectId={projectId}
           packages={overview?.releases ?? []}
           navigation={navigation}
-          packageActions={servicePackageActions}
+          packageActions={{
+            generateDisabled: !canManage || !overview || busy || running || !internal.length,
+            tasksDisabled: !tasks.length,
+            tasksLabel: `源码包${taskLabel}`,
+            tasksActive: activeTasks.length > 0,
+            onTasks: (trigger) => {
+              returnFocus.current = trigger
+              setError(null)
+              setDialog('tasks')
+            },
+            onGenerate: (trigger) => {
+              returnFocus.current = trigger
+              setError(null)
+              setFixedSourceId(null)
+              setDialog('packages')
+            },
+          }}
           onRefreshPackages={() => refreshOverview()}
         />
       ) : !overview ? (
