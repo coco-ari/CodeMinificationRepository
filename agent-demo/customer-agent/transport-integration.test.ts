@@ -55,7 +55,7 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
   const principal = registry.authenticateToken(paired.deviceToken);
   registry.registerWorkspace(principal, { registeredWorkspaceId: workspace.registeredWorkspaceId, projectId: "project", label: "客户项目", workspaceBindingRevision: 1, runtimeId: "codex" });
   let bound: any;
-  const hub = new RemoteDeviceHub({ customerRegistry: registry, getThreadBinding: () => bound } as any, createCustomerTransportJournal(transportDb));
+  const hub = new RemoteDeviceHub({ assertAccepting() {}, customerRegistry: registry, getThreadBinding: () => bound } as any, createCustomerTransportJournal(transportDb));
   const server = createServer();
   const wss = new NodeWS.WebSocketServer({ server });
   const errors: unknown[] = []; const connectionStates: string[] = []; const sockets: Array<InstanceType<typeof NodeWS.WebSocket>> = [];
