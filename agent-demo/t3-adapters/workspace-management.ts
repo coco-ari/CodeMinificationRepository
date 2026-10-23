@@ -122,6 +122,10 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   function receipt(projectId: string, requestId: string, actorId: string) {
     permitWrite(projectId, actorId)
     const task = ['packages', 'external', 'sync', 'snapshot', 'input'].map(type => store.taskForRequest(projectId, type, requestId, actorId)).find(Boolean)
+    if (task?.type === 'packages' && task.status === 'failed') {
+      try { currentWorkspace.reconcileFailedDeploymentCapture(projectId, requestId, actorId) }
+      catch { /* 清理未知不改写原失败收据，捕获继续保留供后续核对。 */ }
+    }
     let capture = authoring.captureByRequest(projectId, requestId, actorId)
     if (task?.type === 'snapshot' && !active(task) && capture?.status === 'active') capture = authoring.releaseCapture(projectId, capture.id, actorId)
     const externalPreparation = capture ? undefined : currentWorkspace.externalPreparationReceipt(projectId, requestId, actorId)

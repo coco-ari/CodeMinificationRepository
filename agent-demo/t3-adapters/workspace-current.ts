@@ -603,6 +603,40 @@ export function createCurrentWorkspace({
       signal,
     )
   }
+  function reconcileFailedDeploymentCapture(
+    project: string,
+    requestId: string,
+    actor: string,
+  ): boolean {
+    access.requireWorkspaceActor(actor, project)
+    const task = store.taskForRequest(project, 'packages', requestId, actor)
+    if (task?.status !== 'failed') return false
+    const captured = authoring.captureByRequest(project, requestId, actor)
+    // 仅归还已知失败部署的源码捕获；未知解析、其他资料输入和文档引用继续受保护。
+    if (
+      !captured ||
+      captured.status !== 'active' ||
+      captured.resolution === 'pending' ||
+      captured.files.length ||
+      captured.directories.length ||
+      authoring.inputByRequest(project, requestId, actor, 'internal')
+    )
+      return false
+    authoring.releaseCapture(project, captured.id, actor)
+    return true
+  }
+  function settleDeploymentCapture(project: string, requestId: string, actor: string) {
+    const completion = store
+      .whenIdle()
+      .then(() => {
+        reconcileFailedDeploymentCapture(project, requestId, actor)
+      })
+      .catch(() => {
+        /* 原收据、授权或释放失败时保留保护，等待原请求再次核对。 */
+      })
+    completions.add(completion)
+    void completion.finally(() => completions.delete(completion))
+  }
   function startDeploymentPackages(
     project: string,
     input: WorkspaceDeploymentSourceInput,
@@ -610,7 +644,7 @@ export function createCurrentWorkspace({
   ): WorkspaceTask {
     access.requireWorkspaceActor(actor, project)
     ensureAccepting()
-    return store.startSourcePackages(
+    const task = store.startSourcePackages(
       project,
       input,
       async ({ signal, progress, materializeCache }) => {
@@ -642,6 +676,16 @@ export function createCurrentWorkspace({
       },
       actor,
     )
+    if (task.status === 'failed') {
+      try {
+        reconcileFailedDeploymentCapture(project, input.requestId, actor)
+      } catch {
+        /* 原失败结果仍有效，未知清理结果由下次原请求核对。 */
+      }
+    } else if (task.status === 'queued' || task.status === 'running') {
+      settleDeploymentCapture(project, input.requestId, actor)
+    }
+    return task
   }
   async function captureAvailableInput(
     project: string,
@@ -857,6 +901,7 @@ export function createCurrentWorkspace({
     captureAvailableInput,
     captureDeploymentSource,
     startDeploymentPackages,
+    reconcileFailedDeploymentCapture,
     generateCurrentExternal,
     sync,
     readInput,

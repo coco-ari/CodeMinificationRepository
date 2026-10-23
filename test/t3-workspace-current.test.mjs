@@ -836,3 +836,217 @@ test('旧版遗留active失败捕获在原请求核对时经公开接口收尾�
   assert.equal(f.store.taskForRequest(projectId, 'sync', request.requestId, owner), undefined)
   assert.equal(f.authoring.inputProtectionSummary(projectId, owner).pendingCaptures.length, 0)
 })
+
+test('部署解析失败和固定提交抓取失败在原任务持久终态后释放捕获，原请求不重复执行', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const contexts = [{ service: 'frontend', root: 'apps/web', workingDirectory: '.' }]
+  f.control.beforeResolve = () => {
+    throw Object.assign(new Error('隔离部署解析超时'), {
+      code: 'WORKSPACE_GIT_TIMEOUT',
+      status: 504,
+    })
+  }
+  const resolving = {
+    requestId: 'deployment-resolve-failed',
+    sources: [{ sourceId: source.id }],
+    contexts,
+  }
+  const first = f.service.startDeploymentPackages(projectId, resolving, owner)
+  const failed = await f.finish(first)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.failureCode, 'WORKSPACE_GIT_TIMEOUT')
+  const original = f.authoring.captureByRequest(projectId, resolving.requestId, owner)
+  assert.equal(original.resolution, 'failed')
+  assert.equal(original.status, 'released')
+  assert.equal(original.resolutionError.code, 'WORKSPACE_GIT_TIMEOUT')
+  const resolveCalls = f.calls.resolve.length
+  assert.equal(f.service.startDeploymentPackages(projectId, resolving, owner).id, failed.id)
+  assert.equal(f.calls.resolve.length, resolveCalls)
+
+  f.control.beforeResolve = undefined
+  f.control.beforeFetch = () => {
+    throw Object.assign(new Error('隔离固定提交下载失败'), {
+      code: 'WORKSPACE_GIT_FAILED',
+      status: 502,
+    })
+  }
+  const repository = await f.repository('frontend')
+  const fetching = {
+    requestId: 'deployment-fetch-failed',
+    sources: [{ sourceId: source.id, refKind: 'commit', ref: repository.commit }],
+    contexts,
+  }
+  const second = f.service.startDeploymentPackages(projectId, fetching, owner)
+  const fetched = await f.finish(second)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(fetched.status, 'failed')
+  assert.equal(fetched.failureCode, 'WORKSPACE_GIT_FAILED')
+  const frozen = f.authoring.captureByRequest(projectId, fetching.requestId, owner)
+  assert.equal(frozen.status, 'released')
+  assert.equal(frozen.resolution, 'resolved')
+  assert.equal(frozen.resolvedRepositories[0].commit, repository.commit)
+  assert.equal(
+    f.authoring.deploymentInput(
+      projectId,
+      fetching.requestId,
+      sha(JSON.stringify(fetching)),
+      owner,
+    ),
+    null,
+  )
+  assert.equal(f.authoring.inputProtectionSummary(projectId, owner).pendingCaptures.length, 0)
+  const fetchCalls = f.calls.fetch.length
+  assert.deepEqual(f.service.receipt(projectId, fetching.requestId, owner).task, fetched)
+  assert.equal(f.service.startDeploymentPackages(projectId, fetching, owner).id, fetched.id)
+  assert.equal(f.calls.fetch.length, fetchCalls)
+})
+
+async function legacyDeploymentFailure(f, input, resolution) {
+  const source = f.authoring
+    .overview(projectId, owner)
+    .sources.find((value) => value.id === input.sources[0].sourceId)
+  const revision = f.authoring.overview(projectId, owner).revision
+  const repository = await f.repository('frontend')
+  // 只通过所属模块的公开入口重现旧版已失败但未归还捕获的状态，不修改存储表或状态文件。
+  const task = f.store.startSourcePackages(
+    projectId,
+    input,
+    async () => {
+      const capture = f.authoring.capture(projectId, revision, owner, input.requestId, {
+        sources: [source],
+        documents: false,
+      })
+      if (resolution === 'resolved')
+        f.authoring.freezeCaptureRepositories(
+          projectId,
+          capture.id,
+          [
+            {
+              sourceId: source.id,
+              commit: repository.commit,
+              refKind: source.refKind,
+              ref: 'main',
+              defaultRef: 'main',
+            },
+          ],
+          owner,
+        )
+      if (resolution === 'failed')
+        f.authoring.failCaptureResolution(
+          projectId,
+          capture.id,
+          { code: 'WORKSPACE_GIT_TIMEOUT', message: '隔离旧部署超时' },
+          owner,
+        )
+      throw Object.assign(new Error('隔离旧部署失败'), {
+        code: resolution === 'pending' ? 'FIXTURE_RECEIPT_UNKNOWN' : 'WORKSPACE_GIT_FAILED',
+        status: 502,
+      })
+    },
+    owner,
+  )
+  return f.finish(task)
+}
+
+test('旧部署failed记录通过GET或原POST核对收敛捕获，保留原任务标识和失败事实', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  for (const [resolution, method] of [
+    ['failed', 'GET'],
+    ['resolved', 'GET'],
+    ['resolved', 'POST'],
+  ]) {
+    const input = {
+      requestId: `legacy-deployment-${resolution}-${method}`,
+      sources: [{ sourceId: source.id }],
+      contexts: [{ service: 'frontend', root: 'apps/web', workingDirectory: '.' }],
+    }
+    const previous = await legacyDeploymentFailure(f, input, resolution)
+    assert.equal(previous.status, 'failed')
+    const capture = f.authoring.captureByRequest(projectId, input.requestId, owner)
+    assert.equal(capture.status, 'active')
+    const count = f.store.overview(projectId).tasks.length
+    const actual =
+      method === 'GET'
+        ? (await f.http(`requests/${input.requestId}`)).body.task
+        : (await f.http('deployment-packages', { method: 'POST', input })).body.task
+    assert.deepEqual(actual, previous)
+    assert.equal(f.store.overview(projectId).tasks.length, count)
+    const settled = f.authoring.captureByRequest(projectId, input.requestId, owner)
+    assert.equal(settled.id, capture.id)
+    assert.equal(settled.status, 'released')
+    assert.equal(settled.resolution, resolution)
+    assert.deepEqual(settled.resolutionError, capture.resolutionError)
+    assert.equal(f.calls.resolve.length, 0)
+    assert.equal(f.calls.fetch.length, 0)
+  }
+})
+
+test('部署正在运行时重复核对不释放捕获，缺少任务或解析结果未知也继续保护', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const entered = deferred(),
+    gate = deferred()
+  f.control.beforeFetch = async () => {
+    entered.resolve()
+    await gate.promise
+    throw Object.assign(new Error('隔离下载结束失败'), {
+      code: 'WORKSPACE_GIT_FAILED',
+      status: 502,
+    })
+  }
+  const input = {
+    requestId: 'deployment-running',
+    sources: [{ sourceId: source.id }],
+    contexts: [{ service: 'frontend', root: 'apps/web', workingDirectory: '.' }],
+  }
+  const task = f.service.startDeploymentPackages(projectId, input, owner)
+  await entered.promise
+  try {
+    assert.equal(
+      f.store.taskForRequest(projectId, 'packages', input.requestId, owner).status,
+      'running',
+    )
+    assert.equal(
+      f.service.reconcileFailedDeploymentCapture(projectId, input.requestId, owner),
+      false,
+    )
+    assert.equal(f.service.receipt(projectId, input.requestId, owner).task.id, task.id)
+    assert.equal(f.service.startDeploymentPackages(projectId, input, owner).id, task.id)
+    assert.equal(f.authoring.captureByRequest(projectId, input.requestId, owner).status, 'active')
+  } finally {
+    gate.resolve()
+  }
+  assert.equal((await f.finish(task)).status, 'failed')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(f.authoring.captureByRequest(projectId, input.requestId, owner).status, 'released')
+
+  const absent = 'deployment-task-unknown'
+  const capture = f.authoring.capture(projectId, f.mutation().expectedRevision, owner, absent, {
+    sources: [source],
+    documents: false,
+  })
+  f.authoring.failCaptureResolution(
+    projectId,
+    capture.id,
+    { code: 'WORKSPACE_GIT_TIMEOUT', message: '隔离无任务收据' },
+    owner,
+  )
+  assert.equal(f.service.reconcileFailedDeploymentCapture(projectId, absent, owner), false)
+  assert.equal(f.service.receipt(projectId, absent, owner).task, undefined)
+  assert.equal(f.authoring.captureByRequest(projectId, absent, owner).status, 'active')
+
+  const unresolved = { ...input, requestId: 'deployment-resolution-unknown' }
+  await legacyDeploymentFailure(f, unresolved, 'pending')
+  assert.equal(
+    f.service.reconcileFailedDeploymentCapture(projectId, unresolved.requestId, owner),
+    false,
+  )
+  assert.equal(f.service.receipt(projectId, unresolved.requestId, owner).task.status, 'failed')
+  assert.equal(
+    f.authoring.captureByRequest(projectId, unresolved.requestId, owner).status,
+    'active',
+  )
+})
