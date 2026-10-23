@@ -6,7 +6,19 @@
 
 2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在顶部选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
 
-### 当前预览：客户 Agent、技能库与部署整合（t3-customer-deployment-preview-1）
+### 当前网页：跨模块公共框架（t3-module-shell-517e3cdb-static）
+
+2026-10-23，先将 UI 提交 `517e3cdb45c9fcf4480cf21ff9558b32e6c2f8fd` 推送至 `feat/workspace-deployment-validation`，再部署到 `172.29.22.6:28887`。网页目录为 `/home/tao/autoops-agent-demo/releases/t3-module-shell-517e3cdb-static/dist/web`；网关和 worker 程序继续使用 `t3-customer-deployment-preview-1`。本轮以问答为公共框架，统一工作区、部署发布、技能库、我的电脑及设置的顶栏、原生侧栏和内容头部，约束已同步 `AGENTS.md` 与 T3 UI 规范。部署业务功能的完整迁移仍需单独评估。
+
+增量包 SHA-256 为 `b6abefff1448d76d8b65d96f8b7e1ec31d97ce7df76748cf2d467abcc8995847`；195 个变化文件上传，653 个未变化文件按哈希复用，完整 848 文件通过逐项校验。另保留 187 个旧哈希资源供已打开的浏览器继续加载，不覆盖原发布目录。新入口为 `agentDemo-BiNnOlcX.js`，实际 HTML SHA-256 为 `f3f1b490aef75513f021ebb3c5a0c129561c3645923816d3f9e268da0c206584`。
+
+本地网页构建、类型检查及 18 项相关测试通过。实际服务器直连的浏览器验收 10/10，通过问答与各模块连续切换、侧栏偏好及刷新、发布确认与焦点、源码包清单、浅深色、1440px 桌面、390px 窄屏和 600px 短窗口；保存 21 张截图，页面运行错误、被阻止的业务写入和 RPC 均为 0。首轮经本机代理时登录后加载超时，未计入通过；上述结果来自直连 `172.29.22.6:28887`。实际手机、真实发布执行和模型对话未纳入本轮 UI 验收。
+
+切换瞬间六个业务数据库的各表摘要与工作区、技能文件一致。最终验收期间已有新的配对码、会话和偏好更新，以及部署 Agent 心跳，因此不宣称活动库总摘要始终相同。原 113 条编排事件、6 条消息、2 条已完成运行、19 条轮次条目及会话绑定逐行保留，159 个原工作区和技能文件摘要一致；4 个部署任务、3 条发布记录及业务配置在排除已核对的心跳、巡检字段后完全一致。网页实际 HTML 和 7 个入口引用资源按 HTTP 字节校验通过，worker 与另四项被核对服务的 PID、工作目录及状态保持一致，28890 站点哈希不变。证据保存在本 worktree 的 `.deployment/module-shell-517e3cdb-evidence/`，服务器恢复点另有 `result.json` 和 `after-browser-verification.json`。
+
+本次仅增加网页网关的 `zzzzzzz-module-shell-517e3cdb.conf`，只重启该网关。恢复点为 `/home/tao/autoops-agent-demo/backups/t3-module-shell-517e3cdb-20261023T022024Z`，保存旧配置、六个业务数据库的一致性快照、工作区和技能文件归档及前后摘要。仅回退网页时，先确认执行空闲，再运行该目录的 `rollback-static.py`，移除本轮单独配置并重新加载、重启网页网关即可；继续使用当前业务数据，不用旧库覆盖后续操作。
+
+### 上一版程序与网页：客户 Agent、技能库与部署整合（t3-customer-deployment-preview-1）
 
 2026-10-23，将合并提交 `9085944f` 部署到原独立预览 `28887/28888`，程序与网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-deployment-preview-1`。此前该端口仍是旧部署程序和顶部导航网页，所以没有客户接入入口。现在通过“更多功能 → 我的电脑”进入，也可直接访问 `http://172.29.22.6:28887/agent-demo.html#/devices`；这是账号级模块，不在外观设置内。新环境尚无已配对设备，需要客户在本机连接并登记目录后才会显示。
 
@@ -66,7 +78,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 | 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
 | 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
 | 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
-| 当前程序 / 网页 | `releases/t3-customer-deployment-preview-1` / 同目录 `dist/web` |
+| 当前程序 / 网页 | `releases/t3-customer-deployment-preview-1` / `releases/t3-module-shell-517e3cdb-static/dist/web` |
 
 固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
 
