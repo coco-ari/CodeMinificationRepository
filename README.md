@@ -9,6 +9,7 @@
 - 开发与 AI 任务入口：[AGENTS.md](AGENTS.md)
 - 规范导航：[规范索引](docs/README.md)
 - 当前代码、启动与检查：[开发与验证](docs/development.md)
+- 新产品模块职责与公开入口：[AutoOps 模块入口](autoops/README.md)
 - 交付顺序：[AutoOps 全新模块化重建计划](examples/autoops-rebuild-plan.md)
 - 产品要求：[当前业务需求](examples/workbench-v2-requirements.md)与[工作台设计](examples/project-workbench-design.md)
 

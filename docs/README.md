@@ -14,6 +14,7 @@
 | [工作台设计](../examples/project-workbench-design.md) | 工作区、交付物、会话与扩展的业务关系 |
 | [重建计划](../examples/autoops-rebuild-plan.md) | 各波交付顺序、依赖和验收边界 |
 | [开发与验证](development.md) | 当前可执行的启动、检查、测试命令与实现状态 |
+| [AutoOps 模块入口](../autoops/README.md) | 新代码职责、数据所有权、公开入口及采用的开源能力 |
 
 规则与实现现状分开：专项规范是目标；开发文档及测试记录是当前证据。旧 Demo、旧部署平台、旧原型与历史评估只用于提取可复用的业务能力，不能成为兼容要求。[历史平台说明](history/legacy-platform-readme.md)不指导新产品的 UI、权限、数据或接口设计。
 
