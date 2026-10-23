@@ -345,9 +345,33 @@ test('显式同步有真实持久收据，失败不伪装成功且保留最近�
     /固定源码/,
   )
   assert.equal(f.service.receipt(projectId, request.requestId, owner).capture.resolution, 'failed')
+  assert.equal(f.authoring.captureByRequest(projectId, request.requestId, owner).status, 'released')
+  assert.equal(f.store.taskForRequest(projectId, 'sync', request.requestId, owner), undefined)
+  assert.equal(
+    f.authoring
+      .inputProtectionSummary(projectId, owner)
+      .pendingCaptures.some((value) => value.requestId === request.requestId),
+    false,
+  )
   const calls = f.calls.resolve.length
-  await assert.rejects(f.service.sync(projectId, request, owner))
+  await assert.rejects(
+    f.service.sync(projectId, request, owner),
+    (error) => error.code === 'WORKSPACE_GIT_FAILED',
+  )
   assert.equal(f.calls.resolve.length, calls)
+  f.control.failResolve = false
+  const restored = await f.service.sync(projectId, f.mutation(), owner)
+  assert.equal((await f.finish(restored)).status, 'completed')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(f.service.overview(projectId, owner).sourceStatus[0].status, 'synced')
+  assert.equal(
+    f.authoring.captureByRequest(projectId, restored.requestId, owner).status,
+    'released',
+  )
+  assert.equal(
+    f.service.receipt(projectId, request.requestId, owner).capture.resolutionError.code,
+    'WORKSPACE_GIT_FAILED',
+  )
 })
 
 test('文件选择捕获只使用已同步源码和当前文档，不联网且相同内容键复用原输入', async (t) => {
@@ -751,4 +775,64 @@ test('源码已写入而输入收据失败时任务保护仍有效，原请求�
   assert.deepEqual(f.service.cleanupVersions(projectId, [task.versionId], owner).removed, [
     task.versionId,
   ])
+})
+
+test('Git解析超时先持久失败再释放捕获，原请求保持超时错误且不重新联网', async (t) => {
+  const f = await fixture(t)
+  await f.source('frontend')
+  f.control.beforeResolve = () => {
+    throw Object.assign(new Error('隔离Git超时'), { code: 'WORKSPACE_GIT_TIMEOUT', status: 504 })
+  }
+  const request = f.mutation()
+  await assert.rejects(
+    f.service.sync(projectId, request, owner),
+    (error) => error.code === 'WORKSPACE_GIT_TIMEOUT',
+  )
+  const capture = f.authoring.captureByRequest(projectId, request.requestId, owner)
+  assert.equal(capture.status, 'released')
+  assert.equal(capture.resolution, 'failed')
+  assert.equal(capture.resolutionError.code, 'WORKSPACE_GIT_TIMEOUT')
+  assert.equal(f.store.taskForRequest(projectId, 'sync', request.requestId, owner), undefined)
+  const calls = f.calls.resolve.length
+  await assert.rejects(
+    f.service.sync(projectId, request, owner),
+    (error) => error.code === 'WORKSPACE_GIT_TIMEOUT' && error.status === 422,
+  )
+  assert.equal(f.calls.resolve.length, calls)
+  assert.equal(
+    f.service.receipt(projectId, request.requestId, owner).capture.resolutionError.code,
+    'WORKSPACE_GIT_TIMEOUT',
+  )
+})
+
+test('旧版遗留active失败捕获在原请求核对时经公开接口收尾，不覆盖原失败或创建任务', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const request = f.mutation()
+  const capture = f.authoring.capture(
+    projectId,
+    request.expectedRevision,
+    owner,
+    request.requestId,
+    { sources: [source], documents: false },
+  )
+  f.authoring.failCaptureResolution(
+    projectId,
+    capture.id,
+    { code: 'WORKSPACE_GIT_TIMEOUT', message: '隔离旧版超时' },
+    owner,
+  )
+  assert.equal(f.authoring.captureByRequest(projectId, request.requestId, owner).status, 'active')
+  await assert.rejects(
+    f.service.sync(projectId, request, owner),
+    (error) => error.code === 'WORKSPACE_GIT_TIMEOUT',
+  )
+  const original = f.authoring.captureByRequest(projectId, request.requestId, owner)
+  assert.equal(original.id, capture.id)
+  assert.equal(original.status, 'released')
+  assert.equal(original.resolution, 'failed')
+  assert.equal(f.calls.resolve.length, 0)
+  assert.equal(f.calls.fetch.length, 0)
+  assert.equal(f.store.taskForRequest(projectId, 'sync', request.requestId, owner), undefined)
+  assert.equal(f.authoring.inputProtectionSummary(projectId, owner).pendingCaptures.length, 0)
 })

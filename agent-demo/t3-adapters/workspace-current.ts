@@ -139,7 +139,7 @@ export function createCurrentWorkspace({
             ? {
                 error: {
                   code: 'WORKSPACE_SYNC_FAILED',
-                  message: '源码同步未完成，请核对原任务后重试',
+                  message: '源码同步未完成，请核对原请求后重试',
                 },
               }
             : {}),
@@ -157,14 +157,15 @@ export function createCurrentWorkspace({
     signal: AbortSignal,
     updateCurrent: boolean,
   ) {
-    if (captured.status !== 'active')
-      fail(410, 'WORKSPACE_CAPTURE_RELEASED', '原资料输入已经释放，请核对原请求')
+    // 释放原件保护不改变失败收据；原请求重读仍须返回最初的来源失败。
     if (captured.resolution === 'failed')
       fail(
         422,
         captured.resolutionError?.code ?? 'WORKSPACE_SOURCE_RESOLUTION_FAILED',
         captured.resolutionError?.message ?? '原来源解析失败，请核对原请求',
       )
+    if (captured.status !== 'active')
+      fail(410, 'WORKSPACE_CAPTURE_RELEASED', '原资料输入已经释放，请核对原请求')
     if (updateCurrent) syncState(project, captured, actor, 'queued')
     try {
       if (captured.resolution === 'pending') {
@@ -480,7 +481,24 @@ export function createCurrentWorkspace({
         sources: authoring.overview(project, actor).sources,
         documents: false,
       })
-      captured = await resolveCapture(project, captured, actor, signal, true)
+      try {
+        captured = await resolveCapture(project, captured, actor, signal, true)
+      } catch (error) {
+        // 只有失败已持久化且原任务确实不存在时才能释放；收据或授权未知时继续保护。
+        try {
+          const originalTask = store.taskForRequest(project, 'sync', input.requestId, actor)
+          const originalCapture = authoring.captureByRequest(project, input.requestId, actor)
+          if (
+            !originalTask &&
+            originalCapture?.status === 'active' &&
+            originalCapture.resolution === 'failed'
+          )
+            authoring.releaseCapture(project, originalCapture.id, actor)
+        } catch {
+          /* 收尾失败不覆盖原错误；原请求再次核对时继续尝试释放。 */
+        }
+        throw error
+      }
       const task = sourceTask(project, captured, actor, 'sync')
       syncState(project, captured, actor, 'syncing')
       const fixed = captured
