@@ -126,7 +126,7 @@ export function WorkspaceFileBrowser({
       element.removeEventListener('pointerdown', interact)
       element.removeEventListener('keydown', interact)
     }
-  }, [projectId, version.id, view.selected])
+  }, [projectId, version.id, view.selected, environmentId])
   const source = useMemo<ReadOnlyFileSource>(
     () => ({
       id: `management:${projectId}:${version.id}`,

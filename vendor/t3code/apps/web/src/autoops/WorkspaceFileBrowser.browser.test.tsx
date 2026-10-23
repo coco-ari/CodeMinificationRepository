@@ -126,6 +126,34 @@ beforeEach(() => {
 })
 
 describe('工作区文件浏览职责边界', () => {
+  it('刷新时文件环境延迟就绪后仍恢复位置并记录后续滚动', async () => {
+    mocks.environment.mockReturnValue(null)
+    mocks.codeViewport = true
+    sessionStorage.setItem(
+      stateKey('p-one:files:v-one'),
+      JSON.stringify({ selected: 'src/index.ts' }),
+    )
+    const scrollKey = stateKey('p-one:scroll:v-one:src/index.ts')
+    sessionStorage.setItem(scrollKey, JSON.stringify([{ top: 600, left: 40 }]))
+    // 冷启动先渲染连接提示，实际文件视口会在宿主环境就绪后挂载。
+    await using screen = await render(
+      <WorkspaceFileBrowser projectId="p-one" version={version} />,
+      { router: false },
+    )
+    expect(screen.container.textContent).toContain('文件连接不可用')
+    expect(screen.container.querySelector('.file-preview-virtualizer')).toBeNull()
+    mocks.environment.mockReturnValue(EnvironmentId.make('files-test'))
+    await screen.rerender(<WorkspaceFileBrowser projectId="p-one" version={version} />)
+    const viewport = screen.container.querySelector<HTMLElement>('.file-preview-virtualizer')!
+    await vi.waitFor(() => expect(viewport.scrollTop).toBe(600))
+    expect(viewport.scrollLeft).toBe(40)
+    await act(() => {
+      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 200 }))
+      viewport.scrollTop = 800
+      viewport.dispatchEvent(new Event('scroll'))
+    })
+    expect(JSON.parse(sessionStorage.getItem(scrollKey)!)).toEqual([{ top: 800, left: 40 }])
+  })
   it('横向内容尚未排版完成时不提前消费恢复位置', async () => {
     mocks.codeViewport = true
     mocks.contentWidth = 220

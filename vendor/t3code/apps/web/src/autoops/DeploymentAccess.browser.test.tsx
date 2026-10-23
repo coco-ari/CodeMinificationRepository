@@ -114,11 +114,11 @@ const pending = {
 }
 const denied = (status = 403) =>
   new DeploymentRequestError('部署访问已被拒绝', false, status, 'ACCESS_DENIED')
-const view = () => (
+const view = (width = 1000, height = 600) => (
   <SidebarProvider>
     <ModuleSidebarProvider>
-      <div style={{ display: 'flex', height: 600, width: 1000 }}>
-        <ModuleSidebarOutlet />
+      <div style={{ display: 'flex', height, width }}>
+        {width >= 768 ? <ModuleSidebarOutlet /> : null}
         <DeploymentsPanel
           projectId="p-one"
           packages={packages}
@@ -173,9 +173,40 @@ beforeEach(() => {
   mocks.releases.mockResolvedValue({ releases: [] })
   mocks.logs.mockResolvedValue(logs())
 })
-afterEach(() => vi.useRealTimers())
+afterEach(async () => {
+  vi.useRealTimers()
+  document.documentElement.classList.remove('dark')
+  await page.viewport(1280, 720)
+})
 
 describe('部署撤权隔离', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [1440, 390]) {
+      it(`${theme} ${width}px 短窗口的未知结果提示保留完整核对按钮`, async () => {
+        await page.viewport(width, 420)
+        document.documentElement.classList.toggle('dark', theme === 'dark')
+        sessionStorage.setItem(pendingKey, JSON.stringify(pending))
+        await using screen = await render(view(width, 420))
+        await vi.waitFor(() => expect(screen.container.textContent).toContain('撤权服务'))
+        await expect.element(page.getByRole('button', { name: '核对并重试原请求' })).toBeEnabled()
+        const alert = screen.container.querySelector<HTMLElement>('[role="alert"]')!
+        const button = alert.querySelector('button')!
+        const title = alert.querySelector<HTMLElement>('[data-slot="alert-title"]')!
+        const bounds = alert.getBoundingClientRect()
+        const actionBounds = button.getBoundingClientRect()
+        expect(actionBounds.left).toBeGreaterThanOrEqual(bounds.left)
+        expect(actionBounds.right).toBeLessThanOrEqual(bounds.right)
+        expect(actionBounds.bottom).toBeLessThanOrEqual(bounds.bottom)
+        expect(actionBounds.top).toBeGreaterThanOrEqual(title.getBoundingClientRect().bottom)
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
+        expect(sessionStorage.getItem(pendingKey)).toBe(JSON.stringify(pending))
+        expect(mocks.submit).not.toHaveBeenCalled()
+        await page.screenshot({
+          path: `../../.test-artifacts/second-wave-responsive/deployment-pending-${theme}-${width}.png`,
+        })
+      })
+    }
+  }
   for (const status of [401, 403, 404]) {
     it(`${status} 清除配置和弹窗并停止自动轮询`, async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })

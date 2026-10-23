@@ -447,25 +447,27 @@ export function DeploymentsPanel({
           <Alert variant={pending ? 'warning' : 'error'}>
             <AlertTitle>{pending ? '有一项提交结果待核对' : '部署操作未完成'}</AlertTitle>
             <AlertDescription>
-              {error ??
-                loadError ??
-                '上次连接中断，不能确定服务器是否已接受。重试会沿用原请求，避免重复部署。'}
+              <p>
+                {error ??
+                  loadError ??
+                  '上次连接中断，不能确定服务器是否已接受。重试会沿用原请求，避免重复部署。'}
+              </p>
+              {pending ? (
+                <Button
+                  className="self-start"
+                  size="sm"
+                  variant="outline"
+                  disabled={accessDenied || !overview || busy || !canExecute}
+                  onClick={() => void perform(pending)}
+                >
+                  {busy ? <Spinner size="sm" /> : <RefreshCwIcon />}核对并重试原请求
+                </Button>
+              ) : (
+                <Button className="self-start" size="xs" variant="outline" onClick={reload}>
+                  重新加载
+                </Button>
+              )}
             </AlertDescription>
-            {pending ? (
-              <Button
-                className="mt-2"
-                size="sm"
-                variant="outline"
-                disabled={accessDenied || !overview || busy || !canExecute}
-                onClick={() => void perform(pending)}
-              >
-                {busy ? <Spinner size="sm" /> : <RefreshCwIcon />}核对并重试原请求
-              </Button>
-            ) : (
-              <Button className="mt-2" size="xs" variant="outline" onClick={reload}>
-                重新加载
-              </Button>
-            )}
           </Alert>
         </div>
       ) : null}
