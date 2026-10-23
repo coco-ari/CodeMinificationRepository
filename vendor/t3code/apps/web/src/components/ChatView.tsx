@@ -8518,11 +8518,12 @@ export default function ChatView(props: ChatViewProps) {
               ref={setComposerOverlayElement}
               inert={isRevertingCheckpoint}
               data-chat-composer-overlay="true"
-              className={
+              className={cn(
+                "scrollbar-gutter-both",
                 isDraftHeroState
                   ? "pointer-events-auto absolute inset-0 z-20 flex items-start overflow-y-auto overscroll-contain py-6"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
-              }
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2",
+              )}
             >
               <div ref={draftHeroTransitionGroupRef} className={cn("chat-composer-lane w-full", isDraftHeroState && "my-auto")}>
                 <div

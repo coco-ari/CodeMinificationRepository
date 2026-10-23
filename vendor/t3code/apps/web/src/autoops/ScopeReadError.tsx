@@ -21,11 +21,10 @@ export function ScopeReadError({
           render={
             <Button
               size="xs"
-              variant="ghost"
+              variant="ghost-destructive"
               disabled={busy}
               onClick={onRetry}
               aria-label={`${label}，重试`}
-              className="text-destructive"
             >
               <CircleAlertIcon />
               {busy ? '正在重试…' : label}

@@ -39,7 +39,7 @@ const catalog: SkillLibrary = {
 }
 it('可以仅在所选项目停用技能并保留固定版本和范围', async () => {
   const mutate = vi.fn().mockResolvedValue(true)
-  await using screen = await render(
+  await using _screen = await render(
     <SkillAssignmentDialog
       catalog={catalog}
       initialSkillId="skill"
@@ -70,7 +70,7 @@ it('可以仅在所选项目停用技能并保留固定版本和范围', async (
 })
 it('再次调整停用分配时，不会无意重新启用', async () => {
   const mutate = vi.fn().mockResolvedValue(true)
-  await using screen = await render(
+  await using _screen = await render(
     <SkillAssignmentDialog
       catalog={catalog}
       assignment={{

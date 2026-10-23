@@ -57,26 +57,24 @@ function setup() {
     )
 }
 describe('客户候选目录的当前授权', () => {
-  for (const status of [401, 403, 404, 503]) {
-    it(`读取失败 ${status} 后移除旧候选，重试恢复新目录`, async () => {
-      setup()
-      await using screen = await render(<Harness />)
-      await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型私有技能'))
-      mocks.request.mockRejectedValue(new AutoOpsRequestError('目录不可访问', 'DENIED', status))
-      await page.getByRole('button', { name: '刷新能力' }).click()
-      await vi.waitFor(() => expect(screen.container.textContent).toContain('目录不可访问'))
-      expect(screen.container.textContent).not.toContain('私有模型')
-      expect(screen.container.textContent).not.toContain('私有技能')
-      mocks.request.mockImplementation(async (path: string) =>
-        path.includes('/capabilities?')
-          ? { capabilities: { ...catalog, skills: [] } }
-          : { devices: [] },
-      )
-      await page.getByRole('button', { name: '刷新能力' }).click()
-      await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型'))
-      expect(screen.container.textContent).not.toContain('私有技能')
-    })
-  }
+  it.each([401, 403, 404, 503])('读取失败 %i 后移除旧候选，重试恢复新目录', async (status) => {
+    setup()
+    await using screen = await render(<Harness />)
+    await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型私有技能'))
+    mocks.request.mockRejectedValue(new AutoOpsRequestError('目录不可访问', 'DENIED', status))
+    await page.getByRole('button', { name: '刷新能力' }).click()
+    await vi.waitFor(() => expect(screen.container.textContent).toContain('目录不可访问'))
+    expect(screen.container.textContent).not.toContain('私有模型')
+    expect(screen.container.textContent).not.toContain('私有技能')
+    mocks.request.mockImplementation(async (path: string) =>
+      path.includes('/capabilities?')
+        ? { capabilities: { ...catalog, skills: [] } }
+        : { devices: [] },
+    )
+    await page.getByRole('button', { name: '刷新能力' }).click()
+    await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型'))
+    expect(screen.container.textContent).not.toContain('私有技能')
+  })
   it('切账号并重挂载会话后，旧请求迟到不能恢复旧目录', async () => {
     setup()
     let finish!: (value: unknown) => void
