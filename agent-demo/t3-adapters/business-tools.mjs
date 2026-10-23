@@ -84,7 +84,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
   }
   const workspacePath = (binding, relativePath) => materialInput ? `autoops/${binding.projectId}/inputs/${materialInput.id}/${relativePath}` : `autoops/${binding.projectId}/workspaces/${binding.workspaceVersionId}/${relativePath}`
   const workspaceSource = (binding, path) => `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(workspacePath(binding, path))}`
-  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: workspacePath(binding, '').replace(/\/$/, ''), ...(materialInput ? { inputId: materialInput.id, capturedAt: materialInput.createdAt, revision: materialInput.revision, sourceErrors: materialInput.sourceErrors ?? [] } : {}), source: { contentHash: version.source?.contentHash, repositories: version.type === 'external' ? [] : version.source?.repositories?.map(({ path, commit }) => ({ path, commit })) } })
+  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: workspacePath(binding, '').replace(/\/$/, ''), ...(materialInput ? { inputId: materialInput.id, capturedAt: materialInput.createdAt, revision: materialInput.revision, sourceErrors: materialInput.sourceErrors ?? [] } : {}), source: { ...(version.source?.contentHash === undefined ? {} : { contentHash: version.source.contentHash }), repositories: version.type === 'external' ? [] : (version.source?.repositories ?? []).map(({ path, commit }) => ({ path, commit })) } })
   return {
     async listMaterials(threadId) {
       const { project, binding } = await authorize(threadId)
@@ -112,7 +112,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
         }
         const read = materialInput ? await materialInput.read(file.path) : workspaceStore.read(binding.projectId, binding.workspaceVersionId, file.path)
         await authorize(threadId)
-        return { id: file.path, name: file.name, mime: file.mime, content: read.contents, byteLength: read.byteLength, truncated: read.truncated, source: materialInput ? 'workspace_input' : 'workspace_snapshot', workspaceType: binding.workspaceType, ...(materialInput ? { inputId: materialInput.id } : { workspaceVersionId: binding.workspaceVersionId }), sourceUrl: workspaceSource(binding, file.path) }
+        return { id: file.path, name: file.name, mime: file.mime, content: read.contents, byteLength: read.byteLength, truncated: read.truncated, source: materialInput ? 'workspace_input' : 'workspace_snapshot', workspaceType: materialInput?.workspaceType ?? binding.workspaceType, ...(materialInput ? { inputId: materialInput.id } : { workspaceVersionId: binding.workspaceVersionId }), sourceUrl: workspaceSource(binding, file.path) }
       }
       const document = project.documents.find((entry) => entry.id === id)
       if (!document) fail('DOCUMENT_FORBIDDEN', '资料不存在或不属于当前项目')
