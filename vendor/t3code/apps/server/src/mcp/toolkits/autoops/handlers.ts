@@ -13,7 +13,7 @@ import { AutoOpsToolkit } from "./tools.ts";
 import { requireToolThread } from "../../../../../../../../agent-demo/t3-adapters/access.mjs";
 import { createAutoOpsBusinessTools, configuredBusinessArtifactStore } from "../../../../../../../../agent-demo/t3-adapters/business-tools.mjs";
 import { renderBusinessPdf } from "../../../../../../../../agent-demo/t3-adapters/business-documents.mjs";
-import { configuredBusinessResourceCatalog } from "../../../../../../../../agent-demo/t3-adapters/resources.mjs";
+import { configuredHostResourceCatalog as configuredBusinessResourceCatalog } from "../../../autoops/resourceCatalog.ts";
 
 function artifacts() {
   const store = configuredBusinessArtifactStore();
@@ -50,7 +50,8 @@ const current = Effect.gen(function* () {
     storeArtifact: (input) => artifacts().create(input),
     renderPdf: renderBusinessPdf,
   });
-  return { caller, authorized, runId, tools };
+  const catalog = configuredBusinessResourceCatalog({ attachmentsDir: config.attachmentsDir, readFile: (path) => Effect.runPromise(fs.readFile(path)) });
+  return { caller, authorized, runId, tools, catalog };
 });
 const invoke = (operation: (context: Effect.Success<typeof current>) => Promise<Record<string, unknown>>) => current.pipe(
   Effect.flatMap((context) => Effect.tryPromise({ try: () => operation(context), catch: toolFailure })),
@@ -59,8 +60,7 @@ const invoke = (operation: (context: Effect.Success<typeof current>) => Promise<
 export const layer = Access.toLayer(AutoOpsToolkit, {
   list_project_materials: Access.readsAsCaller(() => invoke(({ caller, tools }) => tools.listMaterials(caller.thread.threadId))),
   read_project_document: Access.readsAsCaller(({ id }) => invoke(({ caller, tools }) => tools.readDocument(caller.thread.threadId, id))),
-  read_project_material: Access.readsAsCaller(({ path }) => invoke(({ caller }) => {
-    const catalog = configuredBusinessResourceCatalog();
+  read_project_material: Access.readsAsCaller(({ path }) => invoke(({ caller, catalog }) => {
     if (!catalog) return Promise.reject(new Error("Business catalog unavailable"));
     return catalog.readForThread(caller.thread.threadId, path);
   })),

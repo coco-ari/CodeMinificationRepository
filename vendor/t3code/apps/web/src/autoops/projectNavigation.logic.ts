@@ -1,8 +1,9 @@
+import type { ProjectCapabilities } from '../../../../../../autoops/contracts/runtime.ts'
 /** One module definition feeds navigation, route identity and the shared shell. */
 export const AUTOOPS_AREAS = [
   { id: 'chat', label: '问答', icon: 'message', path: '/', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'workspaces', label: '工作区', icon: 'folder', path: '/workspaces', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'deployments', label: '部署发布', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'internal-manager', manage: 'server', sidebar: true },
+  { id: 'deployments', label: '部署发布', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'deployment.read', manage: 'server', sidebar: true },
   { id: 'devices', label: '我的电脑', icon: 'laptop', path: '/devices', scope: 'global', common: false, enabled: 'customer-agents', read: 'owner', manage: 'owner', sidebar: true },
   { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
 ] as const
@@ -14,12 +15,13 @@ export interface NavigationHost {
   readonly customerAgentsEnabled?: boolean
   readonly projects: ReadonlyArray<{
     readonly id: string
+    readonly capabilities?: Readonly<ProjectCapabilities>
     readonly membership?: { readonly workspaceAccess: string; readonly role: string }
     readonly agents?: ReadonlyArray<{ readonly id: string }>
   }>
 }
 
-/** Entry and direct-route guards share the registry's feature and role rules. */
+/** 导航与深链共用注册表及服务端能力，不在前端重新推导角色权限。 */
 export function autoOpsAreaAvailable(areaId: AutoOpsArea, host: NavigationHost | undefined, projectId = ''): boolean {
   if (!host?.principal.id) return false
   const area = AUTOOPS_AREAS.find((entry) => entry.id === areaId)
@@ -27,8 +29,9 @@ export function autoOpsAreaAvailable(areaId: AutoOpsArea, host: NavigationHost |
   if (area.scope === 'global') return true
   const project = host.projects.find((entry) => entry.id === projectId)
   if (!project) return false
-  return area.read !== 'internal-manager' ||
-    (project.membership?.workspaceAccess === 'internal' && project.membership.role === 'manager')
+  if (area.read === 'deployment.read') return project.capabilities?.['deployment.read'] === true
+  if (areaId === 'workspaces') return project.capabilities?.['workspace.read'] === true
+  return true
 }
 
 export type RouteProjectSelection =

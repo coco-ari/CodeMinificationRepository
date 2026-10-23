@@ -10,7 +10,7 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
   await store.ensureProject(project)
   const parts = (match[2] ?? '').split('/').filter(Boolean).map(decodeURIComponent)
   const body = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
-  const canManage = membership.workspaceAccess === 'internal' && membership.role === 'manager'
+  const canManage = access.projectCapabilities(principal, projectId)['workspace.manage']
   const publicExternal = (version) => {
     const { sourceVersionId: _sourceVersionId, ...rest } = version
     return { ...rest, source: { contentHash: version.source.contentHash, repositories: [] } }
@@ -45,9 +45,9 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
   }
   if (method === 'POST') {
     access.requireWorkspaceManager(principal, projectId)
-    if (parts.length === 1 && parts[0] === 'external') return {status:202, body:store.startExternal(projectId, body)}
-    if (parts.length === 1 && parts[0] === 'packages') return {status:202, body:store.startPackages(projectId, body)}
-    if (parts.length === 1 && parts[0] === 'import') return {status:202, body:store.startImport(projectId, body)}
+    if (parts.length === 1 && parts[0] === 'external') return {status:202, body:store.startExternal(projectId, body, principal.id)}
+    if (parts.length === 1 && parts[0] === 'packages') return {status:202, body:store.startPackages(projectId, body, principal.id)}
+    if (parts.length === 1 && parts[0] === 'import') return {status:202, body:store.startImport(projectId, body, principal.id)}
     if (parts.length === 3 && parts[0] === 'versions' && parts[2] === 'publish')
       return {status:200, body:store.confirmExternal(projectId, parts[1], body)}
     if (parts.length === 3 && parts[0] === 'tasks' && parts[2] === 'cancel')

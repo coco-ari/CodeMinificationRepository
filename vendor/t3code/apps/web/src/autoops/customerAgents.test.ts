@@ -227,9 +227,10 @@ describe("customer workspace UI boundary", () => {
       expect.objectContaining({
         credentials: "same-origin",
         method: "POST",
-        headers: expect.objectContaining({ "x-demo-csrf": "csrf" }),
+
       }),
     );
-    await expect(customerRequest("devices")).rejects.toThrow("客户设备请求失败，请重试。");
+    expect(new Headers(fetch.mock.calls[0]?.[1].headers).get('x-demo-csrf')).toBe('csrf');
+    await expect(customerRequest("devices")).rejects.toMatchObject({ code: 'REQUEST_FAILED', uncertain: false });
   });
 });

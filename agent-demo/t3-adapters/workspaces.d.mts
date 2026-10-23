@@ -1,60 +1,8 @@
-export interface WorkspaceSource {
-  repositories: Array<{ path: string; commit: string }>;
-  contentHash: string;
-  repositoryHost?: string;
-  branch?: string;
-}
-export interface WorkspaceVersion {
-  id: string;
-  name: string;
-  type: 'internal' | 'external';
-  status: 'published' | 'pending_review' | 'failed';
-  sourceVersionId?: string;
-  createdAt: string;
-  publishedAt?: string;
-  fileCount: number;
-  byteLength: number;
-  source: WorkspaceSource;
-  report?: {
-    removedGitEntries: number;
-    replacements: number;
-    pendingFiles: Array<{ path: string; reason: string }>;
-    excludedFiles: string[];
-    reviewedFiles?: string[];
-    rulesVersion: string;
-    customRules?: number;
-  };
-  isExample?: boolean;
-}
-export interface WorkspaceFile { path: string; name: string; mime: string; size: number; sha256: string }
-export interface WorkspaceTask {
-  id: string;
-  type: 'external' | 'packages' | 'import';
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted';
-  stage: string;
-  message: string;
-  createdAt: string;
-  versionId?: string;
-  releaseId?: string;
-  error?: string;
-}
-export interface WorkspaceRelease {
-  id: string;
-  name: string;
-  sourceVersionId: string;
-  createdAt: string;
-  services: Array<{ service: 'frontend' | 'backend'; name: string; size: number; sha256: string }>;
-  manifest: Record<string, unknown>;
-}
-export interface WorkspaceOverview {
-  projectId: string;
-  internalVersions: WorkspaceVersion[];
-  externalVersions: WorkspaceVersion[];
-  releases: WorkspaceRelease[];
-  tasks: WorkspaceTask[];
-  import: { supported: boolean; hosts: string[]; maxBytes: number; maxFiles: number };
-}
+import type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../autoops/contracts/workspaces.ts'
+export type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../autoops/contracts/workspaces.ts'
 export interface WorkspaceStore {
+  whenIdle(): Promise<void>;
+  close(): Promise<void>;
   ensureProject(project: { id: string; name: string; documents?: ReadonlyArray<{ id: string; name: string; mime?: string; content: string }> }): Promise<void>;
   overview(projectId: string): WorkspaceOverview;
   getVersion(projectId: string, versionId: string): WorkspaceVersion;
@@ -70,13 +18,14 @@ export interface WorkspaceStore {
   readBytes(projectId: string, versionId: string, path: string): Uint8Array;
   /** Management-only preview, including pending binary review. Never use for Agent resources. */
   versionFile(projectId: string, versionId: string, path: string): { bytes: Uint8Array; name: string; mime: string };
-  startExternal(projectId: string, input: { sourceVersionId: string; rules?: Array<{ find: string; replace: string }>; requestId: string }): WorkspaceTask;
+  startExternal(projectId: string, input: { sourceVersionId: string; rules?: Array<{ find: string; replace: string }>; requestId: string }, actorId?: string): WorkspaceTask;
   confirmExternal(projectId: string, versionId: string, input: { confirmedPaths: string[]; excludedPaths: string[] }): WorkspaceVersion;
-  startPackages(projectId: string, input: { sourceVersionId: string; services: Array<'frontend' | 'backend'>; requestId: string }): WorkspaceTask;
+  startPackages(projectId: string, input: { sourceVersionId: string; services: Array<'frontend' | 'backend'>; requestId: string }, actorId?: string): WorkspaceTask;
   packageFile(projectId: string, releaseId: string, service: string): { bytes: Uint8Array; name: string; mime: string };
-  startImport(projectId: string, input: { repositoryUrl: string; branch?: string; requestId: string }): WorkspaceTask;
+  startImport(projectId: string, input: { repositoryUrl: string; branch?: string; requestId: string }, actorId?: string): WorkspaceTask;
   cancelTask(projectId: string, taskId: string): WorkspaceTask;
 }
 export class WorkspaceError extends Error { status: number; code: string; constructor(status: number, code: string, message: string); }
-export function createWorkspaceStore(options: { dataDir: string }): WorkspaceStore;
-export function configuredWorkspaceStore(): WorkspaceStore | undefined;
+export interface WorkspaceAuthorization { authorizeTask?: (input: { actorId?: string; projectId: string; type: string }) => unknown }
+export function createWorkspaceStore(options: WorkspaceAuthorization & { dataDir: string; taskLimits?: { maxConcurrent?: number; maxQueued?: number }; onTaskDiagnostic?: (event: { event: string; taskId: string; code: string }) => void }): WorkspaceStore;
+export function configuredWorkspaceStore(options?: WorkspaceAuthorization): WorkspaceStore | undefined;

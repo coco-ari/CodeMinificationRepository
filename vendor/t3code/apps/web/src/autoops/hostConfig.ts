@@ -1,3 +1,4 @@
+import type { ProjectCapabilities } from '../../../../../../autoops/contracts/runtime.ts'
 import { ProviderInstanceId } from '@t3tools/contracts'
 import { ClientSettingsPatch, type ClientSettings } from '@t3tools/contracts/settings'
 import * as Schema from 'effect/Schema'
@@ -20,6 +21,7 @@ export interface AutoOpsT3Bootstrap {
     readonly name: string
     readonly environments: ReadonlyArray<{ readonly id: string; readonly name: string }>
     readonly agents: ReadonlyArray<{ readonly id: string; readonly name: string }>
+    readonly capabilities?: Readonly<ProjectCapabilities>
     readonly membership?: {
       readonly workspaceAccess: 'internal' | 'external'
       readonly role: 'manager' | 'member'

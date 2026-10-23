@@ -5,6 +5,8 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {randomUUID} from 'node:crypto'
 import {DatabaseSync} from 'node:sqlite'
+import {createHash} from 'node:crypto'
+import {createAutoOpsAccess, initializeAutoOpsAccessSchema} from '../agent-demo/t3-adapters/access.mjs'
 import {createWorkspaceStore} from '../agent-demo/t3-adapters/workspaces.mjs'
 import {createDeploymentStore} from '../agent-demo/t3-adapters/deployments.mjs'
 import {handleDeploymentRequest} from '../agent-demo/t3-adapters/deployment-http.mjs'
@@ -13,6 +15,7 @@ const projects = [{id:'p-one', name:'同名项目', environments:[{id:'env-one',
 const principal = {id:'manager', displayName:'真实管理者', allowed:['env-one']}
 const forbidden = () => { throw Object.assign(new Error('无权访问'), {status:403}) }
 const access = {
+  requireDeploymentActor(userId, projectId, environmentId) { if (userId !== principal.id) forbidden(); this.requireWorkspaceManager(principal, projectId); this.requireEnvironment(principal, projectId, environmentId) },
   requireProject(p, id) { const project = projects.find((item) => item.id === id); if (!project || p.id === 'other-user') forbidden(); return project },
   requireWorkspaceManager(p) { if (p.id !== 'manager' || p.external) forbidden(); return {workspaceAccess:'internal', role:'manager', environmentIds:p.allowed} },
   requireEnvironment(p, id, env) { if (!this.requireProject(p,id).environments.some((item) => item.id === env) || !p.allowed.includes(env)) forbidden() },
@@ -21,14 +24,14 @@ async function finish(workspaces, projectId, task) {
   for (let index = 0; index < 200; index++) { const current = workspaces.overview(projectId).tasks.find((item) => item.id === task.id); if (!['queued','running'].includes(current.status)) { assert.equal(current.status,'completed',current.error); return current }; await new Promise((done) => setTimeout(done,10)) }
   assert.fail('工作区生成任务超时')
 }
-async function fixture(t, {listener = false} = {}) {
-  const dataDir = await mkdtemp(join(tmpdir(),'t3-deployment-')), workspaceStore = createWorkspaceStore({dataDir})
+async function fixture(t, {listener = false, accessLayer = access, requestPrincipal = principal} = {}) {
+  const dataDir = await mkdtemp(join(tmpdir(),'t3-deployment-')), workspaceStore = createWorkspaceStore({dataDir,authorizeTask:()=>{}})
   for (const project of projects) await workspaceStore.ensureProject(project)
-  let store = createDeploymentStore({dataDir,workspaceStore,...(listener ? {agentPort:0} : {})})
+  let store = createDeploymentStore({dataDir,workspaceStore,access:accessLayer,...(listener ? {agentPort:0} : {})})
   await store.initialize()
-  const request = (suffix = '', method = 'GET', input, p = principal, projectId = 'p-one') => handleDeploymentRequest({access, store, principal:p, url:new URL(`http://demo/autoops/projects/${projectId}/deployments${suffix}`), method,input})
-  t.after(async () => { await store.close(); await rm(dataDir,{recursive:true,force:true}) })
-  return {dataDir,workspaceStore,get store(){return store}, request, async reopen(){await store.close();store = createDeploymentStore({dataDir,workspaceStore});await store.initialize();return store}}
+  const request = (suffix = '', method = 'GET', input, p = requestPrincipal, projectId = 'p-one') => handleDeploymentRequest({access:accessLayer, store, principal:p, url:new URL(`http://demo/autoops/projects/${projectId}/deployments${suffix}`), method,input})
+  t.after(async () => { await store.close(); await workspaceStore.close(); await rm(dataDir,{recursive:true,force:true}) })
+  return {dataDir,workspaceStore,get store(){return store}, request, async reopen(){await store.close();store = createDeploymentStore({dataDir,workspaceStore,access:accessLayer,...(listener ? {agentPort:0} : {})});await store.initialize();return store}}
 }
 async function records(f) {
   const serverInput = {name:'隔离服务器',environmentId:'env-one',requestId:randomUUID()}
@@ -46,6 +49,44 @@ async function agent(f, route, input, token) {
   const response=await fetch(`http://127.0.0.1:${address.port}/api/agent/v1${route}`,{method:input===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},...(input===undefined?{}:{body:JSON.stringify(input)})})
   const body=await response.json();assert.ok(response.ok,JSON.stringify(body));return body
 }
+
+test('真实成员排队后撤权、重启后撤权均不能领取，权限服务故障保留排队并在恢复后可执行', async (t) => {
+  const sessionDb = new DatabaseSync(':memory:'), bindingDb = new DatabaseSync(':memory:')
+  t.after(() => { sessionDb.close(); bindingDb.close() })
+  sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
+  initializeAutoOpsAccessSchema(bindingDb)
+  sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('real-manager-session').digest('hex'), 'manager', 'csrf', Date.now() + 60_000)
+  const catalog = { users: [{ id: 'manager', name: '真实管理者', role: 'member', status: 'active' }], agents: [], projects: projects.map((project) => ({ ...project, documents: [], resources: [], memberIds: ['manager'], memberships: [{ userId: 'manager', workspaceAccess: 'internal', role: 'manager', status: 'active', environmentIds: ['env-one'] }] })) }
+  let outage = false
+  const realAccess = createAutoOpsAccess({ sessionDb, bindingDb, catalog, deploymentEnabled: () => { if (outage) throw new Error('授权配置不可用'); return true } })
+  const realPrincipal = realAccess.authenticateCookie('demo_session=real-manager-session')
+  const f = await fixture(t, { listener: true, accessLayer: realAccess, requestPrincipal: realPrincipal }), r = await records(f)
+  const registered = await agent(f, '/register', { registrationToken: r.server.registrationToken, capabilities: ['static-site-v1'] })
+  const submit = async () => (await f.request('/tasks', 'POST', { targetId: r.target.id, action: 'deploy', service: 'frontend', packageId: r.pack.id, configKey: r.target.configKey, requestId: randomUUID() })).body.task
+  const claim = (signal) => fetch(`http://127.0.0.1:${f.store.agentAddress.port}/api/agent/v1/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registered.token}` }, body: '{}', signal })
+  const membership = catalog.projects[0].memberships[0]
+  for (const revoke of [() => { membership.environmentIds = [] }, () => { membership.role = 'member' }, () => { membership.status = 'disabled' }]) {
+    const task = await submit()
+    if (membership.status === 'active') await f.reopen()
+    revoke()
+    const controller = new AbortController(), pending = claim(controller.signal).catch((error) => { if (error.name !== 'AbortError') throw error })
+    try {
+      for (let attempt = 0; attempt < 100 && readState(f.dataDir).deployments.tasks.find((entry) => entry.id === task.id).status === 'queued'; attempt++) await new Promise((done) => setTimeout(done, 10))
+      const persisted = readState(f.dataDir).deployments.tasks.find((entry) => entry.id === task.id)
+      assert.equal(persisted.status, 'interrupted'); assert.equal(persisted.startedAt, undefined)
+      assert.match(persisted.error, /权限已失效/)
+      assert.equal((await f.request('', 'GET', undefined, realPrincipal, 'p-other')).body.targets.length, 0)
+    } finally { controller.abort(); await pending }
+    Object.assign(membership, { environmentIds: ['env-one'], role: 'manager', status: 'active' })
+  }
+  const task = await submit()
+  outage = true
+  assert.equal((await claim()).status, 503)
+  assert.equal(readState(f.dataDir).deployments.tasks.find((entry) => entry.id === task.id).status, 'queued')
+  assert.equal(f.workspaceStore.overview('p-other').internalVersions.length, 1)
+  outage = false
+  assert.equal((await (await claim()).json()).task.id, task.id)
+})
 
 test('项目与同名环境使用持久ID映射，重启不新增默认环境；GET/POST和历史均校验管理及环境权限',async t=>{
   const f=await fixture(t), r=await records(f)

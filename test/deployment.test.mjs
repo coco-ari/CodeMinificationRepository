@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promis
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/store.mjs';
 import { RepositoryService } from '../src/service.mjs';
 import { DeploymentService, validateConfig } from '../src/deployment.mjs';
@@ -35,6 +36,44 @@ async function targetFixture(f, serverMode = 'managed') {
     mode: serverMode, ...(serverMode === 'observe' ? { containerName: 'jenkins-managed-api' } : {}), config: {} });
   return { source, application, environment, service, server, agent, target };
 }
+
+test('项目部署公开用例提供独立快照，并发幂等与写入失败不会留下半个服务器映射', async t => {
+  const f = await fixture(t);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  await f.deployment.projects.initialize();
+  const project = { id: 'p-scoped', name: '公开用例验证', environments: [{ id: 'env-one', name: '测试' }] };
+  await f.deployment.projects.ensureProject(project);
+  const input = { name: '原子服务器', environmentId: 'env-one', requestId: randomUUID() };
+  const concurrent = await Promise.all([f.deployment.projects.createServer(project.id, input), f.deployment.projects.createServer(project.id, input)]);
+  assert.equal(concurrent[0].server.id, concurrent[1].server.id);
+  assert.equal(concurrent.filter(entry => entry.registrationToken !== null).length, 1);
+  const snapshot = f.deployment.projects.snapshot(project.id);
+  assert.equal(snapshot.servers.length, 1); assert.equal(snapshot.mapping.serverRequests.length, 1);
+  snapshot.mapping.environments[0].environmentId = '篡改'; snapshot.servers[0].name = '篡改';
+  snapshot.servers[0].containers.push({ targetId: '篡改' });
+  assert.equal(f.deployment.projects.snapshot(project.id).mapping.environments[0].environmentId, 'env-one');
+  assert.equal(f.deployment.projects.snapshot(project.id).servers[0].name, input.name);
+  assert.deepEqual(f.deployment.projects.snapshot(project.id).servers[0].containers, []);
+  const failedInput = { ...input, name: '写入故障后重试', requestId: randomUUID() };
+  const db = new DatabaseSync(f.repository.store.databaseFile);
+  try {
+    db.exec("CREATE TRIGGER reject_deployment_write BEFORE UPDATE ON application_state BEGIN SELECT RAISE(ABORT, '测试持久化失败'); END");
+    await assert.rejects(f.deployment.projects.createServer(project.id, failedInput), /测试持久化失败/);
+    assert.equal(f.deployment.projects.snapshot(project.id).servers.length, 1);
+    assert.equal(f.deployment.projects.snapshot(project.id).mapping.serverRequests.length, 1);
+    assert.equal(f.repository.store.state.deployments.servers.length, 1);
+  } finally { db.exec('DROP TRIGGER IF EXISTS reject_deployment_write'); db.close(); }
+  await f.deployment.projects.createServer(project.id, failedInput);
+  assert.equal(f.deployment.projects.snapshot(project.id).servers.length, 2);
+  const targetInput = { name: '原子服务', environmentId: 'env-one', serverId: concurrent[0].server.id, requestId: randomUUID(), config: { module: '.', artifactPath: 'dist' } };
+  const targets = await Promise.all([f.deployment.projects.createTarget(project.id, targetInput), f.deployment.projects.createTarget(project.id, targetInput)]);
+  assert.equal(targets[0], targets[1]);
+  const target = f.deployment.projects.target(project.id, targets[0]);
+  target.target.config.artifactPath = '篡改';
+  assert.equal(f.deployment.projects.target(project.id, targets[0]).target.config.artifactPath, 'dist');
+  assert.equal(f.repository.store.state.deployments.services.length, 1);
+  assert.equal(f.deployment.projects.snapshot(project.id).mapping.targetRequests.length, 1);
+});
 async function ready(f, targetId, action = 'deploy', extra = {}) {
   const task = await f.deployment.createTask({ targetId, action, ...extra });
   if (task.status === 'preparing') await f.deployment.preparations.get(task.id);

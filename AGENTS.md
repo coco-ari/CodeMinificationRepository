@@ -12,7 +12,7 @@
 
 | 任务 | 必读来源 |
 | --- | --- |
-| 新任务、接手、跨模块修改 | [规范索引](docs/README.md)、[开发与验证](docs/development.md)、[重建计划](examples/autoops-rebuild-plan.md) |
+| 新任务、接手、跨模块修改 | [规范索引](docs/README.md)、[开发与验证](docs/development.md)、[当前运行模块](docs/runtime-modules.md)、[重建计划](examples/autoops-rebuild-plan.md) |
 | 页面、交互、导航、主题 | [T3 UI 规范](examples/t3-ui-standard.md)、[工程与 AI 协作规范](examples/engineering-standard.md)的前端部分 |
 | 后端、数据、权限、任务、工具 | [后端架构与模块规范](examples/backend-standard.md)、[工程与 AI 协作规范](examples/engineering-standard.md) |
 | 业务范围和完整流程 | [当前业务需求](examples/workbench-v2-requirements.md)、[工作台设计](examples/project-workbench-design.md) |

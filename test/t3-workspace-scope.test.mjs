@@ -13,7 +13,7 @@ import {users,projects,agents} from '../agent-demo/fixtures.mjs'
 const scope={projectId:'p-autoops',environmentId:'env-test',agentId:'a-project',visibility:'private'}
 async function setup(t) {
   const directory=mkdtempSync(join(tmpdir(),'autoops-scope-'))
-  const workspaceStore=createWorkspaceStore({dataDir:directory})
+  const workspaceStore=createWorkspaceStore({dataDir:directory,authorizeTask:()=>{}})
   const sessionDb=new DatabaseSync(':memory:'),bindingDb=new DatabaseSync(':memory:')
   t.after(()=>{sessionDb.close();bindingDb.close();rmSync(directory,{recursive:true,force:true})})
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY,uid TEXT,csrf TEXT,expires INTEGER)')

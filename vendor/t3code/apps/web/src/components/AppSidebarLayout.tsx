@@ -70,6 +70,8 @@ import { AUTOOPS_AREAS, autoOpsAreaFromPath } from "../autoops/projectNavigation
 
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from "../autoops/ModuleWorkspace";
 
+import { ModuleErrorBoundary } from "../autoops/ModuleErrorBoundary";
+
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
 const AUTOOPS_TOPBAR_HEIGHT = 52;
 
@@ -276,6 +278,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     usePanelAnimationSettings();
   useThreadVisitedMigration();
   const pathname = useLocation({ select: (location) => location.pathname });
+  const moduleResetKey = useLocation({ select: (location) => location.href });
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -381,7 +384,14 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         )}
         <SidebarRail onDoubleClick={resetSidebarWidth} />
       </Sidebar>
-      {children}
+      {hosted ? (
+        <ModuleErrorBoundary
+          resetKey={moduleResetKey}
+          label={isOnSettings ? "设置" : (area?.label ?? "当前模块")}
+        >
+          {children}
+        </ModuleErrorBoundary>
+      ) : children}
       <SidebarControl renderControl={!hosted} />
       <NavigationHistoryShortcuts />
       <MainAppLocationTracker />

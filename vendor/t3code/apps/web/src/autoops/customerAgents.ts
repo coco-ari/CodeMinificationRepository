@@ -1,3 +1,4 @@
+import { autoOpsRequest } from './apiClient'
 import { ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import type { ProviderInstanceEntry } from "~/providerInstances";
@@ -5,7 +6,7 @@ import type {
   CustomerCapabilities,
   CustomerDevice,
   CustomerWorkspace,
-} from "../../../../../../agent-demo/t3-adapters/customer-registry.mjs";
+} from "../../../../../../autoops/contracts/runtime.ts";
 import {
   readAutoOpsHost,
   type AutoOpsExecutionBinding,
@@ -35,29 +36,11 @@ export function customerProviderAvailability(
       : entry,
   );
 }
-export async function customerRequest<T>(
-  path: string,
-  input?: object,
-  signal?: AbortSignal,
-): Promise<T> {
-  const host = readAutoOpsHost();
-  if (!host) throw new Error("项目工作台未连接。");
-  const response = await fetch(`${host.gatewayBasePath}/autoops/customer/${path}`, {
-    credentials: "same-origin",
-    ...(signal ? { signal } : {}),
-    ...(input
-      ? {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-demo-csrf": host.csrfToken },
-          body: JSON.stringify(input),
-        }
-      : {}),
-  });
-  const result = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!response.ok || result === null)
-    throw new Error(result?.error ?? "客户设备请求失败，请重试。");
-  return result;
-}
+export const customerRequest = <T>(path: string, input?: object, signal?: AbortSignal): Promise<T> =>
+  autoOpsRequest<T>(`/autoops/customer/${path}`, {
+    label: '客户设备', ...(input === undefined ? {} : { body: input }), ...(signal ? { signal } : {}),
+  })
+
 export async function loadCustomerWorkspaces(projectId?: string, signal?: AbortSignal) {
   return customerRequest<{ workspaces: CustomerWorkspace[] }>(
     `workspaces${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,

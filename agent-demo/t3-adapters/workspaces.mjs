@@ -1,47 +1,29 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, lstatSync, existsSync, rmSync, realpathSync, statfsSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, lstatSync, existsSync, rmSync, statfsSync } from 'node:fs'
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
-import { join, resolve, extname, dirname, sep } from 'node:path'
-import { zipSync } from 'fflate'
-import { inspectZip } from '../../agent/archive.mjs'
+import { join, resolve, dirname } from 'node:path'
+import { WorkspaceError, MAX_FILES, MAX_BYTES, sha, safePath, textOf, checkedFile, scan } from './workspace-files.mjs'
+import { createWorkspaceJobs } from './workspace-jobs.mjs'
+import { buildWorkspacePackages } from './workspace-packages.mjs'
+export { WorkspaceError } from './workspace-files.mjs'
 import { validateBranch } from '../../src/archive.mjs'
 
 // 输入均以不可变版本保存；目录仅是存储布局，授权仍由网关与资料适配器完成。
 const SCHEMA_VERSION = 1
 const RULES_VERSION = 'autoops-secrets-v1'
-const MAX_FILES = 12000
-const MAX_BYTES = 64 * 1024 * 1024
-const MAX_FILE_BYTES = 8 * 1024 * 1024
+const PROCESS_INSTANCE_ID = randomUUID()
 const MAX_READ_BYTES = 64 * 1024
 const STORAGE_RESERVE = 32 * 1024 * 1024
-const CACHE_NAMES = new Set(['node_modules', '.cache', '.next', 'dist', 'coverage', '__pycache__', '.DS_Store'])
 const SUPPORTED_HOSTS = new Set(['github.com', 'gitlab.com', 'gitee.com', 'codeberg.org'])
-const sha = (value) => createHash('sha256').update(value).digest('hex')
 const now = () => new Date().toISOString()
 const clone = (value) => structuredClone(value)
 
-export class WorkspaceError extends Error {
-  constructor(status, code, message) { super(message); this.name = 'WorkspaceError'; this.status = status; this.code = code }
-}
 const fail = (status, code, message) => { throw new WorkspaceError(status, code, message) }
 const missing = () => fail(404, 'WORKSPACE_NOT_FOUND', '工作区版本不存在或尚未发布')
 function safeId(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) missing()
   return value
-}
-function safePath(value, allowEmpty = false) {
-  if (allowEmpty && value === '') return value
-  if (typeof value !== 'string' || value.length > 800 || /[\\\x00-\x1f:\x7f]/.test(value) || value.startsWith('/') || value.split('/').some((part) => !part || part === '.' || part === '..'))
-    fail(400, 'WORKSPACE_PATH_INVALID', '请选择工作区内的有效相对路径')
-  return value
-}
-function mimeFor(path) {
-  return ({ '.md': 'text/markdown', '.txt': 'text/plain', '.json': 'application/json', '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript', '.ts': 'text/typescript', '.tsx': 'text/typescript', '.jsx': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.zip': 'application/zip', '.yml': 'text/yaml', '.yaml': 'text/yaml', '.xml': 'application/xml' })[extname(path).toLowerCase()] || 'text/plain'
-}
-function textOf(bytes) {
-  if (bytes.includes(0)) return null
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { return null }
 }
 function atom(file, value) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
@@ -49,51 +31,19 @@ function atom(file, value) {
   writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600 })
   renameSync(temporary, file)
 }
-function sameOrWithin(root, target) { return target === root || target.startsWith(root + sep) }
-function checkedFile(root, path) {
-  safePath(path)
-  let cursor = root
-  const rootReal = realpathSync(root)
-  for (const part of path.split('/')) {
-    cursor = join(cursor, part)
-    const details = lstatSync(cursor)
-    if (details.isSymbolicLink() || !sameOrWithin(rootReal, realpathSync(cursor))) fail(422, 'WORKSPACE_LINK_UNSUPPORTED', '工作区不允许符号链接或跨目录读取')
-  }
-  if (!lstatSync(cursor).isFile()) fail(400, 'WORKSPACE_NOT_FILE', '请选择文件进行预览')
-  return cursor
-}
-function scan(root, { skipGit = false, skipCaches = false } = {}) {
-  let size = 0, removedGitEntries = 0
-  const files = []
-  const rootReal = realpathSync(root)
-  function visit(directory, prefix) {
-    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const path = prefix ? `${prefix}/${entry.name}` : entry.name
-      safePath(path)
-      if (skipGit && entry.name === '.git') { removedGitEntries++; continue }
-      if (skipCaches && CACHE_NAMES.has(entry.name)) continue
-      const absolute = join(directory, entry.name), details = lstatSync(absolute)
-      if (details.isSymbolicLink() || !sameOrWithin(rootReal, realpathSync(absolute))) fail(422, 'WORKSPACE_LINK_UNSUPPORTED', '来源包含符号链接；请将需要的内容保存为普通文件后重新导入')
-      if (details.isDirectory()) { visit(absolute, path); continue }
-      if (!details.isFile()) fail(422, 'WORKSPACE_FILE_UNSUPPORTED', '来源包含不支持的特殊文件')
-      size += details.size
-      if (details.size > MAX_FILE_BYTES || size > MAX_BYTES || files.length >= MAX_FILES) fail(413, 'WORKSPACE_TOO_LARGE', '工作区超过演示上限：12,000 个文件、64 MiB 总量、单文件 8 MiB')
-      const bytes = readFileSync(absolute)
-      files.push({ path, name: entry.name, size: bytes.length, mime: mimeFor(path), sha256: sha(bytes), binary: textOf(bytes) === null, executable: Boolean(details.mode & 0o111) })
-    }
-  }
-  visit(root, '')
-  return { files, removedGitEntries, contentHash: sha(JSON.stringify(files.map(({ path, sha256 }) => [path, sha256]))), byteLength: size }
-}
 function publicVersion(value) {
   const { files: _files, directory: _directory, ...rest } = value
   return clone(rest)
 }
 function publicTask(value) {
-  const { requestId: _requestId, fingerprint: _fingerprint, ownerPid: _ownerPid, ...rest } = value
+  const { fingerprint: _fingerprint, ownerPid: _ownerPid, ownerInstanceId: _ownerInstanceId, actorId: _actorId, ...rest } = value
   return clone(rest)
 }
 function livePid(pid) { try { process.kill(pid, 0); return true } catch { return false } }
+function taskOwnerAlive(task) {
+  // 同进程的多个存储共享实例标记，进程号复用不能让旧任务伪装成当前队列。
+  return livePid(task.ownerPid) && (task.ownerPid !== process.pid || task.ownerInstanceId === PROCESS_INSTANCE_ID)
+}
 function checkFree(directory, required = STORAGE_RESERVE) {
   const stats = statfsSync(directory)
   if (Number(stats.bavail) * Number(stats.bsize) < required) fail(507, 'WORKSPACE_STORAGE_LOW', '可用磁盘不足，请清理空间后重试；原有已发布版本仍可使用')
@@ -167,9 +117,15 @@ async function git(args, cwd, signal, { budgetRoot } = {}) {
   })
 }
 
-export function createWorkspaceStore({ dataDir }) {
+export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, authorizeTask }) {
   if (typeof dataDir !== 'string' || !dataDir) throw new TypeError('dataDir is required')
-  const base = resolve(dataDir, 'project-workspaces'), operations = new Map(), initializing = new Map()
+  const base = resolve(dataDir, 'project-workspaces'), initializing = new Map()
+  const failedPersistenceTasks = new Set()
+  const jobs = createWorkspaceJobs({ ...taskLimits, onFailure(event) {
+    failedPersistenceTasks.add(event.taskId)
+    if (onTaskDiagnostic) onTaskDiagnostic(event)
+    else console.error(JSON.stringify(event))
+  } })
   mkdirSync(base, { recursive: true, mode: 0o700 })
   const projectRoot = (id) => join(base, safeId(id))
   const stateFile = (id) => join(projectRoot(id), 'state.json')
@@ -178,10 +134,10 @@ export function createWorkspaceStore({ dataDir }) {
     if (!existsSync(file)) missing()
     const state = JSON.parse(readFileSync(file, 'utf8'))
     let changed = false
-    for (const task of state.tasks) if (['queued', 'running'].includes(task.status) && !livePid(task.ownerPid)) {
-      task.status = 'interrupted'; task.stage = 'interrupted'; task.message = '服务重启中断了任务，原有已发布版本仍可使用'; changed = true
+    for (const task of state.tasks) if (['queued', 'running'].includes(task.status) && (!taskOwnerAlive(task) || failedPersistenceTasks.has(task.id))) {
+      task.status = 'interrupted'; task.stage = 'interrupted'; task.message = failedPersistenceTasks.has(task.id) ? '任务状态保存失败，任务已中断，原有已发布版本仍可使用' : '服务重启中断了任务，原有已发布版本仍可使用'; changed = true
     }
-    if (changed) atom(file, state)
+    if (changed) { atom(file, state); for (const task of state.tasks) if (task.status === 'interrupted') failedPersistenceTasks.delete(task.id) }
     return state
   }
   function save(id, state) { atom(stateFile(id), state) }
@@ -198,36 +154,48 @@ export function createWorkspaceStore({ dataDir }) {
     Object.assign(task, changes); save(id, state)
     return task
   }
-  function start(id, type, input, run) {
+  function authorize(actorId, projectId, type) {
+    if (typeof authorizeTask !== 'function') fail(503, 'WORKSPACE_AUTHORIZATION_REQUIRED', '工作区任务尚未配置授权检查')
+    const decision = authorizeTask({ actorId, projectId, type })
+    if (decision?.then) {
+      Promise.resolve(decision).catch(() => {})
+      fail(503, 'WORKSPACE_AUTHORIZATION_REQUIRED', '工作区授权端口必须同步返回当前权限')
+    }
+  }
+  function start(id, type, input, run, actorId) {
     const state = load(id)
     const requestId = input.requestId
     if (typeof requestId !== 'string' || !requestId || requestId.length > 160 || /[\x00-\x1f]/.test(requestId)) fail(400, 'WORKSPACE_REQUEST_ID_INVALID', '任务需要有效的幂等请求标识')
-    const fingerprint = sha(JSON.stringify({ ...input, requestId: undefined }))
+    authorize(actorId, id, type)
+    const fingerprint = sha(JSON.stringify({ ...input, requestId: undefined, actorId }))
     const previous = state.tasks.find((task) => task.type === type && task.requestId === requestId)
     if (previous) {
       if (previous.fingerprint !== fingerprint) fail(409, 'WORKSPACE_REQUEST_CONFLICT', '该请求标识已用于其他参数，请刷新后重试')
       return publicTask(previous)
     }
-    const task = { id: randomUUID(), type, status: 'queued', stage: 'queued', message: '任务已排队', createdAt: now(), requestId, fingerprint, ownerPid: process.pid }
+    jobs.assertCapacity()
+    const task = { id: randomUUID(), type, actorId, status: 'queued', stage: 'queued', message: '任务已排队', createdAt: now(), requestId, fingerprint, ownerPid: process.pid, ownerInstanceId: PROCESS_INSTANCE_ID }
     state.tasks.unshift(task); save(id, state)
-    const controller = new AbortController(); operations.set(task.id, controller)
-    queueMicrotask(async () => {
+    jobs.submit(task.id, async (signal) => {
       const temporary = join(projectRoot(id), 'staging', task.id)
       const progress = (stage, message, changes = {}) => {
-        if (controller.signal.aborted) throw new WorkspaceError(409, 'WORKSPACE_TASK_CANCELLED', '任务已取消')
+        if (signal.aborted) throw new WorkspaceError(409, 'WORKSPACE_TASK_CANCELLED', '任务已取消')
         updateTask(id, task.id, { status: 'running', stage, message, ...changes })
       }
+      let authorized = false
       try {
+        // 领取时使用当前成员事实重查，持久任务不沿用浏览器会话或提交时的角色快照。
+        authorize(task.actorId, id, task.type)
+        authorized = true
         progress('preparing', '正在固定输入版本')
         checkFree(projectRoot(id))
         await mkdir(temporary, { recursive: true, mode: 0o700 })
-        await run({ task, temporary, progress, signal: controller.signal })
+        await run({ task, temporary, progress, signal })
       } catch (error) {
-        const cancelled = controller.signal.aborted
-        const message = cancelled ? '任务已取消，原有已发布版本仍可使用' : error instanceof WorkspaceError ? error.message : '处理失败，请检查来源、Git 与可用存储后重试'
-        updateTask(id, task.id, { status: cancelled ? 'interrupted' : 'failed', stage: cancelled ? 'cancelled' : 'failed', message, error: message })
+        const cancelled = signal.aborted, revoked = !authorized && [401, 403, 404].includes(error?.status)
+        const message = cancelled ? '任务已取消，原有已发布版本仍可使用' : revoked ? '操作人权限已失效，工作区任务未执行' : error instanceof WorkspaceError ? error.message : '处理失败，请检查来源、Git 与可用存储后重试'
+        updateTask(id, task.id, { status: cancelled || revoked ? 'interrupted' : 'failed', stage: cancelled ? 'cancelled' : revoked ? 'interrupted' : 'failed', message, error: message })
       } finally {
-        operations.delete(task.id)
         await rm(temporary, { recursive: true, force: true }).catch(() => {})
       }
     })
@@ -354,6 +322,8 @@ export function createWorkspaceStore({ dataDir }) {
 
   return {
     ensureProject,
+    whenIdle: jobs.whenIdle,
+    close: jobs.close,
     overview(id) {
       const state = load(id)
       return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal').map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
@@ -377,7 +347,7 @@ export function createWorkspaceStore({ dataDir }) {
     managementRead(id, versionId, path) { return versionText(id, versionId, path, true) },
     readBytes(id, versionId, path) { return readVersionFile(id, versionId, path, false).bytes },
     versionFile(id, versionId, path) { return readVersionFile(id, versionId, path, true) },
-    startExternal(id, input) {
+    startExternal(id, input, actorId) {
       const parent = source(id, input.sourceVersionId), rules = validateRules(input.rules)
       return start(id, 'external', { ...input, rules }, async ({ task, temporary, progress, signal }) => {
         const sourceRoot = checkedSource(id, parent), sourceIndex = scan(sourceRoot, { skipGit: true, skipCaches: true }), root = join(temporary, 'version', 'files')
@@ -399,7 +369,7 @@ export function createWorkspaceStore({ dataDir }) {
         const report = { removedGitEntries: sourceIndex.removedGitEntries, replacements, pendingFiles, excludedFiles: [], rulesVersion: RULES_VERSION, customRules: rules.length }
         // source 只保存提交与相对路径；自定义匹配原文从不进入可见元数据。
         await persistVersion(id, root, { id: versionId, name: `外部脱敏 v${String(count).padStart(3, '0')}`, type: 'external', status: pendingFiles.length ? 'pending_review' : 'published', sourceVersionId: parent.id, createdAt: now(), source: { repositories: clone(parent.source.repositories) }, report, isExample: parent.isExample }, task.id, signal)
-      })
+      }, actorId)
     },
     confirmExternal(id, versionId, input) {
       const state = load(id), version = state.versions.find((entry) => entry.id === safeId(versionId))
@@ -419,32 +389,14 @@ export function createWorkspaceStore({ dataDir }) {
       save(id, state)
       return publicVersion(version)
     },
-    startPackages(id, input) {
+    startPackages(id, input, actorId) {
       const parent = source(id, input.sourceVersionId), services = input.services
       if (!Array.isArray(services) || !services.length || services.length > 2 || new Set(services).size !== services.length || services.some((entry) => !['frontend', 'backend'].includes(entry))) fail(400, 'WORKSPACE_SERVICES_INVALID', '请选择前端、后端或两者')
       return start(id, 'packages', input, async ({ task, temporary, progress, signal }) => {
-        const releaseId = randomUUID(), output = join(temporary, 'release'), root = checkedSource(id, parent), indexed = scan(root, { skipGit: true, skipCaches: true })
+        const releaseId = randomUUID(), output = join(temporary, 'release'), root = versionRoot(id, parent)
         await mkdir(output, { recursive: true, mode: 0o700 })
         progress('packaging', '正在按服务构建上下文生成源码 ZIP')
-        const artifacts = [], contexts = []
-        for (const service of services) {
-          const serviceHasPackage = indexed.files.some((entry) => entry.path === `${service}/package.json`)
-          const packageText = serviceHasPackage ? readFileSync(checkedFile(root, `${service}/package.json`), 'utf8') : ''
-          const rootBuildFiles = new Set(['package.json', 'package-lock.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'turbo.json', 'Cargo.toml', 'go.work'])
-          const sharedContext = indexed.files.some((entry) => rootBuildFiles.has(entry.path) || /^(?:shared|packages|libs)\//.test(entry.path)) || /(?:file:|link:)?\.\.\//.test(packageText) || /workspace:/.test(packageText)
-          const standalone = serviceHasPackage && parent.source.repositories.some((entry) => entry.path === service) && !sharedContext
-          // 只有独立仓库才截取服务目录。单仓/monorepo 保留整个根上下文，避免丢失共享依赖和锁文件。
-          const prefix = standalone ? `${service}/` : ''
-          const chosen = indexed.files.filter((entry) => entry.path.startsWith(prefix))
-          if (!chosen.length) fail(422, 'WORKSPACE_BUILD_CONTEXT_MISSING', `没有可用于${service === 'frontend' ? '前端' : '后端'}打包的源码`)
-          const entries = Object.create(null)
-          for (const file of chosen) entries[file.path.slice(prefix.length)] = [new Uint8Array(readFileSync(checkedFile(root, file.path))), { mtime: new Date('2026-01-01T00:00:00Z'), attrs: (file.executable ? 0o100755 : 0o100644) << 16 }]
-          const bytes = zipSync(entries, { level: 6 }), name = `${service}.zip`
-          inspectZip(Buffer.from(bytes), { maxBytes: MAX_BYTES, maxFiles: MAX_FILES, maxFileBytes: MAX_FILE_BYTES })
-          await writeFile(join(output, name), bytes, { mode: 0o600 })
-          artifacts.push({ service, name, size: bytes.length, sha256: sha(bytes) })
-          contexts.push({ service, root: prefix ? service : '.', reason: standalone ? '独立仓库构建上下文' : '保留完整仓库及共享依赖', workingDirectory: standalone ? '.' : indexed.files.some((entry) => entry.path === `${service}/package.json`) ? service : '.' })
-        }
+        const { artifacts, contexts } = await buildWorkspacePackages({ root, parent, services, output }, signal)
         progress('verifying', '正在校验部署包与固定来源')
         const manifest = { schemaVersion: 1, projectId: id, releaseId, sourceVersionId: parent.id, source: publicVersion(parent).source, createdAt: now(), configurationRef: '由部署目标环境配置提供；源码包不注入平台凭据', services: artifacts.map((entry) => ({ ...entry, context: contexts.find((item) => item.service === entry.service) })), status: 'packaged', notice: '已生成源码交付包，尚未在目标服务器部署；构建、健康检查与回退由部署任务独立执行' }
         await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2), { mode: 0o600 })
@@ -455,7 +407,7 @@ export function createWorkspaceStore({ dataDir }) {
         state.releases.unshift(release)
         Object.assign(state.tasks.find((entry) => entry.id === task.id), { status: 'completed', stage: 'completed', message: '源码部署包已生成并通过校验', releaseId })
         save(id, state)
-      })
+      }, actorId)
     },
     packageFile(id, releaseId, service) {
       safeId(releaseId)
@@ -468,7 +420,7 @@ export function createWorkspaceStore({ dataDir }) {
       if (sha(bytes) !== entry.sha256) fail(409, 'WORKSPACE_PACKAGE_CHANGED', '部署包校验失败，请重新生成')
       return { bytes, name: entry.name, mime: 'application/zip' }
     },
-    startImport(id, input) {
+    startImport(id, input, actorId) {
       const repositoryUrl = validateRepository(input.repositoryUrl)
       let branch
       try { branch = validateBranch(input.branch || 'main') } catch { fail(400, 'WORKSPACE_BRANCH_INVALID', '分支名称无效，请填写明确的分支名') }
@@ -493,24 +445,31 @@ export function createWorkspaceStore({ dataDir }) {
         progress('publishing', '正在保存内部固定版本')
         const count = load(id).versions.filter((entry) => entry.type === 'internal').length + 1
         await persistVersion(id, root, { id: versionId, name: `内部导入 v${String(count).padStart(3, '0')}`, type: 'internal', status: 'published', createdAt: now(), source: { repositories: [{ path: '.', commit }], repositoryHost: new URL(repositoryUrl).hostname, branch }, isExample: false }, task.id, signal)
-      })
+      }, actorId)
     },
     cancelTask(id, taskId) {
       const state = load(id), task = state.tasks.find((entry) => entry.id === safeId(taskId))
       if (!task) missing()
       if (!['queued', 'running'].includes(task.status)) return publicTask(task)
-      const controller = operations.get(task.id)
-      if (!controller) fail(409, 'WORKSPACE_TASK_OWNER', '任务正在另一个服务进程中执行，请稍后查看状态')
-      controller.abort()
-      return publicTask(updateTask(id, task.id, { status: 'interrupted', stage: 'cancelled', message: '任务已取消，原有已发布版本仍可使用' }))
+      if (!jobs.cancel(task.id)) fail(409, 'WORKSPACE_TASK_OWNER', '任务正在另一个服务进程中执行，请稍后查看状态')
+      try { return publicTask(updateTask(id, task.id, { status: 'interrupted', stage: 'cancelled', message: '任务已取消，原有已发布版本仍可使用' })) }
+      catch (error) { failedPersistenceTasks.add(task.id); throw error }
     },
   }
 }
 
 let configured
-export function configuredWorkspaceStore() {
+export function configuredWorkspaceStore({ authorizeTask } = {}) {
   const dataDir = process.env.AUTOOPS_T3_DATA_DIR
   if (!dataDir) return undefined
-  if (!configured || configured.dataDir !== dataDir) configured = { dataDir, store: createWorkspaceStore({ dataDir }) }
+  if (!configured || configured.dataDir !== dataDir) {
+    const instance = { dataDir, authorizeTask }
+    instance.store = createWorkspaceStore({ dataDir, authorizeTask(input) {
+      if (!instance.authorizeTask) fail(503, 'WORKSPACE_AUTHORIZATION_REQUIRED', '工作区任务尚未配置授权检查')
+      return instance.authorizeTask(input)
+    } })
+    configured = instance
+  }
+  if (authorizeTask) configured.authorizeTask = authorizeTask
   return configured.store
 }

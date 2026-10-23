@@ -1,0 +1,37 @@
+name: 工作台运行链路检查
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      T3CODE_TELEMETRY_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            vendor/t3code/pnpm-lock.yaml
+      - name: 安装根项目锁定依赖
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: 安装锁定 T3 工作区依赖
+        run: pnpm --dir vendor/t3code --filter "@t3tools/monorepo" --filter "@t3tools/web..." --filter "t3..." --filter "@t3tools/scripts..." install --frozen-lockfile --ignore-scripts
+      - name: 安装隔离浏览器测试运行时
+        run: pnpm --dir vendor/t3code/apps/web exec playwright install --with-deps chromium
+      - name: 验证实际工作台模块
+        run: pnpm verify:runtime

@@ -1,96 +1,11 @@
-import { readAutoOpsHost } from './hostConfig'
+import { autoOpsApiUrl, autoOpsRequest } from './apiClient'
+import type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../../../../../autoops/contracts/workspaces.ts'
+export type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../../../../../autoops/contracts/workspaces.ts'
 
-export interface WorkspaceVersion {
-  id: string
-  name: string
-  type: 'internal' | 'external'
-  status: 'published' | 'pending_review' | 'failed'
-  sourceVersionId?: string
-  createdAt: string
-  fileCount: number
-  byteLength: number
-  source: { repositories: Array<{ path: string; commit: string }>; contentHash: string }
-  report?: {
-    removedGitEntries: number
-    replacements: number
-    pendingFiles: Array<{ path: string; reason: string }>
-    excludedFiles: string[]
-    rulesVersion: string
-  }
-  isExample?: boolean
-}
-
-export interface WorkspaceRelease {
-  id: string
-  name: string
-  sourceVersionId: string
-  createdAt: string
-  services: Array<{ service: 'frontend' | 'backend'; name: string; size: number; sha256: string }>
-  manifest: object
-}
-
-export interface WorkspaceTask {
-  id: string
-  type: string
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
-  stage: string
-  message: string
-  createdAt: string
-  versionId?: string
-  releaseId?: string
-  error?: string
-}
-
-export interface WorkspaceOverview {
-  projectId: string
-  internalVersions: WorkspaceVersion[]
-  externalVersions: WorkspaceVersion[]
-  releases: WorkspaceRelease[]
-  tasks: WorkspaceTask[]
-  import?: { supported: boolean; hosts: string[]; maxBytes: number; maxFiles: number }
-}
-
-export interface WorkspaceTreeEntry {
-  path: string
-  name: string
-  kind: 'file' | 'directory'
-  size: number
-}
-
-export interface WorkspaceContent {
-  path: string
-  name: string
-  mime: string
-  contents: string
-  byteLength: number
-  truncated: boolean
-}
-
-function workspaceBase(projectId: string) {
-  const host = readAutoOpsHost()
-  if (!host) throw new Error('当前入口未连接项目工作区。')
-  return `${host.gatewayBasePath}/autoops/projects/${encodeURIComponent(projectId)}/workspaces`
-}
-
-async function request<T>(projectId: string, suffix: string, body?: object, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(workspaceBase(projectId) + suffix, {
-    credentials: 'same-origin',
-    ...(signal ? { signal } : {}),
-    ...(body === undefined ? {} : {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Demo-CSRF': readAutoOpsHost()?.csrfToken ?? '' },
-      body: JSON.stringify(body),
-    }),
-  })
-  const result: unknown = await response.json().catch(() => null)
-  if (!response.ok) {
-    const message = result && typeof result === 'object' && 'message' in result
-      ? result.message
-      : result && typeof result === 'object' && 'error' in result ? result.error : undefined
-    throw new Error(typeof message === 'string' ? message : `工作区请求失败（${response.status}），请重试。`)
-  }
-  return result as T
-}
+const workspacePath = (projectId: string) => `/autoops/projects/${encodeURIComponent(projectId)}/workspaces`
+const workspaceBase = (projectId: string) => autoOpsApiUrl(workspacePath(projectId))
+const request = <T>(projectId: string, suffix: string, body?: object, signal?: AbortSignal) =>
+  autoOpsRequest<T>(workspacePath(projectId) + suffix, { label: '工作区', ...(body === undefined ? {} : { body }), ...(signal ? { signal } : {}) })
 
 export const loadWorkspaces = (projectId: string, signal?: AbortSignal) =>
   request<WorkspaceOverview>(projectId, '', undefined, signal)

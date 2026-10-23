@@ -257,7 +257,7 @@ test('我的电脑是独立个人模块，入口和直链共用开关，不依�
   assert.equal(autoOpsAreaAvailable('devices', { ...owner, customerAgentsEnabled: false }), false)
   assert.equal(autoOpsAreaAvailable('devices', undefined), false)
   assert.equal(autoOpsAreaAvailable('deployments', owner, 'project-a'), false)
-  assert.equal(autoOpsAreaAvailable('deployments', { ...owner, projects: [{ id: 'project-a', membership: { workspaceAccess: 'internal', role: 'manager' } }] }, 'project-a'), true)
+  assert.equal(autoOpsAreaAvailable('deployments', { ...owner, projects: [{ id: 'project-a', capabilities: { 'deployment.read': true }, membership: { workspaceAccess: 'internal', role: 'manager' } }] }, 'project-a'), true)
   assert.equal(autoOpsAreaFromPath('/devices'), 'devices')
   assert.equal(normalizeAutoOpsChatHref('/devices/other'), null)
   const definition = AUTOOPS_AREAS.find(area => area.id === 'devices')
@@ -275,4 +275,19 @@ test('电脑模块切项目只更新返回上下文，不保留资源命令或�
   assert.equal(f.store.projectHref('devices', 'project-b'), '/devices?projectId=project-b')
   assert.equal(f.store.projectHref('chat', 'project-a'), '/env/thread-a')
   assert.equal(f.store.projectHref('chat', 'project-b'), '/?projectId=project-b')
+})
+
+test('工作区与部署入口只使用服务端能力，角色和缺失投影不能自行放权', () => {
+  const host = { principal: { id: 'alice', role: 'admin' }, projects: [
+    { id: 'project-a', membership: { workspaceAccess: 'internal', role: 'manager' } },
+  ] }
+  assert.equal(autoOpsAreaAvailable('workspaces', host, 'project-a'), false)
+  assert.equal(autoOpsAreaAvailable('deployments', host, 'project-a'), false)
+  const project = host.projects[0]
+  for (const area of ['workspaces', 'deployments']) {
+    const capability = area === 'workspaces' ? 'workspace.read' : 'deployment.read'
+    assert.equal(autoOpsAreaAvailable(area, { ...host, projects: [{ ...project, capabilities: { [capability]: false } }] }, 'project-a'), false)
+    assert.equal(autoOpsAreaAvailable(area, { ...host, projects: [{ ...project, capabilities: { [capability]: true } }] }, 'project-a'), true)
+    assert.equal(autoOpsAreaAvailable(area, { ...host, projects: [{ ...project, capabilities: { [capability]: true } }] }, 'removed'), false)
+  }
 })

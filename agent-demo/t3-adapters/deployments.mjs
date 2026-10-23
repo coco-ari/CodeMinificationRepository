@@ -1,20 +1,19 @@
-// Project authorization and immutable workspace delivery bridge. Execution,
-// archives, events, recovery and Agent protocol remain owned by the old engine.
+// 工作区适配器负责当前授权与固定源码交付，部署实体、队列和原子写入由引擎公开用例负责。
 import { createServer } from 'node:http'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, writeFile, rm, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { RepositoryService } from '../../src/service.mjs'
-import { DeploymentService, validateConfig } from '../../src/deployment.mjs'
+import { DeploymentService } from '../../src/deployment.mjs'
 import { handleAgentRequest } from '../../src/deploy-http.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
+import { configuredAutoOpsAccess } from './access.mjs'
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), {status, code}) }
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const copy = (value) => value == null ? value : structuredClone(value)
 const pick = (value, keys) => Object.fromEntries(keys.filter((key) => value?.[key] !== undefined).map((key) => [key, copy(value[key])]))
 const uuid = (value, label) => { if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/.test(value)) fail(400, 'DEPLOYMENT_ID_INVALID', `${label}无效`); return value }
-const text = (value, label, max = 80) => { if (typeof value !== 'string' || !value.trim() || value.length > max || /[\u0000-\u001f]/u.test(value)) fail(400, 'DEPLOYMENT_INPUT_INVALID', `${label}无效`); return value.trim() }
 const normalizedModule = (value) => value === '.' || !value ? '' : value
 const safeIdentity = (value) => value && pick(value, ['projectId', 'sourceVersionId', 'packageId', 'service', 'contentHash', 'repositories'])
 const safeActor = (value) => value && pick(value, ['id', 'displayName'])
@@ -41,34 +40,21 @@ function safeServer(value, environmentId) {
   return {...pick(value, ['id', 'name', 'online', 'registeredAt', 'lastSeenAt', 'version', 'revoked', 'capabilities']), environmentId}
 }
 
-export function createDeploymentStore({dataDir, workspaceStore, agentPort, publicOrigin = ''} = {}) {
+export function createDeploymentStore({dataDir, workspaceStore, access, agentPort, publicOrigin = ''} = {}) {
   if (!dataDir || !workspaceStore) fail(500, 'DEPLOYMENT_NOT_CONFIGURED', '部署验证存储尚未配置')
+  if (!access || typeof access.requireDeploymentActor !== 'function') fail(500, 'DEPLOYMENT_AUTHORIZATION_REQUIRED', '部署任务必须配置当前授权检查')
   const directory = join(resolve(dataDir), 'deployment-center')
   const denied = async () => fail(403, 'DEPLOYMENT_GIT_DISABLED', '部署只接受已发布内部工作区生成的固定源码包')
   const repository = new RepositoryService({directory, builder:{initialize:async () => {}, build:denied, history:denied, branches:denied}})
-  const deployment = new DeploymentService(repository, {publicOrigin})
+  const deployment = new DeploymentService(repository, {publicOrigin, authorizeTask({ task, target }) {
+    const scope = deployment.projects.claimScope(task, target)
+    access.requireDeploymentActor(task.actor.id, scope.projectId, scope.environmentId)
+  }})
   let initializing, pending = Promise.resolve(), listener, closed = false
   const serial = (work) => { const operation = pending.then(work); pending = operation.catch(() => {}); return operation }
-  const bindings = () => repository.store.state.autoopsDeploymentBindings
-  const mapping = (projectId) => {
-    const entry = bindings().projects.find((item) => item.projectId === projectId)
-    if (!entry) fail(404, 'DEPLOYMENT_PROJECT_NOT_FOUND', '部署项目尚未初始化')
-    return entry
-  }
-  const environment = (map, environmentId) => {
-    const item = map.environments.find((entry) => entry.environmentId === environmentId)
-    if (!item) fail(404, 'DEPLOYMENT_ENVIRONMENT_NOT_FOUND', '部署环境不存在')
-    return item
-  }
-  const ownedTarget = (projectId, targetId) => {
-    const map = mapping(projectId), target = deployment.data.targets.find((item) => item.id === targetId && item.applicationId === map.applicationId && !item.retiredAt)
-    const env = target && map.environments.find((item) => item.legacyEnvironmentId === target.environmentId)
-    const server = target && map.servers.find((item) => item.serverId === target.serverId && item.environmentId === env?.environmentId)
-    if (!target || !env || !server) fail(404, 'DEPLOYMENT_TARGET_NOT_FOUND', '当前项目与环境中不存在此部署服务')
-    return {map, target, environmentId:env.environmentId}
-  }
+  const ownedTarget = (projectId, targetId) => deployment.projects.target(projectId, targetId)
   const targetDto = (projectId, id) => {
-    const {target, environmentId} = ownedTarget(projectId, id), service = deployment.data.services.find((item) => item.id === target.serviceId)
+    const {target, service, environmentId} = ownedTarget(projectId, id)
     return {...pick(target, ['id', 'serverId', 'createdAt', 'updatedAt', 'lastDeployedAt', 'observation']), name:service.name, environmentId, kind:'static', service:'frontend', config:copy(target.config), configKey:deployment.configKey(id), currentRelease:safeRelease(target.currentRelease)}
   }
   const taskDto = (projectId, task) => safeTask(task, ownedTarget(projectId, task.targetId).environmentId)
@@ -79,12 +65,8 @@ export function createDeploymentStore({dataDir, workspaceStore, agentPort, publi
       if (!initializing) initializing = (async () => {
         await repository.initialize()
         await deployment.initialize()
-        await repository.store.change((state) => {
-          state.autoopsDeploymentBindings ||= {version:1, projects:[]}
-          if (state.autoopsDeploymentBindings.version !== 1 || !Array.isArray(state.autoopsDeploymentBindings.projects)) throw new Error('部署项目映射版本无效')
-        })
-        // Only task-local, adapter-owned staging copies are disposable. The
-        // persistent archive engine has already recovered preparing tasks.
+        await deployment.projects.initialize()
+        // 仅清理工作区交付时的临时副本，持久化源码恢复由部署引擎负责。
         const root = join(directory, 'workspace-inputs')
         await mkdir(root, {recursive:true, mode:0o700})
         for (const name of await readdir(root)) if (/^package-[A-Za-z0-9]+$/.test(name)) await rm(join(root, name), {recursive:true, force:true})
@@ -104,69 +86,30 @@ export function createDeploymentStore({dataDir, workspaceStore, agentPort, publi
     },
     async ensureProject(project) {
       await store.initialize()
-      await repository.store.change((state) => {
-        const maps = state.autoopsDeploymentBindings.projects, data = state.deployments
-        let map = maps.find((entry) => entry.projectId === project.id)
-        if (!map) {
-          // Identity provisioning and mapping are one transaction. Do not call
-          // legacy WorkspaceService.create(), which adds unrelated defaults.
-          const applicationId = randomUUID()
-          data.applications.push({id:applicationId, name:project.name, description:'工作台部署验证', createdAt:new Date().toISOString()})
-          map = {projectId:project.id, applicationId, environments:[], servers:[], targetRequests:[], serverRequests:[]}; maps.push(map)
-        }
-        const app = data.applications.find((item) => item.id === map.applicationId)
-        if (!app) throw new Error('部署项目身份映射损坏')
-        app.name = project.name
-        for (const env of project.environments) {
-          let selected = map.environments.find((item) => item.environmentId === env.id)
-          if (!selected) { selected = {environmentId:env.id, legacyEnvironmentId:randomUUID()}; map.environments.push(selected); data.environments.push({id:selected.legacyEnvironmentId, applicationId:map.applicationId, name:env.name, createdAt:new Date().toISOString()}) }
-          const legacy = data.environments.find((item) => item.id === selected.legacyEnvironmentId && item.applicationId === map.applicationId)
-          if (!legacy) throw new Error('部署环境身份映射损坏')
-          legacy.name = env.name
-        }
-      })
+      await deployment.projects.ensureProject(project)
     },
     overview(project, environmentIds) {
-      const map = mapping(project.id), allowed = new Set(environmentIds), all = deployment.overview(), serverIds = new Set(map.servers.filter((item) => allowed.has(item.environmentId)).map((item) => item.serverId))
+      const all = deployment.projects.snapshot(project.id), map = all.mapping, allowed = new Set(environmentIds), serverIds = new Set(map.servers.filter((item) => allowed.has(item.environmentId)).map((item) => item.serverId))
       const targets = all.targets.filter((item) => item.applicationId === map.applicationId).map((item) => targetDto(project.id, item.id)).filter((item) => allowed.has(item.environmentId)), ids = new Set(targets.map((item) => item.id))
-      const scopedTasks = deployment.data.tasks.filter((item) => item.applicationId === map.applicationId && ids.has(item.targetId))
+      const scopedTasks = all.tasks.filter((item) => ids.has(item.targetId))
       const tasks = scopedTasks.filter((item, index) => index >= scopedTasks.length - 200 || !['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(item.status)).reverse().map((item) => taskDto(project.id, item))
       return {enabled:true, environments:project.environments.filter((item) => allowed.has(item.id)).map((item) => ({id:item.id, name:item.name})), servers:all.servers.filter((item) => serverIds.has(item.id)).map((item) => safeServer(item, map.servers.find((bound) => bound.serverId === item.id).environmentId)), targets, tasks}
     },
     async createServer(projectId, input) {
       return serial(async () => {
-        const map = mapping(projectId); environment(map, input.environmentId)
-        const name = text(input.name, '服务器名称'), requestId = input.requestId && uuid(input.requestId, '请求标识'), fingerprint = sha(JSON.stringify([name, input.environmentId]))
-        const repeated = requestId && map.serverRequests.find((item) => item.requestId === requestId)
-        if (repeated) { if (repeated.fingerprint !== fingerprint) fail(409, 'DEPLOYMENT_REQUEST_CONFLICT', '同一请求标识不能用于不同服务器参数'); const current = deployment.overview().servers.find((item) => item.id === repeated.serverId); return {server:safeServer(current, input.environmentId), registrationToken:null, expiresAt:null, repeated:true} }
-        const result = await deployment.createServer({name, applicationId:map.applicationId})
-        await repository.store.change((state) => { const selected = state.autoopsDeploymentBindings.projects.find((item) => item.projectId === projectId); selected.servers.push({serverId:result.server.id, environmentId:input.environmentId}); if (requestId) selected.serverRequests.push({requestId, fingerprint, serverId:result.server.id}) })
-        return {server:safeServer(result.server, input.environmentId), registrationToken:result.registrationToken, expiresAt:result.expiresAt}
+        const result = await deployment.projects.createServer(projectId, input)
+        return {server:safeServer(result.server, input.environmentId), registrationToken:result.registrationToken, expiresAt:result.expiresAt, ...(result.repeated ? {repeated:true} : {})}
       })
     },
     async createTarget(projectId, input) {
-      const name = text(input.name, '服务名称'), requestId = uuid(input.requestId, '请求标识'), module = input.config?.module || '.', config = validateConfig(input.config || {}, module, 'static')
-      const fingerprint = sha(JSON.stringify([name, input.environmentId, input.serverId, config]))
-      const targetId = await repository.store.change((state) => {
-        const map = state.autoopsDeploymentBindings.projects.find((item) => item.projectId === projectId), env = environment(map, input.environmentId), data = state.deployments
-        const repeated = map.targetRequests.find((item) => item.requestId === requestId)
-        if (repeated) { if (repeated.fingerprint !== fingerprint) fail(409, 'DEPLOYMENT_REQUEST_CONFLICT', '同一请求标识不能用于不同部署服务参数'); return repeated.targetId }
-        if (!map.servers.some((item) => item.serverId === input.serverId && item.environmentId === input.environmentId) || !data.serverBindings.some((item) => item.serverId === input.serverId && item.applicationId === map.applicationId)) fail(404, 'DEPLOYMENT_SERVER_NOT_FOUND', '当前项目与环境中不存在此服务器')
-        const server = data.servers.find((item) => item.id === input.serverId && !item.revoked && item.mode === 'managed')
-        if (!server) fail(409, 'DEPLOYMENT_SERVER_REVOKED', '目标服务器已撤销或不可用')
-        if (data.services.length >= 2000 || data.targets.length >= 2000) fail(400, 'DEPLOYMENT_TARGET_LIMIT', '部署服务数量已达到上限')
-        const serviceId = randomUUID(), id = randomUUID(), at = new Date().toISOString()
-        data.services.push({id:serviceId, applicationId:map.applicationId, name, kind:'static', module, createdAt:at, updatedAt:at})
-        data.targets.push({id, applicationId:map.applicationId, environmentId:env.legacyEnvironmentId, serviceId, serverId:server.id, mode:'managed', containerName:null, config, networkIdentity:null, owner:'platform', createdAt:at, updatedAt:at})
-        map.targetRequests.push({requestId, fingerprint, targetId:id}); return id
-      })
-      deployment.changed('targets', targetId)
-      return {target:targetDto(projectId, targetId)}
+      const id = await deployment.projects.createTarget(projectId, input)
+      return {target:targetDto(projectId, id)}
     },
     targetScope(projectId, targetId) { return {environmentId:ownedTarget(projectId, targetId).environmentId} },
-    taskScope(projectId, taskId) { const task = deployment.data.tasks.find((item) => item.id === taskId && item.applicationId === mapping(projectId).applicationId); if (!task) fail(404, 'DEPLOYMENT_TASK_NOT_FOUND', '当前项目中不存在此部署任务'); return store.targetScope(projectId, task.targetId) },
+    taskScope(projectId, taskId) { const task = deployment.projects.task(projectId, taskId); return store.targetScope(projectId, task.targetId) },
     async createTask(projectId, input, principal) {
-      const {target} = ownedTarget(projectId, input.targetId)
+      const {target, environmentId} = ownedTarget(projectId, input.targetId)
+      access.requireDeploymentActor(principal.id, projectId, environmentId)
       uuid(input.requestId, '请求标识')
       if (!['deploy', 'rollback'].includes(input.action) || input.service !== 'frontend') fail(400, 'DEPLOYMENT_ACTION_UNSUPPORTED', '首轮仅支持前端静态站点发布与回退')
       if (typeof input.configKey !== 'string' || !/^[a-f0-9]{64}$/.test(input.configKey)) fail(400, 'DEPLOYMENT_CONFIG_REQUIRED', '请刷新配置并确认发布快照')
@@ -210,6 +153,6 @@ export function configuredDeploymentStore() {
   const dataDir = process.env.AUTOOPS_T3_DATA_DIR, workspaceStore = configuredWorkspaceStore()
   if (!dataDir || !workspaceStore) fail(500, 'DEPLOYMENT_NOT_CONFIGURED', '部署验证存储尚未配置')
   const port = process.env.AUTOOPS_DEPLOYMENT_AGENT_PORT
-  if (!configured || configured.dataDir !== dataDir) configured = {dataDir, store:createDeploymentStore({dataDir, workspaceStore, ...(port === undefined ? {} : {agentPort:Number(port)}), publicOrigin:process.env.AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN || ''})}
+  if (!configured || configured.dataDir !== dataDir) configured = {dataDir, store:createDeploymentStore({dataDir, workspaceStore, access:configuredAutoOpsAccess(), ...(port === undefined ? {} : {agentPort:Number(port)}), publicOrigin:process.env.AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN || ''})}
   return configured.store
 }

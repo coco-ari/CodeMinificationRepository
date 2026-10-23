@@ -132,8 +132,10 @@ export function ProjectAreaTopbar() {
             }
             return
           }
-          const allowedDeployment = project.membership?.workspaceAccess === 'internal' && project.membership.role === 'manager'
-          go(currentArea === 'deployments' && !allowedDeployment ? 'workspaces' : currentArea, project.id)
+          const nextArea = autoOpsAreaAvailable(currentArea, host, project.id)
+            ? currentArea
+            : AUTOOPS_AREAS.find((area) => autoOpsAreaAvailable(area.id, host, project.id))?.id
+          if (nextArea) go(nextArea, project.id)
         }}
       >
         <ComboboxTrigger render={<Button variant="ghost" size="sm" aria-label="切换项目" className="w-full min-w-0 justify-start" />}>

@@ -38,7 +38,7 @@ test("目录登记拒绝同目录、符号链接别名及父子重叠", () => {
   const f = fixture();
   try {
     mkdirSync(join(f.directory, "child"));
-    symlinkSync(f.directory, join(f.root, "alias"));
+    symlinkSync(f.directory, join(f.root, "alias"), process.platform === "win32" ? "junction" : "dir");
     for (const path of [f.directory, join(f.directory, "child"), f.root, join(f.root, "alias")]) {
       assert.throws(() => f.store.register(path, "project-b", "重复"), /已经登记/);
     }

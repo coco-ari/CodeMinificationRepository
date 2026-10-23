@@ -3,6 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { users, projects, agents } from '../fixtures.mjs'
+import { createProjectAccess } from './project-access.mjs'
 import { resolveProductProfile } from './product-profile.mjs'
 import { configuredBusinessModels } from './models.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
@@ -91,7 +92,7 @@ export function initializeAutoOpsAccessSchema(db) {
     db.exec('ALTER TABLE t3_attachment_access ADD COLUMN metadata_json TEXT')
 }
 
-export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, projects, agents }, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry }) {
+export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, projects, agents }, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry, deploymentEnabled = () => process.env.AUTOOPS_DEPLOYMENT_ENABLED === '1' }) {
   const lookupSession = (sessionHash) => {
     const row = sessionDb.prepare('SELECT token,uid,csrf,expires FROM sessions WHERE token=? AND expires>?').get(sessionHash, now())
     const user = row && catalog.users.find((entry) => entry.id === row.uid)
@@ -104,17 +105,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     if (current.id !== principal.id) fail(401, 'UNAUTHENTICATED', '登录身份已改变')
     return current
   }
-  const membershipForUser = (userId, projectId) => {
-    const project = catalog.projects.find((entry) => entry.id === projectId)
-    const user = catalog.users.find((entry) => entry.id === userId)
-    const configured = project?.memberships?.find((entry) => entry.userId === userId)
-    const membership = configured || (project?.memberIds.includes(userId) ? { userId, workspaceAccess: 'internal', role: user?.role === 'admin' ? 'manager' : 'member', environmentIds: project.environments.map((entry) => entry.id), status: 'active' } : undefined)
-    if (!project || !user || (user.status !== undefined && user.status !== 'active') || !membership || membership.status !== 'active' ||
-        !['internal', 'external'].includes(membership.workspaceAccess) || !['manager', 'member'].includes(membership.role) ||
-        !Array.isArray(membership.environmentIds) || membership.environmentIds.some((id) => !project.environments.some((environment) => environment.id === id)))
-      fail(404, 'PROJECT_NOT_FOUND', '项目不存在或无权访问')
-    return { userId, workspaceAccess: membership.workspaceAccess, role: membership.role, environmentIds: [...new Set(membership.environmentIds)], status: 'active' }
-  }
+  const { membershipForUser, requireWorkspaceManagerForUser, requireDeploymentActor, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
   const customerRegistry = suppliedCustomerRegistry || createCustomerRegistry({
     db: bindingDb, now,
     requireOwner(userId) {
@@ -148,11 +139,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     return membership
   }
   const requireWorkspace = (principal, projectId, type, versionId, environmentId) => workspaceForUser(refresh(principal).id, projectId, type, versionId, environmentId)
-  const requireWorkspaceManager = (principal, projectId) => {
-    const membership = requireWorkspace(principal, projectId, 'internal')
-    if (membership.role !== 'manager') fail(403, 'WORKSPACE_MANAGEMENT_FORBIDDEN', '只有项目内部管理者可以管理工作区')
-    return membership
-  }
+  const requireWorkspaceManager = (principal, projectId) => requireWorkspaceManagerForUser(refresh(principal).id, projectId)
   const projectFor = (principal, projectId) => {
     requireMembership(principal, projectId)
     const project = catalog.projects.find((entry) => entry.id === projectId)
@@ -332,6 +319,17 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
     }
     return { id: row.attachment_id, ownerId: row.owner_id, threadId: row.thread_id, ...(row.metadata_json ? JSON.parse(row.metadata_json) : {}) }
   }
+  // 资料目录通过只读快照协作，不暴露数据库连接或可修改的存储行。
+  function resourceThreads(projectId, canRead) {
+    return bindingDb.prepare('SELECT thread_id FROM t3_thread_bindings WHERE project_id=? AND revoked_at IS NULL').all(projectId)
+      .map((row) => getThreadBinding(row.thread_id)).filter(canRead).map((binding) => {
+      const attachments = bindingDb.prepare('SELECT attachment_id, metadata_json FROM t3_attachment_access WHERE thread_id=?').all(binding.threadId).map((file) => {
+        const metadata = file.metadata_json ? JSON.parse(file.metadata_json) : {}
+        return { id: file.attachment_id, name: metadata.name, mimeType: metadata.mimeType, sizeBytes: metadata.sizeBytes }
+      })
+      return { binding, attachments }
+    })
+  }
   return {
     authenticateCookie(cookie = '') {
       const values = String(cookie).split(';').map((item) => item.trim()).filter((item) => item.startsWith('demo_session='))
@@ -431,6 +429,21 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
         fail(409, 'NATIVE_FORK_IDENTITY_CONFLICT', '原生分支身份已改变')
       bindingDb.prepare('UPDATE t3_thread_bindings SET continuation_verified=1,native_thread_id=? WHERE thread_id=?').run(targetNativeId, targetThreadId)
     },
+    requireDeploymentActor,
+    requireWorkspaceActor: requireWorkspaceManagerForUser,
+    projectCapabilities(principal, projectId) { return projectCapabilities(refresh(principal).id, projectId) },
+    listResourceThreads(principal, projectId) {
+      projectFor(principal, projectId)
+      return resourceThreads(projectId, (binding) => canSeeThread(principal, binding.threadId))
+    },
+    listToolResourceThreads(threadId) {
+      const { binding } = this.requireToolThread(threadId)
+      const targetAudience = threadAudience(binding)
+      return resourceThreads(binding.projectId, (source) => {
+        const audience = threadAudience(source)
+        return targetAudience.length > 0 && targetAudience.every((id) => audience.includes(id))
+      })
+    },
     requireToolThread(threadId) {
       const binding = getThreadBinding(threadId)
       if (!binding) fail(403, 'THREAD_NOT_BOUND', '工具调用没有获授权的业务会话')
@@ -481,7 +494,7 @@ export function createAutoOpsAccess({ sessionDb, bindingDb, catalog = { users, p
         runtimeMode: 'approval-required',
         customerAgentsEnabled: isCustomerAgentsEnabled(),
         projects: visibleProjects.map(({ id, name, environments }) => ({
-          id, name, environments: environments.filter((entry) => membershipForUser(current.id, id).environmentIds.includes(entry.id)), membership: membershipForUser(current.id, id),
+          id, name, capabilities: projectCapabilities(current.id, id), environments: environments.filter((entry) => membershipForUser(current.id, id).environmentIds.includes(entry.id)), membership: membershipForUser(current.id, id),
           agents: catalog.agents.filter((agent) => agent.projectIds.includes(id)).map(({ id, name }) => ({ id, name })),
         })),
         agents: catalog.agents.filter((entry) => entry.projectIds.some((id) => visibleProjects.some((project) => project.id === id))),
@@ -509,7 +522,11 @@ export function configuredAutoOpsAccess() {
   const bindingDb = new DatabaseSync(join(directory, 't3-autoops.sqlite'))
   bindingDb.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;')
   initializeAutoOpsAccessSchema(bindingDb)
-  configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore: configuredWorkspaceStore() })
+  const workspaceStore = configuredWorkspaceStore({ authorizeTask({ actorId, projectId }) {
+    if (!configuredAccess) fail(503, 'WORKSPACE_AUTHORIZATION_REQUIRED', '工作区授权尚未就绪')
+    return configuredAccess.requireWorkspaceActor(actorId, projectId)
+  } })
+  configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore })
   return configuredAccess
 }
 

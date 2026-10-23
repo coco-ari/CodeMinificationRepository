@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
+import { resolve } from 'node:path'
 import { users, projects, agents } from '../agent-demo/fixtures.mjs'
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../agent-demo/t3-adapters/access.mjs'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
@@ -9,7 +10,7 @@ import { handleWorkspaceRequest } from '../agent-demo/t3-adapters/workspace-http
 import { authorizeAutoOpsRpc, filterAutoOpsShell, filterAutoOpsShellItem, prepareAutoOpsRpcPayload } from '../agent-demo/t3-adapters/rpc-policy.mjs'
 
 const base = { projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'project' }
-function setup(t) {
+function setup(t, options = {}) {
   const sessionDb = new DatabaseSync(':memory:'), bindingDb = new DatabaseSync(':memory:')
   t.after(() => { sessionDb.close(); bindingDb.close() })
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY,uid TEXT,csrf TEXT,expires INTEGER)')
@@ -21,7 +22,7 @@ function setup(t) {
     { id:'external-v1', type:'external', status:'published', sourceVersionId:'internal-v1', source:{contentHash:'external-digest',repositories:[{path:'.',commit:'internal-commit'}]} },
     { id:'external-pending', type:'external', status:'pending_review', source:{contentHash:'pending',repositories:[]} },
   ]
-  let writes = 0
+  let writes = 0, lastTaskActor
   const file = { path:'docs/资料.md',name:'资料.md',mime:'text/markdown',size:10,sha256:'digest' }
   const store = {
     async ensureProject() {},
@@ -34,14 +35,39 @@ function setup(t) {
     managementRead(projectId,id) { return {contents:id === 'internal-v1'?'原始内容':'脱敏内容'} },
     versionFile(projectId,id) { return {bytes:Buffer.from(id),name:'资料.md',mime:'text/markdown'} },
     packageFile() { return {bytes:Buffer.from('raw-package'),name:'frontend.zip',mime:'application/zip'} },
-    startExternal() { writes++; return {id:'new-task'} },
+    startExternal(_projectId, _input, actorId) { writes++; lastTaskActor = actorId; return {id:'new-task'} },
   }
-  const access = createAutoOpsAccess({sessionDb,bindingDb,catalog,workspaceStore:store})
+  const access = createAutoOpsAccess({sessionDb,bindingDb,catalog,workspaceStore:store,...options})
   const principal = (id) => access.authenticateCookie('demo_session=' + id)
   const admin=principal('u-admin'), member=principal('u-lin'), guest=principal('u-guest')
   const call = (principal,path='',method='GET',input) => handleWorkspaceRequest({access,store,principal,url:new URL('http://localhost/autoops/projects/p-autoops/workspaces'+path),method,input})
-  return {access,store,catalog,bindingDb,admin,member,guest,call,writes:()=>writes}
+  return {access,store,catalog,bindingDb,admin,member,guest,call,writes:()=>writes,lastTaskActor:()=>lastTaskActor}
 }
+
+test('项目动作投影复用真实成员与环境授权，关闭部署及撤权后即时收敛', async t => {
+  let enabled = true
+  const { access, admin, member, guest, catalog, call, lastTaskActor } = setup(t, { deploymentEnabled: () => enabled })
+  const capabilities = (principal) => access.bootstrap(principal).projects.find((entry) => entry.id === base.projectId)?.capabilities
+  assert.deepEqual(capabilities(admin), { 'workspace.read': true, 'workspace.manage': true, 'deployment.read': true, 'deployment.execute': true })
+  for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'deployment.read': false, 'deployment.execute': false })
+  enabled = false
+  assert.equal(capabilities(admin)['deployment.read'], true)
+  assert.equal(capabilities(admin)['deployment.execute'], false)
+  assert.throws(() => access.requireDeploymentActor(admin.id, base.projectId, base.environmentId), { code: 'DEPLOYMENT_DISABLED' })
+  assert.equal((await call(admin, '/external', 'POST', { actorId: guest.id, actor: { id: guest.id } })).status, 202)
+  assert.equal(lastTaskActor(), admin.id)
+  enabled = true
+  const project = catalog.projects.find((entry) => entry.id === base.projectId)
+  const membership = project.memberships.find((entry) => entry.userId === admin.id) || { userId: admin.id, workspaceAccess: 'internal', role: 'manager', environmentIds: [base.environmentId], status: 'active' }
+  if (!project.memberships.includes(membership)) project.memberships.push(membership)
+  membership.environmentIds = []
+  assert.equal(capabilities(admin)['deployment.read'], true)
+  assert.equal(capabilities(admin)['deployment.execute'], false)
+  assert.throws(() => access.requireDeploymentActor(admin.id, base.projectId, base.environmentId), { code: 'ENVIRONMENT_FORBIDDEN' })
+  membership.status = 'disabled'
+  assert.equal(capabilities(admin), undefined)
+  assert.throws(() => access.requireDeploymentActor(admin.id, base.projectId, base.environmentId), { code: 'PROJECT_NOT_FOUND' })
+})
 
 test('项目身份独立于全局角色，兼容内部成员且外部默认不授予原始权限', t => {
   const {access,admin,member,guest,catalog} = setup(t)
@@ -124,7 +150,7 @@ test('overview、pending、原件、部署包与管理操作按身份过滤', as
 test('直接资源、元数据与草稿@不能绕过外部资料授权', async t => {
   const {access,store,bindingDb,admin,guest}=setup(t)
   access.bindThread(admin,{...base,threadId:'raw',workspaceType:'internal',workspaceVersionId:'internal-v1'})
-  const catalog=createBusinessResourceCatalog({access,bindingDb,workspaceStore:store,attachmentsDir:'/unused'})
+  const catalog=createBusinessResourceCatalog({access,workspaceStore:store,})
   const raw='autoops/p-autoops/workspaces/internal-v1/docs/资料.md',safe=raw.replace('internal-v1','external-v1')
   await assert.rejects(catalog.resource(guest,raw),{code:'WORKSPACE_FORBIDDEN'})
   await assert.rejects(catalog.metadata(guest,[raw]),{code:'WORKSPACE_FORBIDDEN'})
@@ -196,7 +222,7 @@ test('外部RPC只返回虚拟项目根，技能刷新仍映射到服务端固�
     const payload={instanceId:'codex',cwd:'autoops/p-autoops/workspaces',fresh:true}
     authorizeAutoOpsRpc(access,guest,'server.refreshProviders',payload)
     const actual=prepareAutoOpsRpcPayload(access,guest,'server.refreshProviders',payload)
-    assert.equal(actual.cwd,'/private/tmp/autoops-authorized-data/t3/workspaces/p-autoops')
+    assert.equal(actual.cwd,resolve('/private/tmp/autoops-authorized-data/t3/workspaces/p-autoops'))
     assert.equal(payload.cwd,'autoops/p-autoops/workspaces')
     assert.throws(()=>prepareAutoOpsRpcPayload(access,guest,'server.refreshProviders',{...payload,cwd:'autoops/p-cabinet/workspaces'}),{code:'AUTOOPS_OPERATION_FORBIDDEN'})
     assert.throws(()=>authorizeAutoOpsRpc(access,guest,'server.refreshProviders',{...payload,cwd:actual.cwd}),{code:'AUTOOPS_OPERATION_FORBIDDEN'})

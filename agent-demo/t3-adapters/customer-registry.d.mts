@@ -1,14 +1,8 @@
+import type { CustomerExecutionBinding, ExecutionBinding, CustomerDevice, CustomerWorkspace, CustomerModel, CustomerSkill, CustomerCapabilityInput, CustomerCapabilities } from '../../autoops/contracts/runtime.ts';
+export type { CustomerExecutionBinding, ExecutionBinding, CustomerDevice, CustomerWorkspace, CustomerModel, CustomerSkill, CustomerCapabilityInput, CustomerCapabilities } from '../../autoops/contracts/runtime.ts';
 import type { DatabaseSync } from 'node:sqlite';
-export type CustomerExecutionBinding = { kind: 'customer'; deviceId: string; registeredWorkspaceId: string; workspaceBindingRevision: number; runtimeId: 'codex' };
-export type ExecutionBinding = { kind: 'platform' } | CustomerExecutionBinding;
-export interface CustomerDevice { id: string; ownerId: string; label: string; platform?: string; connectorVersion?: string; status: 'active' | 'disabled' | 'revoked'; online: boolean; connectionEpoch: number; lastSeenAt?: string; createdAt: string }
 /** Internal only: never serialize a device principal or put it in logs. */
 export interface CustomerDevicePrincipal { deviceId: string; ownerId: string; tokenHash: string }
-export interface CustomerWorkspace { registeredWorkspaceId: string; deviceId: string; ownerId: string; projectId: string; label: string; workspaceBindingRevision: number; runtimeId: 'codex'; status: 'active' | 'revoked'; createdAt: string; updatedAt: string }
-export interface CustomerModel { id: string; name?: string; supportedReasoningEfforts: string[] }
-export interface CustomerSkill { id: string; name: string; description: string }
-export interface CustomerCapabilityInput { registeredWorkspaceId: string; workspaceBindingRevision: number; runtimeId: 'codex'; revision: string; protocolVersion: 1; runtimeVersion?: string; configRevision?: string; models: CustomerModel[]; skills: CustomerSkill[]; permissions?: {approvalPolicy: string; sandboxMode: string} }
-export interface CustomerCapabilities extends CustomerCapabilityInput { deviceId: string; updatedAt: string }
 export interface CustomerRegistry {
   createPairing(ownerId: string, input?: {label?: string}): {pairingCode: string; expiresAt: string};
   consumePairing(pairingCode: string, input: {label: string; platform?: string; connectorVersion?: string}): {device: CustomerDevice; deviceToken: string};

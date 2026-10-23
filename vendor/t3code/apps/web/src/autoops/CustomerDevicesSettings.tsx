@@ -5,6 +5,7 @@ import {
   ModuleSidebarEmpty,
 } from "./ModuleWorkspace";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isAutoOpsAccessError } from "./apiClient";
 import {
   CopyIcon,
   DownloadIcon,
@@ -73,10 +74,14 @@ function CustomerDevicesContent() {
   const [query, setQuery] = useState("");
   const [devices, setDevices] = useState<CustomerDevice[]>([]);
   const [workspaces, setWorkspaces] = useState<CustomerWorkspace[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [deviceRead, setDeviceRead] = useState({ loading: true, error: null as string | null });
+  const [workspaceRead, setWorkspaceRead] = useState({
+    loading: true,
+    error: null as string | null,
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pairing, setPairing] = useState<{
+  const [pairing, setPairingState] = useState<{
     pairingCode: string;
     expiresAt: string;
     previousDeviceIds: string[];
@@ -89,58 +94,132 @@ function CustomerDevicesContent() {
   const revokeDeviceId = useRef<string | null>(null);
   const detailButtons = useRef(new Map<string, HTMLButtonElement>());
   const deviceActionButtons = useRef(new Map<string, HTMLButtonElement>());
-  const reloadRevision = useRef(0);
-  const reload = useCallback(async () => {
-    const revision = ++reloadRevision.current;
-    try {
-      const [result, registered] = await Promise.all([
-        customerRequest<{ devices: CustomerDevice[] }>("devices"),
-        loadCustomerWorkspaces(),
-      ]);
-      if (revision !== reloadRevision.current) return;
-      setDevices(result.devices);
-      setWorkspaces(registered.workspaces);
-      setError(null);
-    } catch (cause) {
-      if (revision !== reloadRevision.current) return;
-      setError(cause instanceof Error ? cause.message : "无法读取设备");
-    }
-    setLoading(false);
+  const refresh = useRef<() => Promise<void>>(async () => {});
+  const pairingExpires = useRef<string | null>(null);
+  const setPairing = useCallback((value: typeof pairing) => {
+    pairingExpires.current = value?.expiresAt ?? null;
+    setPairingState(value);
   }, []);
+  const mutationRunning = useRef(false);
+  const reload = useCallback(() => {
+    setError(null);
+    return refresh.current();
+  }, []);
+  const clearDevices = useCallback(() => {
+    setDevices([]);
+    setDetails(null);
+    setRevoke(null);
+    setPairing(null);
+  }, [setPairing]);
   useEffect(() => {
-    void reload();
-    const refreshVisible = () => {
-      if (document.visibilityState === "visible") void reload();
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let running: Promise<void> | null = null;
+    let requested = false;
+    const readDevices = async () => {
+      setDeviceRead((current) => ({ ...current, loading: true }));
+      try {
+        const result = await customerRequest<{ devices: CustomerDevice[] }>(
+          "devices",
+          undefined,
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        setDevices(result.devices);
+        setDetails((current) =>
+          current ? (result.devices.find((device) => device.id === current.id) ?? null) : null,
+        );
+        setRevoke((current) =>
+          current ? (result.devices.find((device) => device.id === current.id) ?? null) : null,
+        );
+        setDeviceRead({ loading: false, error: null });
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        if (isAutoOpsAccessError(cause)) clearDevices();
+        setDeviceRead({
+          loading: false,
+          error: cause instanceof Error ? cause.message : "无法读取设备",
+        });
+      }
     };
-    const timer = window.setInterval(refreshVisible, 15_000);
+    const readWorkspaces = async () => {
+      setWorkspaceRead((current) => ({ ...current, loading: true }));
+      try {
+        const result = await loadCustomerWorkspaces(undefined, controller.signal);
+        if (controller.signal.aborted) return;
+        setWorkspaces(result.workspaces);
+        setWorkspaceRead({ loading: false, error: null });
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        if (isAutoOpsAccessError(cause)) setWorkspaces([]);
+        setWorkspaceRead({
+          loading: false,
+          error: cause instanceof Error ? cause.message : "无法读取已登记工作区",
+        });
+      }
+    };
+    const schedule = () => {
+      if (controller.signal.aborted) return;
+      const expires = pairingExpires.current;
+      const delay = expires && Date.parse(expires) > Date.now() ? 3000 : 15000;
+      timer = setTimeout(() => {
+        if (document.visibilityState === "visible") void read();
+        else schedule();
+      }, delay);
+    };
+    const read = (): Promise<void> => {
+      if (controller.signal.aborted) return Promise.resolve();
+      requested = true;
+      clearTimeout(timer);
+      if (running) return running;
+      // 同一轮独立更新两类数据；高频焦点和配对刷新最多排队下一轮，不重叠读取。
+      running = (async () => {
+        do {
+          requested = false;
+          await Promise.allSettled([readDevices(), readWorkspaces()]);
+        } while (requested && !controller.signal.aborted);
+      })().finally(() => {
+        running = null;
+        schedule();
+      });
+      return running;
+    };
+    refresh.current = read;
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void read();
+    };
+    void read();
     document.addEventListener("visibilitychange", refreshVisible);
     window.addEventListener("focus", refreshVisible);
     return () => {
-      reloadRevision.current++;
-      window.clearInterval(timer);
+      refresh.current = async () => {};
+      controller.abort();
+      clearTimeout(timer);
       document.removeEventListener("visibilitychange", refreshVisible);
       window.removeEventListener("focus", refreshVisible);
     };
-  }, [reload]);
-  useEffect(() => {
-    if (!pairing) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && Date.parse(pairing.expiresAt) > Date.now())
-        void reload();
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [pairing, reload]);
+  }, [clearDevices]);
+  const loading = deviceRead.loading && !devices.length;
+  const readErrors = [
+    ...new Set(
+      [error, deviceRead.error, workspaceRead.error].filter((value): value is string => !!value),
+    ),
+  ];
   const action = async (task: () => Promise<unknown>) => {
+    if (mutationRunning.current) return;
+    mutationRunning.current = true;
     setBusy(true);
     setError(null);
     try {
       await task();
       await reload();
     } catch (cause) {
+      if (isAutoOpsAccessError(cause)) clearDevices();
       const message = cause instanceof Error ? cause.message : "设备操作失败";
       setError(message);
       toastManager.add({ type: "error", title: "操作未完成", description: message });
     }
+    mutationRunning.current = false;
     setBusy(false);
   };
   const copy = async (text: string) => {
@@ -217,12 +296,12 @@ function CustomerDevicesContent() {
           个人账号 · 所有项目的已登记电脑
         </p>
       </ModuleSidebar>
-      {error ? (
+      {readErrors.length ? (
         <p
           className="shrink-0 border-b border-border/60 px-3 py-2 text-sm text-destructive"
           role="alert"
         >
-          {error}
+          {readErrors.join("；")}
         </p>
       ) : null}
       <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
@@ -238,7 +317,7 @@ function CustomerDevicesContent() {
           ) : devices.length === 0 ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>{error ? "无法读取设备" : "还没有连接电脑"}</EmptyTitle>
+                <EmptyTitle>{deviceRead.error ? "无法读取设备" : "还没有连接电脑"}</EmptyTitle>
                 <EmptyDescription>
                   先在自己的电脑安装并登录
                   Codex，再通过一次性配对码连接并登记目录。代码和技能留在本机。
@@ -263,12 +342,13 @@ function CustomerDevicesContent() {
                             ? "在线"
                             : "离线"}{" "}
                       ·{" "}
-                      {
-                        workspaces.filter(
-                          (entry) => entry.deviceId === device.id && entry.status === "active",
-                        ).length
-                      }{" "}
-                      个工作区
+                      {workspaceRead.error
+                        ? "工作区状态暂不可用"
+                        : workspaceRead.loading && !workspaces.length
+                          ? "正在读取工作区…"
+                          : workspaces.filter(
+                              (entry) => entry.deviceId === device.id && entry.status === "active",
+                            ).length + " 个工作区"}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
@@ -467,6 +547,8 @@ function CustomerDevicesContent() {
               device={details}
               workspaces={workspaces}
               projects={host.projects}
+              workspaceLoading={workspaceRead.loading}
+              workspaceError={workspaceRead.error}
             />
           ) : null}
           <DialogFooter>
@@ -532,7 +614,11 @@ export function CustomerDeviceDetailsPanel({
   device,
   workspaces,
   projects,
+  workspaceLoading = false,
+  workspaceError = null,
 }: {
+  workspaceLoading?: boolean;
+  workspaceError?: string | null;
   device: CustomerDevice;
   workspaces: readonly CustomerWorkspace[];
   projects: readonly { id: string; name: string }[];
@@ -552,7 +638,17 @@ export function CustomerDeviceDetailsPanel({
           </dd>
         </dl>
         <div className="w-full min-w-0 max-w-full divide-y border-t" aria-label="已登记工作区">
-          {registered.length === 0 ? (
+          {workspaceError ? (
+            <p className="py-3 text-sm text-destructive" role="alert">
+              {workspaceError}
+            </p>
+          ) : null}
+          {workspaceLoading && !registered.length ? (
+            <p className="py-3 text-sm text-muted-foreground" role="status">
+              正在读取已登记工作区…
+            </p>
+          ) : null}
+          {!workspaceError && !workspaceLoading && registered.length === 0 ? (
             <p className="py-3 text-sm text-muted-foreground">
               尚未登记工作区，请在本机运行连接程序的 register 命令。
             </p>

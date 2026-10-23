@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ComponentProps, type KeyboardEvent } from 'react'
+import { useId, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react'
 import {
   ArrowDownToLineIcon,
   ChevronDownIcon,
@@ -40,6 +40,7 @@ type DialogProps = {
   onOpenChange: (open: boolean) => void
   finalFocus?: ComponentProps<typeof DialogPopup>['finalFocus']
   error?: string | null | undefined
+  submissionNotice?: ReactNode
 }
 
 type RedactionRule = { find: string; replace: string }
@@ -88,6 +89,34 @@ function useWorkspaceSubmit() {
     setPending(false)
   }
   return { pending, error, setError, submit }
+}
+
+export function WorkspaceSubmissionNotice({
+  label, busy, onCheck, onRetry, retryAvailable,
+}: {
+  label: string | null
+  retryAvailable: boolean
+  busy: boolean
+  onCheck: () => Promise<boolean>
+  onRetry: () => Promise<boolean>
+}) {
+  if (!label) return null
+  return (
+    <Alert variant="warning" role="status">
+      <div className="flex min-w-0 flex-col gap-2">
+        <p>上次{label}的结果尚未确认。先核对任务；重试会继续使用原输入，关闭弹窗不会取消后台任务。</p>
+        {!retryAvailable ? <p>刷新后需重新填写原输入并提交，系统会先核对上次任务。</p> : null}
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void onCheck()}>
+            核对任务
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy || !retryAvailable} onClick={() => void onRetry()}>
+            使用原请求重试
+          </Button>
+        </div>
+      </div>
+    </Alert>
+  )
 }
 
 function OperationError({ error }: { error: string | null | undefined }) {
@@ -144,16 +173,17 @@ export function WorkspaceImportDialog({
   limits,
   onImport,
   error,
+  submissionNotice,
 }: DialogProps & {
   disabled: boolean
-  limits: WorkspaceOverview['import']
+  limits: WorkspaceOverview['import'] | undefined
   onImport: (url: string, branch: string) => Promise<boolean>
 }) {
   const id = useId()
   const [url, setUrl] = useState('')
   const [branch, setBranch] = useState('main')
   const operation = useWorkspaceSubmit()
-  const unavailable = disabled || operation.pending || limits?.supported === false
+  const unavailable = disabled || operation.pending || limits?.supported !== true
   return (
     <Dialog
       open={open}
@@ -219,6 +249,7 @@ export function WorkspaceImportDialog({
             {limits?.supported === false ? (
               <Alert variant="warning">当前服务未开放仓库导入。</Alert>
             ) : null}
+            {submissionNotice}
             <OperationError error={operation.error ?? error} />
           </DialogPanel>
           <DialogFooter>
@@ -250,6 +281,7 @@ export function ExternalWorkspaceDialog({
   disabled,
   onGenerate,
   error,
+  submissionNotice,
 }: DialogProps & {
   internalVersions: readonly WorkspaceVersion[]
   initialSourceId?: string | undefined
@@ -372,6 +404,7 @@ export function ExternalWorkspaceDialog({
                 </div>
               ))}
             </div>
+            {submissionNotice}
             <OperationError error={operation.error ?? error} />
           </DialogPanel>
           <DialogFooter>
@@ -403,6 +436,7 @@ export function WorkspacePackagesDialog({
   disabled,
   onGenerate,
   error,
+  submissionNotice,
 }: DialogProps & {
   internalVersions: readonly WorkspaceVersion[]
   initialSourceId?: string | undefined
@@ -469,6 +503,7 @@ export function WorkspacePackagesDialog({
               从内部版本生成 ZIP，保留构建所需目录与依赖声明，排除 Git
               和缓存。下载后传输到对应服务器解压部署。
             </p>
+            {submissionNotice}
             <OperationError error={operation.error ?? error} />
           </DialogPanel>
           <DialogFooter>

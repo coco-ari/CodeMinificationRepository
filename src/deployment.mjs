@@ -9,6 +9,7 @@ import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
 import { DEFAULT_STORAGE_POLICY, storagePolicy, artifactId } from '../agent/storage-policy.mjs';
 import { networkIdentity } from '../agent/config.mjs';
+import { createProjectDeployments } from './deployment-projects.mjs';
 
 const now = () => new Date().toISOString();
 const terminal = new Set(['succeeded', 'failed', 'rolled_back', 'interrupted']);
@@ -135,11 +136,30 @@ export function validateConfig(input = {}, module = '.', kind = input?.kind || '
   return result;
 }
 
+// 两种项目入口共用服务器登记规则，归属映射由同一个事务提交。
+function insertServer(data, input, origin) {
+  const name = requireText(input.name, '服务器名称', 80), mode = managedMode(input.mode);
+  if (data.servers.length >= 500) fail('服务器数量已达到上限');
+  if (input.applicationId) find(data.applications, input.applicationId, '项目');
+  const registrationToken = randomSecret(), expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
+  const server = { id: randomUUID(), name, mode, createdAt: now(), registrationHash: digest(registrationToken), registrationExpiresAt: expiresAt,
+    registeredAt: null, lastSeenAt: null, version: null, revoked: false, metrics: null, containers: [] };
+  data.servers.push(server);
+  if (input.applicationId) data.serverBindings.push({ applicationId: input.applicationId, serverId: server.id, createdAt: now() });
+  return { server: structuredClone(safeServer(server)), registrationToken, expiresAt,
+    installCommand: origin ? `curl -fsS '${origin}/agent/install.sh' -o /tmp/cmr-agent-install.sh && sudo bash /tmp/cmr-agent-install.sh --url '${origin}' --token '${registrationToken}'` : null };
+}
+
 export class DeploymentService extends EventEmitter {
-  constructor(repository, { publicOrigin = '' } = {}) {
-    super(); this.repository = repository; this.store = repository.store; this.publicOrigin = publicOrigin;
+  constructor(repository, { publicOrigin = '', authorizeTask } = {}) {
+    super();
+    if (authorizeTask !== undefined && typeof authorizeTask !== 'function') throw new TypeError('任务授权端口必须是函数');
+    this.authorizeTask = authorizeTask;
+    this.repository = repository; this.store = repository.store; this.publicOrigin = publicOrigin;
     this.root = path.join(repository.directory, 'deployments'); this.pins = new Map(); this.pinErrors = new Map(); this.archivePending = new Map(); this.preparations = new Map();
     this.archives = new SourceArchives(this);
+    this.projects = createProjectDeployments({ store: this.store, validateConfig, publicServer: server => structuredClone(safeServer(server)),
+      insertServer: (data, input) => insertServer(data, input, this.publicOrigin), changed: (type, id) => this.changed(type, id) });
   }
   get data() { return this.store.state.deployments; }
   changed(type, id, applicationId) { this.emit('update', { type, id, applicationId, at: now() }); }
@@ -228,17 +248,9 @@ export class DeploymentService extends EventEmitter {
       services: this.data.services, targets: this.data.targets.filter(target => !target.retiredAt && target.mode === 'managed'), tasks: this.data.tasks.slice(-200).reverse() };
   }
   async createServer(input) {
-    const name = requireText(input.name, '服务器名称', 80); const serverMode = managedMode(input.mode);
-    const registrationToken = randomSecret(); const expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
-    const server = { id: randomUUID(), name, mode: serverMode, createdAt: now(), registrationHash: digest(registrationToken), registrationExpiresAt: expiresAt,
-      registeredAt: null, lastSeenAt: null, version: null, revoked: false, metrics: null, containers: [] };
-    await this.store.change(state => { if (state.deployments.servers.length >= 500) fail('服务器数量已达到上限'); if (input.applicationId) find(state.deployments.applications, input.applicationId, '项目');
-      state.deployments.servers.push(server);
-      if (input.applicationId) state.deployments.serverBindings.push({ applicationId: input.applicationId, serverId: server.id, createdAt: now() }); });
-    this.changed('server', server.id);
-    const origin = this.publicOrigin;
-    return { server: safeServer(server), registrationToken, expiresAt,
-      installCommand: origin ? `curl -fsS '${origin}/agent/install.sh' -o /tmp/cmr-agent-install.sh && sudo bash /tmp/cmr-agent-install.sh --url '${origin}' --token '${registrationToken}'` : null };
+    const result = await this.store.change(state => insertServer(state.deployments, input, this.publicOrigin));
+    this.changed('server', result.server.id);
+    return result;
   }
   async revokeServer(id) {
     await this.store.change(state => {
@@ -444,7 +456,7 @@ export class DeploymentService extends EventEmitter {
   async createTask(input) {
     if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
     if (!['deploy', 'restart', 'rollback'].includes(input.action)) fail('操作类型无效');
-    const requestFingerprint = digest(JSON.stringify([input.targetId, input.action, input.branch || null, input.revision || null, input.releaseId || null, input.sourceKey || null, input.configKey || null]));
+    const requestFingerprint = digest(JSON.stringify([input.targetId, input.action, input.branch || null, input.revision || null, input.releaseId || null, input.sourceKey || null, input.configKey || null, input.actor?.id || null]));
     if (input.requestId && !/^[a-f0-9-]{36}$/.test(input.requestId)) fail('幂等请求标识无效');
     const duplicate = data => {
       const existing = input.requestId && data.tasks.find(item => item.requestId === input.requestId);
@@ -600,6 +612,22 @@ export class DeploymentService extends EventEmitter {
       const next = data.tasks.find(task => task.serverId === serverId && ['preparing', 'queued'].includes(task.status));
       if (!next || next.status !== 'queued') return null;
       const target = this.ensureManaged(data, next.targetId);
+      if (this.authorizeTask) {
+        try {
+          // 同步裁决紧邻领取写入；不在事务里请求外部服务，也不保存浏览器会话。
+          const decision = this.authorizeTask({ task: structuredClone(next), target: structuredClone(target) });
+          if (decision?.then) {
+            Promise.resolve(decision).catch(() => {});
+            throw new Error('任务授权端口不支持异步返回');
+          }
+        } catch (error) {
+          if (![401, 403, 404].includes(error?.status)) throw new HttpError(503, '任务授权暂时不可用，尚未执行');
+          transition(next, 'interrupted', true);
+          Object.assign(next, { status: 'interrupted', stage: 'interrupted', error: '发布操作人权限已失效，任务未执行', finishedAt: now(), updatedAt: now() });
+          interruptedId = next.id;
+          return null;
+        }
+      }
       if (next.networkIdentity && !server.capabilities?.includes('fixed-network-alias-v1')) {
         Object.assign(next, { status: 'interrupted', stage: 'interrupted', error: 'Agent 不支持固定网络别名，请升级后重新创建任务', finishedAt: now() }); transition(next, 'interrupted', true); interruptedId = next.id; return null;
       }

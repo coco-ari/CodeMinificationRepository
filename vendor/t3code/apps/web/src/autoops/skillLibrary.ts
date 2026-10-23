@@ -1,6 +1,6 @@
 import type { ProjectListEntriesResult } from '@t3tools/contracts'
 import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
-import { readAutoOpsHost } from './hostConfig'
+import { autoOpsApiUrl, autoOpsRequest } from './apiClient'
 import { autoOpsSkillPackageLink } from './resources'
 
 export type SkillWorkspaceType = 'internal' | 'external'
@@ -66,45 +66,10 @@ export type SkillLibraryAction =
   | { action: 'delete'; skillId: string }
   | { action: 'verify'; skillId: string; versionId: string }
 
-function base() {
-  const host = readAutoOpsHost()
-  if (!host) throw new Error('当前入口未连接技能库。')
-  return `${host.gatewayBasePath}/autoops/skill-library`
-}
-async function request(
-  body?: SkillLibraryAction & { revision: string },
-  signal?: AbortSignal,
-): Promise<SkillLibrary> {
-  const response = await fetch(base(), {
-    credentials: 'same-origin',
-    ...(signal ? { signal } : {}),
-    ...(body
-      ? {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Demo-CSRF': readAutoOpsHost()?.csrfToken ?? '',
-          },
-          body: JSON.stringify(body),
-        }
-      : {}),
-  })
-  const result: unknown = await response.json().catch(() => null)
-  if (!response.ok) {
-    const error =
-      result && typeof result === 'object'
-        ? 'error' in result
-          ? result.error
-          : 'message' in result
-            ? result.message
-            : null
-        : null
-    throw new Error(
-      typeof error === 'string' ? error : `技能库请求失败（${response.status}），请重试。`,
-    )
-  }
-  return result as SkillLibrary
-}
+const base = () => autoOpsApiUrl('/autoops/skill-library')
+const request = (body?: SkillLibraryAction & { revision: string }, signal?: AbortSignal) =>
+  autoOpsRequest<SkillLibrary>('/autoops/skill-library', { label: '技能库', ...(body === undefined ? {} : { body }), ...(signal ? { signal } : {}) })
+
 export const loadSkillLibrary = (signal?: AbortSignal) => request(undefined, signal)
 export const changeSkillLibrary = (revision: string, action: SkillLibraryAction) =>
   request({ ...action, revision })

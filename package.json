@@ -46,7 +46,15 @@
     "format:autoops": "prettier --write autoops scripts/check-autoops-boundaries.mjs .dependency-cruiser.cjs .github/workflows/autoops.yml",
     "check:autoops": "prettier --check autoops scripts/check-autoops-boundaries.mjs .dependency-cruiser.cjs .github/workflows/autoops.yml && tsc --project autoops/tsconfig.json && node scripts/check-autoops-boundaries.mjs",
     "test:autoops": "node --test --test-concurrency=1 \"autoops/**/*.test.ts\" \"autoops/**/*.test.mjs\"",
-    "verify:autoops": "pnpm run check:autoops && pnpm run test:autoops"
+    "verify:autoops": "pnpm run check:autoops && pnpm run test:autoops",
+    "check:runtime:boundaries": "node scripts/check-runtime-boundaries.mjs",
+    "check:runtime:types": "tsc --noEmit && pnpm --dir vendor/t3code/apps/web exec tsc-rs --noEmit && pnpm --dir vendor/t3code/apps/server exec tsc-rs --noEmit && tsc --noEmit --project agent-demo/customer-agent/tsconfig.json",
+    "check:runtime": "prettier --check scripts/check-runtime-boundaries.mjs test/runtime-boundaries.test.mjs .github/workflows/runtime.yml docs/runtime-modules.md && node scripts/check.mjs && pnpm run check:runtime:boundaries && pnpm run check:runtime:types",
+    "test:runtime:node": "node --test --test-timeout=120000 --test-concurrency=1 \"test/**/*.test.mjs\" \"agent-demo/t3-adapters/**/*.test.mjs\"",
+    "test:runtime:server": "pnpm --dir vendor/t3code/apps/server exec vp test run src/autoops",
+    "test:runtime:web": "pnpm --dir vendor/t3code/apps/web exec vp test run src/autoops --project unit --project browser",
+    "test:runtime:customer": "pnpm run bundle:customer-agent && node --test --test-timeout=120000 --test-concurrency=1 \"agent-demo/customer-agent/**/*.test.ts\"",
+    "verify:runtime": "pnpm run check:runtime && pnpm run build:ui && pnpm run test:runtime:node && pnpm run test:runtime:server && pnpm run test:runtime:web && pnpm run test:runtime:customer"
   },
   "packageManager": "pnpm@11.25.0",
   "dependencies": {

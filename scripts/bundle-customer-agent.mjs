@@ -10,11 +10,13 @@ import { generateThirdPartyLicenseManifest } from '../vendor/t3code/scripts/lib/
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const t3Root = path.join(root, 'vendor/t3code');
-const output = path.join(root, 'dist/customer-agent');
-// This directory contains only this build's generated artifacts. Remove obsolete chunks.
+const output = path.resolve(root, 'dist/customer-agent');
+if (path.relative(path.resolve(root, 'dist'), output) !== 'customer-agent') throw new Error('客户构建目录越过允许的输出范围');
+// 此目录只保存本次客户程序产物；校验目录后清理旧分块。
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-await promisify(execFile)(path.join(t3Root, 'node_modules/.bin/vp'), [
+// 使用同一锁定 CLI 的 JavaScript 入口，避免 Windows 的 .cmd 与 POSIX 启动文件差异。
+await promisify(execFile)(process.execPath, [path.join(t3Root, 'node_modules/vite-plus/bin/vp'),
   'pack', '../../agent-demo/customer-agent/cli.ts', '--no-config', '--format', 'esm',
   '--out-dir', output, '--sourcemap', '--deps.always-bundle', '/.*/', '--target', 'node24',
 ], { cwd: t3Root, env: { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}` }, maxBuffer: 8 * 1024 * 1024 });

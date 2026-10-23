@@ -1,120 +1,8 @@
-import { readAutoOpsHost } from './hostConfig'
+import { autoOpsRequest, AutoOpsRequestError } from './apiClient'
+import type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../../../../../autoops/contracts/deployments.ts'
+export type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../../../../../autoops/contracts/deployments.ts'
 
-export interface StaticDeploymentConfig {
-  kind: 'static'
-  module: string
-  artifactPath: string
-  buildImage: string
-  packageManager: 'npm' | 'pnpm'
-  packageManagerVersion: string
-  buildScript: string
-  buildArgs: string[]
-  build: { cpus: number; memoryMb: number }
-  health: {
-    url: string
-    bodyIncludes: string
-    status: number
-    timeoutSeconds: number
-    intervalSeconds: number
-  }
-}
-
-export interface DeploymentRelease {
-  id: string
-  targetId: string
-  createdAt: string
-  revision?: string
-  current?: boolean
-  available?: boolean
-  archiveStatus?: string
-  sourceIdentity?: { packageId?: string; sourceVersionId?: string; service?: string }
-  config?: StaticDeploymentConfig
-}
-
-export interface DeploymentTarget {
-  id: string
-  name: string
-  environmentId: string
-  serverId: string
-  kind?: 'static'
-  service?: 'frontend'
-  configKey: string
-  config: StaticDeploymentConfig
-  currentRelease?: DeploymentRelease | null
-}
-
-export interface DeploymentTask {
-  id: string
-  targetId: string
-  status: string
-  stage: string
-  action?: string
-  createdAt: string
-  updatedAt?: string
-  error?: string | null
-  lastSeq?: number
-  requestId?: string
-  stageHistory?: Array<{ stage: string; startedAt?: string; finishedAt?: string }>
-  sourceIdentity?: { packageId?: string; sourceVersionId?: string }
-  result?: {
-    error?: string
-    cleanupError?: string
-    recoveryMethod?: string
-    release?: DeploymentRelease
-    rollback?: {
-      status: 'succeeded' | 'failed' | 'unavailable'
-      error?: string
-      release?: DeploymentRelease
-    }
-  }
-}
-
-export interface DeploymentLog {
-  seq: number
-  at?: string
-  stage?: string
-  message: string
-}
-export interface DeploymentTaskDetails {
-  task: DeploymentTask
-  logs: DeploymentLog[]
-  nextSeq: number
-}
-export interface DeploymentOverview {
-  enabled: boolean
-  environments: Array<{ id: string; name: string }>
-  servers: Array<{
-    id: string
-    name: string
-    online: boolean
-    environmentId?: string
-    version?: string
-    revoked?: boolean
-    capabilities?: string[]
-  }>
-  targets: DeploymentTarget[]
-  tasks: DeploymentTask[]
-}
-
-export interface DeploymentSubmission {
-  targetId: string
-  action: 'deploy' | 'rollback'
-  packageId?: string
-  service: 'frontend'
-  configKey: string
-  releaseId?: string
-  requestId: string
-}
-
-export interface DeploymentTargetSubmission {
-  name: string
-  environmentId: string
-  serverId: string
-  config: StaticDeploymentConfig
-  requestId: string
-}
-
-/** An interrupted mutation has no client-side success/failure inference. */
+/** 中断的写请求保留待核查状态，界面不能自行推断成功或失败。 */
 export class DeploymentRequestError extends Error {
   constructor(
     message: string,
@@ -124,57 +12,15 @@ export class DeploymentRequestError extends Error {
   }
 }
 
-function deploymentBase(projectId: string) {
-  const host = readAutoOpsHost()
-  if (!host) throw new Error('当前入口未连接部署服务。')
-  return `${host.gatewayBasePath}/autoops/projects/${encodeURIComponent(projectId)}/deployments`
-}
-
-async function request<T>(
-  projectId: string,
-  suffix: string,
-  body?: object,
-  signal?: AbortSignal,
-): Promise<T> {
-  let response: Response
+async function request<T>(projectId: string, suffix: string, body?: object, signal?: AbortSignal): Promise<T> {
   try {
-    response = await fetch(deploymentBase(projectId) + suffix, {
-      credentials: 'same-origin',
-      ...(signal ? { signal } : {}),
-      ...(body === undefined
-        ? {}
-        : {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Demo-CSRF': readAutoOpsHost()?.csrfToken ?? '',
-            },
-            body: JSON.stringify(body),
-          }),
+    return await autoOpsRequest<T>(`/autoops/projects/${encodeURIComponent(projectId)}/deployments${suffix}`, {
+      label: '部署', ...(body === undefined ? {} : { body }), ...(signal ? { signal } : {}),
     })
   } catch (cause) {
-    if (signal?.aborted) throw cause
-    throw new DeploymentRequestError(
-      body
-        ? '连接中断，提交结果尚未确认。请核对后用原请求重试。'
-        : '部署服务暂时无法连接，请重试。',
-      body !== undefined,
-    )
+    if (cause instanceof AutoOpsRequestError) throw new DeploymentRequestError(cause.message, cause.uncertain)
+    throw cause
   }
-  const result: unknown = await response.json().catch(() => null)
-  if (!response.ok || result === null) {
-    const message =
-      result && typeof result === 'object' && 'message' in result
-        ? result.message
-        : result && typeof result === 'object' && 'error' in result
-          ? result.error
-          : undefined
-    throw new DeploymentRequestError(
-      typeof message === 'string' ? message : `部署请求未完成（${response.status}）。`,
-      body !== undefined && (response.status >= 500 || response.status === 408 || response.ok),
-    )
-  }
-  return result as T
 }
 
 export const loadDeployments = (projectId: string, environmentId?: string, signal?: AbortSignal) =>

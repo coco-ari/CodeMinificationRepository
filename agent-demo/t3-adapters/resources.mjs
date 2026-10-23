@@ -1,19 +1,15 @@
 import { createHash } from 'node:crypto'
-import { DatabaseSync } from 'node:sqlite'
-import { join, resolve } from 'node:path'
-import { readFile } from 'node:fs/promises'
 import { contextFor } from '../fixtures.mjs'
 import { configuredAutoOpsAccess, AutoOpsAccessError } from './access.mjs'
 import { configuredBusinessArtifactStore } from './business-tools.mjs'
 import { extractBusinessAttachment } from './business-documents.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
 import { readScopedSkillResourceForThread } from './scoped-skills.mjs'
-import { resolveAttachmentPathById } from '../../vendor/t3code/apps/server/src/attachmentStore.ts'
 
 const fail = (message) => { throw new AutoOpsAccessError(404, 'RESOURCE_NOT_FOUND', message || '资料不存在或无权访问') }
 const nameFor = (name) => name.replace(/[\/\\\u0000-\u001f]/g, '_').slice(0, 160) || 'file'
 const version = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16)
-export function createBusinessResourceCatalog({ access, bindingDb, artifactStore, attachmentsDir, workspaceStore = configuredWorkspaceStore() }) {
+export function createBusinessResourceCatalog({ access, artifactStore, readAttachment, workspaceStore = configuredWorkspaceStore() }) {
   const sameWorkspace = (source, target) => (source.workspaceType || null) === (target?.workspaceType || null) && (source.workspaceVersionId || null) === (target?.workspaceVersionId || null)
   function workspace(binding) {
     if (!binding?.workspaceType && !binding?.workspaceVersionId) return null
@@ -22,7 +18,7 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     if (version.type !== binding.workspaceType) fail('工作区不属于当前会话范围')
     return { version, files: workspaceStore.files(binding.projectId, binding.workspaceVersionId) }
   }
-  function catalog(project, permitsThread, binding) {
+  function catalog(project, resourceThreads, binding) {
     const entries = []
     const add = (path, resource) => entries.push({ path, ...resource })
     const prefix = `autoops/${project.id}`
@@ -38,17 +34,13 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
       for (const environment of project.environments)
         add(`${prefix}/environments/${environment.id}/snapshot.json`, { type: 'environment', id: environment.id, name: `${environment.name}.json`, mime: 'application/json', environmentId: environment.id })
     }
-    const bindings = bindingDb.prepare('SELECT thread_id FROM t3_thread_bindings WHERE project_id=? AND revoked_at IS NULL').all(project.id)
-    for (const row of bindings) {
-      const source = access.getThreadBinding(row.thread_id)
-      if (!source || !sameWorkspace(source, binding) || (binding?.environmentId && source.environmentId !== binding.environmentId)) continue
-      if (!permitsThread(row.thread_id)) continue
-      for (const file of bindingDb.prepare('SELECT attachment_id, metadata_json FROM t3_attachment_access WHERE thread_id=?').all(row.thread_id)) {
-        const meta = file.metadata_json ? JSON.parse(file.metadata_json) : {}
-        add(`${prefix}/threads/${row.thread_id}/attachments/${file.attachment_id}/${nameFor(meta.name || file.attachment_id)}`, { type: 'attachment', id: file.attachment_id, threadId: row.thread_id, name: meta.name || file.attachment_id, mime: meta.mimeType || 'application/octet-stream', size: meta.sizeBytes || 0, sourceUrl: `/api/agent-demo/t3/autoops/attachments/${file.attachment_id}` })
+    for (const { binding: source, attachments } of resourceThreads) {
+      if (!sameWorkspace(source, binding) || (binding?.environmentId && source.environmentId !== binding.environmentId)) continue
+      for (const file of attachments) {
+        add(`${prefix}/threads/${source.threadId}/attachments/${file.id}/${nameFor(file.name || file.id)}`, { type: 'attachment', id: file.id, threadId: source.threadId, name: file.name || file.id, mime: file.mimeType || 'application/octet-stream', size: file.sizeBytes || 0, sourceUrl: `/api/agent-demo/t3/autoops/attachments/${file.id}` })
       }
-      for (const file of artifactStore?.list(row.thread_id) || [])
-        add(`${prefix}/threads/${row.thread_id}/reports/${file.id}/${nameFor(file.name)}`, { type: 'report', id: file.id, threadId: row.thread_id, name: file.name, mime: file.mime, size: file.size, sourceUrl: `/api/agent-demo/t3/autoops/files/${file.id}` })
+      for (const file of artifactStore?.list(source.threadId) || [])
+        add(`${prefix}/threads/${source.threadId}/reports/${file.id}/${nameFor(file.name)}`, { type: 'report', id: file.id, threadId: source.threadId, name: file.name, mime: file.mime, size: file.size, sourceUrl: `/api/agent-demo/t3/autoops/files/${file.id}` })
     }
     return entries
   }
@@ -77,7 +69,7 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
   }
   function visible(principal, project, binding) {
     access.requireWorkspace(principal, project.id, binding?.workspaceType || 'internal', binding?.workspaceVersionId, binding?.environmentId)
-    return catalog(project, (threadId) => access.canSeeThread(principal, threadId), binding)
+    return catalog(project, access.listResourceThreads(principal, project.id), binding)
   }
   function assertPath(path) {
     if (typeof path !== 'string' || path.startsWith('/') || path.includes('\\') || path.split('/').some((part) => part === '..' || part === '.') || path.includes('\0')) fail()
@@ -122,9 +114,8 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
       if (!file) fail()
       return file.bytes
     }
-    const path = resolveAttachmentPathById({ attachmentsDir, attachmentId: resource.id })
-    if (!path) fail()
-    return readFile(path)
+    if (!readAttachment) throw new AutoOpsAccessError(503, 'ATTACHMENT_READER_UNAVAILABLE', '附件读取暂时不可用')
+    return readAttachment(resource.id)
   }
   async function contents(resource) {
     if (resource.type === 'workspace') return workspaceStore.read(resource.projectId, resource.workspaceVersionId, resource.relativePath).contents
@@ -135,14 +126,9 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
   }
   function forThread(threadId) {
     const target = access.requireToolThread(threadId)
-    const targetAudience = access.threadAudience(target.binding)
-    return catalog(target.project, (sourceId) => {
-      const source = access.getThreadBinding(sourceId)
-      if (!source || source.revokedAt) return false
-      const sourceAudience = access.threadAudience(source)
-      return targetAudience.every((id) => sourceAudience.includes(id))
-    }, target.binding).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
+    return catalog(target.project, access.listToolResourceThreads(threadId), target.binding).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
   }
+
   return {
     projectAtCwd,
     search(principal, input) {
@@ -236,13 +222,9 @@ export function createBusinessResourceCatalog({ access, bindingDb, artifactStore
     },
   }
 }
-let configured
-export function configuredBusinessResourceCatalog() {
+export function configuredBusinessResourceCatalog({ readAttachment } = {}) {
   const access = configuredAutoOpsAccess()
   if (!access) return undefined
-  if (configured) return configured
-  const directory = resolve(process.env.AUTOOPS_T3_DATA_DIR)
-  const bindingDb = new DatabaseSync(join(directory, 't3-autoops.sqlite'), { readOnly: true })
-  configured = createBusinessResourceCatalog({ access, bindingDb, artifactStore: configuredBusinessArtifactStore(), attachmentsDir: join(process.env.AUTOOPS_T3_BASE_DIR || join(directory, 't3'), 'userdata/attachments') })
-  return configured
+  // 配置资源由各自所有者持有；目录本身没有连接或可变缓存。
+  return createBusinessResourceCatalog({ access, artifactStore: configuredBusinessArtifactStore(), readAttachment })
 }

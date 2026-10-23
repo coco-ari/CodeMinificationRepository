@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, symlinkSync, unlinkSync, readdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, symlinkSync, unlinkSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { unzipSync } from 'fflate'
 import { execFileSync } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
+import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../agent-demo/t3-adapters/access.mjs'
 import { extractZip } from '../agent/archive.mjs'
 import { createWorkspaceStore } from '../agent-demo/t3-adapters/workspaces.mjs'
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), 't3-workspaces-'))
-  t.after(() => rmSync(dataDir, { recursive: true, force: true }))
-  const store = createWorkspaceStore({ dataDir })
+  const store = createWorkspaceStore({ dataDir, authorizeTask: () => {}, ...options })
+  t.after(async () => { await store.close(); rmSync(dataDir, { recursive: true, force: true }) })
   await store.ensureProject({ id: 'p-test', name: '验证项目', documents: [{ id: 'd1', name: '设计.md', content: '# 固定项目资料\n项目代号 INTERNAL-DEMO' }] })
   return { store, dataDir, version: store.overview('p-test').internalVersions[0] }
 }
@@ -24,6 +26,86 @@ async function finish(store, task) {
   assert.fail('工作区任务未在预期时间完成')
 }
 const publish = (store, version) => store.confirmExternal('p-test', version.id, { confirmedPaths: version.report.pendingFiles.map((entry) => entry.path), excludedPaths: [] })
+
+test('工作区任务限制并发和排队容量，重复提交不占容量，取消排队任务不生成发布物', async (t) => {
+  const { store, version } = await fixture(t, { taskLimits: { maxConcurrent: 1, maxQueued: 1 } })
+  const firstInput = { sourceVersionId: version.id, services: ['frontend'], requestId: 'bounded-first' }
+  const first = store.startPackages('p-test', firstInput)
+  assert.equal(first.requestId, firstInput.requestId)
+  assert.equal(first.actorId, undefined); assert.equal(first.fingerprint, undefined); assert.equal(first.ownerPid, undefined)
+  const queued = store.startPackages('p-test', { ...firstInput, requestId: 'bounded-second' })
+  assert.equal(store.startPackages('p-test', firstInput).id, first.id)
+  assert.throws(() => store.startPackages('p-test', { ...firstInput, requestId: 'capacity-overflow' }), { status: 429, code: 'WORKSPACE_TASK_CAPACITY' })
+  assert.equal(store.overview('p-test').tasks.length, 2)
+  store.cancelTask('p-test', queued.id)
+  const replacement = store.startPackages('p-test', { ...firstInput, requestId: 'capacity-after-cancel' })
+  store.cancelTask('p-test', replacement.id)
+  await store.whenIdle()
+  const overview = store.overview('p-test')
+  assert.equal(overview.tasks.find((entry) => entry.id === first.id).status, 'completed')
+  assert.equal(overview.tasks.find((entry) => entry.id === queued.id).status, 'interrupted')
+  assert.equal(overview.releases.length, 1)
+  await store.close()
+  assert.throws(() => store.startPackages('p-test', { ...firstInput, requestId: 'after-close' }), { code: 'WORKSPACE_STOPPING' })
+})
+
+test('工作区导入、脱敏和打包领取时重查真实项目权限，撤权不产生版本或发布包', async (t) => {
+  let access
+  const { store, version, dataDir } = await fixture(t, { authorizeTask: ({ actorId, projectId }) => access.requireWorkspaceActor(actorId, projectId) })
+  const sessionDb = new DatabaseSync(':memory:'), bindingDb = new DatabaseSync(':memory:')
+  sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
+  initializeAutoOpsAccessSchema(bindingDb)
+  t.after(() => { sessionDb.close(); bindingDb.close() })
+  const membership = { userId: 'manager', workspaceAccess: 'internal', role: 'manager', status: 'active', environmentIds: ['env-test'] }
+  const catalog = { users: [{ id: 'manager', name: '项目管理者', role: 'member', status: 'active' }, { id: 'other-manager', name: '另一管理者', role: 'member', status: 'active' }], agents: [], projects: [{ id: 'p-test', name: '验证项目', memberships: [membership, { ...membership, userId: 'other-manager' }], memberIds: ['manager', 'other-manager'], environments: [{ id: 'env-test', name: '测试' }], documents: [], resources: [] }] }
+  access = createAutoOpsAccess({ sessionDb, bindingDb, catalog, workspaceStore: store, deploymentEnabled: () => false })
+  const before = store.overview('p-test')
+  const tasks = [
+    store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'revoked-packages' }, 'manager'),
+    store.startExternal('p-test', { sourceVersionId: version.id, requestId: 'revoked-external' }, 'manager'),
+    store.startImport('p-test', { repositoryUrl: 'https://github.com/example/repository', requestId: 'revoked-import' }, 'manager'),
+  ]
+  assert.throws(() => store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'revoked-packages' }, 'other-manager'), { code: 'WORKSPACE_REQUEST_CONFLICT' })
+  membership.role = 'member'
+  await store.whenIdle()
+  const after = store.overview('p-test')
+  for (const task of tasks) {
+    const persisted = after.tasks.find((entry) => entry.id === task.id)
+    assert.equal(persisted.status, 'interrupted'); assert.match(persisted.error, /权限已失效/)
+  }
+  assert.deepEqual(after.internalVersions, before.internalVersions)
+  assert.deepEqual(after.externalVersions, before.externalVersions)
+  assert.deepEqual(after.releases, before.releases)
+  assert.match(store.read('p-test', version.id, 'WORKSPACE.md').contents, /验证项目/)
+  assert.throws(() => store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'unknown-actor' }, 'unknown'), { code: 'PROJECT_NOT_FOUND' })
+  const unconfigured = createWorkspaceStore({ dataDir })
+  assert.throws(() => unconfigured.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'missing-port' }, 'manager'), { code: 'WORKSPACE_AUTHORIZATION_REQUIRED' })
+  membership.role = 'manager'
+  assert.throws(() => access.requireDeploymentActor('manager', 'p-test', 'env-test'), { code: 'DEPLOYMENT_DISABLED' })
+  const independent = store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'package-with-deployment-disabled' }, 'manager')
+  await store.whenIdle()
+  assert.equal(store.overview('p-test').tasks.find((entry) => entry.id === independent.id).status, 'completed')
+  assert.ok(store.packageFile('p-test', store.overview('p-test').releases[0].id, 'frontend').bytes.length > 0)
+})
+
+test('任务与失败状态双重写入异常被收敛，其他项目仍可读取并完成打包', async (t) => {
+  const diagnostics = []
+  const { store, version, dataDir } = await fixture(t, { onTaskDiagnostic: (event) => { diagnostics.push(event); throw new Error('诊断接收端也失败') } })
+  await store.ensureProject({ id: 'p-healthy', name: '独立项目', documents: [] })
+  const statePath = join(dataDir, 'project-workspaces', 'p-test', 'state.json')
+  const task = store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'state-write-failure' })
+  const original = readFileSync(statePath)
+  writeFileSync(statePath, '{损坏状态')
+  await store.whenIdle()
+  assert.deepEqual(diagnostics, [{ event: 'workspace.task.persistence_failed', taskId: task.id, code: 'WORKSPACE_TASK_STATE_UNAVAILABLE' }])
+  const healthy = store.overview('p-healthy').internalVersions[0]
+  const next = store.startPackages('p-healthy', { sourceVersionId: healthy.id, services: ['frontend'], requestId: 'unaffected-project' })
+  await store.whenIdle()
+  assert.equal(store.overview('p-healthy').tasks.find((entry) => entry.id === next.id).status, 'completed')
+  assert.match(store.read('p-healthy', healthy.id, 'WORKSPACE.md').contents, /独立项目/)
+  writeFileSync(statePath, original)
+  assert.equal(store.overview('p-test').tasks.find((entry) => entry.id === task.id).status, 'interrupted')
+})
 
 test('内部来源是真实持久化的独立 Git，固定提交与资料身份，重开store仍可读取', async (t) => {
   const { store, dataDir, version } = await fixture(t)
@@ -122,7 +204,12 @@ test('资源范围拒绝跨项目、目录穿越、绝对路径和符号链接�
   }
   assert.throws(() => store.getVersion('p-other', version.id), /不存在/)
   const actual = join(dataDir, 'project-workspaces', 'p-test', 'versions', version.id, 'files', 'docs', '设计.md')
-  unlinkSync(actual); symlinkSync('/etc/passwd', actual)
+  if (process.platform === 'win32') {
+    // Windows 的目录联接不依赖创建文件符号链接的系统权限，同样覆盖跨目录读取。
+    const outside = join(dataDir, 'outside'), docs = join(actual, '..')
+    mkdirSync(outside); writeFileSync(join(outside, '设计.md'), '工作区之外的内容')
+    rmSync(docs, { recursive: true }); symlinkSync(outside, docs, 'junction')
+  } else { unlinkSync(actual); symlinkSync('/etc/passwd', actual) }
   assert.throws(() => store.read('p-test', version.id, 'docs/设计.md'), /符号链接/)
   const failed = await finish(store, store.startExternal('p-test', { sourceVersionId: version.id, requestId: 'unsafe-source' }))
   assert.equal(failed.status, 'failed')
@@ -143,7 +230,7 @@ test('内部固定文件被改动时阻止导出，失败任务保留上个外�
   assert.match(store.read('p-test', published.id, 'docs/设计.md').contents, /固定项目资料/)
 })
 
-test('取消任务不发布半成品，重启只恢复已退出进程的任务', async (t) => {
+test('取消任务不发布半成品，重启识别PID复用且保留同实例及其他存活进程任务', async (t) => {
   const { store, dataDir, version } = await fixture(t)
   const task = store.startExternal('p-test', { sourceVersionId: version.id, requestId: 'cancel' })
   assert.equal(store.cancelTask('p-test', task.id).status, 'interrupted')
@@ -152,13 +239,22 @@ test('取消任务不发布半成品，重启只恢复已退出进程的任务',
   // 跨进程 worker 创建 store 不得破坏当前存活进程拥有的任务。
   const stateFile = join(dataDir, 'project-workspaces', 'p-test', 'state.json')
   const state = JSON.parse(readFileSync(stateFile, 'utf8'))
-  state.tasks.push({ id: 'alive', type: 'external', status: 'running', ownerPid: process.pid, message: '处理中', stage: 'checking', createdAt: new Date().toISOString() })
-  state.tasks.push({ id: 'dead', type: 'external', status: 'running', ownerPid: 999999999, message: '处理中', stage: 'checking', createdAt: new Date().toISOString() })
+  const ownerInstanceId = state.tasks.find((entry) => entry.id === task.id).ownerInstanceId
+  assert.equal(typeof ownerInstanceId, 'string')
+  const active = { type: 'external', status: 'running', ownerPid: process.pid, ownerInstanceId, message: '处理中', stage: 'checking', createdAt: new Date().toISOString() }
+  state.tasks.push({ ...active, id: 'alive' }, { ...active, id: 'dead', ownerPid: 999999999 })
+  state.tasks.push({ ...active, id: 'reused-pid', ownerInstanceId: '另一个进程实例' })
+  state.tasks.push({ ...active, id: 'legacy-same-pid', ownerInstanceId: undefined })
+  state.tasks.push({ ...active, id: 'other-process', ownerPid: process.ppid, ownerInstanceId: '另一个仍在运行的进程' })
   writeFileSync(stateFile, JSON.stringify(state))
   const reopened = createWorkspaceStore({ dataDir }), tasks = reopened.overview('p-test').tasks
   assert.equal(tasks.find((entry) => entry.id === 'alive').status, 'running')
   assert.equal(tasks.find((entry) => entry.id === 'dead').status, 'interrupted')
+  assert.equal(tasks.find((entry) => entry.id === 'reused-pid').status, 'interrupted')
+  assert.equal(tasks.find((entry) => entry.id === 'legacy-same-pid').status, 'interrupted')
+  assert.equal(tasks.find((entry) => entry.id === 'other-process').status, 'running')
   assert.ok(!JSON.stringify(tasks).includes('ownerPid'))
+  assert.ok(!JSON.stringify(tasks).includes('ownerInstanceId'))
   assert.equal(readdirSync(join(dataDir, 'project-workspaces', 'p-test', 'versions')).length, 1)
 })
 

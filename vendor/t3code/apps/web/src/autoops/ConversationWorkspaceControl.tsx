@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { autoOpsAreaAvailable } from "./projectNavigation.logic";
 import { autoOpsProjectHref } from "./projectNavigation";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderGit2Icon, LaptopIcon } from "lucide-react";
 import { MenuItem } from "~/components/ui/menu";
-import { ScopeComposerChoice, availableWorkspaceVersions } from "./WorkspaceScopeControl";
+import { ScopeComposerChoice, availableWorkspaceVersions } from "./scopeSelection";
 import { loadWorkspaces, type WorkspaceVersion } from "./workspaces";
 import {
   customerRequest,
@@ -32,6 +33,8 @@ export function ConversationWorkspaceControl({
   onInitialize: (scope: AutoOpsThreadScope) => void;
 }) {
   const navigate = useNavigate();
+  const host = readAutoOpsHost();
+  const canReadPlatform = autoOpsAreaAvailable("workspaces", host, projectId);
   const [loaded, setData] = useState<{
     projectId: string;
     versions: WorkspaceVersion[];
@@ -44,7 +47,7 @@ export function ConversationWorkspaceControl({
   useEffect(() => {
     const controller = new AbortController();
     void Promise.allSettled([
-      loadWorkspaces(projectId, controller.signal),
+      canReadPlatform ? loadWorkspaces(projectId, controller.signal) : Promise.resolve(null),
       loadCustomerWorkspaces(projectId, controller.signal),
       customerRequest<{ devices: CustomerDevice[] }>("devices", undefined, controller.signal),
     ]).then(([platform, customer, devices]) => {
@@ -52,7 +55,7 @@ export function ConversationWorkspaceControl({
       setData({
         projectId,
         versions:
-          platform.status === "fulfilled"
+          platform.status === "fulfilled" && platform.value
             ? availableWorkspaceVersions(projectId, platform.value)
             : [],
         workspaces: customer.status === "fulfilled" ? customer.value.workspaces : [],
@@ -62,7 +65,7 @@ export function ConversationWorkspaceControl({
       setError(failed?.status === "rejected" ? "部分工作区未能加载，请刷新重试" : null);
     });
     return () => controller.abort();
-  }, [projectId, attempt]);
+  }, [projectId, attempt, canReadPlatform]);
   useEffect(() => {
     if (locked || disabled || !data) return;
     const current = readAutoOpsThreadScope(threadId, projectId);
@@ -155,8 +158,7 @@ export function ConversationWorkspaceControl({
             <MenuItem onClick={() => setAttempt((value) => value + 1)}>读取失败，点击重试</MenuItem>
           ) : null}
           <MenuItem onClick={() => setAttempt((value) => value + 1)}>刷新已登记工作区</MenuItem>
-          {readAutoOpsHost()?.projects.find((entry) => entry.id === projectId)?.membership
-            ?.workspaceAccess !== "external" ? (
+          {canReadPlatform ? (
             <MenuItem onClick={() => void navigate({ href: autoOpsProjectHref("workspaces", projectId) })}>查看平台工作区</MenuItem>
           ) : null}
           {readAutoOpsHost()?.customerAgentsEnabled ? (

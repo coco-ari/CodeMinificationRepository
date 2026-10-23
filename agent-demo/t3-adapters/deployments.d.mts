@@ -1,12 +1,7 @@
-import type {AutoOpsPrincipal, AutoOpsProject} from './access.mjs';
+import type {AutoOpsPrincipal, AutoOpsProject, AutoOpsAccess} from './access.mjs';
 import type {WorkspaceStore} from './workspaces.mjs';
-export interface DeploymentSourceIdentity {projectId:string;sourceVersionId:string;packageId:string;service:'frontend';contentHash:string;repositories:Array<{path:string;commit:string}>}
-export interface DeploymentRelease {id:string;targetId?:string;kind?:'static';revision?:string;createdAt?:string;available?:boolean;current?:boolean;archiveStatus?:string;config?:Record<string,unknown>;sourceIdentity?:DeploymentSourceIdentity}
-export interface DeploymentTask {id:string;targetId:string;serverId:string;environmentId:string;action:string;status:string;stage:string;createdAt:string;lastSeq:number;requestId?:string;error?:string;sourceIdentity?:DeploymentSourceIdentity;actor?:{id:string;displayName?:string};result?:{error?:string;cleanupError?:string;recoveryMethod?:string;release?:DeploymentRelease;rollback?:{status?:'succeeded'|'failed'|'unavailable';error?:string;release?:DeploymentRelease}}}
-export interface DeploymentServer {id:string;name:string;environmentId:string;online?:boolean;revoked?:boolean;capabilities?:string[]}
-export interface DeploymentTarget {id:string;name:string;environmentId:string;serverId:string;kind:'static';service:'frontend';config:Record<string,unknown>;configKey:string;currentRelease?:DeploymentRelease|null}
-export interface DeploymentOverview {enabled:boolean;environments:Array<{id:string;name:string}>;servers:DeploymentServer[];targets:DeploymentTarget[];tasks:DeploymentTask[]}
-export interface DeploymentLog {seq:number;stage:string;status:string;message:string;at:string;receivedAt?:string}
+import type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
+export type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
 export interface DeploymentStore {
  initialize():Promise<DeploymentStore>;
  ensureProject(project:AutoOpsProject):Promise<void>;
@@ -21,5 +16,5 @@ export interface DeploymentStore {
  readonly agentAddress:import('node:net').AddressInfo|string|null|undefined;
  close():Promise<void>;
 }
-export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;access?:unknown;agentPort?:number;publicOrigin?:string}):DeploymentStore;
+export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;access:Pick<AutoOpsAccess,'requireDeploymentActor'>;agentPort?:number;publicOrigin?:string}):DeploymentStore;
 export function configuredDeploymentStore():DeploymentStore|undefined;

@@ -1,3 +1,5 @@
+import { useWorkspaceOverview } from './useWorkspaceOverview'
+import { useWorkspaceTaskSubmission } from './useWorkspaceTaskSubmission'
 import {
   ModuleHeader,
   ModuleSidebar,
@@ -26,17 +28,13 @@ import {
   FILE_SURFACE_SUBHEADER_CLASS,
   FileSurfaceAction,
 } from '~/components/files/fileSurfaceChrome'
-import { randomUUID } from '~/lib/utils'
 import { readAutoOpsHost } from './hostConfig'
 import { useAutoOpsProjectId } from './projectNavigation'
 import { DeploymentsPanel } from './DeploymentsPanel'
-import { WorkspacePackagesDialog, WorkspaceTasksDialog } from './WorkspaceActions'
+import { WorkspacePackagesDialog, WorkspaceTasksDialog, WorkspaceSubmissionNotice } from './WorkspaceActions'
 import {
   cancelWorkspaceTask,
-  generateWorkspacePackages,
-  loadWorkspaces,
   workspacePackageUrl,
-  type WorkspaceOverview,
   type WorkspaceRelease,
   type WorkspaceTask,
   type WorkspaceVersion,
@@ -63,7 +61,7 @@ function saveSelection(projectId: string, key: string, value: string) {
   try {
     sessionStorage.setItem(storageKey(projectId, key), value)
   } catch {
-    /* Viewing stays usable without persistence. */
+    /* 浏览器存储不可用时仍可查看当前页面。 */
   }
 }
 
@@ -77,8 +75,7 @@ export function AutoOpsDeploymentsPage() {
       : typeof search.sourceVersionId === 'string' && search.sourceVersionId
         ? search.sourceVersionId
         : null
-  const manager =
-    project?.membership?.workspaceAccess === 'internal' && project.membership.role === 'manager'
+  const manager = project?.capabilities?.['deployment.read'] === true
   return (
     <SidebarInset
       className="h-dvh min-h-0 min-w-0 overflow-hidden overscroll-y-none"
@@ -95,7 +92,7 @@ export function AutoOpsDeploymentsPage() {
       ) : null}
       {project && manager ? (
         <ProjectDeployments
-          key={projectId}
+          key={`${readAutoOpsHost()?.principal.id}:${projectId}`}
           projectId={projectId}
           requestedSourceVersionId={sourceVersionId}
         />
@@ -119,20 +116,28 @@ function ProjectDeployments({
   requestedSourceVersionId: string | null | undefined
 }) {
   const navigate = useNavigate()
+  const canManage = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.['workspace.manage'] === true
   const [view, setView] = useState<'services' | 'packages'>(() =>
     requestedSourceVersionId !== undefined || readSelection(projectId, 'view') === 'packages'
       ? 'packages'
       : 'services',
   )
-  const [overview, setOverview] = useState<WorkspaceOverview | null>(null)
-  const [refresh, setRefresh] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const { overview, loadError, refreshOverview } = useWorkspaceOverview(projectId)
+  const [actionError, setError] = useState<string | null>(null)
+  const [mutationBusy, setBusy] = useState(false)
   const [dialog, setDialog] = useState<'packages' | 'tasks' | null>(null)
   const [sourceId, setSourceId] = useState(() => readSelection(projectId, 'package-source') ?? '')
   const [fixedSourceId, setFixedSourceId] = useState<string | null>(null)
   const [handledSource, setHandledSource] = useState<string | null | undefined>(undefined)
   const [followTaskId, setFollowTaskId] = useState<string | null>(null)
+  const submission = useWorkspaceTaskSubmission(projectId, (task) => {
+    setFollowTaskId(task.id)
+    setDialog(null)
+    refreshOverview()
+  })
+  const busy = mutationBusy || submission.busy
+  const error = submission.error ?? actionError ?? loadError
+  const submissionNotice = <WorkspaceSubmissionNotice label={submission.pendingLabel} retryAvailable={submission.retryAvailable && canManage} busy={busy} onCheck={submission.check} onRetry={submission.retry} />
   const [selectedPackageId, setSelectedPackageId] = useState(
     () => readSelection(projectId, 'package') ?? '',
   )
@@ -154,24 +159,6 @@ function ProjectDeployments({
   useEffect(() => {
     if (selectedPackageId) saveSelection(projectId, 'package', selectedPackageId)
   }, [projectId, selectedPackageId])
-  useEffect(() => {
-    const controller = new AbortController()
-    void loadWorkspaces(projectId, controller.signal)
-      .then((next) => {
-        setOverview(next)
-        setError(null)
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : '读取源码包失败，请重试。')
-      })
-    return () => controller.abort()
-  }, [projectId, refresh])
-  useEffect(() => {
-    if (!running) return
-    const timer = window.setTimeout(() => setRefresh((value) => value + 1), 1200)
-    return () => window.clearTimeout(timer)
-  }, [running, overview, refresh])
   useEffect(() => {
     if (
       !overview ||
@@ -212,7 +199,7 @@ function ProjectDeployments({
     return action()
       .then(async (task) => {
         setFollowTaskId(task.id)
-        setOverview(await loadWorkspaces(projectId))
+        refreshOverview()
         return true
       })
       .catch((cause: unknown) => {
@@ -251,7 +238,7 @@ function ProjectDeployments({
       <FileSurfaceAction
         label="刷新源码包"
         disabled={busy}
-        onPress={() => setRefresh((value) => value + 1)}
+        onPress={() => refreshOverview()}
       >
         <RefreshCwIcon />
       </FileSurfaceAction>
@@ -269,7 +256,7 @@ function ProjectDeployments({
         ref={generateTrigger}
         size="sm"
         variant="outline"
-        disabled={!overview || busy || running || !internal.length}
+        disabled={!canManage || !overview || busy || running || !internal.length}
         onClick={() => {
           setError(null)
           setFixedSourceId(null)
@@ -298,7 +285,7 @@ function ProjectDeployments({
         ref={generateTrigger}
         size="sm"
         variant="outline"
-        disabled={!overview || busy || running || !internal.length}
+        disabled={!canManage || !overview || busy || running || !internal.length}
         onClick={() => {
           setError(null)
           setFixedSourceId(null)
@@ -335,20 +322,21 @@ function ProjectDeployments({
             className="mt-2"
             size="xs"
             variant="outline"
-            onClick={() => setRefresh((value) => value + 1)}
+            onClick={() => refreshOverview()}
           >
             重新加载
           </Button>
         </div>
       ) : null}
+      {!dialog && submission.pendingLabel ? <div className="shrink-0 border-b border-border/60 px-3 py-2">{submissionNotice}</div> : null}
       {view === 'services' ? (
         <DeploymentsPanel
-          key={projectId}
+          key={`${readAutoOpsHost()?.principal.id}:${projectId}`}
           projectId={projectId}
           packages={overview?.releases ?? []}
           navigation={navigation}
           packageActions={servicePackageActions}
-          onRefreshPackages={() => setRefresh((value) => value + 1)}
+          onRefreshPackages={() => refreshOverview()}
         />
       ) : !overview ? (
         error ? null : (
@@ -371,13 +359,14 @@ function ProjectDeployments({
         open={dialog === 'packages'}
         onOpenChange={changeDialog}
         finalFocus={() => returnFocus.current}
-        disabled={!overview || busy || running || !internal.length}
+        disabled={!canManage || !overview || busy || running || !internal.length}
         internalVersions={fixedSource ? [fixedSource] : internal}
         initialSourceId={fixedSource?.id ?? source?.id}
+        submissionNotice={submissionNotice}
         error={error}
         onGenerate={(id, services) => {
           setSourceId(id)
-          return mutate(() => generateWorkspacePackages(projectId, id, services, randomUUID()))
+          return canManage ? submission.submit({ type: 'packages', sourceVersionId: id, services }) : Promise.resolve(false)
         }}
       />
       <WorkspaceTasksDialog
@@ -385,7 +374,7 @@ function ProjectDeployments({
         onOpenChange={changeDialog}
         finalFocus={() => returnFocus.current}
         tasks={tasks}
-        busy={busy}
+        busy={busy || !canManage}
         error={error}
         onCancel={(id) => mutate(() => cancelWorkspaceTask(projectId, id))}
       />

@@ -1,48 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
+import { autoOpsProjectHref } from './projectNavigation'
+import { autoOpsAreaAvailable } from './projectNavigation.logic'
 import { useNavigate } from '@tanstack/react-router'
-import { FolderGit2Icon, ShieldCheckIcon, type LucideIcon } from 'lucide-react'
-import { ComposerControl, ComposerControlChevron } from '~/components/chat/ComposerControl'
-import { ComposerContextLabel } from '~/components/ComposerContextLabel'
-import { useComposerMenuProps } from '~/components/chat/composerEventScope'
-import { Menu, MenuTrigger, MenuPopup, MenuGroup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuItem } from '~/components/ui/menu'
-import { Tooltip, TooltipTrigger, TooltipPopup } from '~/components/ui/tooltip'
+import { FolderGit2Icon, ShieldCheckIcon } from 'lucide-react'
+import { MenuItem } from '~/components/ui/menu'
 import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from './hostConfig'
-import { loadWorkspaces, type WorkspaceOverview, type WorkspaceVersion } from './workspaces'
-
-export function availableWorkspaceVersions(projectId: string, overview: WorkspaceOverview): WorkspaceVersion[] {
-  const membership = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.membership
-  return [...(membership?.workspaceAccess === 'external' ? [] : overview.internalVersions), ...overview.externalVersions]
-    .filter((version) => version.status === 'published')
-}
-
-export function ScopeComposerChoice({ label, summary, icon: Icon, value, options, locked, disabled, onChange, footer }: {
-  label: string
-  summary: string
-  icon: LucideIcon
-  value: string
-  options: ReadonlyArray<{ value: string; label: string }>
-  locked: boolean
-  disabled: boolean
-  onChange: (value: string) => void
-  footer?: ReactNode
-}) {
-  const floating = useComposerMenuProps()
-  const content = <><Icon className="size-3 shrink-0" /><ComposerContextLabel>{summary}</ComposerContextLabel></>
-  if (locked) return <Tooltip><TooltipTrigger render={<span
-    aria-label={label} aria-description={summary}
-    className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
-    data-composer-context-control data-autoops-scope-locked="true"
-  >{content}</span>} /><TooltipPopup>{summary} · 首条消息已接受，切换范围请新建对话。</TooltipPopup></Tooltip>
-  return <Menu>
-    <Tooltip><TooltipTrigger render={<MenuTrigger
-      render={<ComposerControl size="xs" />} aria-label={label} aria-description={summary} disabled={disabled} data-composer-context-control
-    >{content}<ComposerControlChevron size="xs" /></MenuTrigger>} /><TooltipPopup>{summary}</TooltipPopup></Tooltip>
-    <MenuPopup side="top" align="start" {...floating}>
-      <MenuGroup><MenuGroupLabel>{label}</MenuGroupLabel><MenuRadioGroup value={value} onValueChange={onChange}>{options.map((option) => <MenuRadioItem key={option.value} value={option.value} closeOnClick>{option.label}</MenuRadioItem>)}</MenuRadioGroup></MenuGroup>
-      {footer ? <><MenuSeparator />{footer}</> : null}
-    </MenuPopup>
-  </Menu>
-}
+import { loadWorkspaces, type WorkspaceVersion } from './workspaces'
+import { ScopeComposerChoice, availableWorkspaceVersions } from './scopeSelection'
+// 保留原公开入口，现有调用方可以逐步转向共享选择器。
+export { ScopeComposerChoice, availableWorkspaceVersions } from './scopeSelection'
 
 export function WorkspaceScopeControl({ threadId, projectId, scope, locked, disabled, onChange, onInitialize }: {
   threadId: string
@@ -53,22 +19,32 @@ export function WorkspaceScopeControl({ threadId, projectId, scope, locked, disa
   onChange: (version: WorkspaceVersion) => void
   onInitialize: (scope: AutoOpsThreadScope) => void
 }) {
-  const project = readAutoOpsHost()?.projects.find((entry) => entry.id === projectId)
+  const host = readAutoOpsHost()
+  const project = host?.projects.find((entry) => entry.id === projectId)
+  const canRead = autoOpsAreaAvailable('workspaces', host, projectId)
   const navigate = useNavigate()
-  const [versions, setVersions] = useState<WorkspaceVersion[]>([])
+  const [loaded, setVersions] = useState<{ projectId: string; versions: WorkspaceVersion[] } | null>(null)
+  const versions = canRead && loaded?.projectId === projectId ? loaded.versions : []
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
+    setVersions(null)
+    if (!canRead) {
+      setLoading(false)
+      setError('当前项目没有工作区读取权限。')
+      return
+    }
     const controller = new AbortController()
     setLoading(true)
     void loadWorkspaces(projectId, controller.signal).then((result) => {
-      setVersions(availableWorkspaceVersions(projectId, result)); setLoading(false); setError(null)
+      if (controller.signal.aborted) return
+      setVersions({ projectId, versions: availableWorkspaceVersions(projectId, result) }); setLoading(false); setError(null)
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) { setLoading(false); setError(cause instanceof Error ? cause.message : '无法读取工作区') }
     })
     return () => controller.abort()
-  }, [projectId, attempt])
+  }, [projectId, attempt, canRead])
   useEffect(() => {
     if (locked || disabled || loading || error) return
     const current = readAutoOpsThreadScope(threadId, projectId)
@@ -88,7 +64,7 @@ export function WorkspaceScopeControl({ threadId, projectId, scope, locked, disa
     onChange={(id) => { const version = versions.find((entry) => entry.id === id); if (version) onChange(version) }}
     footer={<>
       {error ? <MenuItem onClick={() => setAttempt((value) => value + 1)}>读取失败，点击重试</MenuItem> : !versions.length ? <MenuItem disabled>{project?.membership?.workspaceAccess === 'external' ? '请等待项目管理员发布外部版本' : '请先创建可用工作区版本'}</MenuItem> : null}
-      {project?.membership?.workspaceAccess !== 'external' ? <MenuItem onClick={() => void navigate({ to: '/workspaces' })}>{project?.membership?.role === 'member' ? '查看工作区' : '管理工作区'}</MenuItem> : null}
+      {canRead ? <MenuItem onClick={() => void navigate({ href: autoOpsProjectHref('workspaces', projectId) })}>{project?.capabilities?.['workspace.manage'] === true ? '管理工作区' : '查看工作区'}</MenuItem> : null}
     </>}
   />
 }

@@ -1,3 +1,4 @@
+import { isAutoOpsAccessError } from './apiClient'
 import {
   ModuleHeader,
   ModuleSidebar,
@@ -216,8 +217,10 @@ function SkillLibraryContent({
         setError(null)
       })
       .catch((cause: unknown) => {
-        if (!controller.signal.aborted && generation === requestGeneration.current)
+        if (!controller.signal.aborted && generation === requestGeneration.current) {
+          if (isAutoOpsAccessError(cause)) setCatalog(null)
           setError(errorMessage(cause))
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted && generation === requestGeneration.current) {
@@ -344,12 +347,22 @@ function SkillLibraryContent({
       .catch(async (cause: unknown) => {
         if (generation !== requestGeneration.current) return false
         setError(errorMessage(cause))
+        if (isAutoOpsAccessError(cause)) {
+          setCatalog(null)
+          setDialog(null)
+          return false
+        }
         await loadSkillLibrary()
           .then((next) => {
             if (generation === requestGeneration.current) setCatalog(next)
           })
-          .catch(() => {
-            /* Preserve the last readable version and failed action. */
+          .catch((refreshCause: unknown) => {
+            if (generation === requestGeneration.current && isAutoOpsAccessError(refreshCause)) {
+              setCatalog(null)
+              setDialog(null)
+              setError(errorMessage(refreshCause))
+            }
+            // 暂时性读取失败保留可读版本；撤权时立即清除目录和已打开的详情。
           })
         return false
       })

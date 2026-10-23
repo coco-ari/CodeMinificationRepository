@@ -1,3 +1,5 @@
+import { useWorkspaceOverview } from './useWorkspaceOverview'
+import { useWorkspaceTaskSubmission } from './useWorkspaceTaskSubmission'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -26,7 +28,6 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '~/compone
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
 import { Spinner } from '~/components/ui/spinner'
-import { randomUUID } from '~/lib/utils'
 import { readAutoOpsHost } from './hostConfig'
 import { useAutoOpsProjectId } from './projectNavigation'
 import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFiles'
@@ -39,19 +40,16 @@ import {
   WorkspaceReviewDialog,
   WorkspaceTasksDialog,
   WorkspaceVersionDialog,
+  WorkspaceSubmissionNotice,
 } from './WorkspaceActions'
 import {
   cancelWorkspaceTask,
-  generateExternalWorkspace,
-  importWorkspaceRepository,
-  loadWorkspaces,
   loadWorkspaceTree,
   loadWorkspaceFileMetadata,
   searchWorkspaceFiles,
   publishWorkspace,
   startWorkspaceConversation,
   workspaceFileDownloadUrl,
-  type WorkspaceOverview,
   type WorkspaceTask,
   type WorkspaceVersion,
 } from './workspaces'
@@ -84,7 +82,7 @@ function saveSelection(key: string, value: string) {
   try {
     sessionStorage.setItem(selectionKey(key), value)
   } catch {
-    /* Viewing remains usable without browser storage. */
+    /* 浏览器存储不可用时仍可查看当前页面。 */
   }
 }
 
@@ -104,7 +102,7 @@ export function AutoOpsWorkspacesPage() {
       aria-label="项目工作区"
       data-testid="workspace-page"
     >
-      {!project ? (
+      {!project || project.capabilities?.['workspace.read'] !== true ? (
         <>
           <ModuleHeader title="工作区" />
           <ModuleSidebar label="工作区版本">
@@ -112,9 +110,9 @@ export function AutoOpsWorkspacesPage() {
           </ModuleSidebar>
         </>
       ) : null}
-      {project ? (
+      {project?.capabilities?.['workspace.read'] === true ? (
         <ProjectWorkspaces
-          key={`${projectId}:${versionId === undefined ? 'remembered' : versionId === null ? 'invalid' : versionId}`}
+          key={`${readAutoOpsHost()?.principal.id}:${projectId}:${versionId === undefined ? 'remembered' : versionId === null ? 'invalid' : versionId}`}
           projectId={projectId}
           requestedVersionId={versionId}
         />
@@ -141,7 +139,7 @@ function ProjectWorkspaces({
   const membership = readAutoOpsHost()?.projects.find(
     (project) => project.id === projectId,
   )?.membership
-  const manager = membership?.workspaceAccess === 'internal' && membership.role === 'manager'
+  const manager = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.['workspace.manage'] === true
   const externalOnly = membership?.workspaceAccess === 'external'
   const [versionQuery, setVersionQuery] = useState('')
   const [selectedTab, setTab] = useState<Tab>(() =>
@@ -149,10 +147,9 @@ function ProjectWorkspaces({
   )
   const tab = externalOnly ? 'external' : selectedTab
   const availableTabs = tabs.filter((item) => !externalOnly || item.id === 'external')
-  const [overview, setOverview] = useState<WorkspaceOverview | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [refresh, setRefresh] = useState(0)
-  const [busy, setBusy] = useState(false)
+  const { overview, loadError, refreshOverview } = useWorkspaceOverview(projectId)
+  const [actionError, setError] = useState<string | null>(null)
+  const [mutationBusy, setBusy] = useState(false)
   const [selectedInternal, setSelectedInternal] = useState(
     () => readSelection(`${projectId}:internal-version`) ?? '',
   )
@@ -165,27 +162,18 @@ function ProjectWorkspaces({
   const dialogReturnFocus = useRef<HTMLElement | null>(null)
   const menuTrigger = useRef<HTMLButtonElement | null>(null)
   const [followTaskId, setFollowTaskId] = useState<string | null>(null)
+  const submission = useWorkspaceTaskSubmission(projectId, (task) => {
+    setFollowTaskId(task.id)
+    setDialog(null)
+    refreshOverview()
+  })
+  const busy = mutationBusy || submission.busy
+  const error = submission.error ?? actionError ?? loadError
+  const submissionNotice = <WorkspaceSubmissionNotice label={submission.pendingLabel} retryAvailable={submission.retryAvailable && manager} busy={busy} onCheck={submission.check} onRetry={submission.retry} />
   const running = overview?.tasks.some(taskActive) ?? false
   useEffect(() => {
     saveSelection(`${projectId}:tab`, tab)
   }, [projectId, tab])
-  useEffect(() => {
-    const controller = new AbortController()
-    void loadWorkspaces(projectId, controller.signal)
-      .then((next) => {
-        setOverview(next)
-        setError(null)
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted) setError(errorLabel(cause))
-      })
-    return () => controller.abort()
-  }, [projectId, refresh])
-  useEffect(() => {
-    if (!running) return
-    const timer = window.setTimeout(() => setRefresh((value) => value + 1), 1200)
-    return () => window.clearTimeout(timer)
-  }, [running, overview, refresh])
   useEffect(() => {
     if (!overview || requestApplied) return
     const version = [...overview.internalVersions, ...overview.externalVersions].find(
@@ -281,7 +269,7 @@ function ProjectWorkspaces({
     return action()
       .then(async (result) => {
         if ('stage' in result) setFollowTaskId(result.id)
-        setOverview(await loadWorkspaces(projectId))
+        refreshOverview()
         return true
       })
       .catch((cause: unknown) => {
@@ -377,7 +365,7 @@ function ProjectWorkspaces({
             <FileSurfaceAction
               label="刷新工作区"
               disabled={busy}
-              onPress={() => setRefresh((value) => value + 1)}
+              onPress={() => refreshOverview()}
             >
               <RefreshCwIcon />
             </FileSurfaceAction>
@@ -540,7 +528,7 @@ function ProjectWorkspaces({
             className="mt-2"
             size="xs"
             variant="outline"
-            onClick={() => setRefresh((value) => value + 1)}
+            onClick={() => refreshOverview()}
           >
             重新加载
           </Button>
@@ -559,6 +547,7 @@ function ProjectWorkspaces({
           中查看任务。
         </div>
       ) : null}
+      {!dialog && submission.pendingLabel ? <div className="shrink-0 border-b border-border/60 px-3 py-2">{submissionNotice}</div> : null}
       {!overview || !requestApplied ? (
         error ? null : (
           <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -591,9 +580,10 @@ function ProjectWorkspaces({
             finalFocus={restoreDialogFocus}
             disabled={actionDisabled || overview?.import?.supported === false}
             limits={overview?.import}
+            submissionNotice={submissionNotice}
             error={error}
             onImport={(url, branch) =>
-              mutate(() => importWorkspaceRepository(projectId, url, branch, randomUUID()))
+              submission.submit({ type: 'import', repositoryUrl: url, branch })
             }
           />
           <ExternalWorkspaceDialog
@@ -603,9 +593,10 @@ function ProjectWorkspaces({
             disabled={actionDisabled}
             internalVersions={internal}
             initialSourceId={currentInternal?.id}
+            submissionNotice={submissionNotice}
             error={error}
             onGenerate={(sourceId, rules) =>
-              mutate(() => generateExternalWorkspace(projectId, sourceId, rules, randomUUID()))
+              submission.submit({ type: 'external', sourceVersionId: sourceId, rules })
             }
           />
           <WorkspaceTasksDialog
