@@ -6,7 +6,17 @@
 
 2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在顶部选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
 
-### 当前网页：跨模块公共框架（t3-module-shell-517e3cdb-static）
+### 当前程序与网页：技能标签和正文读取（t3-skill-flow-0714cc89）
+
+2026-10-23，修复提交 `0714cc892b8cf268de58b1955f38c95e963ffbb0` 已推送后部署到 `172.29.22.6:28887/28888`，程序与网页使用 `/home/tao/autoops-agent-demo/releases/t3-skill-flow-0714cc89` 及其 `dist/web`。消息区改用会话授权技能快照，复用 T3 原生技能标签显示名称与图标，复制仍保留原始 `$技能名`。执行上下文明示 `instructionsPath`，模型通过现有 `read_project_material` 读取固定版本 `SKILL.md`，继续使用原生 skill 输入和只读权限。
+
+前端构建、Web 类型、ChatView Compiler、服务端打包及 Linux 13 项技能/权限回归通过。本机修复后的界面读取真实历史消息，中文技能标签、原始复制标记、刷新和窄屏检查通过，访问标记写入在验收中被拦截。部署后独立私有会话实际完成 `SKILL.md` 正文读取、项目手册读取与 `query_environment`，随后仅清理该验收会话。旧验收助手缺少工作区固定版本时被服务端以 `WORKSPACE_REQUIRED` 拒绝；补齐授权版本后通过。两次 ZeroTier 浏览器首屏复核出现连接/加载超时，未计入通过；服务器本机实际 HTTP 入口及 7 个引用资源逐字节校验一致。
+
+增量归档 SHA-256 为 `d085e7ecf7c38061b863921e99693201c451645fddafe9628043c1ade2938dfd`。完整发布和原生依赖清单已验证，848 个网页文件逐项校验，保留 349 个旧哈希资源。实际 HTML SHA-256 为 `baa8b00f2d55677d9333be846963a62c782eaaeb20c416e399e5fb69bf26fc53`。切换前确认执行空闲，仅停止并启动独立网关和 worker；原 21 条消息、9 条已完成运行、52 条轮次条目、325 条编排事件及会话绑定逐行保留，159 个工作区与技能文件摘要一致，部署配置和历史在排除已核对的心跳字段后保持一致。其它四项被核对服务的 PID、工作目录和状态，以及 28890 站点哈希不变。
+
+恢复点为 `/home/tao/autoops-agent-demo/backups/t3-skill-flow-0714cc89-20261023T032334Z`，包含旧 unit 配置、六个数据库的一致性快照、文件归档和验证结果。仅回退本轮程序时，先确认平台与客户执行均空闲，再运行该目录的 `rollback-program.py`；它只移除本轮两项专用 drop-in 并重启独立 worker 与网关，恢复上轮程序和公共框架网页，继续使用当前业务数据。本地无密钥证据在 `.deployment/skill-flow-0714cc89-evidence/`，服务器另存 `target.json`、`result.json` 和 `after-validation.json`。
+
+### 上一版网页：跨模块公共框架（t3-module-shell-517e3cdb-static）
 
 2026-10-23，先将 UI 提交 `517e3cdb45c9fcf4480cf21ff9558b32e6c2f8fd` 推送至 `feat/workspace-deployment-validation`，再部署到 `172.29.22.6:28887`。网页目录为 `/home/tao/autoops-agent-demo/releases/t3-module-shell-517e3cdb-static/dist/web`；网关和 worker 程序继续使用 `t3-customer-deployment-preview-1`。本轮以问答为公共框架，统一工作区、部署发布、技能库、我的电脑及设置的顶栏、原生侧栏和内容头部，约束已同步 `AGENTS.md` 与 T3 UI 规范。部署业务功能的完整迁移仍需单独评估。
 
@@ -78,7 +88,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 | 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
 | 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
 | 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
-| 当前程序 / 网页 | `releases/t3-customer-deployment-preview-1` / `releases/t3-module-shell-517e3cdb-static/dist/web` |
+| 当前程序 / 网页 | `releases/t3-skill-flow-0714cc89` / 同目录 `dist/web` |
 
 固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
 
