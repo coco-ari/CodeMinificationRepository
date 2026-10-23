@@ -13,6 +13,7 @@ import {
 import { serializeEditorDoc } from "~/composer-rich-text-doc";
 import type { AutoOpsThreadScope } from "./hostConfig";
 import { useAutoOpsSkillContext } from "./useSkillContext";
+import { skillContextDisplaySkills } from "./skillLibrary";
 
 const mocks = vi.hoisted(() => ({ host: vi.fn() }));
 vi.mock(import("./hostSnapshot"), async (original) => ({
@@ -91,12 +92,7 @@ function Probe({
   showEditor = false,
 }: ProbeProps) {
   const result = useAutoOpsSkillContext(threadId, selection.projectId, selection);
-  const displaySkills =
-    result?.context?.skills.map((skill) => ({
-      ...skill,
-      path: `autoops/skill-context/isolated/${skill.name}/SKILL.md`,
-      enabled: true,
-    })) ?? [];
+  const displaySkills = skillContextDisplaySkills(result?.context);
   return (
     <section data-testid={id}>
       {showHistory ? (
@@ -140,6 +136,33 @@ async function focus() {
 }
 
 describe("技能上下文的同范围刷新", () => {
+  it("分配切换快照但原生目录尚未发现时，标签、光标及固定版本说明地址保持正确", async () => {
+    setup();
+    const next = {
+      ...snapshot("新版发布检查"),
+      cwd: "autoops/skill-context/next",
+      snapshotId: "next-snapshot",
+      skills: [{ name: skillName, displayName: "新版发布检查", versionId: "skill-version-two" }],
+    };
+    const fetcher = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(Response.json(next));
+    using _fetch = stubGlobal("fetch", fetcher);
+    await using screen = await render(view({ showEditor: true }));
+    const node = screen.container.querySelector<HTMLElement & { editor: Editor }>(".tiptap")!;
+    await vi.waitFor(() => expect(node.textContent).toContain("发布准备检查"));
+    const editor = node.editor;
+    await act(() => editor.commands.setTextSelection(editor.state.doc.content.size - 1));
+    const cursor = editor.state.selection.from;
+    await act(() => window.dispatchEvent(new Event("autoops:skill-library-changed")));
+    await vi.waitFor(() => expect(node.textContent).toContain("新版发布检查"));
+    expect(editor.state.selection.from).toBe(cursor);
+    expect(serializeEditorDoc(editor.state.doc).value).toBe(prompt);
+    expect(node.querySelectorAll('button[aria-label="技能 新版发布检查，查看详情"]')).toHaveLength(1);
+    expect(skillContextDisplaySkills(next)[0]?.path).toBe(
+      "/api/agent-demo/t3/autoops/skill-library/contexts/next-snapshot/files/autoops-readiness?path=SKILL.md",
+    );
+    expect(skillContextDisplaySkills(null)).toEqual([]);
+  });
+
   it("输入框已有技能标签和原文序列化在复核、网络失败及恢复期间保持稳定", async () => {
     setup();
     const pending = deferred<Response>();

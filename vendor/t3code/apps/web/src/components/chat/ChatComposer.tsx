@@ -15,6 +15,7 @@ import {
 import { completeWorkspaceCommonPrefix, workspaceRelativePath } from "~/autoops/pathCompletion";
 import { openAutoOpsResource } from "~/autoops/ResourceLink";
 import { useAutoOpsSkillContext } from "~/autoops/useSkillContext";
+import { skillContextDisplaySkills } from "~/autoops/skillLibrary";
 
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { readAutoOpsHost } from "~/autoops/hostConfig";
@@ -2435,11 +2436,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : NO_PROVIDER_SKILLS;
   const displayProviderSkills =
     isAutoOpsHosted() && !customerScope
-      ? (selectedProviderStatus?.workspaceSnapshots
-          ?.find((snapshot) => snapshot.cwd === autoOpsSkillContext?.context?.cwd)
-          ?.skills.filter((skill) =>
-            autoOpsSkillContext?.context?.skills.some((known) => known.name === skill.name),
-          ) ?? NO_PROVIDER_SKILLS)
+      ? skillContextDisplaySkills(autoOpsSkillContext?.context)
       : selectedProviderSkills;
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, skillsCwd)

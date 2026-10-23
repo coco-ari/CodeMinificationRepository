@@ -1,4 +1,4 @@
-import type { ProjectListEntriesResult } from '@t3tools/contracts'
+import type { ProjectListEntriesResult, ServerProviderSkill } from '@t3tools/contracts'
 import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
 import { autoOpsApiUrl, autoOpsRequest } from './apiClient'
 import { autoOpsSkillPackageLink } from './resources'
@@ -151,11 +151,29 @@ export function skillFileSource(skill: LibrarySkill, version: SkillVersion): Rea
 export interface SkillContext {
   cwd: string
   snapshotId: string
-  skills: { name: string; displayName?: string; versionId: string }[]
+  skills: { name: string; displayName?: string; description?: string; versionId: string }[]
+}
+
+/** 标签展示只依赖已授权快照；原生目录尚未发现新版本时也不清空已有标签。 */
+export function skillContextDisplaySkills(
+  context: SkillContext | null | undefined,
+): ServerProviderSkill[] {
+  return (
+    context?.skills.map((skill) => ({
+      name: skill.name,
+      ...(skill.displayName ? { displayName: skill.displayName } : {}),
+      ...(skill.description ? { description: skill.description } : {}),
+      enabled: true,
+      path: `${base()}/contexts/${encodeURIComponent(context.snapshotId)}/files/${encodeURIComponent(skill.name)}?path=SKILL.md`,
+    })) ?? []
+  )
 }
 
 /** 接受既有范围缓存键，统一处理同源、取消、预算及登录上下文校验。 */
-export async function loadSkillContext(requestKey: string, signal?: AbortSignal): Promise<SkillContext> {
+export async function loadSkillContext(
+  requestKey: string,
+  signal?: AbortSignal,
+): Promise<SkillContext> {
   const endpoint = autoOpsApiUrl('/autoops/skill-library/context')
   if (!requestKey.startsWith(endpoint + '?')) throw new Error('当前技能范围地址无效。')
   const path = '/autoops/skill-library/context' + requestKey.slice(endpoint.length)
