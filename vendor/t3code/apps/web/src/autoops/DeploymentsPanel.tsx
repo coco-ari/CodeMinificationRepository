@@ -6,7 +6,7 @@ import {
 } from './ModuleWorkspace'
 import { Link } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   FileTextIcon,
   HistoryIcon,
@@ -33,6 +33,7 @@ import {
   deploymentStatusLabel,
   deploymentTaskFinished,
   DeploymentRequestError,
+  isDeploymentAccessError,
   loadDeploymentReleases,
   loadDeployments,
   submitDeployment,
@@ -106,7 +107,10 @@ export function DeploymentsPanel({
   packageActions: ReactNode
   onRefreshPackages: () => void
 }) {
-  const canExecute = readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.['deployment.execute'] === true
+  const canExecute =
+    readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.[
+      'deployment.execute'
+    ] === true
   const [query, setQuery] = useState('')
   const [selection, setSelection] = useState<Selection>(() => initialSelection(projectId))
   const [pending, setPending] = useState<PendingSubmission | null>(() =>
@@ -115,6 +119,8 @@ export function DeploymentsPanel({
   const [overview, setOverview] = useState<DeploymentOverview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [accessDenied, setAccessDenied] = useState(false)
+  const accessDeniedRef = useRef(false)
   const [refresh, setRefresh] = useState(0)
   const [busy, setBusy] = useState(false)
   const [detailTab, setDetailTab] = useState<DetailTab>('logs')
@@ -124,6 +130,22 @@ export function DeploymentsPanel({
   const [rollbackId, setRollbackId] = useState('')
   const submitGuard = useRef(false)
   const returnFocus = useRef<HTMLElement | null>(null)
+  const revokeAccess = useCallback((cause: unknown) => {
+    // 撤权立即清除展示数据；原始提交收据保留，恢复权限后仍使用同一请求标识核对。
+    accessDeniedRef.current = true
+    setAccessDenied(true)
+    setOverview(null)
+    setReleases([])
+    setReleasesError(null)
+    setDialog(null)
+    setError(null)
+    setLoadError(errorLabel(cause))
+  }, [])
+  const reload = () => {
+    accessDeniedRef.current = false
+    setAccessDenied(false)
+    setRefresh((value) => value + 1)
+  }
   const frontendPackages = packages.filter((entry) =>
     entry.services.some((item) => item.service === 'frontend'),
   )
@@ -145,10 +167,12 @@ export function DeploymentsPanel({
   const server = overview?.servers.find((entry) => entry.id === target?.serverId)
   const online = !!server?.online && !server.revoked
   const staticReady = online && !!server?.capabilities?.includes('static-site-v1')
-  const releaseDisabled = !canExecute || busy || !!pending || !!activeTask || !staticReady
+  const releaseDisabled =
+    accessDenied || !canExecute || busy || !!pending || !!activeTask || !staticReady
   const running = overview?.tasks.some((task) => !deploymentTaskFinished(task)) ?? false
 
   useEffect(() => {
+    if (accessDenied) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout>
     const poll = async () => {
@@ -158,11 +182,16 @@ export function DeploymentsPanel({
           selection.environmentId || undefined,
           controller.signal,
         )
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted || accessDeniedRef.current) return
         setOverview(next)
         setLoadError(null)
       } catch (cause) {
-        if (!controller.signal.aborted) setLoadError(errorLabel(cause))
+        if (controller.signal.aborted || accessDeniedRef.current) return
+        if (isDeploymentAccessError(cause)) {
+          revokeAccess(cause)
+          return
+        }
+        setLoadError(errorLabel(cause))
       }
       if (!controller.signal.aborted) timer = setTimeout(poll, running ? 1200 : 5000)
     }
@@ -171,7 +200,7 @@ export function DeploymentsPanel({
       controller.abort()
       clearTimeout(timer)
     }
-  }, [projectId, selection.environmentId, refresh, running])
+  }, [projectId, selection.environmentId, refresh, running, accessDenied, revokeAccess])
 
   useEffect(() => {
     if (!overview) return
@@ -187,7 +216,7 @@ export function DeploymentsPanel({
   }, [projectId, overview, environmentId, target?.id, taskId])
 
   useEffect(() => {
-    if (!target) {
+    if (!target || accessDenied) {
       setReleases([])
       return
     }
@@ -196,25 +225,28 @@ export function DeploymentsPanel({
     setReleasesError(null)
     void loadDeploymentReleases(projectId, target.id, controller.signal)
       .then((result) => {
-        if (!controller.signal.aborted) setReleases(result.releases)
+        if (!controller.signal.aborted && !accessDeniedRef.current) setReleases(result.releases)
       })
       .catch((cause) => {
-        if (!controller.signal.aborted) setReleasesError(errorLabel(cause))
+        if (controller.signal.aborted || accessDeniedRef.current) return
+        if (isDeploymentAccessError(cause)) revokeAccess(cause)
+        else setReleasesError(errorLabel(cause))
       })
     return () => controller.abort()
-  }, [projectId, target?.id, target?.currentRelease?.id, refresh])
+  }, [projectId, target?.id, target?.currentRelease?.id, refresh, accessDenied, revokeAccess])
 
   const chooseEnvironment = (value: string) => {
     setSelection({ environmentId: value, targetId: '', taskId: '' })
     setOverview(null)
   }
   const openDialog = (value: 'target' | 'deploy' | 'rollback', releaseId = '') => {
+    if (accessDeniedRef.current) return
     setError(null)
     setRollbackId(releaseId)
     setDialog(value)
   }
   const perform = async (submission: PendingSubmission) => {
-    if (!canExecute || submitGuard.current) return
+    if (accessDeniedRef.current || !overview || !canExecute || submitGuard.current) return
     submitGuard.current = true
     setBusy(true)
     setError(null)
@@ -231,6 +263,7 @@ export function DeploymentsPanel({
     try {
       if (submission.kind === 'task') {
         const result = await submitDeployment(projectId, submission.input)
+        if (accessDeniedRef.current) return
         setOverview((previous) =>
           previous
             ? {
@@ -246,6 +279,7 @@ export function DeploymentsPanel({
         setDetailTab('logs')
       } else {
         const result = await createDeploymentTarget(projectId, submission.input)
+        if (accessDeniedRef.current) return
         setOverview((previous) =>
           previous
             ? {
@@ -274,6 +308,11 @@ export function DeploymentsPanel({
       setDialog(null)
       setRefresh((value) => value + 1)
     } catch (cause) {
+      if (isDeploymentAccessError(cause)) {
+        revokeAccess(cause)
+        return
+      }
+      if (accessDeniedRef.current) return
       if (cause instanceof DeploymentRequestError && !cause.uncertain) {
         setPending(null)
         try {
@@ -283,9 +322,10 @@ export function DeploymentsPanel({
         }
       } else setDialog(null)
       setError(errorLabel(cause))
+    } finally {
+      submitGuard.current = false
+      setBusy(false)
     }
-    submitGuard.current = false
-    setBusy(false)
   }
   const captureTrigger = (event: React.MouseEvent<HTMLElement>) => {
     const button = event.target instanceof Element ? event.target.closest('button') : null
@@ -307,7 +347,14 @@ export function DeploymentsPanel({
             size="icon-sm"
             variant="ghost"
             aria-label="添加前端服务"
-            disabled={!canExecute || !overview?.enabled || busy || !!pending || !overview.servers.length}
+            disabled={
+              accessDenied ||
+              !canExecute ||
+              !overview?.enabled ||
+              busy ||
+              !!pending ||
+              !overview.servers.length
+            }
             onClick={() => openDialog('target')}
           >
             <PlusIcon />
@@ -322,7 +369,7 @@ export function DeploymentsPanel({
                 value={environmentId}
                 options={environments.length ? environments : (overview?.environments ?? [])}
                 onChange={chooseEnvironment}
-                disabled={busy || !!pending}
+                disabled={accessDenied || busy || !!pending}
                 placeholder="读取环境…"
               />
             </div>
@@ -351,7 +398,11 @@ export function DeploymentsPanel({
               })}
             {!targets.length ? (
               <ModuleSidebarEmpty>
-                {overview ? '当前环境还没有服务。' : '正在读取服务…'}
+                {accessDenied
+                  ? '部署访问已停止，请重新加载核对权限。'
+                  : overview
+                    ? '当前环境还没有服务。'
+                    : '正在读取服务…'}
               </ModuleSidebarEmpty>
             ) : null}
             {targets.length > 0 &&
@@ -372,7 +423,7 @@ export function DeploymentsPanel({
               label="刷新部署状态"
               disabled={busy}
               onPress={() => {
-                setRefresh((value) => value + 1)
+                reload()
                 onRefreshPackages()
               }}
             >
@@ -404,18 +455,13 @@ export function DeploymentsPanel({
                 className="mt-2"
                 size="sm"
                 variant="outline"
-                disabled={busy || !canExecute}
+                disabled={accessDenied || !overview || busy || !canExecute}
                 onClick={() => void perform(pending)}
               >
                 {busy ? <Spinner size="sm" /> : <RefreshCwIcon />}核对并重试原请求
               </Button>
             ) : (
-              <Button
-                className="mt-2"
-                size="xs"
-                variant="outline"
-                onClick={() => setRefresh((value) => value + 1)}
-              >
+              <Button className="mt-2" size="xs" variant="outline" onClick={reload}>
                 重新加载
               </Button>
             )}
@@ -552,6 +598,7 @@ export function DeploymentsPanel({
                         targetId={target.id}
                         taskId={taskId}
                         refresh={refresh}
+                        onAccessDenied={revokeAccess}
                       />
                     ) : (
                       <DeploymentEmpty

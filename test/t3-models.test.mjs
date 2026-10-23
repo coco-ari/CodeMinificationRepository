@@ -47,7 +47,7 @@ test('模型与思考选项双层校验；原生请求保留所选值、拒绝�
  assert.throws(()=>prepareAutoOpsCodexRequest('turn/start',{model:'grok-3-mini',collaborationMode:{settings:{model:'grok-4.6'}}}),/不一致/)
  const home=join(data,'t3/codex-home'),{policy}=prepareBusinessNativePolicy(data,home,'grok-4.6',env),catalog=JSON.parse(readFileSync(policy.model_catalog_json,'utf8'))
  assert.equal(catalog.models.length,2);assert.equal(catalog.models[1].supported_reasoning_levels.length,3);assert(!JSON.stringify(catalog).includes('NEVER_IMPORT'))
- const response={config:{model:'grok-4.6',model_catalog_json:policy.model_catalog_json,features:{multi_agent:false},agents:{enabled:false,max_depth:1,default_subagent_model:'grok-4.6',...Object.fromEntries(['default','explorer','worker'].map(role=>[role,policy['agents.'+role]]))}}}
+ const response={config:{permissions:{agent_demo:{filesystem:{':root':'deny'}}},model:'grok-4.6',model_catalog_json:policy.model_catalog_json,features:{multi_agent:false},agents:{enabled:false,max_depth:1,default_subagent_model:'grok-4.6',...Object.fromEntries(['default','explorer','worker'].map(role=>[role,policy['agents.'+role]]))}}}
  assert.doesNotThrow(()=>assertBusinessNativeConfig(response,env))
  catalog.models[0].supported_reasoning_levels.push({effort:'ultra',description:''});writeFileSync(policy.model_catalog_json,JSON.stringify(catalog));assert.throws(()=>assertBusinessNativeConfig(response,env),/CPA 能力目录/)
  assert.equal(readBusinessModels(data,'grok-4.6').models.length,2)

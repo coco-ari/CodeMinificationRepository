@@ -7,10 +7,15 @@ export class DeploymentRequestError extends Error {
   constructor(
     message: string,
     readonly uncertain: boolean,
+    readonly status?: number,
+    readonly code?: string,
   ) {
     super(message)
   }
 }
+
+export const isDeploymentAccessError = (error: unknown) => error instanceof DeploymentRequestError &&
+  (error.status === 401 || error.status === 403 || error.status === 404)
 
 async function request<T>(projectId: string, suffix: string, body?: object, signal?: AbortSignal): Promise<T> {
   try {
@@ -18,7 +23,7 @@ async function request<T>(projectId: string, suffix: string, body?: object, sign
       label: '部署', ...(body === undefined ? {} : { body }), ...(signal ? { signal } : {}),
     })
   } catch (cause) {
-    if (cause instanceof AutoOpsRequestError) throw new DeploymentRequestError(cause.message, cause.uncertain)
+    if (cause instanceof AutoOpsRequestError) throw new DeploymentRequestError(cause.message, cause.uncertain, cause.status, cause.code)
     throw cause
   }
 }

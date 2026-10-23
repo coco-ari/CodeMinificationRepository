@@ -20,12 +20,19 @@ import {
   deploymentStatusLabel,
   deploymentTaskFinished,
   loadDeploymentTask,
+  isDeploymentAccessError,
   type DeploymentTask,
   type DeploymentLog,
 } from '../deployments'
 import { dateLabel, errorLabel } from './deploymentPresentation'
 
-type DeploymentLogsProps = { projectId: string; targetId: string; taskId: string; refresh: number }
+type DeploymentLogsProps = {
+  projectId: string
+  targetId: string
+  taskId: string
+  refresh: number
+  onAccessDenied?: (cause: unknown) => void
+}
 
 /** 切换任务必须重新建立游标与阅读位置，迟到响应由原任务的取消信号拦截。 */
 export function DeploymentLogs(props: DeploymentLogsProps) {
@@ -39,12 +46,8 @@ function DeploymentTaskLog({
   targetId,
   taskId,
   refresh,
-}: {
-  projectId: string
-  targetId: string
-  taskId: string
-  refresh: number
-}) {
+  onAccessDenied,
+}: DeploymentLogsProps) {
   const [task, setTask] = useState<DeploymentTask | null>(null)
   const [logs, setLogs] = useState<DeploymentLog[]>([])
   const [error, setError] = useState<{ message: string; retrying: boolean } | null>(null)
@@ -84,6 +87,14 @@ function DeploymentTaskLog({
         timer = setTimeout(poll, cursor.current < (result.task.lastSeq ?? 0) ? 100 : 1000)
       } catch (cause) {
         if (!controller.signal.aborted) {
+          if (isDeploymentAccessError(cause)) {
+            setTask(null)
+            setLogs([])
+            cursor.current = 0
+            setError({ message: errorLabel(cause), retrying: false })
+            onAccessDenied?.(cause)
+            return
+          }
           setError({ message: errorLabel(cause), retrying: true })
           timer = setTimeout(poll, 3000)
         }
@@ -94,7 +105,7 @@ function DeploymentTaskLog({
       controller.abort()
       clearTimeout(timer)
     }
-  }, [projectId, targetId, taskId, refresh])
+  }, [projectId, targetId, taskId, refresh, onAccessDenied])
   useEffect(() => {
     const viewport = surface.current?.querySelector<HTMLElement>(
       '[data-slot="scroll-area-viewport"]',
@@ -185,7 +196,7 @@ function DeploymentTaskLog({
             </Button>
           ) : null}
         </div>
-      ) : (
+      ) : error ? null : (
         <div className="flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
           <Spinner size="sm" />
           正在读取执行记录…
@@ -219,9 +230,11 @@ function DeploymentTaskLog({
                     {entry.message}
                   </span>
                 ))
-              : task && deploymentTaskFinished(task)
-                ? '该任务没有执行日志。'
-                : '等待部署执行器返回日志…'}
+              : error && !error.retrying
+                ? '当前任务日志不可用。'
+                : task && deploymentTaskFinished(task)
+                  ? '该任务没有执行日志。'
+                  : '等待部署执行器返回日志…'}
           </pre>
         </ScrollArea>
         {!following ? (
