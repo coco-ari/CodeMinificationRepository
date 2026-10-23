@@ -240,6 +240,7 @@ describe('现有模块的公共框架响应式布局', () => {
             .element(page.getByRole('dialog', { name: '确认发布', exact: true }))
             .toBeVisible()
           await page.getByRole('button', { name: '取消', exact: true }).click()
+          await expect.element(screen.getByRole('button', { name: '发布', exact: true })).toHaveFocus()
         }
         await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)

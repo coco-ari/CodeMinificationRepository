@@ -329,7 +329,8 @@ export function DeploymentsPanel({
   }
   const captureTrigger = (event: React.MouseEvent<HTMLElement>) => {
     const button = event.target instanceof Element ? event.target.closest('button') : null
-    if (button) returnFocus.current = button
+    // Portal 中的取消和关闭点击不能覆盖弹窗打开前的页面触发器。
+    if (button && event.currentTarget.contains(button)) returnFocus.current = button
   }
   const finalFocus = () => returnFocus.current
 
