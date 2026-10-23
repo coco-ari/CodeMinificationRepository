@@ -6,13 +6,43 @@
 
 2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在顶部选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
 
-### 当前程序与网页：第二步模块化及标签修复（t3-step2-b6f25a04）
+### 当前验证发行
 
-2026-10-23，核对实际运行旧版 `t3-modular-81a5c2f8` 后，先发布完整模块化基线 578a51f3，再发布真实验收发现的技能换版标签修复 `b6f25a04dcf418c31535269644e029e65b46dceb`。当前完整网关、T3 Worker、网页与客户 ZIP 位于 `/home/tao/autoops-agent-demo/releases/t3-step2-b6f25a04`。使用原 `/home/tao/autoops-deployment-validation/data`，仅切换 28887/28888 验证服务；逐模块证据及待验项统一见[运行模块验收记录](../docs/runtime-modules.md#本轮修复与当前发行2026-10-23b6f25a04)。
+本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
-当前完整归档 SHA-256 `37d3c8f731908eab2ac09af1a846ffdbb3e323d162c56298df2171cc5611c31f`；目标完整清单 `014eb6c1c075244faa6e4f2c95d0782f5441ba855268e177d7c467ef53dceaaf`，原生依赖清单 `b0e395f21131afcb0ca5f00c44f8030870aed28cc10e489bc32f7576c821e5d3`。保留 1130 个旧哈希静态资源，实际 HTML SHA-256 `ea4de16ec2cd0faef5631a8d2e7494b317523172b076d928093e8fcd0b77f324`。归档使用 `COPYFILE_DISABLE=1` 与 `tar --no-xattrs`，完整清单校验通过后才切换。
+2026-10-23，最终应用提交为 `73b119c40a62fb4374a78947b82e6e9e9aedfa09`，分支 `feat/workspace-deployment-validation`。网关、T3 Worker、网页与客户 ZIP 均使用 `/home/tao/autoops-agent-demo/releases/t3-step2-73b119c4`；业务数据继续使用 `/home/tao/autoops-deployment-validation/data`，未初始化空库或切换独立身份后端。完整发行含导入预算扫描、原生视口与冷刷新阅读恢复、部署提示布局修复；完整基线及客户、权限、技能、发布恢复流程的分批证据继续有效。
 
-当前两项服务增加 `zzzzzzzzzzzz-step2-b6f25a04.conf`，停止预算 90 秒；继承本轮首批 Worker 的 `SuccessExitStatus=130`，对应锁定 Effect 的纯中断退出，其他错误仍按失败处理。当前恢复点 `/home/tao/autoops-agent-demo/backups/t3-step2-b6f25a04-20261023` 包含原有效配置、SQLite 一致性副本、业务文件、前后摘要与可执行 `rollback-program.sh`。`rollback-program.sh --check` 已通过；执行同脚本可恢复 578a51f3 程序并保留当前数据，未实际执行降级。若已有客户持久命令，必须先核对原收据，不能绕过脚本保护。首批 578a51f3 的恢复点仍保留，但其检查要求首批配置仍为当前配置，不能越过补丁层直接执行；下文旧版回退命令仅为历史记录。
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `d4bb16ccab383946648f8b8897261669692191b136b93a38dadd1036fa2d7dca` |
+| 完整清单 SHA-256 | `8015e7d30fdea6ec93a012400919328bfcb642242ab3a0d58a477cbbecd75bc3` |
+| 原生依赖清单 SHA-256 | `8d74e8ae382390364d7fcb04a00b3d7008061fc8f3f2cf8f2ff667a2eacc1513` |
+| 实际网页 HTML SHA-256 | `a34968593df6b4d0fa3df1dab46f49f35eee583d0231293628d9b87c2a5b822d` |
+| 客户 ZIP SHA-256 / 字节 | `48fb35c3e39fec059671b1825619e09a3b7a3114b9e91c75b2c34534c98481bb` / 1042160 |
+| 清单与旧资源 | 5657 文件、61 相对链接；保留 1454 个旧哈希资源；官方同版原生依赖 2038 文件/21 包校验通过 |
+| 最终提交 CI | [工作台运行链路 39961511719](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39961511719)、[AutoOps 质量检查 39961511745](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39961511745) |
+
+最终归档由 Python tarfile 生成，不附带 macOS 扩展元数据；开发机完成构建。Linux 目标按完整清单和官方同版原生依赖逐项校验，隔离打包 Worker 与 CLI 启动通过后才切换。服务器准备、校验与切换串行运行，各自使用独立 512MiB/no-swap cgroup；该限额不表示 Docker daemon 或业务构建容器共享同一个总限额。
+
+当前两个验证服务增加 `zzzzzzzzzzzzzz-step2-73b119c4.conf`，停止预算 90 秒，继承 Worker 对锁定 Effect 正常中断的 `SuccessExitStatus=130`，其他错误仍按失败处理。切换前停止接单，复核平台/工作区/部署任务、客户租约与原收据；客户 completed/failed 历史允许保留，unknown/accepted、未应用事件或未追平游标会阻断切换。实际目录、健康、网页与当前数据保留均通过；235 个原工作区/技能文件、96 条消息、31 轮运行、289 条轮次条目、17 个会话绑定、3 份成果，以及 1 个客户设备、1 个目录、1 个传输会话、12 个命令和 3 个游标均保留，原部署配置与记录不变，其他四项服务 PID 不变。
+
+当前恢复点 `/home/tao/autoops-agent-demo/backups/t3-step2-73b119c4-20261023` 包含有效服务配置、全部非空 SQLite 的一致性副本与 quick_check、其余业务文件归档及摘要，以及前后保留性记录和可执行 `rollback-program.sh`。文件归档只排除已单独一致性备份的具体数据库及其日志，不按 `.sqlite` 或 `.tmp` 字符串遗漏普通业务文件；原生 home 与其他业务文件随文件归档保留。
+
+`/home/tao/autoops-agent-demo/backups/t3-step2-73b119c4-20261023/rollback-program.sh --check` 已通过。程序回滚目标是 `/home/tao/autoops-agent-demo/releases/t3-step2-61e9ed11`；脚本以回滚当下数据为基线，仅撤销本批且摘要未变化的配置，继续使用当前数据，遇外部配置改动保留并报告；不会用发布前数据库覆盖后来新增记录。程序恢复中途失败会尝试恢复原程序与服务。**本轮未实际执行程序降级或整库恢复**；17 项本地临时库/模拟服务检查以及真实部署目标的回退/恢复演练分别记录，不能互相替代。
+
+最终无凭据证据为 `.deployment/step2-closeout/release/switch-73b119c4.json`、`.deployment/step2-closeout/release/verify-73b119c4.json`、`.deployment/step2-closeout/release/rollback-ready-73b119c4.json`、`.deployment/step2-closeout/release/retention-73b119c4.json`。macOS 专用客户电脑保持配对登记，仅授权独立临时工作目录；Windows、实体手机及普通公网 HTTPS/WSS 不在本轮已测环境内。
+
+### 历史程序与网页：第二步模块化及标签修复（t3-step2-b6f25a04）
+
+2026-10-23，先发布完整模块化基线 578a51f3，再发布技能换版标签修复 `b6f25a04dcf418c31535269644e029e65b46dceb`；该批程序目录为 `/home/tao/autoops-agent-demo/releases/t3-step2-b6f25a04`。归档 SHA-256 `37d3c8f731908eab2ac09af1a846ffdbb3e323d162c56298df2171cc5611c31f`，完整清单 `014eb6c1c075244faa6e4f2c95d0782f5441ba855268e177d7c467ef53dceaaf`，原生清单 `b0e395f21131afcb0ca5f00c44f8030870aed28cc10e489bc32f7576c821e5d3`；保留 1130 个旧哈希资源，该批 HTML 摘要 `ea4de16ec2cd0faef5631a8d2e7494b317523172b076d928093e8fcd0b77f324`。
+
+该批 drop-in 为 `zzzzzzzzzzzz-step2-b6f25a04.conf`，恢复点为 `/home/tao/autoops-agent-demo/backups/t3-step2-b6f25a04-20261023`，当时程序回滚预检通过、未执行降级；后续已有新配置层，不能直接拿该脚本回滚现行版本。详细业务证据见[历史标签修复批次](../docs/runtime-modules.md#历史批次技能标签修复2026-10-23b6f25a04)。
+
+### 历史程序与网页：导入与阅读修复（t3-step2-61e9ed11）
+
+该批应用提交 `61e9ed11cd4cc5f97a2cbc368a78b74c0f53bedd`，目录 `/home/tao/autoops-agent-demo/releases/t3-step2-61e9ed11`；归档 SHA-256 `91065bd3331a59540d8ade51cbbb808322c5d7762cd6013e522b94d41decd1e1`，完整清单 `adf358d290df34b3cbf7219bff5e8345aaa0939c6fb708f337fc12161f95b318`，原生清单 `8ef2320491e2e64f92243afe36dff8e446533797868d9f4680bce6bb929274ba`。5495 文件、61 相对链接校验通过，保留 1292 个旧哈希资源；HTML SHA-256 `7ef9c20794b4c02e57f076e27f635413321c251dbbe069978cc62f3eb6607140`。
+
+该批切换脚本运行 12.215 秒，206 个原工作区/技能文件及客户设备、目录、会话、12 命令和 3 游标保留；这不是精确停机时长。恢复点 `/home/tao/autoops-agent-demo/backups/t3-step2-61e9ed11-20261023` 的程序回滚预检通过，未执行降级。合法导入与跨页面阅读通过后，继续修复冷刷新阅读恢复和部署提示布局，当前状态以上方现行记录为准。证据：`.deployment/step2-closeout/release/switch-final.log`、`verify-final.json`、`rollback-ready-61e9ed11.json`。
 
 ### 历史程序与网页：技能标签和正文读取（t3-skill-flow-0714cc89）
 
@@ -96,7 +126,7 @@ UI 沿用锁定 T3 的 `WorkspacePageHeader`、工作区连续列表与分栏、
 | 系统级部署 Agent | `autoops-deployment-validation-agent.service`，使用现有 `agent/main.mjs` |
 | 独立 Nginx 容器 | `autoops-deployment-validation-nginx`，28890，只挂载验证站点 |
 | 数据与部署目录 | `/home/tao/autoops-deployment-validation`；业务数据在 `data` 下 |
-| 当前程序 / 网页 | `releases/t3-step2-b6f25a04` / 同目录 `dist/web` |
+| 当前程序 / 网页 | 统一见本页[当前验证发行](#当前验证发行)，网页为该目录的 `dist/web` |
 
 固定包、映射、部署中心状态和 Agent 身份均保存在独立目录。CPA 沿用服务器既有凭据引用，仅复用模型能力缓存；密钥不进入代码、报告或源码包。首次服务器接入与站点映射由运维预置，不承诺 Web 自助安装、HTTPS 公网接入或自动生成 Nginx 配置。服务器注册与业务映射目前分两次持久化，中途崩溃可能产生孤立接入记录，后续开放安装流程前须补偿处理。
 
