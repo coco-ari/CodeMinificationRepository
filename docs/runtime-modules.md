@@ -53,16 +53,17 @@ pnpm --dir vendor/t3code --filter "@t3tools/monorepo" --filter "@t3tools/web..."
 pnpm --dir vendor/t3code/apps/web exec playwright install --with-deps chromium
 ```
 
-| 命令                            | 覆盖范围                                                                    |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| `pnpm check:runtime:boundaries` | 递归发现运行代码、依赖规则与解析覆盖核对；新增子目录自动进入                |
-| `pnpm check:runtime`            | 门禁文件格式、根脚本语法、根/Web/Server/客户程序类型、运行模块依赖          |
-| `pnpm test:runtime:node`        | 递归执行根与适配器 Node 测试、运行边界负例；包含原部署引擎及网关测试        |
-| `pnpm test:runtime:server`      | T3 `src/autoops` 下的实际服务、权限、客户事件及恢复测试                     |
-| `pnpm test:runtime:web`         | T3 Web `src/autoops` 的单元与浏览器组件测试；不是所有上游 UI 测试           |
-| `pnpm test:runtime:customer`    | 先打真实客户 ZIP，再测客户执行、传输与离开仓库后的分发运行                  |
-| `pnpm verify:runtime`           | 上述检查与测试，并构建当前真正使用的网页；本地与 `runtime.yml` 使用同一入口 |
-| `pnpm verify:autoops`           | 独立新后端的完整检查；由原 `autoops.yml` 保持执行                           |
+| 命令                            | 覆盖范围                                                                                             |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `pnpm check:runtime:boundaries` | 递归发现运行代码、依赖规则与解析覆盖核对；新增子目录自动进入                                         |
+| `pnpm check:runtime`            | 门禁文件格式、根脚本语法、根/Web/Server/客户程序类型、运行模块依赖                                   |
+| `pnpm test:runtime:node`        | 递归执行根与适配器 Node 测试、运行边界负例；包含原部署引擎及网关测试                                 |
+| `pnpm test:runtime:server`      | T3 `src/autoops` 下的实际服务、权限、客户事件及恢复测试                                              |
+| `pnpm test:runtime:web`         | T3 Web `src/autoops` 的单元与浏览器组件测试；不是所有上游 UI 测试                                    |
+| `pnpm test:runtime:markdown`    | 共享文件链接解析与原生 Markdown 文件引用、Windows 链接的定向浏览器回归；不覆盖全部上游 Markdown 测试 |
+| `pnpm test:runtime:customer`    | 先打真实客户 ZIP，再测客户执行、传输与离开仓库后的分发运行                                           |
+| `pnpm verify:runtime`           | 上述检查与测试，并构建当前真正使用的网页；本地与 `runtime.yml` 使用同一入口                          |
+| `pnpm verify:autoops`           | 独立新后端的完整检查；由原 `autoops.yml` 保持执行                                                    |
 
 `verify:runtime` 不调用模型、不连接真实部署目标、不执行远端重启，也不构建桌面、营销站或完整上游产品。发布前仍须按受影响范围打包 T3 服务端，并执行真实环境健康、静态文件、数据保留及跨模块交互验收；模拟测试不能替代这些验证。
 

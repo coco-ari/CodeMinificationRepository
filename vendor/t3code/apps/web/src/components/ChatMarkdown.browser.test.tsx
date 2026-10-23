@@ -1,3 +1,4 @@
+import { parseFileUrlHref } from "@t3tools/shared/fileLinks";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { searchableMessageSegments } from "@t3tools/shared/threadFindText";
 import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
@@ -107,10 +108,8 @@ function buttonsLabelled(container: HTMLElement, label: string) {
   );
 }
 
-function fileOptions(container: HTMLElement) {
-  return [...container.querySelectorAll("button")]
-    .map((button) => button.getAttribute("aria-label"))
-    .filter((label) => label?.startsWith("File options for "));
+function fileChips(container: HTMLElement) {
+  return [...container.querySelectorAll(".chat-markdown-file-link")];
 }
 
 describe("ChatMarkdown theme drafts", () => {
@@ -850,7 +849,10 @@ describe("ChatMarkdown file citations", () => {
       );
       const { container } = screen;
       expect(container.textContent).not.toContain("codex-file-citation");
-      expect(fileOptions(container)).toEqual(["File options for report.xlsx"]);
+      expect(fileChips(container)).toHaveLength(1);
+      await expect
+        .element(screen.getByRole("button", { name: "文件选项： report.xlsx", exact: true }))
+        .toBeVisible();
     },
   );
 
@@ -862,7 +864,7 @@ describe("ChatMarkdown file citations", () => {
     );
     const { container } = screen;
     expect(container.textContent).toContain(":codex-file-citation");
-    expect(fileOptions(container)).toEqual([]);
+    expect(fileChips(container)).toEqual([]);
   });
 
   it.each([
@@ -874,7 +876,7 @@ describe("ChatMarkdown file citations", () => {
     await using screen = await renderText(text);
     const { container } = screen;
     expect(container.textContent).toContain(text.replace("\\", ""));
-    expect(fileOptions(container)).toEqual([]);
+    expect(fileChips(container)).toEqual([]);
   });
 
   it("preserves Codex file citation examples inside code", async () => {
@@ -885,7 +887,7 @@ describe("ChatMarkdown file citations", () => {
     );
     const { container } = screen;
     expect(container.textContent?.match(/:codex-file-citation/g)).toHaveLength(2);
-    expect(fileOptions(container)).toEqual([]);
+    expect(fileChips(container)).toEqual([]);
   });
 
   it("does not create a nested link for citations inside link text", async () => {
@@ -894,7 +896,7 @@ describe("ChatMarkdown file citations", () => {
     await using screen = await renderText(`[See ${directive}](https://example.com)`);
     const { container } = screen;
     expect(container.textContent).toContain("codex-file-citation");
-    expect(fileOptions(container)).toEqual([]);
+    expect(fileChips(container)).toEqual([]);
   });
 
   it("renders file citations created by over-indented list recovery", async () => {
@@ -905,7 +907,10 @@ describe("ChatMarkdown file citations", () => {
     const { container } = screen;
     expect(container.querySelector("pre")).toBeNull();
     expect(container.querySelector("li")?.textContent).toContain("Created ");
-    expect(fileOptions(container)).toEqual(["File options for report.xlsx"]);
+    expect(fileChips(container)).toHaveLength(1);
+    await expect
+      .element(screen.getByRole("button", { name: "文件选项： report.xlsx", exact: true }))
+      .toBeVisible();
   });
 
   it("disambiguates Codex citations with the same basename", async () => {
@@ -1114,6 +1119,13 @@ describe("ChatMarkdown Windows file links", () => {
       expect(same.container.textContent).not.toContain("main.ts ·");
     }
   });
+
+  it.each(["d:alert(1)", "C:relative.md", "f:"])(
+    "浏览器不能把非文件协议 %s 当成文件 URL 解析",
+    (href) => {
+      expect(parseFileUrlHref(href)).toBeNull();
+    },
+  );
 
   it("still rejects unsafe schemes", async () => {
     setup();

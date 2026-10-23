@@ -11,6 +11,7 @@ describe("parseFileUrlHref", () => {
     ],
     ["file://server/share/workspace-image.svg", "\\\\server\\share\\workspace-image.svg", ""],
     ["file://localhost/home/me/notes.md", "/home/me/notes.md", ""],
+    ["  FILE:///D:/reports/result.md#L8", "D:/reports/result.md", "#L8"],
   ])("parses %s", (href, path, hash) => {
     expect(parseFileUrlHref(href)).toEqual({ path, hash });
   });
@@ -22,7 +23,15 @@ describe("parseFileUrlHref", () => {
     expect(parseFileUrlHref("file:///c%3A/Users/x/shot.png")?.path).toBe("/c%3A/Users/x/shot.png");
   });
 
-  it.each(["https://example.com/a.ts", "file://%", "/Users/julius/a.ts"])("rejects %s", (href) => {
+  it.each([
+    "https://example.com/a.ts",
+    "file://%",
+    "/Users/julius/a.ts",
+    "d:alert(1)",
+    "C:relative.md",
+    "f:",
+    "C:/reports/result.md",
+  ])("拒绝非文件 URL 或无效地址 %s", (href) => {
     expect(parseFileUrlHref(href)).toBeNull();
   });
 });

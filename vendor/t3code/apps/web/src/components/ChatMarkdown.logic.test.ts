@@ -91,16 +91,16 @@ describe("markdownFileCopyMenuItems", () => {
         : [
             {
               id: "copy-relative",
-              label: "Copy relative path",
+              label: "复制相对路径",
               value: relative,
-              title: "Relative path",
+              title: "相对路径",
             },
           ]),
       {
         id: "copy-full",
-        label: "Copy full path",
+        label: "复制完整路径",
         value: full,
-        title: "Full path",
+        title: "完整路径",
       },
     ]);
   });

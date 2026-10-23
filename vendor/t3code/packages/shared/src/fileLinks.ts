@@ -17,6 +17,8 @@ const POSITION_HASH_PATTERN = /^#L(\d+)(?:C(\d+))?$/i;
 export function parseFileUrlHref(
   href: string,
 ): { readonly path: string; readonly hash: string } | null {
+  // Windows 浏览器可能将单字母协议转成盘符，必须先校验原始协议。
+  if (!/^file:/i.test(href.trimStart())) return null;
   try {
     const parsed = new URL(href);
     if (parsed.protocol.toLowerCase() !== "file:") return null;
