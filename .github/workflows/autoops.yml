@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: 验证公网证书维护
+        run: python3 -m unittest discover -s test -p test_public_certificate.py -v
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

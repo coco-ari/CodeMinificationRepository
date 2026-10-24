@@ -1,6 +1,6 @@
 # T3 模块运行、迁移与恢复
 
-实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。原 Demo 的 8787 入口已切换到本模块；工作区部署使用下述独立验证入口，未替换原 Demo。早期构建、数据迁移与恢复记录保留在历史章节。
+实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。现行应用运行于测试服务器的 28887 入口；2026-10-24 经用户确认，旧主站、技能预览和上游对照环境已退役。早期构建、数据迁移与恢复记录保留在历史章节，不再代表可用的旧服务或恢复点。
 
 ## 独立验证：工作区部署发布（28887）
 
@@ -8,7 +8,7 @@
 
 ### 当前验证发行
 
-本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
+本节是验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；公网域名的准备状态见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据；旧发行和备份已清理，不能执行历史回滚脚本。
 
 2026-10-24，当前技能范围应用提交 `33e30846eedc82a00434b0b6b7bfe35e56fd3455` 已部署。网关、Worker、网页和重新打包的客户程序统一使用 `/home/tao/autoops-agent-demo/releases/t3-current-skills-33e30846`，数据仍为 `/home/tao/autoops-deployment-validation/data`。新旧对话都显示当前项目、助手和工作区的可用技能；停用或取消分配只移除对应项，不要求新建对话。重试同步更新业务分配和原生目录。详见[当前技能验收](../docs/runtime-modules.md#新旧对话使用当前技能2026-10-24)。
 
@@ -28,7 +28,23 @@ macOS 完整运行类型、199 文件模块边界、46 项定向 Node、20 项�
 
 线上旧对话返回当前唯一技能“项目资料解读”，与新对话一致；实际候选、选择标签和说明预览通过。独立浏览器注入失效目录后，单次“重试”重新读取当前分配并恢复选择，输入保留。用户旧页面未发送的 `¥` 保留；未向用户历史发送测试消息。上述页面验收和原生协议验收不表述为真实模型技能执行。
 
-现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-current-skills-33e30846-20261024`，程序回滚目标 `t3-old-skills-2af191d9`；配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-current-skills-33e30846.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过；回滚只撤销本批程序配置、保留当前业务数据，不恢复旧库。证据在 `.deployment/current-skills/`。本批未执行真实模型调用、客户本机写操作和真实降级。
+该技能修复批次原恢复目录 `/home/tao/autoops-agent-demo/backups/t3-current-skills-33e30846-20261024` 和旧程序 `t3-old-skills-2af191d9` 已在下述清理中移除，不再是可执行恢复点。当前程序配置仍为 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-current-skills-33e30846.conf`。当时的 29 项恢复脚本测试及回滚预检通过记录保留在 `.deployment/current-skills/`；不能据此恢复已删除的旧发行。本批未执行真实模型调用、客户本机写操作和真实降级。
+
+### 公网入口与旧环境清理（2026-10-24）
+
+目标入口为 `https://auto.996788.xyz`。应用仍运行于 `192.168.31.157:28887`，公网机 `203.195.200.164` 的宝塔 Nginx 通过 ZeroTier 上游 `172.29.22.6:28887` 转发；公网机的 ZeroTier 地址为 `172.29.225.157`。没有切换独立后端身份或业务存储。
+
+目前 DNS、ZeroTier 健康请求、HTTPS 证书和 HTTP 到 HTTPS 跳转通过；域名暂时返回 503 维护页，尚未开放业务。当前应用仍使用演示共用密码，已向用户询问生成随机应用密码或由用户提供，凭据确认后才能完成公网登录、WSS 及页面验收。不能将维护页的 TLS 通过表述为项目已可通过域名使用。
+
+代理配置来源为 [`autoops-public-nginx.conf`](autoops-public-nginx.conf)，服务器文件 `/www/server/panel/vhost/nginx/auto.996788.xyz.conf`；最终配置已准备，但等待凭据切换后启用。保留 Host/Origin、WebSocket 升级，关闭响应缓存与缓冲，读写超时 3600 秒；写请求不自动转发重试，登录独立限流，Cookie 强制 Secure/HttpOnly/SameSite=Strict。不记录访问查询参数，凭据不写入代理配置。
+
+复用宝塔现有 ACME 账号签发本站证书，有效期至 2027-01-22，文件位于 `/www/server/panel/vhost/cert/auto.996788.xyz/`。续期来源为 [`renew-autoops-certificate.py`](../scripts/renew-autoops-certificate.py)，部署在 `/opt/autoops-public-proxy/`；`/etc/cron.d/autoops-certificate-renew` 每日 03:27 按服务器时间检查，到期前 30 天续期并在校验后平滑加载 Nginx。仅处理本站订单，签发输出不包含私钥；其他 16 个站点配置摘要未变。
+
+真实证书的正确域名通过、错误域名拒绝；Linux 独立临时目录中 5 项证书回归通过，覆盖域名、信任链、即将到期和文件缺失，并已加入质量 CI。macOS 自带 LibreSSL 3.3.6 缺少 `verify_hostname`，这组测试在本机明确跳过，不作为通过；首次负例发现 `x509 -checkhost` 的退出码不能用于拒绝，已改用 `openssl verify` 校验主机名及信任链。证书签发和轻量验收均使用独立 cgroup，不安装新依赖或执行整套重型回归。
+
+用户明确确认永久删除后，已退役 `autoops-agent-demo`、`autoops-t3-worker`、`autoops-skill-management-gateway`、`autoops-skill-management-worker`、`t3-code-comparison` 五项用户服务。清理 102 个旧发行及旧主站、技能预览、对照环境、上传包和历史备份，共 302 个顶层目标，释放 28,350,767,104 字节（约 26.4 GiB）。第一次引用预检发现当前进程仍使用 `secrets`，在任何删除前停止并将其纳入保留范围；最终待删目标无进程、环境或打开文件引用。
+
+保留当前资料目录 `/home/tao/autoops-deployment-validation/data`、模型凭据、运行时、当前发行 `t3-current-skills-33e30846` 和当前发行归档。`t3-deployment-validation-1` 仍被真实部署执行器使用，也保留；不能因为名称较旧就删除。当前网页摘要、网关/Worker PID 与健康检查在清理前后一致。服务器清理清单与结果位于 `/home/tao/autoops-agent-demo/operations/public-gateway-20261024/`，本地证据位于 `.deployment/public-gateway/`。历史备份已按授权删除，不得再把旧文档中的恢复目录当作现行回滚方案。
 
 ### 历史旧技能清单拒绝提示（t3-old-skills-2af191d9）
 
