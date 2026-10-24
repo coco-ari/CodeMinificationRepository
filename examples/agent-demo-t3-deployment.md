@@ -10,6 +10,28 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，文件引用分析修复应用提交 `17ea104c343e682af41bb8221124aca32be1b306` 已部署。网关和重构建的 T3 Worker 使用 `/home/tao/autoops-agent-demo/releases/t3-reference-17ea104c`；数据仍为 `/home/tao/autoops-deployment-validation/data`。原生文件标签随消息保留业务引用授权，工具可按所选路径读取原件；未切换账号后端或修改用户原失败消息。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `16a5e6a44b6e8d123286682251fb277c99304f5926e06e3160f1b8dda4f95476` |
+| 完整清单 SHA-256 | `774bf7cde56079b77e088256316049902879f4c0505990248680dafd93712b36` |
+| 原生依赖清单 SHA-256 | `9195e93d192b53f90620ef65f76d0b0767085be9b5eca30c6b0366a754cb973f` |
+| 实际网页 HTML SHA-256 | `923fb27ecad5dfb48193e01e001c502322df02faaa3a8b9832a1ff10039dee09` |
+| 客户 ZIP SHA-256 / 字节 | `628529660b6ff3d142b6f0dfcbbba1937deb9bd58fdcbf82fa0da85bd5d4447a` / 1042167 |
+| 文件与旧资源 | 6994 文件、61 相对链接；保留 2768 个旧哈希资源；官方原生依赖 2038 文件/21 包通过 |
+| 应用提交 CI | [工作台运行链路 40063580023](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40063580023)、[AutoOps 质量检查 40063580007](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40063580007) 均通过 |
+
+macOS 34 项资料/权限回归、9 项消息入口测试、运行链路检查及实际 Worker 构建通过，29274 个跟踪文件与提交核对。网页和客户包源码未改变，沿用已验证构建。Linux 完整发行通过清单、原生 CLI、独立资料输入和 ZIP Worker 冒烟；准备、校验、切换串行使用 512 MiB、无 swap、100% CPU 的独立 cgroup。
+
+切换再次核对无活跃任务，正常停止接单并备份 15 个 SQLite 及业务文件。348 个工作区/技能文件、121 条消息、38 轮运行、367 条轮次条目、20 个绑定、3 份成果及客户设备/目录、13 条命令、3 个游标均保留；来源、原件、凭证与部署状态校验通过。其他四服务 PID 和 28890 站点未改变。两服务 active，重启计数 0，Worker 可达。
+
+线上独立测试对话通过真实选择 `client.ts` → 发送分析 → 继续追问；两轮读取工具成功，所选原件摘要一致、答案与正文相符。引用授权已在真实消息和业务收据中保存；本轮新输入与已选原件身份各自保留。线上 Git 正常；Git 失败、未授权和撤权条件使用隔离回归，不能混称线上故障注入。未执行资料写入、部署业务任务、权限变更或客户操作。完整证据与未测边界见[引用分析修复](../docs/runtime-modules.md#引用文件分析链路修复2026-10-24)。
+
+现行恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-reference-17ea104c-20261024`，程序回滚目标 `t3-mention-424f6b35`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzz-reference-17ea104c.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚只撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。证据在 `.deployment/reference-read-fix/`。
+
+### 历史文件选择修复（t3-mention-424f6b35）
+
 2026-10-24，新对话 `@` 文件选择修复已部署应用提交 `424f6b35959c380ab24d8a88a5b3cfff8e96b47d`。实际发行目录为 `/home/tao/autoops-agent-demo/releases/t3-mention-424f6b35`；数据继续使用 `/home/tao/autoops-deployment-validation/data`。修正未指定历史版本时的参数归一，使新对话读取当前资料；未改变现有权限、历史引用或资料内容。
 
 | 发行身份与校验 | 实际结果 |
@@ -28,7 +50,7 @@ macOS 完成 26 项资料与工作区回归、`check:runtime` 及实际 Worker �
 
 线上新草稿实际输入 `@`，两个 Git 根目录及 `docs` 正常显示；Tab 进入中文目录、Enter 选择上传 PDF、点击选择 Git README 及正文预览通过。PDF 固定资料 iframe 已打开，但内置浏览器显示空画面，不将其计为 PDF 渲染通过。测试草稿已清空，未发送对话，未执行上传、同步、发布或线上撤权；权限与固定内容覆盖来自本地隔离回归。
 
-现行恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-mention-424f6b35-20261024`，程序回滚目标为 `t3-layout-5ceb677d`；两个服务的本批配置为 `zzzzzzzzzzzzzzzzzzzzzzzz-mention-424f6b35.conf`。`rollback-program.sh --check` 及 29 项临时库/模拟服务恢复检查通过；未实际降级，回滚始终保留当下业务数据。证据位于 `.deployment/mention-picker-fix/`，含修复前两个真实失败用例、回归、构建源核对、发行/保留校验和实际 UI 截图。
+该批历史恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-mention-424f6b35-20261024`，程序回滚目标为 `t3-layout-5ceb677d`；两个服务的本批配置为 `zzzzzzzzzzzzzzzzzzzzzzzz-mention-424f6b35.conf`。`rollback-program.sh --check` 及 29 项临时库/模拟服务恢复检查通过；未实际降级，回滚始终保留当下业务数据。证据位于 `.deployment/mention-picker-fix/`，含修复前两个真实失败用例、回归、构建源核对、发行/保留校验和实际 UI 截图。
 
 ### 历史资料页排版（t3-layout-5ceb677d）
 
