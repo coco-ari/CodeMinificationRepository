@@ -10,6 +10,27 @@
 
 本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次仅作历史证据，是否仍保留由当前恢复方案决定；不要执行已清理发行对应的历史脚本。
 
+2026-10-24，客户电脑图片与文件输入已完整部署，应用提交 `13c8e3916cdd0ce5b632727f3c7e054170276c6f`（包含主实现 `117826bc`）。网关、Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-attachments-13c8e391`；数据仍为 `/home/tao/autoops-deployment-validation/data`。客户包升级为 0.2.0，本次 Mac 测试设备已更新并通过公网 HTTPS/WSS 接入，原配对、目录和执行记录保留。
+
+| 当前发行证据 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `2ca89f9ca0bb5b78a4099bb69adc0616074d8ea710b26bd9aba688204a509707` |
+| 完整清单 SHA-256 | `c8f3a01e2e676f4127a45830a086fb7609b34c0a9817d3474711a37cba6de003` |
+| 原生依赖清单 SHA-256 | `d5a921e349fc92dd7205629dce6a5f5defaeca5c3f51d9d0469d9bad739b615b` |
+| 实际网页 HTML SHA-256 | `9c310824df74ebe5e409953a99565f5d60aaf752858ab1a3b345c5b4536b8a2b` |
+| 客户 ZIP | 0.2.0，1046479 字节；`6690b5b9976cce18854a60920085090900c2ea834b6ec1ea8a007e5145ca455d` |
+| 来源与发行 | 29288 个跟踪文件与干净提交逐项一致；8825 个发行文件、61 个相对链接；保留 4596 个旧静态资源 |
+| Linux 原生运行 | 官方 2038 个原生文件、21 包、实际 CLI、隔离资料与 ZIP Worker 通过 |
+| CI | [运行链路 40104605702](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40104605702)、[AutoOps 质量 40104605698](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40104605698) 均通过 |
+
+真实网页选择文本文件、粘贴 PNG、继续输入后发送到当前 Mac 的 Codex / GPT-6-Astra，独立对话 `9296c973-4b5f-4ad8-b23d-71ae2ee8e51c` 完成。文件验收码 `FILE-927164`、图片验证码 `IMG-438926` 及 3 个蓝色方块均正确；原生执行记录显示只读取连接程序下载的文件缓存，未手工搬文件或写入测试项目。具体权限、故障与 UI 范围见[客户附件验收](../docs/runtime-modules.md#客户电脑图片与文件输入2026-10-24)。
+
+切换前检查空闲、停止接单并一致备份，保留 348 个资料/技能文件、161 条消息、51 轮运行、511 条轮次条目、27 个绑定、4 项附件授权以及设备、收据和部署数据；其他服务 PID 不变。恢复点为 `/home/tao/autoops-agent-demo/backups/t3-customer-attachments-13c8e391-20261024`，其中 `rollback-program.sh --check` 已通过。实际回滚仅恢复上一完整发行 `117826bc`，继续使用回滚时的数据，不覆盖新产生的业务记录；未执行真实降级。
+
+构建在 macOS 完成，服务器准备、校验、切换及恢复预检串行使用独立 512 MiB、无 swap、100% CPU cgroup。首次候选含 macOS `._` 元数据，被发行清单检查拒绝且未切换；关闭归档元数据后重新打包，完整校验通过再切换。前一应用 `117826bc` 的真实网页验收发现附件引用误经外部文本过滤，后续输入会移除文件；本次最终发行已修正并实测标签保留。证据位于 `.deployment/customer-attachments/` 和 `.deployment/customer-attachments-followup/`。
+
+### 历史批次：中文对话标题（2026-10-24）
+
 2026-10-24，中文对话标题修复 `ed4b944370a000edd1e61ce453ae0af36ea11747` 已完整部署。网关、Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-chinese-titles-ed4b9443`，数据仍为 `/home/tao/autoops-deployment-validation/data`。本批重建实际 Worker；网页和客户包未修改，复用上一批已验证构建，网页摘要保持一致。
 
 | 当前发行证据 | 实际结果 |
