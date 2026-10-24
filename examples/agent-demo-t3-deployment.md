@@ -10,6 +10,30 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，合入非工作区 UI 修复后的应用提交 `b0cda944d5fcd6c46aef70a2b0d8ec0cb197aa1a` 已完整部署。网关、T3 Worker、网页与客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-ui-b0cda944`；数据仍为 `/home/tao/autoops-deployment-validation/data`，未切换身份后端或初始化空库。当前资料、每轮固定输入和独立 Git 部署来源继续保留。
+
+| 发行身份与校验          | 实际结果                                                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 归档 SHA-256            | `2f97c7e096335077df90b826aa4e2420a3b0c43022eb4eeec190ae7a50f96c9f`                                                                                                                                                                    |
+| 完整清单 SHA-256        | `d9f99e194a96580dbdadab88a03e7c093135bc9641de31ff64403bf735711038`                                                                                                                                                                    |
+| 原生依赖清单 SHA-256    | `c3f1f0e3b1915d29b282e421a8b0df8fb06a4b36541adcadc20d9224aba0db47`                                                                                                                                                                    |
+| 实际网页 HTML SHA-256   | `6fcf70af44852f0bf8870317058a672b4d06a95fa0373a6ec4abbfb1fe04b36f`                                                                                                                                                                    |
+| 客户 ZIP SHA-256 / 字节 | `c334eaaaa06c5d58c8cc306de4d38dc6acaab9e44ad68fa0bc5a5d76021c8446` / 1042167                                                                                                                                                          |
+| 文件与旧资源            | 6346 文件、61 相对链接；保留 2120 个旧哈希资源；官方同版原生依赖 2038 文件/21 包校验通过                                                                                                                                              |
+| 应用提交 CI             | [工作台运行链路 40049059663](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40049059663)、[AutoOps 质量检查 40049059777](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40049059777) 均通过 |
+
+构建在开发机完成，源文件逐项与已验证合并树核对。服务器准备、发行冒烟及切换串行使用独立 `MemoryMax=512M / MemorySwapMax=0 / CPUQuota=100%` cgroup；发行目录的当前资料输入、旧输入保留、原请求不变、ZIP Worker 与 CLI 校验通过。切换前再次核对远端提交、原生运行、部署、客户租约/收据及资料捕获；两个验证服务增加 `zzzzzzzzzzzzzzzzzzz-ui-b0cda944.conf`，停止预算 90 秒。
+
+正常停止接单并排空后，完成 15 个非空 SQLite 一致性备份与业务文件归档。切换前后 258 个业务文件、113 条消息、36 轮运行、333 条轮次条目、18 个会话绑定、3 份成果，以及客户设备、目录、13 条命令和 3 个游标均保留；部署配置和记录、28890 站点及其他四项服务 PID 不变。两项验证服务处于 active、重启计数为 0，实际网页字节与新发行一致，Worker 可达。
+
+现行恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-ui-b0cda944-20261024`，程序回滚目标为 `t3-current-b6e1ba4e`。该目录的 `rollback-program.sh --check` 已通过；实际回滚会以当时业务数据为基线，仅撤销本批且摘要未变的配置，不恢复旧数据库。本批未实际降级或整库恢复；29 项辅助脚本检查使用本地临时库和模拟服务，与服务器预检分别记录。
+
+部署后通过真实浏览器刷新工作区，读取两个 Git 来源、展开目录并打开 README；我的电脑显示原设备在线，已登记目录可读，详情弹窗 Esc 后焦点恢复。只读冒烟没有发起配对、改权限、模型执行、同步或部署任务；原有 7 项异常任务及两个来源的同步失败提示仍保留，不能将其当作本次部署新增失败或成功恢复。未重复完整浅深色/窄屏交互矩阵。既有来源分支交互及合并回归证据见[非工作区 UI 修复验收](../docs/runtime-modules.md#非工作区-ui-修复验收2026-10-24)。
+
+证据在 `.deployment/ui-merge-deploy/`：`build-source-attestation.json`、`archive.json`、`server-prepare.json`、`server-verify.json`、`server-switch.json`、`rollback-check.json`、`final-state.json`、`ui-report.json` 与 `workspace-after.png`。下方历史恢复脚本不得越层执行。
+
+### 历史程序与网页：当前资料与部署来源拆分（t3-current-b6e1ba4e）
+
 2026-10-24，当前资料与部署来源拆分应用提交 `b6e1ba4eebfbc405a62fe19cb86cb999086723e1` 已部署。网关、T3 Worker、网页与客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-current-b6e1ba4e`，业务数据继续使用 `/home/tao/autoops-deployment-validation/data`。日常工作区使用当前上传资料及 Git 来源，每个新 Agent 轮次捕获当时输入；部署单独选择 Git 引用与构建目录。未切换独立身份后端，未初始化空库。
 
 | 发行身份与校验 | 实际结果 |
