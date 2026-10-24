@@ -10,6 +10,26 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，界面中文与工作台用语应用提交 `b033e83971e2c028fa6904b03e75ab5a8e9aaab2` 已部署。网关、重新构建的 Worker、网页及客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-language-b033e839`，数据仍为 `/home/tao/autoops-deployment-validation/data`。工具来源使用“工作台工具”，内置动作补齐中文；带来源的工具失败会保留失败标记。连接与模型服务提示中文化，原始错误保留详情；内置主题显示“默认”“柔和”，协议、历史及主题 ID 不变。详见[运行验收记录](../docs/runtime-modules.md#界面中文与工作台用语2026-10-24)。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `391c2a087236c1d872cb54fc614cd8e60b1a18ef0858894b4f7980c3f663a800` |
+| 完整清单 SHA-256 | `4da9dbd629f25237f2fb62b5b1d5eab99949eba7fdf2d2b921ef954ef7976e16` |
+| 原生依赖清单 SHA-256 | `e0dd308cf1eea149aa17412eac4b4036d51334d5ef90a63f35dcf720d1c5c2af` |
+| 实际网页 HTML SHA-256 | `f8b95b4749fe91ebf150d45956cbe3a3e70141497f1c7f2eaf332415673de47e` |
+| 客户 ZIP SHA-256 / 字节 | `628529660b6ff3d142b6f0dfcbbba1937deb9bd58fdcbf82fa0da85bd5d4447a` / 1042167 |
+| 文件与旧资源 | 7689 文件、61 相对链接；保留旧哈希网页资源，官方原生依赖 2038 文件/21 包通过 |
+| 应用提交 CI | [工作台运行链路 40072604397](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40072604397)、[AutoOps 质量检查 40072604385](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40072604385) 均通过 |
+
+macOS Web 类型、网页与 Worker 构建、199 文件边界和 36 项中文状态回归通过，29276 个跟踪文件与应用提交逐项核对。独立英文浏览器实际验证 6 组流程、9 张截图，含浅深色、桌面/390px 短窗口、主题导入与 Esc 焦点、原始错误展开、断网提示和自动重连。Linux 完整清单、原生 CLI、隔离资料与 ZIP Worker 通过。候选准备、隔离验证及切换串行运行于独立 512 MiB、无 swap、100% CPU 的 cgroup；共享服务器未安装依赖或运行整套重型回归。
+
+切换前再次确认空闲，停止接单并备份全部非空 SQLite 和业务文件；原 348 个工作区/技能文件、135 条消息、42 轮运行、422 条轮次条目、21 个绑定、客户设备及收据、部署配置和历史保留。其他四项服务 PID 与 28890 站点未变；实际目录、网页摘要及服务健康通过。线上另只读核对常规设置、主题和真实模型菜单，不发送模型请求，不修改业务数据。
+
+现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-language-b033e839-20261024`，程序回滚目标 `t3-topbar-2eb08131`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzz-language-b033e839.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未执行真实降级；回滚只撤销本批摘要未变的程序配置，保留当下业务数据，不恢复旧库。证据位于 `.deployment/ui-language/`。本批未进行模型实际调用、客户设备写操作、Windows 真机、实体手机、公网 HTTPS 或全部上游 T3 测试；不据此宣称所有原始模型/第三方错误均已翻译。
+
+### 历史顶部导航直接切换（t3-topbar-2eb08131）
+
 2026-10-24，顶部导航直接切换应用提交 `2eb08131800c8df194c527755e5e874ac378f005` 已部署。网关、Worker、网页及客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-topbar-2eb08131`；数据仍为 `/home/tao/autoops-deployment-validation/data`。项目选择器收紧，问答、工作区、部署、技能库直接可达；低频模块紧邻常用入口，窄屏通过当前模块菜单切换；设置、外观、归档及退出保留侧栏入口。业务权限与任务归属未改变。
 
 | 发行身份与校验 | 实际结果 |
@@ -26,7 +46,7 @@ macOS Web 类型、网页构建、199 文件模块边界、17 项项目导航回
 
 切换前确认空闲，停止接单并备份全部非空 SQLite 和业务文件；原 348 个工作区/技能文件、135 条消息、42 轮运行、422 条轮次条目、21 个绑定、客户设备/目录/收据及部署配置和历史保留。其他四项服务 PID 与 28890 站点未变；实际服务目录及网页摘要与本批一致，Worker 可达。
 
-现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-topbar-2eb08131-20261024`，程序回滚目标 `t3-skills-b973a0e1`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzz-topbar-2eb08131.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚仅撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。本批没有模型调用或业务管理写入；Windows 真机、实体手机、公网 HTTPS 与全部 T3 上游测试未执行，按用户要求不作为本批范围。导航验收见[运行模块记录](../docs/runtime-modules.md#顶部导航直接切换2026-10-24)，证据在 `.deployment/topbar-direct/`。
+该历史批次恢复目录 `/home/tao/autoops-agent-demo/backups/t3-topbar-2eb08131-20261024`，程序回滚目标 `t3-skills-b973a0e1`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzz-topbar-2eb08131.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚仅撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。本批没有模型调用或业务管理写入；Windows 真机、实体手机、公网 HTTPS 与全部 T3 上游测试未执行，按用户要求不作为本批范围。导航验收见[运行模块记录](../docs/runtime-modules.md#顶部导航直接切换2026-10-24)，证据在 `.deployment/topbar-direct/`。
 
 ### 历史技能库导航与卡片优化（t3-skills-b973a0e1）
 
