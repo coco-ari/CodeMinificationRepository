@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { CustomerCapabilityInput } from "../../autoops/contracts/runtime.ts";
 import { CustomerAttachmentCache, type AttachmentDownload } from "./attachments.ts";
 import { CUSTOMER_ATTACHMENT_LIMITS } from "../../vendor/t3code/packages/contracts/src/customerAttachments.ts";
 import { createHash } from "node:crypto";
@@ -232,7 +233,7 @@ export class CustomerAgentExecutor {
       const receipt = errorReceipt(command, error, uncertain ? "unknown" : "failed"); this.notify(receipt); return receipt;
     }
   }
-  async capabilities(workspace: LocalWorkspace): Promise<Record<string, unknown>> {
+  async capabilities(workspace: LocalWorkspace): Promise<CustomerCapabilityInput> {
     this.store.resolveWorkspace(workspace);
     // Discovery does not leave a permanent app-server per registered directory.
     const runner = await this.runnerFactory({ instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath,
@@ -240,7 +241,7 @@ export class CustomerAgentExecutor {
     this.discoveryRunners.add(runner);
     try { return await this.catalogSnapshot(workspace, runner); } finally { this.discoveryRunners.delete(runner); await runner.close(); }
   }
-  private async catalogSnapshot(workspace: LocalWorkspace, runner: HeadlessCodexRunner): Promise<Record<string, unknown>> {
+  private async catalogSnapshot(workspace: LocalWorkspace, runner: HeadlessCodexRunner): Promise<CustomerCapabilityInput> {
     const catalog = await runner.catalog();
     return {
       registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
@@ -249,12 +250,14 @@ export class CustomerAgentExecutor {
       revision: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
       models: catalog.models.map((model) => {
         const effort = model.capabilities?.optionDescriptors?.find((option) => option.id === "reasoningEffort");
+        const defaultEffort = effort?.type === "select" ? effort.options.find((option) => option.isDefault)?.id : undefined;
         return { id: model.slug, name: model.name,
+          ...(defaultEffort === undefined ? {} : { defaultReasoningEffort: defaultEffort }),
           supportedReasoningEfforts: effort?.type === "select" ? effort.options.map((option) => option.id) : [] };
       }),
       skills: catalog.skills.filter((skill) => skill.enabled).map((skill) => ({
         id: customerSkillId(workspace.registeredWorkspaceId, skill.path),
-        name: skill.name, description: skill.description,
+        name: skill.name, description: skill.description ?? "",
       })),
       permissions: { approvalPolicy: workspace.policy.approvalPolicy, sandboxMode: workspace.policy.sandboxMode },
     };

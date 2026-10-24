@@ -227,7 +227,7 @@ describe("buildTraitsTriggerDisplay", () => {
     expect(display([EFFORT, CONTEXT_WINDOW])).toEqual({ label: "High · 1M" });
   });
 
-  it("stays blank when descriptors resolve to no label and there is no fast mode", () => {
+  it("未报告思考默认值时显示默认，不猜测具体档位", () => {
     const unresolved: Extract<ProviderOptionDescriptor, { type: "select" }> = {
       id: "effort",
       label: "effort",
@@ -237,7 +237,7 @@ describe("buildTraitsTriggerDisplay", () => {
         { id: "high", label: "High" },
       ],
     };
-    expect(display([unresolved])).toEqual({ label: "" });
+    expect(display([unresolved])).toEqual({ label: "默认" });
   });
 
   it("still renders prompt-controlled ultrathink with Fast", () => {

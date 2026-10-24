@@ -171,9 +171,12 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       if (input.protocolVersion !== 1) fail(409, 'CUSTOMER_PROTOCOL_UNSUPPORTED', '连接程序协议不兼容，请更新后重连')
       if (!Array.isArray(input.models) || input.models.length > 1000 || !Array.isArray(input.skills) || input.skills.length > 2000) fail(400, 'CUSTOMER_CAPABILITIES_LIMIT', '模型或技能目录过大或格式无效')
       const models = input.models.map((model) => {
-        object(model, ['id', 'name', 'supportedReasoningEfforts'])
+        object(model, ['id', 'name', 'supportedReasoningEfforts', 'defaultReasoningEffort'])
         if (!Array.isArray(model.supportedReasoningEfforts) || model.supportedReasoningEfforts.length > 16) fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '思考强度目录无效')
-        return { id: text(model.id, '模型ID', 200), ...(model.name ? {name:text(model.name,'模型名称',200)} : {}), supportedReasoningEfforts: [...new Set(model.supportedReasoningEfforts.map((effort) => text(effort, '思考强度', 40)))] }
+        const supportedReasoningEfforts = [...new Set(model.supportedReasoningEfforts.map((effort) => text(effort, '思考强度', 40)))]
+        const defaultReasoningEffort = model.defaultReasoningEffort === undefined ? undefined : text(model.defaultReasoningEffort, '默认思考强度', 40)
+        if (defaultReasoningEffort !== undefined && !supportedReasoningEfforts.includes(defaultReasoningEffort)) fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '默认思考强度不在支持目录中')
+        return { id: text(model.id, '模型ID', 200), ...(model.name ? {name:text(model.name,'模型名称',200)} : {}), supportedReasoningEfforts, ...(defaultReasoningEffort === undefined ? {} : {defaultReasoningEffort}) }
       })
       const skills = input.skills.map((skill) => { object(skill, ['id','name','description']); return {id:id(skill.id,'技能ID'),name:text(skill.name,'技能名称'),description:typeof skill.description === 'string' && !skill.description ? '' : text(skill.description,'技能描述',4000)} })
       if (new Set(models.map((model) => model.id)).size !== models.length || new Set(skills.map((skill) => skill.id)).size !== skills.length) fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '模型或技能标识重复')

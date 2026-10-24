@@ -636,7 +636,11 @@ export function buildTraitsTriggerDisplay(input: {
       labels.push(speedLabel);
     }
   }
-  return { label: labels.join(" · ") };
+  // 旧客户端可能只报告可选档位；没有默认值时不猜测具体强度，也不显示空按钮。
+  const unresolvedReasoning = input.descriptors.some(
+    (descriptor) => descriptor.type === "select" && REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
+  );
+  return { label: labels.join(" · ") || (unresolvedReasoning ? "默认" : "") };
 }
 
 export const TraitsPicker = memo(function TraitsPicker({

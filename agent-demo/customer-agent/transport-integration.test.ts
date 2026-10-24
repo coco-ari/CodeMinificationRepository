@@ -39,7 +39,7 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
       const message=JSON.parse(line);appendFileSync(${JSON.stringify(requestLog)},line+'\\n');
       if(message.id===undefined)return;
       let result;
-      if(message.method==='model/list')result={data:[{id:'gpt-6-luna',model:'gpt-6-luna',displayName:'GPT-6-Luna',description:'Fixture',hidden:false,isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Medium'}]}],nextCursor:null};
+      if(message.method==='model/list')result={data:[{id:'gpt-6-luna',model:'gpt-6-luna',displayName:'GPT-6-Luna',description:'Fixture',hidden:false,isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Medium'},{reasoningEffort:'high',description:'High'}]}],nextCursor:null};
       else if(message.method==='skills/list')result={data:[{cwd:${JSON.stringify(directory)},errors:[],skills:[]}]};
       else result=responses[message.method];
       if(result===undefined)return send({id:message.id,error:{code:-32601,message:'unsupported fixture method'}});
@@ -94,16 +94,19 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
   const port = (server.address() as { port: number }).port;
   const connection = new CustomerAgentConnection({ store, credentials: { deviceId: paired.device.id, token: paired.deviceToken, baseUrl: `http://127.0.0.1:${port}` },
     onState: (message) => connectionStates.push(message),
+    onReady: async () => { registry.updateCapabilities(principal, await connection.executor.capabilities(workspace)); },
     runnerFactory: (options) => createHeadlessCodexRunner({ ...options, binaryPath, environment: { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ""}` } }) });
   const abort = new AbortController();
   let consume: Promise<void> | undefined;
   try {
     connection.start(); await until(() => { if (errors.length) throw errors[0]; return hub.online(paired.device.id); }).catch((error) => { throw new Error(`${String(error)}; states=${JSON.stringify(connectionStates)}; connections=${connectionCount}`); });
     const threadId = "thread-customer", sessionId = "session-customer", instanceId = `customer-${paired.device.id}-codex`;
-    const modelSelection = { instanceId, model: "gpt-6-luna", options: [{ id: "reasoningEffort", value: "medium" }] };
+    const modelSelection = { instanceId, model: "gpt-6-luna", options: [{ id: "reasoningEffort", value: "high" }] };
     const runtimePolicy = { cwd: "/rejected-central-path", runtimeMode: "full-access", interactionMode: "default" };
     bound = { threadId, ownerId: "owner", projectId: "project", executionBinding: { kind: "customer", deviceId: paired.device.id,
       registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: 1, runtimeId: "codex" } };
+    await until(() => { try { return Boolean(registry.getCapabilities("owner", bound.executionBinding)?.models.length); } catch { return false; } });
+    assert.equal(registry.getCapabilities("owner", bound.executionBinding)?.models[0]?.defaultReasoningEffort, "medium");
     hub.bind(bound, sessionId);
     await hub.command(sessionId, "openSession", { threadId, providerSessionId: sessionId, modelSelection, runtimePolicy }, "open");
     const providerThread = await hub.command(sessionId, "ensureThread", { threadId, modelSelection, runtimePolicy }, "ensure") as any;
@@ -125,7 +128,9 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
     await until(() => store.streams().length === 0);
     assert.equal(downloads,2);
     const nativeRequests=readFileSync(requestLog,"utf8").trim().split("\n").map(line=>JSON.parse(line));
-    const nativeInput=nativeRequests.find(entry=>entry.method==="turn/start").params.input;
+    const nativeTurn=nativeRequests.find(entry=>entry.method==="turn/start").params;
+    assert.equal(nativeTurn.effort, "high");
+    const nativeInput=nativeTurn.input;
     assert.ok(nativeInput.some((entry:any)=>entry.type==="image" && entry.url===`data:image/png;base64,${imageBytes.toString("base64")}`));
     const text=JSON.stringify(nativeInput);
     assert.ok(text.includes("验收.txt"));

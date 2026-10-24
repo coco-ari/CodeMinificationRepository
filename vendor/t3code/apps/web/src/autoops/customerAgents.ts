@@ -179,6 +179,7 @@ export function customerScopedProviders(
                     options: model.supportedReasoningEfforts.map((id) => ({
                       id,
                       label: reasoningLabels[id] ?? id,
+                      ...(id === model.defaultReasoningEffort ? { isDefault: true } : {}),
                     })),
                   },
                 ]

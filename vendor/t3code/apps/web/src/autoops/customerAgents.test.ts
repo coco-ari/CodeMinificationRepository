@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { ProviderInstanceId, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import type { AutoOpsThreadScope, AutoOpsT3Bootstrap } from "./hostConfig";
 import type { CustomerCapabilities } from "./customerAgents";
+import { getProviderOptionCurrentLabel, getProviderOptionDescriptors } from "@t3tools/shared/model";
 const target = {
   kind: "customer" as const,
   deviceId: "device-1",
@@ -62,6 +63,32 @@ afterEach(() => {
   vi.resetModules();
 });
 describe("customer workspace UI boundary", () => {
+  it("显示本机默认思考档位，并保留用户显式选择及未知默认值", async () => {
+    const host = await import("./hostConfig");
+    host.installAutoOpsHost(bootstrap, "https://work.test");
+    const { customerScopedProviders, customerInstanceId } = await import("./customerAgents");
+    const entries = [provider(customerInstanceId(target))];
+    const scoped = customerScopedProviders(entries, scope, {
+      ...catalog,
+      models: [{ ...catalog.models[0]!, defaultReasoningEffort: "high" }],
+    });
+    const caps = scoped[0]!.models[0]!.capabilities;
+    if (!caps) throw new Error("客户模型缺少能力描述");
+    expect(getProviderOptionCurrentLabel(getProviderOptionDescriptors({ caps })[0])).toBe("高");
+    expect(
+      getProviderOptionCurrentLabel(
+        getProviderOptionDescriptors({
+          caps,
+          selections: [{ id: "reasoningEffort", value: "low" }],
+        })[0],
+      ),
+    ).toBe("低");
+    const unreported = customerScopedProviders(entries, scope, catalog)[0]!.models[0]!.capabilities;
+    if (!unreported) throw new Error("客户模型缺少能力描述");
+    expect(
+      getProviderOptionCurrentLabel(getProviderOptionDescriptors({ caps: unreported })[0]),
+    ).toBeUndefined();
+  });
   it("uses the fixed customer's server availability without enabling platform providers", async () => {
     const host = await import("./hostConfig");
     host.installAutoOpsHost(bootstrap, "https://work.test");

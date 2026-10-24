@@ -45,6 +45,7 @@ export interface CustomerModel {
   id: string
   name?: string
   supportedReasoningEfforts: string[]
+  defaultReasoningEffort?: string
 }
 export interface CustomerSkill {
   id: string

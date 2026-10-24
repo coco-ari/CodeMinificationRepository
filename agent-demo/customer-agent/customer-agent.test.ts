@@ -34,6 +34,27 @@ function runnerHarness(f: ReturnType<typeof fixture>, behavior?: (method: string
   return { executor, calls, emit: (event: unknown) => emit(event) };
 }
 
+test("客户目录保留运行器报告的默认思考档位，不从选项顺序推测", async () => {
+  const f = fixture();
+  let closed = false;
+  const executor = new CustomerAgentExecutor({ store: f.store, deviceId: "device-a", notify: () => {}, runnerFactory: async () => ({
+    processGeneration: "catalog-epoch",
+    catalog: async () => ({ models: [
+      { slug: "reported", name: "Reported", isCustom: false, capabilities: { optionDescriptors: [{ id: "reasoningEffort", label: "Reasoning", type: "select", options: [{ id: "low", label: "Low" }, { id: "high", label: "High", isDefault: true }] }] } },
+      { slug: "unknown", name: "Unknown", isCustom: false, capabilities: { optionDescriptors: [{ id: "reasoningEffort", label: "Reasoning", type: "select", options: [{ id: "low", label: "Low" }] }] } },
+    ], skills: [] }),
+    dispatch: async () => null, close: async () => { closed = true; },
+  }) });
+  try {
+    const catalog = await executor.capabilities(f.workspace);
+    assert.deepEqual(catalog.models, [
+      { id: "reported", name: "Reported", supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "high" },
+      { id: "unknown", name: "Unknown", supportedReasoningEfforts: ["low"] },
+    ]);
+    assert.equal(closed, true);
+  } finally { await executor.close(); f.close(); }
+});
+
 test("目录登记拒绝同目录、符号链接别名及父子重叠", () => {
   const f = fixture();
   try {

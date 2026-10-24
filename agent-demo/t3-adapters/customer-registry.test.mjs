@@ -80,6 +80,10 @@ test('capabilities stay per-workspace, reject executable paths and never silentl
   registry.markConnected(entry.principal)
   const input = {registeredWorkspaceId:'workspace-1',workspaceBindingRevision:1,runtimeId:'codex',revision:'catalog-1',protocolVersion:1,models:[{id:'gpt-test',supportedReasoningEfforts:['low','high']}],skills:[{id:'skill-docs',name:'docs',description:'使用本机文档工具'}],permissions:{approvalPolicy:'on-request',sandboxMode:'workspace-write'}}
   registry.updateCapabilities(entry.principal,input)
+  registry.updateCapabilities(entry.principal,{...input,models:[{...input.models[0],defaultReasoningEffort:'high'}]})
+  assert.equal(registry.getCapabilities('owner',entry.target).models[0].defaultReasoningEffort,'high')
+  assert.throws(()=>registry.updateCapabilities(entry.principal,{...input,models:[{...input.models[0],defaultReasoningEffort:'max'}]}),{code:'CUSTOMER_CAPABILITIES_INVALID'})
+  assert.equal(registry.getCapabilities('owner',entry.target).models[0].defaultReasoningEffort,'high')
   assert.equal(registry.validateSelection('owner','project',entry.target,{modelId:'gpt-test',reasoningEffort:'high',skillIds:['skill-docs']}).revision,'catalog-1')
   assert.throws(()=>registry.validateSelection('owner','project',entry.target,{modelId:'unknown'}),{code:'CUSTOMER_MODEL_UNAVAILABLE'})
   assert.throws(()=>registry.validateSelection('owner','project',entry.target,{modelId:'gpt-test',reasoningEffort:'max'}),{code:'CUSTOMER_REASONING_UNAVAILABLE'})
