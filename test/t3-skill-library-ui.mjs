@@ -469,7 +469,7 @@ try {
       assert(readySkill)
       await ownedMutation({action:'assign',skillId:readySkill.id,targetType:'project',targetId:primaryProject.id,versionId:readySkill.latestVersionId,workspaceTypes:['internal'],enabled:true})
       await management(desktop)
-      await page.locator('[aria-label="技能管理"]').getByText('项目技能',{exact:true}).click()
+      await page.locator('[aria-label="技能管理"]').getByText('项目分配',{exact:true}).click()
       assert.equal(new URL(page.url().split('#')[1],origin).searchParams.get('projectId'),primaryProject.id)
       await skillCard(readySkill.id).waitFor()
       const {list}=await projectPopover(readySkill)
@@ -622,7 +622,7 @@ try {
   })
   await step('scope-version-update-and-project-assignment', async () => {
     await page.getByRole('button',{name:'返回技能库',exact:true}).click()
-    await page.locator('[aria-label="技能管理"]').getByText('助手技能', { exact: true }).click()
+    await page.locator('[aria-label="技能管理"]').getByText('助手分配', { exact: true }).click()
     await page.locator(`[data-skill-row="${readySkill.id}"]`).click()
     await menu('调整当前分配')
     await choose('分配技能版本', readySkill.latestVersionId.slice(0, 8))
@@ -636,7 +636,7 @@ try {
       readySkill.latestVersionId,
     )
     await page.getByRole('button',{name:'返回技能库',exact:true}).click()
-    await page.locator('[aria-label="技能管理"]').getByText('项目技能', { exact: true }).click()
+    await page.locator('[aria-label="技能管理"]').getByText('项目分配', { exact: true }).click()
     await page.getByRole('button', { name: '添加技能', exact: true }).click()
     await choose('分配的技能', longName)
     await mutation('assign', () =>

@@ -168,9 +168,9 @@ async function assertSkills(projectId, view) {
 }
 async function central() {
   const back = page.getByRole('button', { name: '返回技能库', exact: true }); if (await back.isVisible()) await back.click()
-  await page.locator('[aria-label="技能管理范围"]').getByText('中央技能库', { exact: true }).click(); await ready()
+  await page.locator('[aria-label="技能管理"]').getByText('全部技能', { exact: true }).click(); await ready()
 }
-async function projectView() { await page.locator('[aria-label="技能管理范围"]').getByText('项目技能', { exact: true }).click(); await until(() => routeState().view === 'project', '项目技能筛选应持久化到 URL'); await ready() }
+async function projectView() { await page.locator('[aria-label="技能管理"]').getByText('项目分配', { exact: true }).click(); await until(() => routeState().view === 'project', '项目技能筛选应持久化到 URL'); await ready() }
 async function refresh() { await page.getByRole('button', { name: '刷新技能库', exact: true }).click(); await ready() }
 async function menu(action) { await page.getByRole('button', { name: '技能操作', exact: true }).click(); await page.getByRole('menuitem', { name: action, exact: true }).click() }
 async function closeSettingsSidebar() {

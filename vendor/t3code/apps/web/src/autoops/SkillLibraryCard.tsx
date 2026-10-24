@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { CheckIcon, CircleAlertIcon, FolderIcon, PlusIcon } from 'lucide-react'
+import { CheckIcon, CircleAlertIcon, FolderIcon, PlusIcon, SparklesIcon } from 'lucide-react'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
@@ -85,23 +85,31 @@ export function SkillLibraryCard({
       data-skill-card={skill.id}
       className="group flex min-w-0 flex-col gap-3 rounded-xl border border-border/70 bg-card/60 p-3 transition-colors hover:bg-accent/20"
     >
-      <div className="flex min-w-0 items-start gap-2">
-        <h2 className="min-w-0 flex-1">
-          <button
-            type="button"
-            data-skill-row={skill.id}
-            className="w-full min-w-0 cursor-pointer truncate rounded-sm text-left text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card pointer-coarse:min-h-11"
-            title={skill.displayName}
-            onClick={onOpen}
-          >
-            {skill.displayName}
-          </button>
-        </h2>
+      <div className="flex min-w-0 items-start gap-3">
+        <div
+          className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground"
+          aria-hidden="true"
+        >
+          <SparklesIcon className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-1">
+          <h2 className="min-w-0">
+            <button
+              type="button"
+              data-skill-row={skill.id}
+              className="w-full min-w-0 cursor-pointer truncate rounded-sm text-left text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card pointer-coarse:min-h-11"
+              title={skill.displayName}
+              onClick={onOpen}
+            >
+              {skill.displayName}
+            </button>
+          </h2>
+          <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground wrap-anywhere">
+            {skill.description || '尚未提供技能描述。'}
+          </p>
+        </div>
         {actions}
       </div>
-      <p className="line-clamp-2 text-xs leading-4 text-muted-foreground wrap-anywhere">
-        {skill.description || '尚未提供技能描述。'}
-      </p>
       {!skill.enabled || version?.readiness === 'restricted' ? (
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {!skill.enabled ? (
@@ -127,7 +135,7 @@ export function SkillLibraryCard({
           ) : null}
         </div>
       ) : null}
-      <div className="mt-auto space-y-1.5">
+      <div className="mt-auto space-y-1.5 border-t border-border/60 pt-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0 text-xs text-muted-foreground">助手</span>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1" aria-label="助手分配">
@@ -266,7 +274,7 @@ function SkillTargetButton({
     <Toggle
       {...targetProps}
       size="compact"
-      variant="default"
+      variant="outline"
       className="min-w-0 max-w-full justify-start pointer-coarse:min-h-11 pointer-coarse:after:inset-0"
       pressed={active}
       onPressedChange={onToggle}

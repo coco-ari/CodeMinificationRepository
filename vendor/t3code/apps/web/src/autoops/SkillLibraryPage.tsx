@@ -8,6 +8,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeftIcon,
+  BotIcon,
+  FolderGit2Icon,
+  LibraryIcon,
   InfoIcon,
   MoreHorizontalIcon,
   PlusIcon,
@@ -58,7 +61,8 @@ type OpenDialog =
   | { type: 'assign'; skillId?: string; assignment?: SkillAssignment }
   | { type: 'details' | 'delete'; skill: LibrarySkill }
   | null
-const scopeNames = { library: '中央技能库', agent: '助手技能', project: '项目技能' } as const
+const scopeNames = { library: '全部技能', agent: '助手分配', project: '项目分配' } as const
+const scopeIcons = { library: LibraryIcon, agent: BotIcon, project: FolderGit2Icon } as const
 
 const viewStorageKey = (principalId: string, projectId: string) =>
   `autoops:skill-library-view:${encodeURIComponent(principalId)}:${encodeURIComponent(projectId)}`
@@ -428,6 +432,7 @@ function SkillLibraryContent({
             <ModuleSidebarItem
               key={value}
               label={name}
+              icon={scopeIcons[value as Scope]}
               selected={scope === value}
               onClick={() => selectView(value as Scope)}
             />
@@ -522,7 +527,7 @@ function SkillLibraryContent({
                       <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
                         <PopoverTitle>技能分配</PopoverTitle>
                         <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
-                          <p>中央库与助手技能全局共享，项目技能跟随顶部当前项目。</p>
+                          <p>技能库与助手分配全局共享，项目分配跟随顶部当前项目。</p>
                           <p>
                             点击助手或项目即可分配，再点取消。新分配使用最新版本，仅限内部工作区；未就绪版本不能分配。
                           </p>
@@ -577,7 +582,7 @@ function SkillLibraryContent({
                         : canManage
                           ? scope === 'library'
                             ? '导入 SKILL.md、ZIP 或公开 Git 技能包。'
-                            : '可从中央技能库的卡片直接分配给助手或项目。'
+                            : '可从全部技能的卡片直接分配给助手或项目。'
                           : '请联系管理员分配可用技能。'
                     }
                   />
