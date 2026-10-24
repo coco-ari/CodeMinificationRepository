@@ -10,6 +10,32 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，当前技能范围应用提交 `33e30846eedc82a00434b0b6b7bfe35e56fd3455` 已部署。网关、Worker、网页和重新打包的客户程序统一使用 `/home/tao/autoops-agent-demo/releases/t3-current-skills-33e30846`，数据仍为 `/home/tao/autoops-deployment-validation/data`。新旧对话都显示当前项目、助手和工作区的可用技能；停用或取消分配只移除对应项，不要求新建对话。重试同步更新业务分配和原生目录。详见[当前技能验收](../docs/runtime-modules.md#新旧对话使用当前技能2026-10-24)。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `24692a05fba80e6e3456f12b6689546ee5643540a71aadc658941100cdf6afd0` |
+| 完整清单 SHA-256 | `a9261a61fa0c9843419567e8f4a001c7d7d3a62fcd0554e4d931300d28991ad6` |
+| 原生依赖清单 SHA-256 | `ae0f6b2c0d35c6fd4bb1c826047326bb2d7bfff6299589b84736f10435ea84ae` |
+| 实际网页 HTML SHA-256 | `7bd07d43842a00ba92d996a8d8180d8a4a62241c113ee8d4eaeb6557a1369491` |
+| 客户 ZIP SHA-256 / 字节 | `0c0ce1b5cfe82e44a8549646c2ce31d108608774fc4c741cde04cc5e53a1c8f9` / 1042410 |
+| 文件与旧资源 | 8175 文件、61 相对链接；保留旧哈希资源，官方原生依赖 2038 文件/21 包通过 |
+| 应用提交 CI | [AutoOps 质量检查 40078692265](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40078692265)、[工作台运行链路检查 40078692433](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40078692433) 均通过 |
+
+macOS 完整运行类型、199 文件模块边界、46 项定向 Node、20 项授权目录与菜单浏览器、3 项执行协议回归通过；网页、Worker 和客户包构建完成，29279 个跟踪文件与提交逐项核对。Linux 完整清单、CLI、隔离资料与 ZIP Worker 通过；真实 Codex 0.159.2 在独立临时项目中完成技能版本更新、停用至空目录及同一原生会话恢复，注入的合成历史持久文件保留，未请求模型。首次验收将注入历史误当成可见轮次、将内置演示分配误当成空范围，修正验收夹具后通过；失败记录保留，不能把它们当成产品修复。
+
+切换前确认空闲并备份业务库与文件。原 348 个工作区/技能文件、135 条消息、42 轮运行、422 条轮次条目、21 个绑定、客户设备与收据、部署配置和历史保留；其他四项服务 PID 和 28890 站点未变。服务器候选准备、校验及切换串行使用独立 512 MiB、无 swap、100% CPU cgroup，不在共享服务器安装依赖或跑整套回归。
+
+线上旧对话返回当前唯一技能“项目资料解读”，与新对话一致；实际候选、选择标签和说明预览通过。独立浏览器注入失效目录后，单次“重试”重新读取当前分配并恢复选择，输入保留。用户旧页面未发送的 `¥` 保留；未向用户历史发送测试消息。上述页面验收和原生协议验收不表述为真实模型技能执行。
+
+现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-current-skills-33e30846-20261024`，程序回滚目标 `t3-old-skills-2af191d9`；配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-current-skills-33e30846.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过；回滚只撤销本批程序配置、保留当前业务数据，不恢复旧库。证据在 `.deployment/current-skills/`。本批未执行真实模型调用、客户本机写操作和真实降级。
+
+### 历史旧技能清单拒绝提示（t3-old-skills-2af191d9）
+
+`2af191d98a335f218bd0dc9948ee287bf4d828dd` 曾完整部署，将旧对话的技能清单不一致改为明确拒绝；随后用户否定整份会话锁定规则，现由当前技能范围实现替代。该批两项 CI（40076197735、40076197746）、清单、健康及数据保留通过，恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-old-skills-2af191d9-20261024`，证据在 `.deployment/old-skills/`。其拒绝规则不再作为现行规范。
+
+### 历史技能候选等待恢复（t3-skill-picker-40b66307）
+
 2026-10-24，技能候选等待恢复应用提交 `40b663079d19775b6721662b57498968b2651dcc` 已部署。网关、重新构建的 Worker、网页及客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-skill-picker-40b66307`，数据仍为 `/home/tao/autoops-deployment-validation/data`。缺失目录自动续试，读取总等待上限 30 秒，空目录与失败不再误显为同步中；失败提供一个“重试”按钮，保留输入、授权交集与客户本机隔离。详见[技能候选等待恢复](../docs/runtime-modules.md#技能候选等待恢复2026-10-24)。
 
 | 发行身份与校验 | 实际结果 |
@@ -26,7 +52,7 @@ macOS Web 类型、网页与 Worker 构建、199 文件边界及 26 项浏览器
 
 切换前确认空闲、停止接单并备份业务库和文件；原 348 个工作区/技能文件、135 条消息、42 轮运行、422 条轮次条目、21 个绑定、客户设备与收据、部署配置和历史保留。其他四项服务 PID 与 28890 站点未变。线上真实验证技能候选、选择标签和固定说明预览，验收后恢复空白输入；没有发送消息或模型调用。间歇失败的复现与恢复证据来自本机故障注入，不表述为线上重新发生该故障。
 
-现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-skill-picker-40b66307-20261024`，程序回滚目标 `t3-language-b033e839`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-skill-picker-40b66307.conf`。29 项恢复脚本测试与 `rollback-program.sh --check` 通过，未执行真实降级；回滚仅撤销本批程序配置并保留当下业务数据，不恢复旧库。证据位于 `.deployment/skill-picker/`。未执行本批真实模型技能调用、客户本机写操作及全部 T3 上游测试。
+该历史批次恢复目录 `/home/tao/autoops-agent-demo/backups/t3-skill-picker-40b66307-20261024`，程序回滚目标 `t3-language-b033e839`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-skill-picker-40b66307.conf`。29 项恢复脚本测试与 `rollback-program.sh --check` 通过，未执行真实降级；回滚仅撤销本批程序配置并保留当下业务数据，不恢复旧库。证据位于 `.deployment/skill-picker/`。未执行本批真实模型技能调用、客户本机写操作及全部 T3 上游测试。
 
 ### 历史界面中文与工作台用语（t3-language-b033e839）
 
