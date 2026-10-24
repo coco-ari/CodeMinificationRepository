@@ -270,9 +270,11 @@ describe('现有模块的公共框架响应式布局', () => {
           expect(screen.container.querySelector('[data-module-error]')).toBeNull(),
         )
         if (area === 'workspaces') {
+          await screen.getByRole('button', { name: '工作区操作', exact: true }).click()
           await expect
-            .element(screen.getByRole('button', { name: '新建对话', exact: true }))
+            .element(page.getByRole('menuitem', { name: '新建对话', exact: true }))
             .toBeVisible()
+          await userEvent.keyboard('{Escape}')
           await expect
             .element(screen.getByRole('button', { name: '上传资料', exact: true }))
             .toBeEnabled()
@@ -555,6 +557,35 @@ describe('当前资料保留满高文件区域和原生操作', () => {
       expect(
         screen.container.querySelector('section[aria-label="当前资料文件浏览"]'),
       ).not.toBeNull()
+      const header = screen.container.querySelector<HTMLElement>('[data-module-header]')!
+      const files = screen.container.querySelector<HTMLElement>('[data-file-browser-panel]')!
+      expect(
+        files.getBoundingClientRect().top - header.getBoundingClientRect().bottom,
+      ).toBeLessThanOrEqual(1)
+      expect(screen.container.querySelectorAll('[data-surface-subheader]')).toHaveLength(1)
+      expect(
+        header.contains(page.getByRole('button', { name: '上传资料', exact: true }).element()),
+      ).toBe(true)
+      expect(
+        header.contains(page.getByRole('button', { name: '同步源码', exact: true }).element()),
+      ).toBe(true)
+      await expect
+        .element(page.getByRole('button', { name: '刷新当前资料', exact: true }))
+        .not.toBeInTheDocument()
+      const beforeRefresh = mocks.authoring.mock.calls.length
+      await page.getByRole('button', { name: '刷新工作区文件', exact: true }).click()
+      await vi.waitFor(() =>
+        expect(mocks.authoring.mock.calls.length).toBeGreaterThan(beforeRefresh),
+      )
+      await page.getByRole('button', { name: '工作区操作', exact: true }).click()
+      await page.getByRole('menuitem', { name: '任务记录', exact: true }).click()
+      await expect
+        .element(page.getByRole('dialog', { name: '任务记录', exact: true }))
+        .toBeVisible()
+      await userEvent.keyboard('{Escape}')
+      await expect
+        .element(page.getByRole('button', { name: '工作区操作', exact: true }))
+        .toHaveFocus()
       await page.getByRole('button', { name: '工作区操作', exact: true }).click()
       await page.getByRole('menuitem', { name: '添加源码来源', exact: true }).click()
       await expect
@@ -580,6 +611,27 @@ describe('当前资料保留满高文件区域和原生操作', () => {
 })
 
 for (const width of [390, 1440]) {
+  it(`当前资料在 ${width}px 将子目录路径与搜索放在同一工具栏`, async () => {
+    await page.viewport(width, 600)
+    saveSelection('p-one:authoring:file', 'docs')
+    await using screen = await render(
+      <AppSidebarLayout>
+        <AutoOpsWorkspacesPage />
+      </AppSidebarLayout>,
+      { router: '/workspaces?projectId=p-one' },
+    )
+    const search = page.getByRole('searchbox', { name: '搜索 当前资料 的文件' })
+    await expect.element(search).toBeVisible()
+    const path = page.getByRole('navigation', { name: '文件路径' })
+    await expect.element(path).toBeVisible()
+    await vi.waitFor(() => {
+      const toolbar = search.element().closest('[data-surface-subheader]')!
+      expect(toolbar.contains(path.element())).toBe(true)
+      expect(screen.container.querySelectorAll('[data-surface-subheader]')).toHaveLength(1)
+      expect(search.element().getBoundingClientRect().width).toBeGreaterThan(80)
+    })
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
+  })
   it(`工作区在 ${width}px 一次点击提交同步与外部更新，次要脱敏设置保留`, async () => {
     await page.viewport(width, 600)
     mocks.authoringSend.mockImplementation(async (_project, input) => ({

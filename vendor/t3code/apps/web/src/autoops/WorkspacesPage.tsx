@@ -103,6 +103,7 @@ function ProjectWorkspaces({
   const [previewReview, setPreviewReview] = useState(false)
   const dialogFocus = useRef<HTMLElement | null>(null)
   const externalMenuFocus = useRef<HTMLButtonElement | null>(null)
+  const authoringMenuFocus = useRef<HTMLButtonElement | null>(null)
   const [followTaskId, setFollowTaskId] = useState<string | null>(null)
   const submission = useWorkspaceTaskSubmission(projectId, (task) => {
     setFollowTaskId(task.id)
@@ -135,11 +136,13 @@ function ProjectWorkspaces({
         : latestPublished
   const open = (next: Dialog) => {
     dialogFocus.current =
-      next === 'external'
-        ? externalMenuFocus.current
-        : document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null
+      next === 'tasks' && tab === 'internal' && historicalId === undefined
+        ? authoringMenuFocus.current
+        : next === 'external'
+          ? externalMenuFocus.current
+          : document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
     setError(null)
     setDialog(next)
   }
@@ -257,7 +260,21 @@ function ProjectWorkspaces({
           manager={manager}
           section={section}
           navigation={navigation}
-          actions={actions}
+          menuTriggerRef={authoringMenuFocus}
+          menuItems={
+            <>
+              <MenuItem onClick={() => startWorkspaceConversation(projectId, 'internal')}>
+                <MessageSquarePlusIcon />
+                新建对话
+              </MenuItem>
+              {manager ? (
+                <MenuItem onClick={() => open('tasks')}>
+                  {running ? <Spinner size="sm" /> : <HistoryIcon />}
+                  {taskLabel}
+                </MenuItem>
+              ) : null}
+            </>
+          }
           taskRevision={taskRevision}
           taskActive={running}
           onSection={(next) => {

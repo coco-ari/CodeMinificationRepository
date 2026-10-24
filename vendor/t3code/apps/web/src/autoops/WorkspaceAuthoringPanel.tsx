@@ -1,6 +1,6 @@
 import { AutoOpsRequestError } from './apiClient'
 import { useWorkspaceFileScroll } from './useWorkspaceFileScroll'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import {
   FolderOpenIcon,
   GitBranchIcon,
@@ -18,7 +18,15 @@ import { SettingsRow, SettingsSection } from '~/components/settings/settingsLayo
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '~/components/ui/menu'
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from '~/components/ui/menu'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import { Spinner } from '~/components/ui/spinner'
 import { usePrimaryEnvironmentId } from '~/state/environments'
@@ -99,7 +107,8 @@ export function WorkspaceAuthoring({
   onSection,
   onAccepted,
   navigation,
-  actions,
+  menuItems,
+  menuTriggerRef,
   taskRevision = '',
   taskActive = false,
 }: {
@@ -109,7 +118,8 @@ export function WorkspaceAuthoring({
   onSection: (section: WorkspaceSection) => void
   onAccepted: (receipt: AuthoringReceipt) => void
   navigation?: ReactNode
-  actions?: ReactNode
+  menuItems?: ReactNode
+  menuTriggerRef?: RefObject<HTMLButtonElement | null>
   taskRevision?: string
   taskActive?: boolean
 }) {
@@ -161,9 +171,7 @@ export function WorkspaceAuthoring({
             ? `credential:${value.credential.id}`
             : value?.type === 'revoke-credential'
               ? `credential:${value.credential.id}`
-              : value?.type === 'file' && value.entry
-                ? 'file-actions'
-                : 'toolbar'
+              : 'toolbar'
     dialogReturnFocus.current =
       active instanceof HTMLElement && panelRoot.current?.contains(active)
         ? active
@@ -210,148 +218,135 @@ export function WorkspaceAuthoring({
           detail={section === 'current' ? '当前资料' : '源码来源'}
           actions={
             <>
-              {actions}
-              <FileSurfaceAction
-                label="刷新当前资料"
-                disabled={controller.busy}
-                onPress={controller.refresh}
-              >
-                <RefreshCwIcon />
-              </FileSurfaceAction>
-              {manager ? (
-                <Menu>
-                  <MenuTrigger
-                    render={
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label="工作区操作"
-                        data-authoring-focus="toolbar"
-                      />
-                    }
-                  >
-                    <MoreHorizontalIcon />
-                  </MenuTrigger>
-                  <MenuPopup align="end">
-                    <MenuItem disabled={disabled} onClick={() => open({ type: 'upload' })}>
-                      <UploadIcon />
-                      上传资料
-                    </MenuItem>
-                    <MenuItem
-                      disabled={disabled}
-                      onClick={() => open({ type: 'file', action: 'mkdir' })}
-                    >
-                      新建目录
-                    </MenuItem>
-                    <MenuSeparator />
-                    <MenuItem disabled={disabled} onClick={() => open({ type: 'source' })}>
-                      <GitBranchIcon />
-                      添加源码来源
-                    </MenuItem>
-                    <MenuItem disabled={disabled} onClick={() => open({ type: 'credential' })}>
-                      <KeyRoundIcon />
-                      添加仓库凭证
-                    </MenuItem>
-                    <MenuSeparator />
-                    <MenuItem
-                      disabled={syncDisabled}
-                      onClick={() => void controller.submit({ kind: 'sync' })}
-                    >
-                      <RefreshCwIcon />
-                      同步源码
-                    </MenuItem>
-                  </MenuPopup>
-                </Menu>
+              {!manager ? (
+                <Badge variant="outline" size="sm">
+                  只读
+                </Badge>
               ) : null}
-            </>
-          }
-        />
-        <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5">
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {!overview ? '正在读取…' : taskActive ? '正在处理…' : ''}
-            {!manager ? ' · 只读' : ''}
-          </span>
-          {manager ? (
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={disabled}
-                onClick={() =>
-                  open(section === 'current' ? { type: 'upload' } : { type: 'source' })
-                }
-              >
-                {section === 'current' ? <UploadIcon /> : <PlusIcon />}
-                {section === 'current' ? '上传资料' : '添加来源'}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={syncDisabled}
-                onClick={() => void controller.submit({ kind: 'sync' })}
-              >
-                同步源码
-              </Button>
-            </>
-          ) : null}
-          {section === 'current' && entry ? (
-            <Menu>
-              <MenuTrigger
-                render={
+              {manager ? (
+                <>
                   <Button
                     size="sm"
                     variant="ghost"
-                    aria-label="当前文件操作"
-                    data-authoring-focus="file-actions"
-                  />
-                }
-              >
-                文件操作
-              </MenuTrigger>
-              <MenuPopup align="end">
-                {entry.kind === 'file' ? (
-                  <MenuItem
-                    render={
-                      <a
-                        href={authoringFileUrl(projectId, entry.path, entry.revision).replace(
-                          '&inline=1',
-                          '',
-                        )}
-                        download={entry.name}
-                      />
+                    aria-label={section === 'current' ? '上传资料' : '添加来源'}
+                    disabled={disabled}
+                    onClick={() =>
+                      open(section === 'current' ? { type: 'upload' } : { type: 'source' })
                     }
                   >
-                    下载原件
-                  </MenuItem>
-                ) : null}
-                {manager && entry.editable ? (
-                  <MenuItem
-                    disabled={disabled}
-                    onClick={() => open({ type: 'file', action: 'save', entry })}
+                    {section === 'current' ? <UploadIcon /> : <PlusIcon />}
+                    <span className="hidden sm:inline">
+                      {section === 'current' ? '上传资料' : '添加来源'}
+                    </span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-label="同步源码"
+                    disabled={syncDisabled}
+                    onClick={() => void controller.submit({ kind: 'sync' })}
                   >
-                    编辑正文
-                  </MenuItem>
-                ) : null}
-                {manager ? (
-                  <>
-                    <MenuItem
-                      disabled={disabled}
-                      onClick={() => open({ type: 'file', action: 'move', entry })}
-                    >
-                      重命名或移动
-                    </MenuItem>
-                    <MenuItem
-                      disabled={disabled}
-                      onClick={() => open({ type: 'file', action: 'delete', entry })}
-                    >
-                      删除资料
-                    </MenuItem>
-                  </>
-                ) : null}
-              </MenuPopup>
-            </Menu>
-          ) : null}
-        </div>
+                    {taskActive ? <Spinner size="sm" /> : null}
+                    {taskActive ? '处理中…' : '同步源码'}
+                  </Button>
+                </>
+              ) : null}
+              {section === 'sources' ? (
+                <FileSurfaceAction
+                  label="刷新当前资料"
+                  disabled={controller.busy}
+                  onPress={controller.refresh}
+                >
+                  <RefreshCwIcon />
+                </FileSurfaceAction>
+              ) : null}
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      ref={menuTriggerRef}
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="工作区操作"
+                      data-authoring-focus="toolbar"
+                    />
+                  }
+                >
+                  <MoreHorizontalIcon />
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  {menuItems}
+                  {manager ? (
+                    <>
+                      {menuItems ? <MenuSeparator /> : null}
+                      <MenuItem
+                        disabled={disabled}
+                        onClick={() => open({ type: 'file', action: 'mkdir' })}
+                      >
+                        新建目录
+                      </MenuItem>
+                      <MenuItem disabled={disabled} onClick={() => open({ type: 'source' })}>
+                        <GitBranchIcon />
+                        添加源码来源
+                      </MenuItem>
+                      <MenuItem disabled={disabled} onClick={() => open({ type: 'credential' })}>
+                        <KeyRoundIcon />
+                        添加仓库凭证
+                      </MenuItem>
+                    </>
+                  ) : null}
+                  {section === 'current' && entry ? (
+                    <MenuGroup>
+                      <MenuSeparator />
+                      <MenuGroupLabel>
+                        {entry.kind === 'file' ? '当前文件' : '当前目录'}
+                      </MenuGroupLabel>
+                      {entry.kind === 'file' ? (
+                        <MenuItem
+                          render={
+                            <a
+                              href={authoringFileUrl(projectId, entry.path, entry.revision).replace(
+                                '&inline=1',
+                                '',
+                              )}
+                              download={entry.name}
+                            />
+                          }
+                        >
+                          下载原件
+                        </MenuItem>
+                      ) : null}
+                      {manager && entry.editable ? (
+                        <MenuItem
+                          disabled={disabled}
+                          onClick={() => open({ type: 'file', action: 'save', entry })}
+                        >
+                          编辑正文
+                        </MenuItem>
+                      ) : null}
+                      {manager ? (
+                        <>
+                          <MenuItem
+                            disabled={disabled}
+                            onClick={() => open({ type: 'file', action: 'move', entry })}
+                          >
+                            重命名或移动
+                          </MenuItem>
+                          <MenuItem
+                            disabled={disabled}
+                            onClick={() => open({ type: 'file', action: 'delete', entry })}
+                          >
+                            删除资料
+                          </MenuItem>
+                        </>
+                      ) : null}
+                    </MenuGroup>
+                  ) : null}
+                </MenuPopup>
+              </Menu>
+            </>
+          }
+        />
         {!dialog && (controller.error || controller.pending) ? (
           <div className="shrink-0 space-y-2 p-3">
             <AuthoringNotice controller={controller} />
@@ -396,6 +391,7 @@ export function WorkspaceAuthoring({
               revision={fileRevision}
               readingRevision={readingRevision}
               onDenied={controller.denyRead}
+              onRefresh={controller.refresh}
               selected={selected || null}
               trail={trail}
               onOpen={(path) => {
@@ -607,6 +603,7 @@ export function WorkspaceCurrentFiles({
   revision,
   readingRevision,
   onDenied,
+  onRefresh,
   selected,
   trail,
   onOpen,
@@ -616,6 +613,7 @@ export function WorkspaceCurrentFiles({
   revision: number | string
   readingRevision: string
   onDenied: (cause: unknown) => void
+  onRefresh?: () => void
   selected: string | null
   trail: string | undefined
   onOpen: (path: string) => void
@@ -681,6 +679,8 @@ export function WorkspaceCurrentFiles({
         environmentId={environmentId}
         cwd={source.id}
         projectName="当前资料"
+        compactNavigation
+        onRefresh={onRefresh}
         relativePath={selected}
         source={source}
         folderTrail={trail}

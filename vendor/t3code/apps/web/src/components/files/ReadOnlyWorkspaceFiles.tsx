@@ -1,7 +1,7 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import * as Schema from "effect/Schema";
-import { FolderTreeIcon, MessageSquarePlusIcon } from "lucide-react";
+import { FolderTreeIcon, MessageSquarePlusIcon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useComposerHandleContext } from "~/composerHandleContext";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -26,6 +26,8 @@ export interface ReadOnlyWorkspaceFilesProps {
   readonly threadRef?: ScopedThreadRef;
   readonly revealRequestId?: number;
   readonly folderTrail?: string | undefined;
+  readonly compactNavigation?: boolean;
+  readonly onRefresh?: (() => void) | undefined;
   readonly onOpenFile: (path: string) => void;
   readonly onNavigateFolder: (path: string, trail: string, keepSource: boolean) => void;
 }
@@ -52,6 +54,10 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
   const resource = current?.resource?.kind === "file" ? current.resource : null;
   const previewPath = folder ? null : props.relativePath;
   const showExplorer = folder || (!narrow && explorerOpen);
+  const refreshFiles = () => {
+    setRevision((value) => value + 1);
+    props.onRefresh?.();
+  };
   const navigate = (path: string) => props.onNavigateFolder(path, retainedBreadcrumbTrail(props.folderTrail, path), !folder);
   const breadcrumbs = <ScrollArea radius="none" hideScrollbars scrollFade className="min-w-0 flex-1" data-file-breadcrumbs>
     <div className="flex h-full w-max min-w-full items-center text-xs"><FileBreadcrumbs
@@ -70,7 +76,7 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
     const inserted = composer?.current?.insertTextAtEnd(`${mention} `, { ensureLeadingBoundary: true });
     if (!inserted) toastManager.add({ type: "error", title: "无法添加到对话", description: "请打开此项目的对话后重试。" });
   }}><MessageSquarePlusIcon className="size-3.5" /></FileSurfaceAction> : null;
-  const actions = <>{addToChat}{explorerAction}</>;
+  const actions = <>{addToChat}{props.compactNavigation && previewPath && !showExplorer ? <FileSurfaceAction label="刷新当前资料" onPress={refreshFiles}><RefreshCwIcon /></FileSurfaceAction> : null}{explorerAction}</>;
   return <ReadOnlyFileSourceContext.Provider value={props.source}>
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background" data-readonly-workspace={props.source.id}
       onClickCapture={(event) => {
@@ -90,7 +96,7 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
         }
       }}
     >
-      {folder || !resource ? <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>{breadcrumbs}{actions}</div> : null}
+      {(folder && !props.compactNavigation) || (!folder && !resource) ? <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>{breadcrumbs}{actions}</div> : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {previewPath ? <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {current?.error ? <FileSurfaceFailure message={current.error} onRetry={() => setRevision((value) => value + 1)} /> : resource ?
@@ -103,7 +109,8 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
         {showExplorer ? <aside className={cn("flex min-h-0 bg-background", previewPath ? "w-[min(22rem,46%)] min-w-52 shrink-0 border-l border-border/60" : "min-w-0 flex-1")}>
           <FileBrowserPanel key={props.source.id} environmentId={props.environmentId} cwd={props.cwd} projectName={props.projectName}
             selectedPath={props.relativePath} selectedPathRevealId={props.revealRequestId ?? 0} onOpenFile={props.onOpenFile}
-            onRefreshSelectedFile={() => setRevision((value) => value + 1)} workspaceMutationId={null}
+            onRefreshSelectedFile={refreshFiles} workspaceMutationId={null}
+            toolbarStart={props.compactNavigation && folder && (props.relativePath || props.folderTrail) ? breadcrumbs : undefined}
           />
         </aside> : null}
       </div>
