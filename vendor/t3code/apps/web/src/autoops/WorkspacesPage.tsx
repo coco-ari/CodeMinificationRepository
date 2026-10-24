@@ -341,6 +341,11 @@ function ProjectWorkspaces({
                     </MenuTrigger>
                     <MenuPopup align="end">
                       {pendingReview ? (
+                        <MenuItem onClick={() => setPreviewReview(!previewReview)}>
+                          {previewReview ? '查看已发布内容' : '查看待复核内容'}
+                        </MenuItem>
+                      ) : null}
+                      {pendingReview ? (
                         <MenuItem
                           disabled={busy || running}
                           onClick={() => {
@@ -359,15 +364,6 @@ function ProjectWorkspaces({
                       </MenuItem>
                     </MenuPopup>
                   </Menu>
-                ) : null}
-                {pendingReview ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setPreviewReview(!previewReview)}
-                  >
-                    {previewReview ? '查看已发布内容' : '查看待复核内容'}
-                  </Button>
                 ) : null}
                 {manager && current?.report && current.status !== 'pending_review' ? (
                   <Button size="sm" variant="ghost" disabled={busy} onClick={() => open('review')}>
