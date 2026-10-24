@@ -10,6 +10,28 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，新对话 `@` 文件选择修复已部署应用提交 `424f6b35959c380ab24d8a88a5b3cfff8e96b47d`。实际发行目录为 `/home/tao/autoops-agent-demo/releases/t3-mention-424f6b35`；数据继续使用 `/home/tao/autoops-deployment-validation/data`。修正未指定历史版本时的参数归一，使新对话读取当前资料；未改变现有权限、历史引用或资料内容。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `acade035482095e59d021edad560e7d7abd380c74f4507094104acb55520a7dd` |
+| 完整清单 SHA-256 | `581fdd3cd7709ac09fe6c961b8c6108e866d988a93cce61d88588537b1466f8e` |
+| 原生依赖清单 SHA-256 | `d4c29ab52ffcb19e109bccda3f7279b8d0d13c590398667ada195fb181dc584a` |
+| 实际网页 HTML SHA-256 | `923fb27ecad5dfb48193e01e001c502322df02faaa3a8b9832a1ff10039dee09` |
+| 客户 ZIP SHA-256 / 字节 | `628529660b6ff3d142b6f0dfcbbba1937deb9bd58fdcbf82fa0da85bd5d4447a` / 1042167 |
+| 文件与旧资源 | 6994 文件、61 相对链接；保留 2768 个旧哈希资源；官方原生依赖 2038 文件/21 包校验通过 |
+| 应用提交 CI | [工作台运行链路 40060652414](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40060652414)、[AutoOps 质量检查 40060652417](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40060652417) 均通过 |
+
+macOS 完成 26 项资料与工作区回归、`check:runtime` 及实际 Worker 重构建；29272 个跟踪文件与提交逐项核对。网页和客户代码未改，复用原构建。Linux 从完整候选发行通过清单、原生 CLI、独立资料输入与 ZIP Worker 冒烟。准备、验收和切换串行使用独立 `MemoryMax=512M / MemorySwapMax=0 / CPUQuota=100%` cgroup。
+
+切换前核对任务空闲、正常排空并备份 15 个 SQLite 与业务文件。348 个原工作区/技能文件、113 条消息、36 轮运行、333 条轮次条目、18 个绑定、3 份成果及客户设备、13 条命令、3 个游标保留；资料原件、来源、凭证与部署状态检查通过。两服务 active、重启计数 0，28890 和其他四项服务未改变。
+
+线上新草稿实际输入 `@`，两个 Git 根目录及 `docs` 正常显示；Tab 进入中文目录、Enter 选择上传 PDF、点击选择 Git README 及正文预览通过。PDF 固定资料 iframe 已打开，但内置浏览器显示空画面，不将其计为 PDF 渲染通过。测试草稿已清空，未发送对话，未执行上传、同步、发布或线上撤权；权限与固定内容覆盖来自本地隔离回归。
+
+现行恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-mention-424f6b35-20261024`，程序回滚目标为 `t3-layout-5ceb677d`；两个服务的本批配置为 `zzzzzzzzzzzzzzzzzzzzzzzz-mention-424f6b35.conf`。`rollback-program.sh --check` 及 29 项临时库/模拟服务恢复检查通过；未实际降级，回滚始终保留当下业务数据。证据位于 `.deployment/mention-picker-fix/`，含修复前两个真实失败用例、回归、构建源核对、发行/保留校验和实际 UI 截图。
+
+### 历史资料页排版（t3-layout-5ceb677d）
+
 2026-10-24，资料页排版应用提交 `5ceb677d36290d46cf104d023017bbee9a51b821` 已完整部署。网关、T3 Worker、网页与客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-layout-5ceb677d`；数据继续使用 `/home/tao/autoops-deployment-validation/data`。标题、上传和同步合并为一行，任务记录、新建对话和文件操作进入原生菜单，根目录移除重复路径横栏和重复刷新。子目录路径与搜索同行；打开文件仍沿用 T3 左预览、右目录，窄屏可返回目录。
 
 | 发行身份与校验 | 实际结果 |
@@ -28,7 +50,7 @@
 
 线上实际检查浅深色、1440×600 桌面、390×480 窄屏短窗口、搜索、预览、返回目录、内部滚动、上传/新建目录弹窗、任务菜单与 Esc 焦点恢复。相同 1440×600 尺寸下，文件区域由 top=185/height=415 变为 top=104/height=496，增加 81px；最终子目录路径与搜索中心同为 y=123.5，390px 下搜索宽 152px、页面无横向溢出。现有长中文目录与 PDF 文件名及其文件操作菜单可用；本批未伪造超长业务数据。上传与新建目录只打开后关闭，未提交；未为排版验收重新发起同步或外部生成，也未对外发布待复核内容。此前真实同步/生成的收据证据保留在下方历史批次，不能把本批只读查看称为新增写流程通过。
 
-现行恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-layout-5ceb677d-20261024`，程序回滚目标为 `t3-layout-a4a0479e`。`rollback-program.sh --check` 已通过；只撤销本批且摘要未变的配置，保留回滚当下业务数据，不恢复旧库。未实际降级，原恢复辅助程序的 29 项临时库/模拟服务检查保持适用。中间 `a4a0479e` 及更早恢复点只保留历史证据，不越过当前配置层执行。
+本批历史恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-layout-5ceb677d-20261024`，程序回滚目标为 `t3-layout-a4a0479e`。`rollback-program.sh --check` 已通过；只撤销本批且摘要未变的配置，保留回滚当下业务数据，不恢复旧库。未实际降级，原恢复辅助程序的 29 项临时库/模拟服务检查保持适用。中间 `a4a0479e` 及更早恢复点只保留历史证据，不越过当前配置层执行。
 
 证据在 `.deployment/workspace-layout/`（首版构建、35 项定向回归、真实菜单/预览和发现的路径对齐问题）及 `.deployment/workspace-layout-final/`（最终源核对、发行清单、服务器验收、数据保留和 UI 截图/报告）。截图只证明静态呈现；真实操作与 DOM 几何分别记录。已恢复用户原浅色主题与浏览器尺寸。本批未执行真实撤权、断网、Windows 真机、实体手机、公网 HTTPS 或全部 T3 上游测试。
 
