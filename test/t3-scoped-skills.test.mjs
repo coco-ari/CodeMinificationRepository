@@ -33,13 +33,27 @@ test('同一中央包按助手/项目与内部外部范围隔离；原生列表�
  const entries=[...c.skills,{...c.skills[0],path:'/other/SKILL.md'}]
  assert.equal(filterBusinessSkills(entries,f.env,c.physicalCwd).length,1);assert.deepEqual(filterBusinessSkills(entries,f.env),[])
 })
-test('会话版本固定：仓库升级后旧会话不被覆盖，新会话采用新版本',t=>{
+test('分配升级后新旧对话均采用当前版本，历史技能文件不改写',t=>{
  const f=fixture(t),skill=f.importSkill();f.assign(skill);const before=prepareScopedBusinessSkills(f.directory,f.binding)
  f.library.importMarkdown({revision:f.library.catalog().revision,skillId:skill.id,contents:markdown('sample','第二版指令')})
  const updated=f.library.catalog().skills.find(s=>s.id===skill.id);f.assign(updated)
  const continued=prepareScopedBusinessSkills(f.directory,f.binding),fresh=prepareScopedBusinessSkills(f.directory,{...f.binding,threadId:'new-thread'})
- assert.equal(continued.snapshotId,before.snapshotId);assert.notEqual(fresh.snapshotId,before.snapshotId)
- assert.match(readFileSync(continued.skills[0].path,'utf8'),/references\/check.md/);assert.match(readFileSync(fresh.skills[0].path,'utf8'),/第二版/)
+ assert.notEqual(continued.snapshotId,before.snapshotId);assert.equal(fresh.snapshotId,continued.snapshotId)
+ assert.match(readFileSync(before.skills[0].path,'utf8'),/references\/check.md/);assert.match(readFileSync(continued.skills[0].path,'utf8'),/第二版/);assert.match(readFileSync(fresh.skills[0].path,'utf8'),/第二版/)
+})
+test('多次更新的历史技能仍按会话归属读取，不扩大其他用户的访问',t=>{
+ const f=fixture(t),skill=f.importSkill();f.assign(skill)
+ const versions=[prepareScopedBusinessSkills(f.directory,f.binding)]
+ for(const body of ['第二次分配','第三次分配']) {
+  f.library.importMarkdown({revision:f.library.catalog().revision,skillId:skill.id,contents:markdown('sample',body)})
+  f.assign(f.library.catalog().skills.find(s=>s.id===skill.id))
+  versions.push(prepareScopedBusinessSkills(f.directory,f.binding))
+ }
+ assert.equal(new Set(versions.map(c=>c.snapshotId)).size,3)
+ const middle=versions[1]
+ assert.match(readScopedSkillResourceForThread(f.directory,f.binding.threadId,`autoops/skills/${middle.snapshotId}/autoops-sample/SKILL.md`,f.access).content,/第二次分配/)
+ assert.throws(()=>readScopedSkillResource(f.directory,middle.snapshotId,'autoops-sample','SKILL.md',{access:f.access,principal:{id:'user-two'}}),{code:'SKILL_SCOPE_FORBIDDEN'})
+ assert.equal(resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},{access:f.access,principal:f.principal}).snapshotId,versions[2].snapshotId)
 })
 test('历史技能快照只允许有权查看锁定会话的用户读取；新成员只看当前版本',t=>{
  const f=fixture(t),skill=f.importSkill();f.assign(skill)
@@ -59,7 +73,7 @@ test('历史技能快照只允许有权查看锁定会话的用户读取；新�
  f.binding.scopeState='draft'
  assert.throws(()=>readScopedSkillResource(f.directory,old.snapshotId,'autoops-sample','SKILL.md',ownerOptions),e=>e.code==='SKILL_SCOPE_FORBIDDEN')
  assert.throws(()=>readScopedSkillResource(f.directory,old.snapshotId,'autoops-sample','SKILL.md',{...ownerOptions,threadId:f.binding.threadId}),e=>e.code==='SKILL_SCOPE_FORBIDDEN')
- assert.throws(()=>resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},ownerOptions),e=>e.code==='SKILL_SCOPE_FORBIDDEN')
+ assert.equal(resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},ownerOptions).snapshotId,fresh.snapshotId)
  f.binding.scopeState='locked';f.binding.visibility='project'
  assert.equal(readScopedSkillResource(f.directory,old.snapshotId,'autoops-sample','references/check.md',memberOptions).bytes.toString(),'固定参考内容')
  assert.equal(filterBusinessProviderResult(f.directory,value,memberOptions).providers[0].workspaceSnapshots.length,1)
@@ -102,7 +116,7 @@ test('真实登录与会话ACL：私有旧版本仅拥有者可见，共享旧�
   const content=options=>readScopedSkillResource(f.directory,old.snapshotId,'autoops-sample','references/check.md',options).bytes.toString()
   const cached={providers:[{skills:old.skills,workspaceSnapshots:[{cwd:old.physicalCwd,skills:old.skills}]}]}
   assert.equal(content(ownerOptions),'固定参考内容')
-  assert.equal(resolveBusinessSkillContext(f.directory,{threadId:binding.threadId},ownerOptions).snapshotId,old.snapshotId)
+  assert.notEqual(resolveBusinessSkillContext(f.directory,{threadId:binding.threadId},ownerOptions).snapshotId,old.snapshotId)
   const fresh=resolveBusinessSkillContext(f.directory,{...binding,threadId:undefined},memberOptions)
   assert.notEqual(fresh.snapshotId,old.snapshotId)
   assert.match(readScopedSkillResource(f.directory,fresh.snapshotId,'autoops-sample','SKILL.md',memberOptions).bytes.toString(),/当前版本/)
@@ -121,25 +135,35 @@ test('真实登录与会话ACL：私有旧版本仅拥有者可见，共享旧�
   assert.deepEqual(filterBusinessProviderResult(f.directory,cached,guestOptions).providers[0].workspaceSnapshots,[])
  }
 })
-test('停用与撤销拒绝新调用/轮次和资源读取，但不会删除执行中的固定目录',t=>{
+test('停用只拒绝该技能调用和资源读取，普通对话不受影响且历史目录保留',t=>{
  const f=fixture(t),skill=f.importSkill();f.assign(skill);const c=prepareScopedBusinessSkills(f.directory,f.binding)
  f.library.setEnabled({revision:f.library.catalog().revision,skillId:skill.id,enabled:false})
- assert.throws(()=>resolveBusinessSkillMentions('普通后续消息',f.env,f.binding),e=>e.code==='SKILL_SCOPE_CHANGED')
+ assert.deepEqual(resolveBusinessSkillMentions('普通后续消息',f.env,f.binding),[])
+ assert.throws(()=>resolveBusinessSkillMentions('$autoops-sample',f.env,f.binding),{code:'SKILL_NOT_AVAILABLE'})
+ assert.deepEqual(scopedBusinessSkillPolicy(f.directory,f.binding).resources,[])
  assert.throws(()=>readScopedSkillResource(f.directory,c.snapshotId,'autoops-sample','references/check.md',{access:f.access,principal:f.principal}),e=>e.code==='SKILL_SCOPE_FORBIDDEN')
  assert.match(readFileSync(c.skills[0].path,'utf8'),/references/)
  assert.deepEqual(prepareScopedBusinessSkills(f.directory,{...f.binding,threadId:'new'}).skills,[])
 })
-test('旧对话部分技能撤回后候选入口立即拒绝，新对话可用且旧快照保持不变',t=>{
+test('旧对话部分技能撤回后仅移除对应候选，其余技能继续选择和执行',t=>{
  const f=fixture(t),kept=f.importSkill('kept'),removed=f.importSkill('removed')
  f.assign(kept);f.assign(removed)
  const context=prepareScopedBusinessSkills(f.directory,f.binding),options={access:f.access,principal:f.principal}
  assert.equal(resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},options).skills.length,2)
  const manifest=join(context.physicalCwd,'snapshot.json'),before=readFileSync(manifest,'utf8')
  f.library.setEnabled({revision:f.library.catalog().revision,skillId:removed.id,enabled:false})
- assert.throws(()=>resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},options),{status:409,code:'SKILL_SCOPE_CHANGED'})
- assert.throws(()=>authorizeBusinessSkillCwd(f.directory,context.cwd,options),{code:'SKILL_SCOPE_CHANGED'})
+ const continued=resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},options)
+ assert.deepEqual(continued.skills.map(skill=>skill.name),['autoops-kept'])
+ assert.equal(resolveBusinessSkillMentions('$autoops-kept',f.env,f.binding).length,1)
+ assert.throws(()=>resolveBusinessSkillMentions('$autoops-removed',f.env,f.binding),{code:'SKILL_NOT_AVAILABLE'})
+ const policy=scopedBusinessSkillPolicy(f.directory,f.binding)
+ assert.equal(policy.context.snapshotId,continued.snapshotId)
+ assert.match(readScopedSkillResourceForThread(f.directory,f.binding.threadId,policy.resources[0].instructionsPath,f.access).content,/name: autoops-kept/)
+ assert.throws(()=>authorizeBusinessSkillCwd(f.directory,context.cwd,options),{code:'SKILL_CONTEXT_STALE'})
  const fresh=resolveBusinessSkillContext(f.directory,{...f.binding,threadId:undefined},options)
  assert.deepEqual(fresh.skills.map(skill=>skill.name),['autoops-kept'])
+ assert.equal(fresh.snapshotId,continued.snapshotId)
+ assert.equal(authorizeBusinessSkillCwd(f.directory,continued.cwd,options),policy.context.physicalCwd)
  assert.notEqual(fresh.snapshotId,context.snapshotId)
  assert.equal(readFileSync(manifest,'utf8'),before)
  f.library.setEnabled({revision:f.library.catalog().revision,skillId:removed.id,enabled:true})

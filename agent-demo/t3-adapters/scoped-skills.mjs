@@ -33,8 +33,7 @@ function publishThreadBinding(path,value) {
   const tmp=`${path}.${randomUUID()}.tmp`
   try {
     writeFileSync(tmp,JSON.stringify(value)+'\n',{mode:0o600,flag:'wx'})
-    // Publish complete bytes once. rename would replace a winner from another
-    // native worker and silently change the versions pinned by that session.
+    // 原子发布完整收据，避免并发进程覆盖已登记的范围和历史归属。
     try {linkSync(tmp,path)}catch(error){if(error.code!=='EEXIST')throw error}
   }finally{rmSync(tmp,{force:true})}
 }
@@ -105,24 +104,27 @@ function readContext(directory,snapshotId) {
 function assertCurrent(directory,context,{strict=false}={}) {
   const allowed=new Set(resolveSkillLibrary(directory,context.scope).map(entry=>entry.skillId||entry.id))
   const skills=context.skills.filter(entry=>allowed.has(entry.skillId||entry.id))
-  if(strict&&skills.length!==context.skills.length)throw new AutoOpsAccessError(409,'SKILL_SCOPE_CHANGED','此对话的部分技能已停用或取消分配，请新建对话。历史记录仍保留。')
+  if(strict&&skills.length!==context.skills.length)throw new AutoOpsAccessError(409,'SKILL_CONTEXT_STALE','技能列表已更新，请重试。')
   return {...context,skills}
 }
 const lockPath=(directory,threadId)=>join(contextRoot(directory),'threads',digest(threadId)+'.json')
-function readThreadContext(directory,path,threadId,binding,{strict=false}={}) {
-  const value=readJson(path),context=readContext(directory,value.snapshotId)
-  if(value.threadId!==threadId||!scopeEqual(context.scope,binding))fail('会话技能绑定与当前范围不一致')
-  return assertCurrent(directory,context,{strict})
+const receiptPath=(directory,threadId,snapshotId)=>join(contextRoot(directory),'threads',`${digest(threadId)}-${snapshotId}.json`)
+function assertThreadScope(directory,path,threadId,binding) {
+  const saved=readJson(path)
+  if(!idPattern.test(saved.snapshotId))fail()
+  const identity=readJson(join(contextRoot(directory),saved.snapshotId,'snapshot.json'))
+  if(saved.threadId!==threadId||digest(identity)!==saved.snapshotId||!scopeEqual(identity.scope,binding))fail('会话技能绑定与当前范围不一致')
 }
-export function prepareScopedBusinessSkills(directory,binding,{lock=true,strict=false}={}) {
+export function prepareScopedBusinessSkills(directory,binding,{lock=true}={}) {
   const threadId=binding.nativeParentThreadId||binding.threadId,saved=threadId?lockPath(directory,threadId):null
-  if(saved&&existsSync(saved))return readThreadContext(directory,saved,threadId,binding,{strict})
+  if(saved&&existsSync(saved))assertThreadScope(directory,saved,threadId,binding)
+  // 会话只固定业务范围；新旧对话每次都按当前分配生成目录。
   const context=materialize(directory,binding,resolveSkillLibrary(directory,scopeOf(binding)))
   if(lock&&saved) {
     publishThreadBinding(saved,{threadId,snapshotId:context.snapshotId})
-    // The first worker wins; all others must use that complete snapshot, or
-    // reject a conflicting scope rather than start another native context.
-    return readThreadContext(directory,saved,threadId,binding,{strict})
+    assertThreadScope(directory,saved,threadId,binding)
+    // 不可变收据仅证明历史文件归属，不再把首次技能清单锁定到后续轮次。
+    publishThreadBinding(receiptPath(directory,threadId,context.snapshotId),{threadId,snapshotId:context.snapshotId})
   }
   return context
 }
@@ -136,10 +138,10 @@ function authorizeSnapshotViewer(directory,context,{access,principal}) {
   // metadata from the process-wide provider cache.
   const threads=join(contextRoot(directory),'threads')
   if(existsSync(threads)&&!lstatSync(threads).isSymbolicLink())for(const entry of readdirSync(threads,{withFileTypes:true})) {
-    if(!entry.isFile()||!/^([a-f0-9]{64})\.json$/.test(entry.name))continue
+    if(!entry.isFile()||!/^[a-f0-9]{64}(?:-[a-f0-9]{64})?\.json$/.test(entry.name))continue
     try {
       const saved=readJson(join(threads,entry.name))
-      if(saved.snapshotId!==context.snapshotId||typeof saved.threadId!=='string'||entry.name!==digest(saved.threadId)+'.json')continue
+      if(saved.snapshotId!==context.snapshotId||typeof saved.threadId!=='string'||![digest(saved.threadId)+'.json',`${digest(saved.threadId)}-${context.snapshotId}.json`].includes(entry.name))continue
       const binding=access.requireThread(principal,saved.threadId)
       if(binding.scopeState==='locked'&&scopeEqual(binding,context.scope))return
     }catch{/* Missing, revoked or private conversations confer no access. */}
@@ -148,8 +150,8 @@ function authorizeSnapshotViewer(directory,context,{access,principal}) {
 }
 export function resolveBusinessSkillContext(directory,input,{access=configuredAutoOpsAccess(),principal}={}) {
   const scope=authorizeScope(access,principal,input)
-  // 候选读取与目录扫描、继续对话采用同一校验，不能返回无法扫描的旧快照。
-  const context=prepareScopedBusinessSkills(directory,scope,{lock:false,strict:true})
+  // 候选目录和下一轮执行共同使用当前分配，不受历史清单影响。
+  const context=prepareScopedBusinessSkills(directory,scope,{lock:false})
   if(scope.threadId&&scope.scopeState!=='locked')authorizeSnapshotViewer(directory,context,{access,principal})
   return {cwd:context.cwd,snapshotId:context.snapshotId,skills:context.skills.map(({name,displayName,description,versionId,contentHash})=>({name,displayName,description,versionId,contentHash,enabled:true}))}
 }
@@ -168,7 +170,7 @@ export function scopedBusinessSkillsForCwd(directory,cwd) {
   return assertCurrent(directory,readContext(directory,id)).skills
 }
 export function scopedBusinessSkillPolicy(directory,binding) {
-  return policyForContext(prepareScopedBusinessSkills(directory,binding,{strict:true}))
+  return policyForContext(prepareScopedBusinessSkills(directory,binding))
 }
 export function scopedBusinessSkillPolicyForCwd(directory,cwd) {
   const id=relative(contextRoot(directory),resolve(String(cwd||'')))
@@ -189,8 +191,14 @@ function authorizedSkillContext(directory,contextId,{access=configuredAutoOpsAcc
   const context=readContext(directory,contextId)
   if(threadId) {
     const binding=principal?access.requireThread(principal,threadId):access.requireToolThread(threadId).binding
-    const locked=prepareScopedBusinessSkills(directory,binding,{lock:false})
-    if(locked.snapshotId!==contextId)fail()
+    const current=prepareScopedBusinessSkills(directory,binding,{lock:false})
+    const ownerThreadId=binding.nativeParentThreadId||binding.threadId
+    const historical=[lockPath(directory,ownerThreadId),receiptPath(directory,ownerThreadId,contextId)].some(path=>{
+      if(!existsSync(path))return false
+      const saved=readJson(path)
+      return saved.threadId===ownerThreadId&&saved.snapshotId===contextId
+    })
+    if(!scopeEqual(binding,context.scope)||(current.snapshotId!==contextId&&!historical))fail()
     if(principal&&binding.scopeState!=='locked')authorizeSnapshotViewer(directory,context,{access,principal})
   } else authorizeSnapshotViewer(directory,context,{access,principal})
   return assertCurrent(directory,context)

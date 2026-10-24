@@ -2165,6 +2165,52 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer))),
   );
 
+  it.effect.each([true, false])("当前技能变更后热会话重新载入配置，确认目录一致才发送（%s）", (accepted) =>
+    Effect.gen(function* () {
+      const nativeThreadId = "current-skills-native";
+      const before = { cwd: "/skills/before", baseInstructions: "旧技能说明", config: { "skills.config": [{ path: "/skills/before/SKILL.md", enabled: true }] } };
+      const after = { cwd: "/skills/after", baseInstructions: "当前技能说明", config: { "skills.config": [{ path: "/skills/after/SKILL.md", enabled: true }] } };
+      using policy = vi.spyOn(BusinessPolicy, "businessThreadParameters").mockReturnValue(before);
+      using _skills = vi.spyOn(BusinessSkills, "resolveBusinessSkillMentions").mockReturnValue([]);
+      const entries = codexReplayPreamble({ nativeThreadId, nativeTurnId: "before-turn", prompt: "第一轮" }).map((entry) => {
+        if (!Predicate.isObject("frame" in entry ? entry.frame : null)) return entry;
+        if (entry.type === "expect_outbound" && Predicate.isObject(entry.frame)) {
+          const params = Predicate.isObject(entry.frame.params) ? entry.frame.params : {};
+          if (entry.label === "thread/start") return { ...entry, frame: { ...entry.frame, params: { ...params, ...before, config: { ...CodexAdapterV2.CODEX_THREAD_CONFIG, ...before.config } } } };
+          if (entry.label === "turn/start") return { ...entry, frame: { ...entry.frame, params: { ...params, cwd: before.cwd } } };
+        }
+        if (entry.type === "emit_inbound" && entry.label === "thread/start" && Predicate.isObject(entry.frame) && Predicate.isObject(entry.frame.result) && Predicate.isObject(entry.frame.result.thread)) {
+          return { ...entry, frame: { ...entry.frame, result: { ...entry.frame.result, thread: { ...entry.frame.result.thread, cwd: before.cwd } } } };
+        }
+        return entry;
+      });
+      const second = codexReplayPreamble({ nativeThreadId, nativeTurnId: "after-turn", prompt: "继续" }).slice(-3).map(entry => {
+        const numbered = withReplayRequestId(entry, 6);
+        if (numbered.type === "expect_outbound" && Predicate.isObject(numbered.frame) && Predicate.isObject(numbered.frame.params)) return { ...numbered, frame: { ...numbered.frame, params: { ...numbered.frame.params, cwd: after.cwd } } };
+        return numbered;
+      });
+      const harness = yield* makeCodexReplayHarness(makeCodexReplayTranscript({
+        scenario: `current-skills-${accepted}`,
+        entries: [
+          ...entries,
+          { type: "emit_inbound", frame: { method: "turn/completed", params: { threadId: nativeThreadId, turn: makeCodexReplayTurn({ id: "before-turn", status: "completed" }) } } },
+          { type: "expect_outbound", frame: { id: 4, method: "thread/unsubscribe", params: { threadId: nativeThreadId } } },
+          { type: "emit_inbound", frame: { id: 4, result: { status: "unsubscribed" } } },
+          { type: "expect_outbound", frame: { id: 5, method: "thread/resume", params: { threadId: nativeThreadId, excludeTurns: true, ...after, config: { ...CodexAdapterV2.CODEX_THREAD_CONFIG, ...after.config } } } },
+          { type: "emit_inbound", frame: { id: 5, result: { thread: { id: nativeThreadId, updatedAt: 1782622440, cwd: accepted ? after.cwd : before.cwd } } } },
+          ...(accepted ? second : []),
+        ],
+      }));
+      const input = makeCodexTestTurnInput({ threadId: harness.threadId, providerThread: harness.providerThread, now: yield* DateTime.now, attemptId: RunAttemptId.make("current-before"), text: "第一轮" });
+      yield* harness.runtime.startTurn(input);
+      yield* harness.firstTerminal;
+      policy.mockReturnValue(after);
+      const result = yield* harness.runtime.startTurn({ ...input, attemptId: RunAttemptId.make("current-after"), message: { ...input.message, text: "继续" } }).pipe(Effect.result);
+      assert.equal(result._tag, accepted ? "Success" : "Failure");
+      assert.equal(harness.providerThread.nativeThreadRef?.nativeId, nativeThreadId);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer))),
+  );
+
   it.effect.each(["supported", "unsupported", "invalid"] as const)(
     "delivers native history with %s app-server protocol",
     (response) =>

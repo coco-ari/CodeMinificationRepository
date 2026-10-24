@@ -104,6 +104,7 @@ function Probe({
         选择新技能
       </button>
       {showEditor ? <SkillDraft skills={displaySkills} /> : null}
+      <output data-testid="available">{result?.authorizedContext?.skills.map(skill => skill.name).join(",")}</output>
       <output data-testid="status">
         {result?.isRefreshing ? "正在复核" : result ? "已完成" : "初次读取"}
       </output>
@@ -141,41 +142,35 @@ async function focus() {
 }
 
 describe("技能上下文的同范围刷新", () => {
-  it("旧对话技能撤回立即结束读取，失败基线不恢复旧候选，恢复分配后可重试", async () => {
+  it("旧对话按当前分配刷新，移除的技能不阻止其余候选，网络失败不恢复旧项", async () => {
     setup();
     const selection = { ...scope, scopeLocked: true, scopeState: "locked" as const };
-    const message = "此对话的部分技能已停用或取消分配，请新建对话。历史记录仍保留。";
-    const fetcher = vi
-      .fn()
+    const current = { ...snapshot(), snapshotId: "remaining", skills: [{ name: "autoops-kept", displayName: "项目资料解读", versionId: "kept" }] };
+    const fetcher = vi.fn()
       .mockResolvedValueOnce(response())
-      .mockResolvedValueOnce(
-        Response.json({ code: "SKILL_SCOPE_CHANGED", error: message }, { status: 409 }),
-      )
+      .mockResolvedValueOnce(Response.json(current))
       .mockRejectedValueOnce(new TypeError("隔离网络故障"))
-      .mockResolvedValueOnce(response());
+      .mockResolvedValueOnce(Response.json({ ...current, skills: [] }));
     using _fetch = stubGlobal("fetch", fetcher);
     await using screen = await render(view({ selection }, true));
     await vi.waitFor(() => expect(newSelection(screen).disabled).toBe(false));
-    expect(fetcher.mock.calls[0]?.[0]).toBe(
-      "/api/agent-demo/t3/autoops/skill-library/context?threadId=thread-one",
-    );
+    expect(fetcher.mock.calls[0]?.[0]).toBe("/api/agent-demo/t3/autoops/skill-library/context?threadId=thread-one");
     await focus();
-    await vi.waitFor(() =>
-      expect(panel(screen).querySelector('[role="alert"]')?.textContent).toBe(message),
-    );
+    await vi.waitFor(() => expect(panel(screen).querySelector('[data-testid="available"]')?.textContent).toBe("autoops-kept"));
     for (const id of ["timeline", "composer"]) {
-      expect(newSelection(screen, id).disabled).toBe(true);
+      expect(newSelection(screen, id).disabled).toBe(false);
+      expect(panel(screen, id).querySelector('[role="alert"]')).toBeNull();
       expect(panel(screen, id).querySelector('[data-testid="status"]')?.textContent).toBe("已完成");
-      expect(history(screen, id).querySelector('[data-slot="context-chip"]')).toBeNull();
+      expect(history(screen, id).textContent).toContain(prompt);
     }
     await focus();
-    await vi.waitFor(() =>
-      expect(panel(screen).querySelector('[role="alert"]')?.textContent).toContain("暂时无法连接"),
-    );
+    await vi.waitFor(() => expect(newSelection(screen).disabled).toBe(true));
     expect(history(screen).querySelector('[data-slot="context-chip"]')).toBeNull();
+    await vi.waitFor(() => expect(panel(screen).querySelector('[role="alert"]')?.textContent).toContain("暂时无法连接"));
     await act(() => panel(screen).querySelectorAll<HTMLButtonElement>("button")[1]!.click());
     await vi.waitFor(() => expect(newSelection(screen).disabled).toBe(false));
-    expectLabel(screen);
+    expect(panel(screen).querySelector('[data-testid="available"]')?.textContent).toBe("");
+    expect(panel(screen).querySelector('[role="alert"]')).toBeNull();
   });
 
   it("分配切换快照但原生目录尚未发现时，标签、光标及固定版本说明地址保持正确", async () => {

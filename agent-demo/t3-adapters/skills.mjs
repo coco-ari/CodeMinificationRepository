@@ -74,7 +74,7 @@ export function resolveBusinessSkillMentions(text,env=process.env,binding) {
   if(!env.AUTOOPS_T3_DATA_DIR)return []
   const names=[...new Set([...String(text||'').matchAll(/(?:^|\s)\p{Sc}(autoops-[a-z][a-z0-9-]*)(?![a-z0-9-])/gu)].map(match=>match[1]))]
   if(!binding) {if(names.length)throw new AutoOpsAccessError(403,'SKILL_SCOPE_REQUIRED','请先选择项目、助手与工作区后使用技能');return []}
-  const context=prepareScopedBusinessSkills(env.AUTOOPS_T3_DATA_DIR,binding,{lock:false,strict:true})
+  const context=prepareScopedBusinessSkills(env.AUTOOPS_T3_DATA_DIR,binding,{lock:false})
   return names.map(name=>{
     const skill=context.skills.find(skill=>skill.name===name)
     if(!skill)throw new AutoOpsAccessError(409,'SKILL_NOT_AVAILABLE','所选技能已停用或不属于当前助手、项目和工作区，请重新选择')

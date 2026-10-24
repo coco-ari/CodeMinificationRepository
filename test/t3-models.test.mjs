@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { normalizeCpaModels, synchronizeBusinessModels, readBusinessModels, assertBusinessModelSelection } from '../agent-demo/t3-adapters/models.mjs'
 import { prepareBusinessNativePolicy, assertBusinessNativeConfig } from '../agent-demo/t3-adapters/native-catalog.mjs'
+import { prepareScopedBusinessSkills } from '../agent-demo/t3-adapters/scoped-skills.mjs'
 import { prepareAutoOpsCodexRequest } from '../agent-demo/t3-adapters/codex-policy.mjs'
 import { authorizeAutoOpsRpc } from '../agent-demo/t3-adapters/rpc-policy.mjs'
 
@@ -41,7 +42,8 @@ test('模型与思考选项双层校验；原生请求保留所选值、拒绝�
  const binding={threadId:'t',projectId:'p',compatibilityReadOnly:false},access={refresh(){},requireThread(){return binding},requireReference(){}}
  assert.doesNotThrow(()=>authorizeAutoOpsRpc(access,{},'orchestration.dispatchCommand',{type:'thread.model-selection.set',threadId:'t',modelSelection:selection}))
  assert.throws(()=>authorizeAutoOpsRpc(access,{},'orchestration.dispatchCommand',{type:'thread.model-selection.set',threadId:'t',modelSelection:{...selection,model:'unregistered'}}),/模型/)
- const result=prepareAutoOpsCodexRequest('turn/start',{model:'grok-3-mini',effort:'high',sandboxPolicy:{type:'dangerFullAccess'}})
+ const cwd=prepareScopedBusinessSkills(data,{threadId:'models',projectId:'p-autoops',agentId:'a-project',workspaceType:'internal'}).physicalCwd
+ const result=prepareAutoOpsCodexRequest('turn/start',{cwd,model:'grok-3-mini',effort:'high',sandboxPolicy:{type:'dangerFullAccess'}})
  assert.equal(result.model,'grok-3-mini');assert.equal(result.effort,'high');assert.equal(result.permissions,'agent_demo');assert.equal(result.sandboxPolicy,undefined)
  assert.throws(()=>prepareAutoOpsCodexRequest('turn/start',{model:'grok-3-mini',effort:'xhigh'}),/思考/)
  assert.throws(()=>prepareAutoOpsCodexRequest('turn/start',{model:'grok-3-mini',collaborationMode:{settings:{model:'grok-4.6'}}}),/不一致/)

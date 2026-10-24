@@ -2845,7 +2845,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (autoOpsSkillContext?.error) return autoOpsSkillContext.error;
       if (!autoOpsSkillContext || autoOpsSkillContext.isRefreshing) return "正在读取技能…";
       if (!autoOpsSkillContext.authorizedContext?.skills.length)
-        return "暂无可用技能，可在技能库中分配。";
+        return "暂无可用技能";
       if (workspaceSkillRefresh.isRefreshing) return "正在读取技能…";
       if (selectedProviderSkills.length === 0)
         return workspaceSkillRefresh.error ?? "当前模型服务未能读取技能，请重试。";

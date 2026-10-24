@@ -1352,6 +1352,7 @@ const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
 function codexThreadRuntimeParams(input: {
   readonly host: CodexExecutionHost;
+  readonly hostParameters?: ReturnType<CodexExecutionHost["threadParameters"]>;
   readonly appThreadId: ThreadId | null;
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
@@ -1363,7 +1364,7 @@ function codexThreadRuntimeParams(input: {
   readonly config: Readonly<Record<string, Schema.Json>>;
 } {
   const { mcpSession } = input;
-  const business = input.host.threadParameters(input.appThreadId ?? mcpSession?.threadId);
+  const business = input.hostParameters ?? input.host.threadParameters(input.appThreadId ?? mcpSession?.threadId);
   return {
     ...(business.baseInstructions === undefined
       ? {}
@@ -1395,7 +1396,7 @@ function codexThreadRuntimeParams(input: {
 }
 
 const decodeCodexResumeMetadata = Schema.decodeUnknownEffect(
-  Schema.Struct({ thread: Schema.Struct({ id: Schema.String, updatedAt: Schema.Number }) }),
+  Schema.Struct({ thread: Schema.Struct({ id: Schema.String, updatedAt: Schema.Number, cwd: Schema.optional(Schema.String) }) }),
 );
 
 const CodexChildSelection = Schema.Struct({
@@ -1889,6 +1890,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const turnTerminalizationPermit = yield* Semaphore.make(1);
         const goalsByNativeThread = new Map<string, OrchestrationV2ProviderGoal | null>();
         const rootProviderThreads = new Map<string, OrchestrationV2ProviderThread>();
+        const hostCwdByThread = new Map<string, string>();
         const goalHolds = new Map<string, CodexGoalHold>();
         const goalRuns = new Map<ProviderTurnId, Array<ActiveCodexTurnContext>>();
         const goalActivations = new Map<string, { stopped: boolean }>();
@@ -6544,6 +6546,29 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
             const hostParameters = host.threadParameters(turnInput.threadId);
+            if (
+              hostParameters.baseInstructions && hostParameters.cwd &&
+              hostCwdByThread.get(threadId) !== hostParameters.cwd
+            ) {
+              // 原生热会话会忽略配置覆盖；先解除订阅，再以当前技能目录恢复同一会话。
+              yield* client.request("thread/unsubscribe", { threadId });
+              const resumed = yield* client.raw.request("thread/resume", {
+                threadId,
+                excludeTurns: true,
+                ...codexThreadRuntimeParams({
+                  host,
+                  hostParameters,
+                  appThreadId: turnInput.threadId,
+                  mcpSession,
+                  modelSelection: turnInput.modelSelection,
+                  runtimePolicy: turnInput.runtimePolicy,
+                }),
+              }).pipe(Effect.flatMap(decodeCodexResumeMetadata));
+              if (resumed.thread.id !== threadId || resumed.thread.cwd !== hostParameters.cwd) {
+                return yield* toProtocolError("技能配置未更新，请重试。");
+              }
+              hostCwdByThread.set(threadId, hostParameters.cwd);
+            }
             const turnStartParams = yield* buildCodexTurnStartParams({
               additionalContext: host.additionalContext,
               nativeThreadId: threadId,
@@ -6845,6 +6870,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   }),
                 ),
               ),
+              Effect.tap((response) => Effect.sync(() => {
+                hostCwdByThread.set(response.thread.id, response.thread.cwd);
+              })),
               Effect.map((response): OrchestrationV2ProviderThread =>
                 providerThreadFromCodexThread({
                   appThreadId: threadInput.threadId,
@@ -6906,6 +6934,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
                 Effect.flatMap(decodeCodexResumeMetadata),
               );
+              if (response.thread.cwd) hostCwdByThread.set(nativeThreadId, response.thread.cwd);
               return {
                 ...threadInput.providerThread,
                 providerSessionId: input.providerSessionId,
@@ -7065,6 +7094,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const nativeThreadId = yield* getNativeThreadId(unloadInput.providerThread);
               sessionApprovals.delete(nativeThreadId);
               yield* client.request("thread/unsubscribe", { threadId: nativeThreadId });
+              hostCwdByThread.delete(nativeThreadId);
             },
             (effect, unloadInput) =>
               effect.pipe(

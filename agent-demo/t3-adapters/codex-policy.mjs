@@ -1,6 +1,6 @@
 import { configuredBusinessNativePolicy } from './native-catalog.mjs'
 import { RUNNER_CONFIG } from '../runtime-policy.mjs'
-import { isAutoOpsEnabled, requireToolThread } from './access.mjs'
+import { AutoOpsAccessError, isAutoOpsEnabled, requireToolThread } from './access.mjs'
 import { resolveProductProfile } from './product-profile.mjs'
 import { requireBusinessModel } from './models.mjs'
 import { scopedBusinessSkillPolicy, scopedBusinessSkillPolicyForCwd } from './scoped-skills.mjs'
@@ -64,6 +64,12 @@ export function prepareAutoOpsCodexRequest(method, payload) {
   // Native named permissions and sandboxPolicy are mutually exclusive.
   delete result.sandboxPolicy
   delete result.sandbox
+  if (method === 'turn/start') {
+    // 发送前再次核对实际技能输入，拒绝目录准备后刚被撤回的技能或旧路径。
+    const scoped=scopedBusinessSkillPolicyForCwd(process.env.AUTOOPS_T3_DATA_DIR,result.cwd)
+    for(const item of result.input||[])if(item.type==='skill'&&!scoped.context.skills.some(skill=>skill.name===item.name&&skill.path===item.path))
+      throw new AutoOpsAccessError(409,'SKILL_NOT_AVAILABLE','所选技能已不可用，请移除后发送。')
+  }
   if (method !== 'turn/start') {
     result.baseInstructions ||= BUSINESS_INSTRUCTIONS
     // The original adapter injects this exact session-scoped channel. A root
