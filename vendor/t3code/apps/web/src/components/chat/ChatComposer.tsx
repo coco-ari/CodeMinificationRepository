@@ -6973,8 +6973,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     error={composerTriggerKind === "path" ? workspaceEntries.error : skillMenuError}
                     onRetry={() => {
                       if (composerTriggerKind === "skill") {
-                        if (autoOpsSkillContext?.error) autoOpsSkillContext.refresh();
-                        else workspaceSkillRefresh.retry();
+                        autoOpsSkillContext?.refresh();
+                        workspaceSkillRefresh.retry();
                       } else workspaceEntries.refresh();
                       scheduleComposerFocus();
                     }}
