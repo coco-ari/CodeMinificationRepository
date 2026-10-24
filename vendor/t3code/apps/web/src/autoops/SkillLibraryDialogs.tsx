@@ -96,9 +96,7 @@ export function SkillImportDialog({
     if (
       await mutate(
         { ...action, ...(skill ? { skillId: skill.id } : {}) },
-        skill
-          ? '新版本已入库。现有分配仍使用原版本，可在分配中升级。'
-          : '技能已入库。请查看运行条件，再分配给助手或项目。',
+        skill ? '新版本已导入，已有分配保持不变。' : '技能已导入。',
       )
     )
       onClose()
@@ -115,8 +113,8 @@ export function SkillImportDialog({
           <DialogTitle>{skill ? '导入技能新版本' : '导入技能'}</DialogTitle>
           <DialogDescription>
             {skill
-              ? `为“${skill.displayName}”保存新版本；技能 name 必须保持一致。`
-              : '导入完整技能包到中央仓库，再分配给助手或项目。'}
+              ? `${skill.displayName} · name 须与原技能一致`
+              : '支持 SKILL.md、ZIP 和公开 Git 仓库。'}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
@@ -190,7 +188,7 @@ export function SkillImportDialog({
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  ZIP 内需包含一个技能目录和 SKILL.md。附带参考资料、模板和资源按原目录保存。
+                  ZIP 内须包含 SKILL.md，可附带参考资料和模板。
                 </p>
               )}
             </>
@@ -224,7 +222,7 @@ export function SkillImportDialog({
                   onChange={(event) => setUrl(event.currentTarget.value)}
                 />
               </Field>
-              <Field label="固定提交 SHA">
+              <Field label="提交版本">
                 <Input
                   aria-label="技能 Git 提交 SHA"
                   value={ref}
@@ -244,14 +242,12 @@ export function SkillImportDialog({
                 />
               </Field>
               <p className="text-xs text-muted-foreground">
-                支持 GitHub、GitLab、Gitee 和 Codeberg
-                的公开仓库。固定提交保证导入版本可以追溯；不接受账号口令或令牌。
+                支持 GitHub、GitLab、Gitee 和 Codeberg 的公开仓库，不接受账号口令或令牌。
               </p>
             </>
           )}
           <p className="text-xs text-muted-foreground">
-            导入会检查文件和运行条件。依赖任意脚本、Shell
-            或未开放工具的技能可保存查看，但当前不能分配执行。
+            导入后自动检查；依赖脚本或未开放工具的技能仅可查看。
           </p>
           <ErrorMessage error={fileError ?? error} />
         </DialogPanel>
@@ -328,9 +324,7 @@ export function SkillAssignmentDialog({
       <DialogPopup finalFocus={finalFocus} showCloseButton={!busy}>
         <DialogHeader>
           <DialogTitle>{assignment ? '调整技能分配' : '分配技能'}</DialogTitle>
-          <DialogDescription>
-            选定技能版本和使用范围。会话只能使用已授权的文件与工具。
-          </DialogDescription>
+          <DialogDescription>设置使用对象、版本和工作区。</DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
           <Field label="技能">
@@ -434,14 +428,16 @@ export function SkillAssignmentDialog({
                 disabled={busy}
                 onValueChange={(value) => setProjectEnabled(value !== 'disabled')}
               >
-                <SelectTrigger aria-label="项目技能使用方式"><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-label="项目技能使用方式">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectPopup>
                   <SelectItem value="enabled">在此项目启用</SelectItem>
                   <SelectItem value="disabled">在此项目停用，阻止助手继承</SelectItem>
                 </SelectPopup>
               </Select>
               <p className="text-xs text-muted-foreground">
-                项目停用只影响所选项目。取消单独分配则恢复沿用助手设置。
+                停用会阻止助手继承；取消分配则恢复继承。
               </p>
             </Field>
           ) : null}
@@ -465,9 +461,11 @@ export function SkillAssignmentDialog({
               </label>
             </div>
           </Field>
-          <p className="text-xs text-muted-foreground">
-            外部可用意味着外部成员可以读取技能说明和附带文件，请先检查其中不含内部资料。更新技能库后，已有分配继续使用此固定版本。
-          </p>
+          {workspaceTypes.includes('external') ? (
+            <p className="text-xs text-muted-foreground">
+              外部成员可读取技能及附带文件，请确认不含内部资料。
+            </p>
+          ) : null}
           <ErrorMessage error={error} />
         </DialogPanel>
         <DialogFooter>
@@ -492,8 +490,8 @@ export function SkillAssignmentDialog({
                     enabled: targetType === 'project' ? projectEnabled : true,
                   },
                   targetType === 'project' && !projectEnabled
-                    ? '已在此项目停用技能，不再继承助手分配；其他项目不受影响。'
-                    : '分配已保存，新对话将使用该版本；已有对话保持其固定版本。',
+                    ? '已在此项目停用，不再继承助手分配。'
+                    : '分配已保存。',
                 ))
               )
                 onClose()

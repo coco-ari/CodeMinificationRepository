@@ -8,14 +8,13 @@ import { zipSync, strToU8 } from 'fflate'
 import { chromium } from '../vendor/t3code/node_modules/.pnpm/playwright@1.60.0/node_modules/playwright/index.mjs'
 import { T3LiveClient } from './helpers/t3-live-client.mjs'
 
-// Run this concrete browser command outside the macOS execution sandbox. Each
-// profile is owned by this test; all business writes are restricted to its UUID.
+// 此浏览器命令需在 macOS 沙盒外授权运行；临时配置和业务写入仅属于本次 UUID。
 const origin = (process.env.BASE_URL || 'http://192.168.31.157:18897').replace(/\/$/, '')
 if (process.env.T3_SKILL_LIBRARY_MUTATIONS !== '1' || new URL(origin).port === '8787')
   throw new Error('技能管理验收仅允许显式授权的隔离实例，不能在正式 8787 运行。')
 const marker = `skill-ui-${randomUUID().slice(0, 8)}`
 const targetedCase = process.env.T3_SKILL_LIBRARY_CASE
-if (targetedCase && targetedCase !== 'project-filter-unassign')
+if (targetedCase && !['project-filter-unassign', 'management'].includes(targetedCase))
   throw new Error(`未知的技能验收案例：${targetedCase}`)
 const longName =
   `技能闭环验收 ${marker} · ${'长中文标题用于验证列表省略和菜单边界'.repeat(3)}`.slice(0, 76)
@@ -34,7 +33,7 @@ const report = {
   blockedMutations: [],
   mutations: [],
   ownedSkillIds: [],
-  coverage: { actualApi: true, actualUploads: !targetedCase, modelCalls: false, actualTouchDevice: false },
+  coverage: { actualApi: true, actualUploads: targetedCase !== 'project-filter-unassign', modelCalls: false, actualTouchDevice: false },
   cleanup: {},
 }
 const sessions = [],
@@ -226,7 +225,6 @@ async function management(session, id) {
   await closeMobileSidebar(session)
   const back=page.getByRole('button',{name:'返回技能库',exact:true})
   if(await back.isVisible())await back.click()
-  await page.locator('[aria-label="技能管理范围"]').getByText('中央技能库', { exact: true }).click()
   const refreshed=page.waitForResponse(response=>response.request().method()==='GET'&&response.url().endsWith('/autoops/skill-library'))
   void refreshed.catch(()=>{})
   await page.getByRole('button',{name:'刷新技能库',exact:true}).click()
@@ -471,7 +469,7 @@ try {
       assert(readySkill)
       await ownedMutation({action:'assign',skillId:readySkill.id,targetType:'project',targetId:primaryProject.id,versionId:readySkill.latestVersionId,workspaceTypes:['internal'],enabled:true})
       await management(desktop)
-      await page.locator('[aria-label="技能管理范围"]').getByText('项目技能',{exact:true}).click()
+      await page.locator('[aria-label="技能管理"]').getByText('项目技能',{exact:true}).click()
       assert.equal(new URL(page.url().split('#')[1],origin).searchParams.get('projectId'),primaryProject.id)
       await skillCard(readySkill.id).waitFor()
       const {list}=await projectPopover(readySkill)
@@ -486,14 +484,14 @@ try {
         :page.getByRole('button',{name:'添加技能',exact:true})
       await until(()=>expectedFocus.evaluate(element=>element===document.activeElement),'卡片移除后焦点必须恢复到下一张可见卡片或添加技能入口')
       assert.equal(await expectedFocus.isEnabled(),true)
-      await page.locator('[data-slot="toast-title"]:visible').filter({hasText:`已取消“${primaryProject.name}”的单独分配。该项目将沿用助手设置。`}).waitFor()
+      await page.locator('[data-slot="toast-title"]:visible').filter({hasText:`已取消“${primaryProject.name}”的分配，沿用助手设置。`}).waitFor()
       await page.screenshot({path:path.join(output,'project-filter-after-unassign.png')})
       await page.getByRole('button',{name:'添加技能',exact:true}).click()
       await choose('分配的技能',readySkill.displayName)
       await mutation('assign',()=>page.getByRole('button',{name:'保存分配',exact:true}).click())
       await dialogClosed()
       await skillCard(readySkill.id).waitFor()
-      await page.locator('[data-slot="toast-title"]:visible').filter({hasText:'分配已保存，新对话将使用该版本；已有对话保持其固定版本。'}).waitFor()
+      await page.locator('[data-slot="toast-title"]:visible').filter({hasText:'分配已保存。'}).waitFor()
       assert.deepEqual(assignedTo(readySkill.id,'project',primaryProject.id).workspaceTypes,['internal'])
       await page.screenshot({path:path.join(output,'project-filter-after-reassign.png')})
       return {skillId:readySkill.id,projectId:primaryProject.id,removedFromFilteredCards:true,popupUnmounted:true,focusReturnedToAvailableControl:true,unassignToastPublished:true,subsequentAssignmentToastPublished:true,defaultInternal:true}
@@ -542,10 +540,16 @@ try {
     await mutation('unassign',()=>project.click())
     assert.equal(assignedTo(readySkill.id,'project',primaryProject.id),undefined)
     assert.deepEqual(assignedTo(readySkill.id,'agent',primaryAgent.id),originalAgent,'项目快切不可改写助手绑定')
-    const revokedToast=page.locator('[data-slot="toast-title"]:visible').filter({hasText:`已取消“${primaryProject.name}”的单独分配。该项目将沿用助手设置。`})
+    const revokedToast=page.locator('[data-slot="toast-title"]:visible').filter({hasText:`已取消“${primaryProject.name}”的分配，沿用助手设置。`})
     assert.equal(await revokedToast.count(),0,'项目弹层打开时取消分配的成功Toast也应延后')
     await closeProjectPopover(trigger)
     await revokedToast.waitFor()
+    const currentProjectTarget=skillCard(readySkill.id).locator(targetSelector('project',primaryProject.id))
+    assert.equal(await skillCard(readySkill.id).locator('[data-skill-target-type="project"]').count(),1,'卡片只常驻当前项目入口')
+    await mutation('assign',()=>currentProjectTarget.click())
+    assert.equal(assignedTo(readySkill.id,'project',primaryProject.id).targetId,primaryProject.id)
+    await mutation('unassign',()=>currentProjectTarget.click())
+    assert.equal(assignedTo(readySkill.id,'project',primaryProject.id),undefined)
     await assertQuickView()
     await management(desktop,readySkill.id)
     return { skillId: readySkill.id, assignmentId: assigned.id, versionId: assigned.versionId,agentQuickToggle:true,projectPopoverQuickToggle:true,keyboardAssign:true,defaultInternal:true,refreshBlocksWrites:true,cardVisual,successDoesNotMoveCards:true,assignmentHelpFocus:true,projectSuccessToastAfterClose:true }
@@ -618,7 +622,7 @@ try {
   })
   await step('scope-version-update-and-project-assignment', async () => {
     await page.getByRole('button',{name:'返回技能库',exact:true}).click()
-    await page.locator('[aria-label="技能管理范围"]').getByText('助手技能', { exact: true }).click()
+    await page.locator('[aria-label="技能管理"]').getByText('助手技能', { exact: true }).click()
     await page.locator(`[data-skill-row="${readySkill.id}"]`).click()
     await menu('调整当前分配')
     await choose('分配技能版本', readySkill.latestVersionId.slice(0, 8))
@@ -632,7 +636,7 @@ try {
       readySkill.latestVersionId,
     )
     await page.getByRole('button',{name:'返回技能库',exact:true}).click()
-    await page.locator('[aria-label="技能管理范围"]').getByText('项目技能', { exact: true }).click()
+    await page.locator('[aria-label="技能管理"]').getByText('项目技能', { exact: true }).click()
     await page.getByRole('button', { name: '添加技能', exact: true }).click()
     await choose('分配的技能', longName)
     await mutation('assign', () =>
@@ -645,7 +649,9 @@ try {
     )
     return { agentAndProjectScopes: true, explicitUpgrade: true, externalGrantedExplicitly: true }
   })
-  await step('draft-dollar-skill-chip-and-instructions', async () => {
+  // 管理页验收可在无模型运行器的隔离实例执行，问答链路另行验证。
+  if (targetedCase === 'management') report.coverage.draftSkillSelection = false
+  else await step('draft-dollar-skill-chip-and-instructions', async () => {
     page = desktop.page
     await page.goto(`${origin}/agent-demo.html#/draft/${randomUUID()}`)
     const editor = page.getByTestId('composer-editor')

@@ -29,6 +29,7 @@ export function skillQuickAssignmentAllowed(skill: LibrarySkill, assignment?: Sk
 type CardProps = {
   skill: LibrarySkill
   catalog: SkillLibrary
+  projectId: string
   busy: boolean
   pendingTarget: string | null
   actions: ReactNode
@@ -37,10 +38,11 @@ type CardProps = {
   onToggle: (skill: LibrarySkill, type: SkillTargetType, id: string) => void
 }
 
-/** T3 theme-result cards with Skills Manager's direct target toggles. */
+/** 复用 T3 目录卡片，保留 Skills Manager 的就地分配操作。 */
 export function SkillLibraryCard({
   skill,
   catalog,
+  projectId,
   busy,
   pendingTarget,
   actions,
@@ -51,12 +53,10 @@ export function SkillLibraryCard({
   const version = skillVersion(skill)
   const assignments = catalog.assignments.filter((entry) => entry.skillId === skill.id)
   const projectAssignments = assignments.filter((entry) => entry.targetType === 'project')
-  const shownProjects =
-    catalog.projects.length <= 3
-      ? catalog.projects
-      : catalog.projects
-          .filter((project) => projectAssignments.some((entry) => entry.targetId === project.id))
-          .slice(0, 3)
+  const currentProject = catalog.projects.find((project) => project.id === projectId)
+  const otherAssignmentCount = projectAssignments.filter(
+    (entry) => entry.targetId !== projectId,
+  ).length
   const [projectQuery, setProjectQuery] = useState('')
   const projects = catalog.projects.filter((project) =>
     project.name.toLocaleLowerCase().includes(projectQuery.toLocaleLowerCase().trim()),
@@ -99,7 +99,7 @@ export function SkillLibraryCard({
         </h2>
         {actions}
       </div>
-      <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground wrap-anywhere">
+      <p className="line-clamp-2 text-xs leading-4 text-muted-foreground wrap-anywhere">
         {skill.description || '尚未提供技能描述。'}
       </p>
       {!skill.enabled || version?.readiness === 'restricted' ? (
@@ -143,15 +143,7 @@ export function SkillLibraryCard({
             className="flex min-w-0 flex-1 flex-wrap items-center gap-1"
             aria-label="项目分配摘要"
           >
-            {shownProjects.map((project) => target('project', project))}
-            {!shownProjects.length ? (
-              <span className="text-xs text-muted-foreground">沿用助手设置</span>
-            ) : null}
-            {projectAssignments.length > shownProjects.length ? (
-              <span className="text-xs text-muted-foreground">
-                另有 {projectAssignments.length - shownProjects.length} 项
-              </span>
-            ) : null}
+            {currentProject ? target('project', currentProject) : null}
             <Popover
               onOpenChange={(open) => {
                 onProjectOpenChange(open)
@@ -163,13 +155,14 @@ export function SkillLibraryCard({
                 render={<Button variant="ghost" size="xs" />}
               >
                 <FolderIcon />
-                选择项目
+                {currentProject ? '更多项目' : '选择项目'}
+                {otherAssignmentCount > 0 ? ` · ${otherAssignmentCount}` : ''}
               </PopoverTrigger>
               <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
                 <div className="space-y-2">
                   <PopoverTitle>项目分配</PopoverTitle>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    勾选为单独分配。取消项目分配后，沿用助手设置。
+                    点击分配，再点取消。未单独分配的项目沿用助手设置。
                   </p>
                   <Input
                     size="sm"

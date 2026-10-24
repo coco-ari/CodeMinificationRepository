@@ -43,7 +43,6 @@ import {
 } from './SkillLibraryDialogs'
 import {
   skillFileSource,
-  skillSourceName,
   skillVersion,
   skillVersionName,
   type LibrarySkill,
@@ -247,9 +246,6 @@ function SkillLibraryContent({
   const version = selected
     ? skillVersion(selected, selectedVersionId || assignment?.versionId)
     : undefined
-  const selectedAssignments = selected
-    ? (catalog?.assignments.filter((entry) => entry.skillId === selected.id) ?? [])
-    : []
   const selectedDialogSkill =
     dialog && 'skill' in dialog && dialog.skill
       ? (catalog?.skills.find((entry) => entry.id === dialog.skill?.id) ?? dialog.skill)
@@ -317,7 +313,7 @@ function SkillLibraryContent({
     void mutate(
       action,
       existing?.enabled
-        ? `已取消“${name}”的单独分配。${type === 'project' ? '该项目将沿用助手设置。' : '现有项目单独分配不变。'}`
+        ? `已取消“${name}”的分配${type === 'project' ? '，沿用助手设置' : ''}。`
         : existing
           ? `已恢复“${name}”的分配，沿用原版本与工作区范围。`
           : `已分配给“${name}”，仅用于内部工作区。`,
@@ -372,7 +368,7 @@ function SkillLibraryContent({
         else if (action === 'toggle')
           void mutate(
             { action: 'set-enabled', skillId: skill.id, enabled: !skill.enabled },
-            skill.enabled ? '技能已停用，后续轮次不能再调用。' : '技能已启用，可在已授权范围使用。',
+            skill.enabled ? '技能已停用。' : '技能已启用。',
           )
       }}
     />
@@ -388,9 +384,10 @@ function SkillLibraryContent({
     >
       <ModuleHeader
         title="技能库"
-        detail={showDetail && selected ? selected.name : scopeNames[scope]}
+        detail={showDetail && selected ? selected.displayName : scopeNames[scope]}
         actions={
           <>
+            {showDetail && selected ? actions(selected, version, assignment) : null}
             {!showDetail && canManage ? (
               <Button
                 ref={libraryActionRef}
@@ -435,9 +432,6 @@ function SkillLibraryContent({
               onClick={() => selectView(value as Scope)}
             />
           ))}
-          <p className="px-2 py-3 text-xs leading-relaxed text-sidebar-muted-foreground">
-            中央库和助手分配为全局范围；项目技能使用顶部当前项目。
-          </p>
         </div>
       </ModuleSidebar>
       {error && !dialog ? (
@@ -476,7 +470,7 @@ function SkillLibraryContent({
             aria-label="技能列表"
           >
             <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
-              <WorkspacePageContainer width="wide" className="gap-4">
+              <WorkspacePageContainer width="wide" className="gap-3">
                 <div
                   className="flex min-w-0 flex-wrap items-center gap-2"
                   aria-label="技能库工具栏"
@@ -511,7 +505,7 @@ function SkillLibraryContent({
                   >
                     {scope === 'project' ? projectName : '全局共享'}
                   </span>
-                  <div className="flex min-w-0 flex-1 basis-48 items-center gap-1 sm:ml-auto sm:max-w-72">
+                  <div className="ml-auto flex shrink-0 items-center gap-1">
                     <span
                       className="text-xs text-muted-foreground"
                       aria-label={`${visibleSkills.length} 项技能`}
@@ -528,18 +522,12 @@ function SkillLibraryContent({
                       <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
                         <PopoverTitle>技能分配</PopoverTitle>
                         <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
+                          <p>中央库与助手技能全局共享，项目技能跟随顶部当前项目。</p>
                           <p>
-                            中央库与助手分配在全局管理；项目技能跟随顶部当前项目。卡片上的项目按钮用于明确分配目标。
+                            点击助手或项目即可分配，再点取消。新分配使用最新版本，仅限内部工作区；未就绪版本不能分配。
                           </p>
-                          <p>
-                            点击助手或项目即可分配，再点取消。新分配使用当前最新版本，仅用于内部工作区；未就绪版本不能分配。
-                          </p>
-                          <p>
-                            项目未单独分配时沿用助手设置。取消项目的单独分配后，会恢复这层继承。
-                          </p>
-                          <p>
-                            版本、来源和外部工作区范围，可从技能菜单的“分配与版本详情”查看和调整。
-                          </p>
+                          <p>项目未单独分配时沿用助手设置。</p>
+                          <p>版本、来源和外部范围在技能菜单中查看或调整。</p>
                         </div>
                       </PopoverPopup>
                     </Popover>
@@ -555,6 +543,7 @@ function SkillLibraryContent({
                         key={skill.id}
                         skill={skill}
                         catalog={catalog}
+                        projectId={projectId}
                         busy={busy || loading}
                         pendingTarget={pendingTarget}
                         actions={actions(
@@ -608,31 +597,6 @@ function SkillLibraryContent({
                       <FileSurfaceAction label="返回技能库" onPress={returnToLibrary}>
                         <ArrowLeftIcon />
                       </FileSurfaceAction>
-                      <h2
-                        className="min-w-0 flex-1 truncate text-sm font-medium"
-                        title={selected.displayName}
-                      >
-                        {selected.displayName}
-                      </h2>
-                      <Badge
-                        size="sm"
-                        variant={
-                          !selected.enabled
-                            ? 'outline'
-                            : version.readiness === 'ready'
-                              ? 'success'
-                              : 'warning'
-                        }
-                      >
-                        {!selected.enabled
-                          ? '已停用'
-                          : version.readiness === 'ready'
-                            ? '可分配'
-                            : '未就绪'}
-                      </Badge>
-                      {actions(selected, version, assignment)}
-                    </div>
-                    <div className="flex min-w-0 items-center gap-2">
                       <div className="min-w-0 flex-1 sm:max-w-80">
                         <Select
                           value={version.id}
@@ -654,14 +618,16 @@ function SkillLibraryContent({
                           </SelectPopup>
                         </Select>
                       </div>
-                      <span className="hidden shrink-0 text-xs text-muted-foreground xl:block">
-                        {skillSourceName(version.source)} · {version.fileCount} 个文件
-                      </span>
+                      {!selected.enabled || version.readiness !== 'ready' ? (
+                        <Badge size="sm" variant={!selected.enabled ? 'outline' : 'warning'}>
+                          {!selected.enabled ? '已停用' : '未就绪'}
+                        </Badge>
+                      ) : null}
                     </div>
                     {version.readiness === 'restricted' ? (
                       <p role="status" className="text-xs text-warning-foreground wrap-anywhere">
                         运行条件未满足：{version.reason ?? '当前运行器无法执行此技能。'}{' '}
-                        可以查看文件，完成适配后重新导入。
+                        可以查看文件。
                       </p>
                     ) : null}
                     {assignment ? (
@@ -673,12 +639,6 @@ function SkillLibraryContent({
                         {version.id !== assignment.versionId
                           ? ' · 正在预览其他版本，当前分配未改变'
                           : ''}
-                      </p>
-                    ) : selectedAssignments.length === 0 &&
-                      selected.enabled &&
-                      version.readiness === 'ready' ? (
-                      <p className="text-xs text-muted-foreground">
-                        尚未分配。返回技能库后，点击卡片上的助手或项目即可分配。
                       </p>
                     ) : null}
                   </div>
