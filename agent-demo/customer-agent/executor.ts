@@ -1,3 +1,6 @@
+import { join } from "node:path";
+import { CustomerAttachmentCache, type AttachmentDownload } from "./attachments.ts";
+import { CUSTOMER_ATTACHMENT_LIMITS } from "../../vendor/t3code/packages/contracts/src/customerAttachments.ts";
 import { createHash } from "node:crypto";
 import type { CustomerAgentCommand, CustomerAgentReceipt, CustomerAgentClientFrame } from "../../vendor/t3code/packages/contracts/src/autoopsRemote.ts";
 import { ConnectorError, CustomerAgentStore, type LocalSession, type LocalWorkspace } from "./store.ts";
@@ -28,15 +31,19 @@ export class CustomerAgentExecutor {
   private readonly providerThreads = new Map<string, unknown>();
   private readonly stopping = new Set<string>();
   private executing = 0;
+  private readonly commands = new Set<Promise<CustomerAgentReceipt>>();
+  private readonly shutdown = new AbortController();
+  private readonly attachments: CustomerAttachmentCache | undefined;
   private readonly discoveryRunners = new Set<HeadlessCodexRunner>();
   private readonly notify: (frame: CustomerAgentClientFrame) => void;
   private readonly runnerFactory: RunnerFactory;
   private readonly onState: (message: string) => void;
   constructor(options: {
-    store: CustomerAgentStore; deviceId: string; runnerFactory: RunnerFactory;
+    store: CustomerAgentStore; deviceId: string; runnerFactory: RunnerFactory; downloadAttachment?: AttachmentDownload;
     notify: (frame: CustomerAgentClientFrame) => void; onState?: (message: string) => void;
   }) {
     this.store = options.store; this.deviceId = options.deviceId; this.runnerFactory = options.runnerFactory;
+    this.attachments = options.downloadAttachment ? new CustomerAttachmentCache(join(options.store.directory, "attachments"), options.downloadAttachment) : undefined;
     this.notify = options.notify; this.onState = options.onState ?? (() => {});
   }
   private async runner(sessionId: string, workspace: LocalWorkspace): Promise<HeadlessCodexRunner> {
@@ -52,6 +59,7 @@ export class CustomerAgentExecutor {
       let epoch = "";
       const runner = await this.runnerFactory({
         instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath, localPolicy: workspace.policy,
+        resolveAttachmentPath: (attachment) => this.attachments?.resolve(sessionId, attachment) ?? null,
         onEvent: (event) => this.handleEvent(sessionId, epoch, event),
         onError: () => this.markUnknown(sessionId, "客户运行器连接异常，结果待核实", "runtime_lost"),
       });
@@ -118,11 +126,14 @@ export class CustomerAgentExecutor {
   }
   async execute(command: CustomerAgentCommand): Promise<CustomerAgentReceipt> {
     this.executing++;
-    try { return await this.executeCommand(command); } finally { this.executing--; }
+    const task = this.executeCommand(command);
+    this.commands.add(task);
+    try { return await task; } finally { this.executing--; this.commands.delete(task); }
   }
   private async executeCommand(command: CustomerAgentCommand): Promise<CustomerAgentReceipt> {
     let nativeAttempted = false;
     try {
+      this.shutdown.signal.throwIfAborted();
       const previous = this.store.receipt(command);
       if (previous) { this.notify(previous); return previous; }
       const workspace = this.store.resolveWorkspace(command.target, command.method === "interruptTurn" || command.method === "readThreadSnapshot");
@@ -155,6 +166,8 @@ export class CustomerAgentExecutor {
           this.store.finish(epochReceipt); this.notify(epochReceipt);
         }
         if (command.method === "startTurn" || command.method === "steerTurn") {
+          if (this.attachments) await this.attachments.prepare(command, this.shutdown.signal, () => { this.store.resolveWorkspace(command.target); });
+          else if (input.message?.attachments?.length || command.attachments?.length) throw new ConnectorError("attachment_unavailable", "请更新连接程序后再发送附件");
           const names = [...new Set([...String(input.message?.text ?? "").matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!))];
           if (names.length) {
             const { skills } = await runner.catalog();
@@ -167,6 +180,9 @@ export class CustomerAgentExecutor {
             }
           }
         }
+        if (command.method === "steerTurn" && this.providerTurns.get(command.sessionId) !== input.providerTurnId) throw new ConnectorError("stale_turn", "这条消息对应的轮次已结束，请重新发送");
+        this.shutdown.signal.throwIfAborted();
+        this.store.resolveWorkspace(command.target, command.method === "interruptTurn" || command.method === "readThreadSnapshot");
         if (command.method === "startTurn") {
           if (input.providerThread?.nativeThreadRef?.nativeId) {
             this.providerThreads.set(command.sessionId, input.providerThread);
@@ -229,6 +245,7 @@ export class CustomerAgentExecutor {
     return {
       registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
       runtimeId: "codex", protocolVersion: 1,
+      ...(this.attachments ? {attachments: CUSTOMER_ATTACHMENT_LIMITS} : {}),
       revision: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
       models: catalog.models.map((model) => {
         const effort = model.capabilities?.optionDescriptors?.find((option) => option.id === "reasoningEffort");
@@ -260,7 +277,9 @@ export class CustomerAgentExecutor {
     return this.executing > 0 || this.store.sessions().some((session) => session.state !== "idle" && this.runners.has(session.sessionId));
   }
   async close(): Promise<void> {
+    this.shutdown.abort();
     await Promise.allSettled([...this.runners.values(), ...this.discoveryRunners].map((runner) => runner.close()));
+    await Promise.allSettled([...this.commands]);
     for (const session of this.store.sessions()) if (session.state === "active") this.markUnknown(session.sessionId, "连接程序退出，旧执行需核实");
     this.runners.clear();
   }

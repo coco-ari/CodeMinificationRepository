@@ -1,6 +1,8 @@
+import { CustomerAttachmentDelivery } from "../../vendor/t3code/apps/server/src/autoops/CustomerAttachmentDelivery.ts";
+import { createAttachmentId } from "../../vendor/t3code/apps/server/src/attachmentStore.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { createServer, type IncomingMessage } from "node:http";
@@ -55,8 +57,23 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
   const principal = registry.authenticateToken(paired.deviceToken);
   registry.registerWorkspace(principal, { registeredWorkspaceId: workspace.registeredWorkspaceId, projectId: "project", label: "客户项目", workspaceBindingRevision: 1, runtimeId: "codex" });
   let bound: any;
-  const hub = new RemoteDeviceHub({ assertAccepting() {}, customerRegistry: registry, getThreadBinding: () => bound } as any, createCustomerTransportJournal(transportDb));
-  const server = createServer();
+  const attachmentsDir=join(root, "uploads"); mkdirSync(attachmentsDir);
+  const fileBytes=Buffer.from("附件正文：客户电脑自动接收 938271");
+  const imageBytes=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5T8AAAAASUVORK5CYII=", "base64");
+  const attachments=[{type:"file",id:createAttachmentId("thread-customer",".txt")!,name:"验收.txt",mimeType:"text/plain",sizeBytes:fileBytes.length},
+    {type:"image",id:createAttachmentId("thread-customer",".png")!,name:"截图.png",mimeType:"image/png",sizeBytes:imageBytes.length}];
+  for(const [index,attachment] of attachments.entries())writeFileSync(join(attachmentsDir,`${attachment.id}.${index===0?"txt":"png"}`),[fileBytes,imageBytes][index]!);
+  const access = {requireCustomerAttachment(ownerId:string,threadId:string,id:string){assert.equal(ownerId,"owner");assert.equal(threadId,"thread-customer");const item=attachments.find(item=>item.id===id);assert.ok(item);return item;}, assertAccepting() {}, customerRegistry: registry, getThreadBinding: () => bound } as any;
+  const hub = new RemoteDeviceHub(access, createCustomerTransportJournal(transportDb), new CustomerAttachmentDelivery(access,attachmentsDir));
+  let downloads=0;
+  const server = createServer(async (request,response)=>{
+    try {
+      const auth=registry.authenticateToken(request.headers.authorization?.slice(7)??"");
+      const parts=new URL(request.url!,"http://localhost").pathname.split("/");
+      const bytes=await hub.readAttachment(auth,parts.at(-2)!,parts.at(-1)!);downloads++;
+      response.writeHead(200,{"content-type":"application/octet-stream"});response.end(bytes);
+    } catch {response.writeHead(403);response.end();}
+  });
   const wss = new NodeWS.WebSocketServer({ server });
   const errors: unknown[] = []; const connectionStates: string[] = []; const sockets: Array<InstanceType<typeof NodeWS.WebSocket>> = [];
   let dropped = false, startCommandId = "", connectionCount = 0;
@@ -99,13 +116,20 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
         runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null, activeProviderThreadId: providerThread.id,
         lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId }, forkedFrom: null,
         createdAt: now, updatedAt: now, archivedAt: null, settledOverride: null, settledAt: null, lastVisitedAt: null, deletedAt: null },
-      message: { createdBy: "user", creationSource: "web", messageId: "message-customer", text: "fixture simple ok", attachments: [] }, modelSelection, runtimePolicy };
+      message: { createdBy: "user", creationSource: "web", messageId: "message-customer", text: "fixture simple ok", attachments }, modelSelection, runtimePolicy };
     const { customerCommandId } = await import("../t3-adapters/customer-transport.mjs");
     startCommandId = customerCommandId(sessionId, "startTurn", "start");
     await hub.acquireWorkspace(threadId, "run-customer");
     await hub.command(sessionId, "startTurn", turn, "start");
     await until(() => events.some((event) => event.type === "turn.terminal"));
     await until(() => store.streams().length === 0);
+    assert.equal(downloads,2);
+    const nativeRequests=readFileSync(requestLog,"utf8").trim().split("\n").map(line=>JSON.parse(line));
+    const nativeInput=nativeRequests.find(entry=>entry.method==="turn/start").params.input;
+    assert.ok(nativeInput.some((entry:any)=>entry.type==="image" && entry.url===`data:image/png;base64,${imageBytes.toString("base64")}`));
+    const text=JSON.stringify(nativeInput);
+    assert.ok(text.includes("验收.txt"));
+    assert.ok(text.includes(join(root,"state","attachments")));
     assert.equal(dropped, true); assert.ok(connectionCount >= 2);
     assert.deepEqual(errors, []);
     assert.equal(readFileSync(sideEffect, "utf8"), "1");

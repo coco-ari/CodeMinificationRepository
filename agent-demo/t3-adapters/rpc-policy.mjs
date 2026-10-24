@@ -176,7 +176,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
   }
   if (threadMethods.has(method)) {
     const binding = access.requireThread(principal, payload.threadId)
-    if (binding.executionBinding?.kind === 'customer' && (method === 'assets.persistChatAttachments' || method.startsWith('mcpApps.'))) denied('客户首版暂不支持平台附件和交互式工具页面')
+    if (binding.executionBinding?.kind === 'customer' && method.startsWith('mcpApps.')) denied('本机对话不支持平台交互式工具页面')
     if (binding.nativeParentThreadId && ['assets.persistChatAttachments','mcpApps.callTool','mcpApps.updateModelContext'].includes(method)) denied('原生子任务仅供查看')
     if (binding.compatibilityReadOnly && ['assets.persistChatAttachments','mcpApps.callTool','mcpApps.updateModelContext'].includes(method)) denied('兼容历史仅供查看')
     if (method === 'mcpApps.updateModelContext') access.requireReference(principal, payload.threadId, payload.conversationThreadId)

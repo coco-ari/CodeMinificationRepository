@@ -5,7 +5,7 @@ import { CustomerAgentExecutor } from "./executor.ts";
 import type { CustomerAgentStore } from "./store.ts";
 
 export interface DeviceCredentials { deviceId: string; token: string; baseUrl: string; allowInsecure?: boolean; }
-export const CONNECTOR_VERSION = "0.1.0";
+export const CONNECTOR_VERSION = "0.2.0";
 export function validateBaseUrl(value: string, allowInsecure = false): string {
   const url = new URL(value);
   if (url.username || url.password || url.hash || url.search) throw new Error("中心地址不能包含账号、密码、查询参数或片段");
@@ -34,6 +34,14 @@ export class CustomerAgentHttpClient {
     if (Buffer.byteLength(text) > 1024 * 1024) throw new Error("中心响应超过大小限制");
     return JSON.parse(text) as T;
   }
+  async *downloadAttachment(commandId: string, attachmentId: string, signal: AbortSignal): AsyncGenerator<Uint8Array> {
+    const response = await fetch(endpoint(this.baseUrl, `connector/attachments/${encodeURIComponent(commandId)}/${encodeURIComponent(attachmentId)}`), {
+      dispatcher: this.dispatcher, headers: {authorization: `Bearer ${this.token}`},
+      signal: AbortSignal.any([signal, AbortSignal.timeout(45000)]), redirect: "error",
+    });
+    if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error("附件下载失败"); }
+    for await (const chunk of response.body) yield chunk;
+  }
   async close(): Promise<void> { await this.dispatcher.close(); }
 }
 
@@ -43,6 +51,7 @@ export class CustomerAgentConnection {
   private readonly store: CustomerAgentStore;
   private readonly credentials: DeviceCredentials;
   private readonly dispatcher = new EnvHttpProxyAgent();
+  private readonly attachmentClient: CustomerAgentHttpClient;
   private readonly connectorEpoch = randomUUID();
   private readonly onState: (message: string) => void;
   private readonly beforeConnect: () => Promise<void>;
@@ -67,7 +76,9 @@ export class CustomerAgentConnection {
   }) {
     this.store = options.store; this.credentials = options.credentials; this.onState = options.onState ?? (() => {});
     this.beforeConnect = options.beforeConnect ?? (async () => {}); this.onReady = options.onReady ?? (async () => {});
+    this.attachmentClient = new CustomerAgentHttpClient(this.credentials.baseUrl, this.credentials.token, this.credentials.allowInsecure);
     this.executor = new CustomerAgentExecutor({ store: this.store, deviceId: this.credentials.deviceId,
+      downloadAttachment: (commandId, attachmentId, signal) => this.attachmentClient.downloadAttachment(commandId, attachmentId, signal),
       runnerFactory: options.runnerFactory, notify: (frame) => this.enqueue(frame), onState: this.onState });
   }
   start(): void {
@@ -92,7 +103,7 @@ export class CustomerAgentConnection {
       if (this.socket !== socket || this.stopped) return;
       this.lastReceived = Date.now(); this.sent.clear();
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: this.credentials.deviceId,
-        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch,
+        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true,
         workspaces: this.store.workspaces().filter((workspace) => !workspace.revoked && workspace.published).map((workspace) => ({
           registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
           runtimeId: workspace.runtimeId, projectId: workspace.projectId, label: workspace.label,
@@ -166,6 +177,7 @@ export class CustomerAgentConnection {
   async close(): Promise<void> {
     this.stopped = true; clearTimeout(this.retryTimer); clearInterval(this.flushTimer); clearInterval(this.heartbeatTimer);
     this.socket?.close(1000, "connector shutdown");
-    await this.executor.close(); await this.dispatcher.close();
+    await this.executor.close();
+    await this.attachmentClient.close(); await this.dispatcher.close();
   }
 }

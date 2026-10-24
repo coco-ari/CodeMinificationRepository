@@ -1,3 +1,6 @@
+import { CustomerAttachmentDelivery } from './CustomerAttachmentDelivery.ts';
+import { customerMessageAttachments } from '../../../../packages/contracts/src/customerAttachments.ts';
+import { ServerConfig } from '../config.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { EventEmitter } from 'node:events';
 import * as Context from 'effect/Context';
@@ -16,7 +19,7 @@ import { customerProviderInstanceId,customerWorkspaceKey } from '../../../../../
 import { createCustomerTransportJournal, customerCommandId, CustomerTransportError, type CustomerTransportJournal, type TransportSession, type TransportReceipt } from '../../../../../../agent-demo/t3-adapters/customer-transport.mjs';
 
 type Send = (frame: CustomerAgentServerFrame) => Promise<void>;
-type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
+type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
 type Delivery = {sessionId:string;epoch:string;seq:number};
 const error = (code:string,message:string) => new CustomerTransportError(code,message);
 export class RemoteDeviceHub {
@@ -26,7 +29,8 @@ export class RemoteDeviceHub {
   private readonly signals=new EventEmitter();
   private readonly metadata=new WeakMap<object,Delivery>();
   private readonly waiters=new Map<string,Set<(receipt:TransportReceipt)=>void>>();
-  constructor(access:AutoOpsAccess,journal:CustomerTransportJournal) {this.access=access;this.journal=journal;this.signals.setMaxListeners(0);access.customerRegistry.resetPresence();}
+  private readonly attachments:CustomerAttachmentDelivery|undefined;
+  constructor(access:AutoOpsAccess,journal:CustomerTransportJournal,attachments?:CustomerAttachmentDelivery) {this.attachments=attachments;this.access=access;this.journal=journal;this.signals.setMaxListeners(0);access.customerRegistry.resetPresence();}
   session(id:string) {return this.journal.session(id);}
   hasDispatchedRun(sessionId:string,runId:string,attemptId:string) {
     return Boolean(this.journal.command(customerCommandId(sessionId,'startTurn',[runId,attemptId])));
@@ -134,6 +138,7 @@ export class RemoteDeviceHub {
         if(frame.type==='hello') {
           if(connection.hello || frame.deviceId!==principal.deviceId)throw error('INVALID_HELLO','设备握手信息不匹配');
           // HTTP registration is authoritative; a hello cannot register a directory.
+          connection.attachmentTransfers = frame.attachmentTransfers === true;
           const registered=this.access.customerRegistry.listWorkspaces(principal.ownerId);
           for(const workspace of frame.workspaces)if(!registered.some(item=>item.deviceId===principal.deviceId&&item.projectId===workspace.projectId&&item.registeredWorkspaceId===workspace.registeredWorkspaceId&&item.workspaceBindingRevision===workspace.workspaceBindingRevision&&item.runtimeId===workspace.runtimeId))throw error('WORKSPACE_SCOPE','客户设备声明了未登记的工作区');
           connection.hello=true;
@@ -224,6 +229,17 @@ export class RemoteDeviceHub {
     this.journal.saveSession({...old,sessionId,deviceId,ownerId:binding.ownerId,projectId:binding.projectId,threadId:binding.threadId,target});
   }
   update(sessionId:string,update:Partial<TransportSession>) {const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');this.journal.saveSession({...session,...update});if(update.pendingInterrupt)this.signals.emit('session-state',sessionId);}
+  async readAttachment(principal:CustomerDevicePrincipal,commandId:string,attachmentId:string) {
+    const saved=this.journal.command(commandId), session=saved && this.journal.session(saved.command.sessionId);
+    if(!saved || !session || session.deviceId!==principal.deviceId || session.ownerId!==principal.ownerId || !this.attachments)throw error('ATTACHMENT_SCOPE','附件不属于此设备');
+    this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,{kind:'customer',deviceId:session.deviceId,...session.target});
+    const binding=this.access.getThreadBinding(session.threadId);
+    if(binding?.executionBinding.kind!=='customer' || binding.executionBinding.deviceId!==session.deviceId || binding.executionBinding.runtimeId!==session.target.runtimeId || customerWorkspaceKey(binding.executionBinding)!==customerWorkspaceKey({kind:'customer',deviceId:session.deviceId,...session.target}))throw error('ATTACHMENT_SCOPE','附件绑定已失效');
+    const manifest=saved.command.attachments?.find(item=>item.id===attachmentId);
+    const attachment=customerMessageAttachments(saved.command.input).find(item=>item.id===attachmentId);
+    if(!manifest || !attachment)throw error('ATTACHMENT_SCOPE','原命令没有此附件');
+    return (await this.attachments.read(session,attachment,manifest)).bytes;
+  }
   async command(sessionId:string,method:CustomerAgentMethod,input:unknown,key:unknown,signal?:AbortSignal):Promise<unknown> {
     const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');
     const connection=this.connections.get(session.deviceId);
@@ -235,10 +251,14 @@ export class RemoteDeviceHub {
     if(method!=='readThreadSnapshot')this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,target,{requireOnline:!control});
     const commandId=customerCommandId(sessionId,method,key);
     const prior=this.journal.command(commandId);
+    const requestedAttachments=['startTurn','steerTurn'].includes(method)?customerMessageAttachments(input):[];
+    if(requestedAttachments.length && (!this.attachments || !connection?.attachmentTransfers))throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED','请更新这台电脑的连接程序后发送附件'),{outcome:'not_started'});
+    const attachments=!prior && requestedAttachments.length?await this.attachments!.prepare(session,input):undefined;
+    if(signal?.aborted)throw Object.assign(error('WAIT_CANCELLED','已取消发送附件'),{outcome:'not_started'});
     const names=['startTurn','steerTurn'].includes(method)?[...new Set([...String((input as {message?:{text?:string}})?.message?.text??'').matchAll(SKILL_MENTION_PATTERN)].map(match=>match[2]!))]:[];
     const catalog=names.length?this.access.customerRegistry.getCapabilities(session.ownerId,target):undefined;
     const skillBindings=names.map(name=>{const matches=catalog?.skills.filter(skill=>skill.name===name)??[];if(matches.length!==1)throw error('CUSTOMER_SKILL_UNAVAILABLE','所选本机技能已变更或有重名，请刷新后重选');return {id:matches[0]!.id,name};});
-    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method,...(method!=='openSession'&&session.runtimeEpoch?{runtimeEpoch:session.runtimeEpoch}:{}),...(skillBindings.length?{skillBindings}:{}),input};
+    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method,...(method!=='openSession'&&session.runtimeEpoch?{runtimeEpoch:session.runtimeEpoch}:{}),...(skillBindings.length?{skillBindings}:{}),...(attachments?.length?{attachments}:{}),input};
     this.journal.saveCommand(command);
     const settle=(receipt:TransportReceipt)=>{if(receipt.state==='completed')return receipt.result;if(receipt.state!=='accepted'){const failure=error(receipt.error?.code??'CUSTOMER_OUTCOME_UNKNOWN',receipt.error?.message??'客户执行结果尚未确认，请先检查本机任务');if(receipt.state==='failed'&&['startTurn','steerTurn'].includes(method))Object.assign(failure,{outcome:'not_started'});throw failure;}};
     if(prior?.receipt&&prior.receipt.state!=='accepted')return settle(prior.receipt);
@@ -293,7 +313,8 @@ export const layer=Layer.effect(RemoteDeviceService,Effect.gen(function*(){
   const directory=process.env.AUTOOPS_T3_DATA_DIR!;yield* fs.makeDirectory(path.join(directory,'t3'),{recursive:true}).pipe(Effect.orDie);
   const db=yield* Effect.acquireRelease(Effect.sync(()=>new DatabaseSync(path.join(directory,'t3','customer-transport.sqlite'))),db=>Effect.sync(()=>db.close()));
   db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;');
-  const hub=new RemoteDeviceHub(access,createCustomerTransportJournal(db));
+  const config=yield* ServerConfig;
+  const hub=new RemoteDeviceHub(access,createCustomerTransportJournal(db),new CustomerAttachmentDelivery(access,config.attachmentsDir));
   yield* Effect.addFinalizer(()=>Effect.sync(()=>hub.close()));
   return {hub};
 }));

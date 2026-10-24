@@ -164,7 +164,7 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       return publicWorkspace(workspaceRow(device.id, workspaceId))
     },
     updateCapabilities(principal, input) {
-      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions'])
+      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments'])
       const device = activeDevice(principal), workspace = workspaceRow(device.id, input.registeredWorkspaceId)
       if (!workspace) fail(404, 'CUSTOMER_WORKSPACE_NOT_FOUND', '请先在本机登记工作区')
       validateTarget(device.owner_id, workspace.project_id, {kind:'customer',deviceId:device.id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:input.workspaceBindingRevision,runtimeId:input.runtimeId})
@@ -178,7 +178,13 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       const skills = input.skills.map((skill) => { object(skill, ['id','name','description']); return {id:id(skill.id,'技能ID'),name:text(skill.name,'技能名称'),description:typeof skill.description === 'string' && !skill.description ? '' : text(skill.description,'技能描述',4000)} })
       if (new Set(models.map((model) => model.id)).size !== models.length || new Set(skills.map((skill) => skill.id)).size !== skills.length) fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '模型或技能标识重复')
       const permissions = input.permissions === undefined ? undefined : (() => { object(input.permissions,['approvalPolicy','sandboxMode']); return {approvalPolicy:text(input.permissions.approvalPolicy,'审批策略',80),sandboxMode:text(input.permissions.sandboxMode,'本机权限',80)} })()
-      const snapshot = {deviceId:device.id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:workspace.binding_revision,runtimeId:workspace.runtime_id,revision:text(input.revision,'能力版本'),protocolVersion:1,...(input.runtimeVersion ? {runtimeVersion:text(input.runtimeVersion,'运行器版本',100)} : {}),...(input.configRevision ? {configRevision:text(input.configRevision,'配置版本')} : {}),models,skills,...(permissions ? {permissions} : {})}
+      const attachments = input.attachments === undefined ? undefined : (() => {
+        object(input.attachments, ['maxFileBytes', 'maxTotalBytes', 'maxCount'])
+        const limits = {maxFileBytes:50*1024*1024, maxTotalBytes:100*1024*1024, maxCount:100}
+        for (const [key, limit] of Object.entries(limits)) if (!Number.isSafeInteger(input.attachments[key]) || input.attachments[key] < 1 || input.attachments[key] > limit) fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '附件能力无效')
+        return {...input.attachments}
+      })()
+      const snapshot = {...(attachments ? {attachments} : {}),deviceId:device.id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:workspace.binding_revision,runtimeId:workspace.runtime_id,revision:text(input.revision,'能力版本'),protocolVersion:1,...(input.runtimeVersion ? {runtimeVersion:text(input.runtimeVersion,'运行器版本',100)} : {}),...(input.configRevision ? {configRevision:text(input.configRevision,'配置版本')} : {}),models,skills,...(permissions ? {permissions} : {})}
       const encoded = JSON.stringify(snapshot)
       if (Buffer.byteLength(encoded) > 1024 * 1024) fail(413, 'CUSTOMER_CAPABILITIES_LIMIT', '能力目录超过大小限制')
       db.prepare('INSERT INTO customer_capabilities VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id,workspace_id,runtime_id) DO UPDATE SET binding_revision=excluded.binding_revision,revision=excluded.revision,snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at').run(device.id,workspace.id,workspace.runtime_id,workspace.binding_revision,snapshot.revision,encoded,now())

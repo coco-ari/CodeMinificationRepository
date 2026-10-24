@@ -39,9 +39,9 @@ test('customer dispatch accepts its actual model and effort but cannot switch pr
   ])assert.throws(()=>dispatch(patch),{code:'AUTOOPS_OPERATION_FORBIDDEN'})
 })
 
-test('customer input cannot bypass missing attachment, platform context, or autonomous-goal capabilities',t=>{
+test('客户输入仍拒绝平台资料和未开放的自主目标',t=>{
   const {dispatch}=fixture(t)
-  for(const patch of [{attachments:[{id:'file'}]},{context:{records:[{}]}},{message:{attachments:[{}]}},{initialMessage:{text:'/goal work forever'}},{text:'/goal work forever'},{text:'/plan'}])
+  for(const patch of [{context:{records:[{}]}},{initialMessage:{text:'/goal work forever'}},{text:'/goal work forever'},{text:'/plan'}])
     assert.throws(()=>dispatch(patch),error=>['CUSTOMER_CONTEXT_UNSUPPORTED','CUSTOMER_COMMAND_UNSUPPORTED'].includes(error.code))
 })
 
@@ -51,7 +51,7 @@ test('offline blocks new work but preserves stop and history controls',t=>{
   assert.throws(()=>dispatch(),{code:'CUSTOMER_DEVICE_OFFLINE'})
   authorizeAutoOpsRpc(access,principal,'orchestration.dispatchCommand',{type:'thread.stop',threadId:'customer'})
   authorizeAutoOpsRpc(access,principal,'orchestration.getThreadProjection',{threadId:'customer'})
-  assert.throws(()=>authorizeAutoOpsRpc(access,principal,'assets.persistChatAttachments',{threadId:'customer'}),{code:'AUTOOPS_OPERATION_FORBIDDEN'})
+  authorizeAutoOpsRpc(access,principal,'assets.persistChatAttachments',{threadId:'customer'})
 })
 
 test('customer approval is authorized before native projection can mark it resolved',t=>{
@@ -79,4 +79,24 @@ test('customer catalog refresh stays owner-bound and cannot accept a platform or
   authorizeAutoOpsRpc(access,principal,'server.refreshProviders',{instanceId:selection.instanceId,fresh:true})
   for(const payload of [{instanceId:'customer-other-codex'},{instanceId:selection.instanceId,cwd:'autoops/skill-context/example'},{instanceId:selection.instanceId,cwd:'/private/local'}])
     assert.throws(()=>authorizeAutoOpsRpc(access,principal,'server.refreshProviders',payload),{code:'AUTOOPS_OPERATION_FORBIDDEN'})
+})
+
+
+test('客户附件仅允许已归属本私有对话的文件，设备和会话撤销立即阻止读取',t=>{
+  const {access,principal,device,registry,dispatch}=fixture(t)
+  const file={id:'attachment-one',type:'file',name:'资料.txt',mimeType:'text/plain',sizeBytes:3}
+  access.recordPendingAttachment(principal,file.id,file)
+  dispatch({attachments:[file],context:{records:[{kind:"file",attachmentId:file.id}]}})
+  assert.throws(()=>dispatch({attachments:[file],context:{records:[{kind:"file",attachmentId:"other"}]}}),{code:"CUSTOMER_CONTEXT_UNSUPPORTED"})
+  assert.throws(()=>access.requireCustomerAttachment(principal.id,'customer',file.id),{code:'ATTACHMENT_NOT_FOUND'})
+  access.recordClaimedAttachment(principal,file.id,'claimed-file','customer')
+  file.id='claimed-file'
+  assert.equal(access.requireCustomerAttachment(principal.id,'customer',file.id).name,file.name)
+  assert.throws(()=>access.requireCustomerAttachment('u-guest','customer',file.id),{code:'ATTACHMENT_NOT_FOUND'})
+  assert.throws(()=>dispatch({attachments:[{...file,id:'not-owned'}]}),{code:'ATTACHMENT_NOT_FOUND'})
+  registry.setDeviceStatus(principal.id,device.id,'disabled')
+  assert.throws(()=>access.requireCustomerAttachment(principal.id,'customer',file.id),{code:'CUSTOMER_DEVICE_DISABLED'})
+  registry.setDeviceStatus(principal.id,device.id,'active')
+  access.markThreadDeleted('customer')
+  assert.throws(()=>access.requireCustomerAttachment(principal.id,'customer',file.id),{code:'THREAD_NOT_FOUND'})
 })

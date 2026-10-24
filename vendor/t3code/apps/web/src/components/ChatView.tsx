@@ -2315,19 +2315,20 @@ export default function ChatView(props: ChatViewProps) {
   const pullRequestsCapabilityKnown = serverConfig !== null;
   const supportsPullRequests = serverConfig?.environment.capabilities.pullRequests === true;
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
-  const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null;
+  const customerAttachmentLimits = customerRuntime.catalog?.attachments;
+  const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null && (!customerScope || !customerRuntime.loading);
   const supportsQuestionAttachments =
     !customerScope &&
     attachmentEnvironmentConfig?.environment.capabilities.questionAttachments === true;
   const supportsAttachmentUploads =
-    !customerScope &&
+    (!customerScope || customerAttachmentLimits !== undefined) &&
     attachmentEnvironmentConfig?.environment.capabilities.attachmentUploads === true;
   const advertisedFileAttachmentBytes =
     attachmentEnvironmentConfig?.environment.capabilities.fileAttachments?.maxUploadBytes ?? null;
   const maxFileAttachmentBytes =
     advertisedFileAttachmentBytes === null
       ? null
-      : clampFileAttachmentUploadBytes(advertisedFileAttachmentBytes);
+      : clampFileAttachmentUploadBytes(Math.min(advertisedFileAttachmentBytes, customerScope ? customerAttachmentLimits?.maxFileBytes ?? 0 : advertisedFileAttachmentBytes));
   const envLocked = Boolean(activeThread && (activeMessageCount > 0 || activeRuntime !== null));
   // onEnvironmentChange only retargets an unsent draft. envLocked alone does not
   // rule out a started thread: one whose machine is offline never loads its
@@ -6799,6 +6800,17 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
+    if (customerScope && composerAttachmentsSnapshot.length > 0) {
+      if (!customerAttachmentLimits) {
+        setThreadError(threadIdForSend, "请更新这台电脑的连接程序后发送附件。");
+        return;
+      }
+      if (composerAttachmentsSnapshot.length > customerAttachmentLimits.maxCount ||
+          composerAttachmentsSnapshot.reduce((sum, item) => sum + item.sizeBytes, 0) > customerAttachmentLimits.maxTotalBytes) {
+        setThreadError(threadIdForSend, "附件过多或总大小超过 100 MB，请减少后发送。");
+        return;
+      }
+    }
     const readLiveAttachmentCapabilities = () => {
       const config = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId) ?? null;
       const liveSupportsAttachmentUploads =

@@ -48,6 +48,7 @@ export interface HeadlessCodexRunnerOptions {
   readonly homePath?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly localPolicy?: CustomerCodexLocalPolicy;
+  readonly resolveAttachmentPath?: (attachment: C.ChatAttachment) => string | null;
   readonly onEvent: (event: unknown) => void | Promise<void>;
   readonly onError?: (error: unknown) => void | Promise<void>;
 }
@@ -218,7 +219,7 @@ export function customerRuntimePolicy(
   };
 }
 
-export function makeCustomerCodexHost(): CodexExecutionHost {
+export function makeCustomerCodexHost(resolveAttachmentPath: (attachment: C.ChatAttachment) => string | null = () => null): CodexExecutionHost {
   return {
     additionalContext: () => ({}),
     mcpSessions: { read: () => Effect.succeed(undefined) },
@@ -227,7 +228,7 @@ export function makeCustomerCodexHost(): CodexExecutionHost {
     threadParameters: () => ({ config: CUSTOMER_THREAD_CONFIG }),
     mcpApprovals: {},
     resolveSkillMentions: resolveCustomerSkillMentions,
-    resolveAttachmentPath: () => null,
+    resolveAttachmentPath,
     resolveAttachmentPathById: () => null,
     snapshotMcpApp: () => Effect.succeed(undefined),
     requireLegacyTool: () => {
@@ -282,7 +283,7 @@ export async function createHeadlessCodexRunner(
   let nativeThreadId: string | undefined;
   let client: CodexClient.CodexAppServerClient["Service"] | undefined;
   let clientInitialized = false;
-  const host = makeCustomerCodexHost();
+  const host = makeCustomerCodexHost(options.resolveAttachmentPath);
   const adapter = await manager.runPromise(
     Effect.gen(function* () {
       const context = yield* Layer.build(Core.makeLayerAppServerClientFactory());
@@ -388,8 +389,8 @@ export async function createHeadlessCodexRunner(
   };
   const assertMessage = (message: Adapter.ProviderAdapterV2TurnMessage) => {
     if (/^\s*\/goal\b/iu.test(message.text)) throw new Error("Persistent goals are unavailable on this customer runtime.");
-    if (message.attachments.length > 0)
-      throw new Error("Attachments are unavailable on this customer runtime.");
+    if (message.attachments.some(attachment => !host.resolveAttachmentPath(attachment)))
+      throw new Error("附件未能传到这台电脑，请重新发送");
   };
   const encodeThread = Schema.encodeSync(C.OrchestrationV2ProviderThreadJson);
   return {

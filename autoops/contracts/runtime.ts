@@ -61,6 +61,7 @@ export interface CustomerCapabilityInput {
   configRevision?: string
   models: CustomerModel[]
   skills: CustomerSkill[]
+  attachments?: { maxFileBytes: number; maxTotalBytes: number; maxCount: number }
   permissions?: { approvalPolicy: string; sandboxMode: string }
 }
 export interface CustomerCapabilities extends CustomerCapabilityInput {

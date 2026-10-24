@@ -21,10 +21,12 @@ export function authorizeCustomerModel(access, binding, selection) {
 
 export function assertCustomerInput(input) {
   if (!input || typeof input !== 'object') return
-  if ((Array.isArray(input.attachments) && input.attachments.length > 0) ||
-      (Array.isArray(input.context?.records) && input.context.records.length > 0) ||
+  const attachments = Array.isArray(input.attachments) ? input.attachments : []
+  const unsupportedContext = Array.isArray(input.context?.records) && input.context.records.some(record =>
+    !['file', 'image'].includes(record?.kind) || !attachments.some(attachment => attachment.id === record.attachmentId && attachment.type === record.kind))
+  if (unsupportedContext ||
       (input.attachmentsByQuestionId && Object.values(input.attachmentsByQuestionId).some((items) => items?.length)))
-    throw new AutoOpsAccessError(403, 'CUSTOMER_CONTEXT_UNSUPPORTED', '客户首版暂不支持文件引用、平台资料或附件，请直接输入或粘贴文本')
+    throw new AutoOpsAccessError(403, 'CUSTOMER_CONTEXT_UNSUPPORTED', '本机对话不支持引用平台资料或在审批回答中附加文件')
   if (typeof input.text === 'string' && /^\s*\/(?:login|logout|compact|model|plan|goal)\b/iu.test(input.text))
     throw new AutoOpsAccessError(403, 'CUSTOMER_COMMAND_UNSUPPORTED', '请使用模型选择器；运行器登录与配置在客户本机管理')
 }

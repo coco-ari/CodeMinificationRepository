@@ -125,6 +125,7 @@ import * as AutoOpsHttp from "./autoops/http.ts";
 import * as AutoOpsBusinessRuntime from "./autoops/BusinessRuntime.ts";
 import * as CustomerHttp from './autoops/customerHttp.ts';
 import * as CustomerSocket from './autoops/customerSocket.ts';
+import * as CustomerAttachmentHttp from './autoops/customerAttachmentHttp.ts';
 import * as CustomerStatusHttp from './autoops/customerStatusHttp.ts';
 import * as RemoteDevices from './autoops/RemoteDeviceService.ts';
 import * as RemoteProviders from './autoops/RemoteProviderRegistry.ts';
@@ -715,6 +716,7 @@ const layerMakeRoutes = Layer.mergeAll(
     CustomerHttp.layer,
     CustomerSocket.layer,
     CustomerStatusHttp.layer,
+    CustomerAttachmentHttp.layer,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     DeviceHubProxy.layer,

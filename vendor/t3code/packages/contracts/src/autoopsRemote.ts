@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { CustomerAttachmentManifest } from "./customerAttachments.ts";
 
 /** Device transport only. Browser chat and Provider events retain their T3 contracts. */
 export const CUSTOMER_AGENT_PROTOCOL_VERSION = 1;
@@ -21,6 +22,7 @@ export const CustomerAgentCommand = Schema.Struct({
   type: Schema.Literal("command"), commandId: Id, sessionId: Id,
   target: CustomerAgentTarget, method: CustomerAgentMethod,
   runtimeEpoch: Schema.optional(Id), input: Schema.Unknown,
+  attachments: Schema.optional(Schema.Array(CustomerAttachmentManifest)),
   skillBindings: Schema.optional(Schema.Array(Schema.Struct({ id: Id, name: Id }))),
 });
 export type CustomerAgentCommand = typeof CustomerAgentCommand.Type;
@@ -45,6 +47,7 @@ export const CustomerAgentClientFrame = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("hello"), protocolVersion: Schema.Literal(1), deviceId: Id,
     connectorVersion: Id, connectorEpoch: Id,
+    attachmentTransfers: Schema.optional(Schema.Boolean),
     workspaces: Schema.Array(Schema.Struct({
       ...CustomerAgentTarget.fields, projectId: Id, label: Schema.String,
     })),

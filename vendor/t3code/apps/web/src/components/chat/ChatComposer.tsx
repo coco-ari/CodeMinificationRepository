@@ -2817,7 +2817,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile && !isComposerApprovalState;
   const showComposerAttachAction =
-    !customerScope &&
+    (!customerScope || supportsAttachmentUploads) &&
     fileStagingLimit !== null &&
     (!activePendingProgress ||
       (supportsQuestionAttachments &&
@@ -4409,14 +4409,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const restoreStashEntry = async (menuEntry: PromptStashEntry) => {
     if (
       customerScope &&
-      ((menuEntry.files?.length ?? 0) > 0 ||
-        menuEntry.attachments.length > 0 ||
-        (menuEntry.records?.length ?? 0) > 0)
+      (menuEntry.records?.some(record => !["file", "image"].includes(record.kind)) ?? false)
     ) {
       toastManager.add({
         type: "info",
-        title: "客户对话仅支持恢复纯文本",
-        description: "此暂存包含平台附件或上下文，已保留原条目；可复制其中的文字再粘贴。",
+        title: "此暂存包含平台资料",
+        description: "请在平台对话中使用。",
       });
       return;
     }
@@ -5614,12 +5612,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       readonly skipImageInlineChip?: boolean;
     },
   ): Promise<boolean> => {
-    if (customerScope) {
-      toastManager.add({
-        type: "info",
-        title: "客户工作区首版仅支持文本和本地技能",
-        description: "请直接粘贴文本；Agent 可自行读取登记目录中的文件。",
-      });
+    if (customerScope && !supportsAttachmentUploads) {
+      toastManager.add({type: "info", title: "请更新这台电脑的连接程序后添加附件。"});
       return false;
     }
     if (!activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) return false;
@@ -5877,7 +5871,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     bypassAutoAttachment: boolean,
     selectionOverride?: { start: number; end: number },
   ): boolean => {
-    if (isLiteralPendingAnswer || customerScope) return false;
+    if (isLiteralPendingAnswer || (customerScope && !supportsAttachmentUploads)) return false;
     const questionCanAttach =
       pendingUserInputs.length === 0 ||
       (supportsQuestionAttachments &&

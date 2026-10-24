@@ -93,6 +93,7 @@ export interface AutoOpsAccess {
   markThreadAccepted(threadId: string): ThreadBinding | undefined;
   /** Invoke only after native execution is known to have ended or been lost. */
   reconcileThreadSubmission(threadId: string, accepted: boolean): ThreadBinding | undefined;
+  requireCustomerAttachment(ownerId:string, threadId:string, attachmentId:string): {id:string;name?:string;mimeType?:string;sizeBytes?:number};
   requireAttachment(principal: AutoOpsPrincipal, attachmentId: string, targetThreadId?: string): {id:string; ownerId:string; threadId:string|null;name?:string;mimeType?:string;sizeBytes?:number};
   recordPendingAttachment(principal: AutoOpsPrincipal, attachmentId: string, metadata?: {name:string;mimeType:string;sizeBytes:number}): void;
   recordClaimedAttachment(principal: AutoOpsPrincipal, sourceId: string, finalId: string, threadId: string): void;

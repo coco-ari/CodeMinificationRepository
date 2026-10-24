@@ -380,6 +380,16 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     markThreadAccepted,
     reconcileThreadSubmission,
     requireAttachment,
+    requireCustomerAttachment(ownerId, threadId, attachmentId) {
+      const binding = getThreadBinding(identifier(threadId, '会话ID'))
+      if (!binding || binding.ownerId !== ownerId || binding.executionBinding.kind !== 'customer') fail(404, 'ATTACHMENT_NOT_FOUND', '附件不存在或无权访问')
+      validateBinding(binding)
+      bindingAudienceForUser(ownerId, binding)
+      customerRegistry.validateTarget(ownerId, binding.projectId, binding.executionBinding)
+      const row = bindingDb.prepare('SELECT * FROM t3_attachment_access WHERE attachment_id=?').get(identifier(attachmentId, '附件ID'))
+      if (!row || row.owner_id !== ownerId || row.thread_id !== threadId) fail(404, 'ATTACHMENT_NOT_FOUND', '附件不属于此客户对话')
+      return {id:row.attachment_id, ...(row.metadata_json ? JSON.parse(row.metadata_json) : {})}
+    },
     recordPendingAttachment(principal, attachmentId, metadata) {
       const current = refresh(principal)
       bindingDb.prepare('INSERT INTO t3_attachment_access(attachment_id,owner_id,thread_id,created_at,metadata_json) VALUES(?,?,NULL,?,?) ON CONFLICT(attachment_id) DO NOTHING').run(
@@ -398,8 +408,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     },
     recordThreadAttachment(principal, attachmentId, threadId, metadata) {
       const current = refresh(principal)
-      const target = requireThread(current, threadId)
-      if (target.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_ATTACHMENTS_DISABLED', '客户工作区首版未开放附件')
+      requireThread(current, threadId)
       bindingDb.prepare('INSERT INTO t3_attachment_access(attachment_id,owner_id,thread_id,created_at,metadata_json) VALUES(?,?,?,?,?) ON CONFLICT(attachment_id) DO NOTHING').run(
         identifier(attachmentId, '附件ID'), current.id, threadId, new Date(now()).toISOString(), metadata ? JSON.stringify({ name: metadata.name, mimeType: metadata.mimeType, sizeBytes: metadata.sizeBytes }) : null,
       )

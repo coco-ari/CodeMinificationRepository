@@ -45,9 +45,11 @@ const canonicalJson = (value: unknown): unknown => {
 };
 export class CustomerAgentStore {
   readonly db: DatabaseSync;
+  readonly directory: string;
   readonly maxLogBytes: number;
   readonly reserveBytes: number;
   constructor(directory: string, options: { maxLogBytes?: number; reserveBytes?: number } = {}) {
+    this.directory = resolve(directory);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     if (process.platform !== "win32") chmodSync(directory, 0o700);
     this.db = new DatabaseSync(join(directory, "connector.sqlite"));
