@@ -3,7 +3,7 @@ import * as Stream from "effect/Stream";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({ principal: { id: "actor-a", username: "actor-a" }, authorize: vi.fn() }));
-vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ principalForNativeSession: () => mocks.principal, customerRegistry: { listDevices: () => [{ id: "owned" }] } }) }));
+vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ getThreadBinding: () => undefined, principalForNativeSession: () => mocks.principal, customerRegistry: { listDevices: () => [{ id: "owned" }] } }) }));
 vi.mock("../../../../../../agent-demo/t3-adapters/rpc-policy.mjs", () => ({
   authorizeAutoOpsRpc: mocks.authorize,
   filterAutoOpsShell: (_access: unknown, _principal: unknown, value: unknown) => value,
@@ -17,6 +17,23 @@ import { CurrentAutoOpsPrincipal } from "./RequestScope.ts";
 import { PRODUCT_CAPABILITY_DISABLED, PRODUCT_CAPABILITY_MESSAGE } from "../../../../../../agent-demo/t3-adapters/product-profile.mjs";
 
 describe("AutoOps signed attachment RPC identity", () => {
+  it("文件选择的授权载荷和交给原生持久化的载荷一致", async () => {
+    mocks.authorize.mockReset();
+    const path = "autoops/p-autoops/inputs/selected/src/client.ts";
+    for (const [method, payload] of [
+      ["orchestration.launchThread", { threadId: "thread", initialMessage: { text: `[client.ts](${path}) 分析` } }],
+      ["orchestration.dispatchCommand", { threadId: "thread", type: "message.dispatch", text: `[client.ts](${path}) 分析` }],
+      ["orchestration.dispatchCommand", { threadId: "thread", type: "queued-run.edit", text: `[client.ts](${path}) 分析` }],
+    ] as const) {
+      await Effect.runPromise(authorize("native-session", method, payload));
+      const authorized = mocks.authorize.mock.lastCall?.[3];
+      const handlers = protectHandlers({ [method]: (input: unknown) => Effect.succeed(input) }, "native-session", () => Stream.empty);
+      const persisted = await Effect.runPromise(handlers[method]!(payload));
+      expect(persisted).toEqual(authorized);
+      expect(JSON.stringify(persisted)).toContain('"kind":"mention"');
+      expect(JSON.stringify(persisted)).toContain(`"path":"${path}"`);
+    }
+  });
   it("exposes only the fixed product restriction message and keeps ACL details private", async () => {
     mocks.authorize.mockReset().mockImplementation(() => { throw Object.assign(new Error("untrusted internal detail"), {code: PRODUCT_CAPABILITY_DISABLED}); });
     const product = await Effect.runPromise(authorize("native-session", "orchestration.dispatchCommand", {}).pipe(Effect.flip));

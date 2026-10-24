@@ -1,5 +1,6 @@
 import { filterBusinessProviderResult } from "../../../../../../agent-demo/t3-adapters/scoped-skills.mjs";
 import { resourceRequest } from "./resources.ts";
+import { prepareBusinessMessagePayload } from "./messageContext.ts";
 import { withCommandPrincipal } from "./RequestScope.ts";
 import * as Personal from "./personalPreferences.ts";
 import { AuthOrchestrationReadScope, EnvironmentAuthorizationError, authScopeRequiredResponse, type OrchestrationV2Command, type ChatAttachment, type AttachmentCreateUploadUrlInput } from "@t3tools/contracts";
@@ -27,7 +28,7 @@ export const reserveForkBinding = Effect.fn("AutoOps.reserveForkBinding")(functi
 export const authorize = (sessionId: string, method: string, payload: unknown) => Effect.try({
   try: () => {
     const access = configuredAutoOpsAccess();
-    if (access) authorizeAutoOpsRpc(access, access.principalForNativeSession(sessionId), method, payload);
+    if (access) authorizeAutoOpsRpc(access, access.principalForNativeSession(sessionId), method, prepareBusinessMessagePayload(access, method, payload));
   },
   catch: (cause) => new EnvironmentAuthorizationError({
     ...authScopeRequiredResponse(AuthOrchestrationReadScope),
@@ -90,7 +91,7 @@ export function protectHandlers<T extends object>(handlers: T, sessionId: string
     if (typeof original !== "function") return [method, original];
     return [method, (payload: unknown, ...args: unknown[]) => {
       const access = configuredAutoOpsAccess();
-      const nativePayload = access ? prepareAutoOpsRpcPayload(access, access.principalForNativeSession(sessionId), method, payload) : payload;
+      const nativePayload = access ? prepareBusinessMessagePayload(access, method, prepareAutoOpsRpcPayload(access, access.principalForNativeSession(sessionId), method, payload)) : payload;
       const value = resourceRequest(sessionId,method,payload) ?? original(nativePayload, ...args);
       if (Stream.isStream(value)) return (
         method === "orchestration.subscribeShell" || method === "orchestration.subscribeArchivedShell"

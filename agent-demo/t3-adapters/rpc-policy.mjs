@@ -166,7 +166,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
       ['projectId', 'worktreePath', 'branch', 'linkedPullRequest', 'branchPullRequest'].some((key) => key in payload)) denied()
     checkRuntime(payload, access, binding)
     checkReferences(access, principal, payload, binding.threadId)
-    if (payload.type === 'message.dispatch') {
+    if (payload.type === 'message.dispatch' || payload.type === 'queued-run.edit') {
       if (!customer) {
         resolveBusinessSkillMentions(payload.text,process.env,binding)
         configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context)

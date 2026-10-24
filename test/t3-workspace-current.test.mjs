@@ -17,6 +17,7 @@ import { createProjectCredentialService } from '../agent-demo/t3-adapters/creden
 import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-management.ts'
 import { handleWorkspaceAuthoringRequest } from '../agent-demo/t3-adapters/workspace-authoring-http.ts'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
+import { createBusinessRunInputs } from '../agent-demo/t3-adapters/thread-inputs.ts'
 import { renderBusinessPdf } from '../agent-demo/t3-adapters/business-documents.mjs'
 
 const projectId = 'p-test'
@@ -675,6 +676,33 @@ test('Git暂不可用时固定上传资料与明确失败事实，不回退旧�
   assert.equal(next.repositories.length, 1)
   assert.equal(next.sourceErrors, undefined)
   assert.equal(f.calls.fetch.length, 1)
+})
+
+test('已选源码引用在新轮Git失败时仍能按所选原件读取，未发送引用和撤权仍拒绝', async (t) => {
+  const f = await fixture(t)
+  await f.source('frontend')
+  const principal = { id: 'reader', sessionHash: 'session-reader' }
+  for (const threadId of ['selected', 'unselected'])
+    f.access.bindThread(principal, { threadId, projectId, environmentId: 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: 'internal' })
+  await f.service.captureAgentInput(projectId, { requestId: 'sync', workspaceType: 'internal' }, 'reader')
+  const catalog = createBusinessResourceCatalog({ access: f.access, workspaceStore: f.store, workspaceInputs: f.service })
+  const cwd = `autoops://projects/${projectId}/environments/env-test/threads/selected?workspaceType=internal`
+  const found = await catalog.search(principal, { cwd, query: 'README', limit: 10 })
+  const path = found.entries.find(entry => entry.path.endsWith('/README.md')).path
+  const selectedInputId = path.split('/')[3]
+  catalog.requireContext('selected', { records: [{ kind: 'mention', path }] })
+  f.control.failResolve = true
+  const inputs = createBusinessRunInputs(f.access, f.service)
+  const current = await inputs.prepare('selected', 'current')
+  assert.equal(current.repositories.length, 0)
+  assert.equal(current.sourceErrors[0].code, 'WORKSPACE_GIT_FAILED')
+  assert.notEqual(current.id, selectedInputId)
+  await assert.rejects(catalog.readForThread('selected', path, current.id))
+  assert.match((await catalog.readForThread('selected', path, current.id, [selectedInputId])).content, /frontend 固定源码/)
+  const other = await inputs.prepare('unselected', 'other')
+  await assert.rejects(catalog.readForThread('unselected', path, other.id, [selectedInputId]))
+  f.memberships.find(member => member.userId === 'reader').status = 'disabled'
+  await assert.rejects(catalog.readForThread('selected', path, current.id, [selectedInputId]))
 })
 
 test('抓取故障限定源码范围，但校验失败、撤权与取消不能降级伪装成可执行输入', async (t) => {
