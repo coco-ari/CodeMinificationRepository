@@ -147,7 +147,9 @@ export function DraftHeroHeadline({
 
   const pickerItems: readonly PickerItem[] = [
     ...menuEntries.map(({ group }) => ({ value: group.projectKey, label: group.displayName })),
-    { value: ADD_PROJECT_VALUE, label: "添加项目" },
+    ...(autoOpsFeature("projectAdministration")
+      ? [{ value: ADD_PROJECT_VALUE, label: "添加项目" }]
+      : []),
   ];
   const pickerSearch = pickerQuery.trim();
   const filteredPickerItems =

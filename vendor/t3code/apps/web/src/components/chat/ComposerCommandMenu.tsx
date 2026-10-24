@@ -26,6 +26,7 @@ import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Command, CommandFooter, CommandGroup, CommandItem, CommandList } from "../ui/command";
 import { Kbd } from "../ui/kbd";
 import { PierreEntryIcon } from "./PierreEntryIcon";
@@ -87,6 +88,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   isLoading: boolean;
   triggerKind: ComposerTriggerKind | null;
   emptyStateText?: string;
+  error?: string | null;
+  onRetry?: () => void;
   activeItemId: string | null;
   workspacePathCompletion?: boolean;
   onHighlightedItemChange: (itemId: string | null) => void;
@@ -118,7 +121,25 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
         className="flex min-h-0 w-full flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
-        {props.items.length > 0 ? (
+        {props.error && !props.isLoading ? (
+          <div role="alert" className="flex items-center gap-2 px-5 pt-3.5 pb-7 text-xs">
+            <span className="min-w-0 flex-1 text-destructive wrap-anywhere">{props.error}</span>
+            {props.onRetry ? (
+              <Button
+                size="xs"
+                variant="outline"
+                onPointerDown={(event) => event.preventDefault()}
+                onKeyDown={(event) => {
+                  // 保留按钮的原生激活，避免候选容器把回车当成选项确认。
+                  if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+                }}
+                onClick={props.onRetry}
+              >
+                重试读取文件
+              </Button>
+            ) : null}
+          </div>
+        ) : props.items.length > 0 ? (
           <CommandList
             id={props.listId}
             aria-label={props.triggerKind ? LISTBOX_LABEL_BY_TRIGGER[props.triggerKind] : undefined}

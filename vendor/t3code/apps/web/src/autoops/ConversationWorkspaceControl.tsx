@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ScopeReadError } from "./ScopeReadError";
 import { autoOpsAreaAvailable } from "./projectNavigation.logic";
 import { autoOpsProjectHref } from "./projectNavigation";
 import { useNavigate } from "@tanstack/react-router";
@@ -98,7 +99,7 @@ export function ConversationWorkspaceControl({
         };
       }),
   ];
-  return (
+  const workspaceChoice = (
     <ScopeComposerChoice
       label="对话工作区"
       summary={summary}
@@ -158,5 +159,17 @@ export function ConversationWorkspaceControl({
         </>
       }
     />
+  );
+  return (
+    <>
+      {workspaceChoice}
+      {locked && error ? (
+        <ScopeReadError
+          label="工作区读取失败"
+          error={error}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
+      ) : null}
+    </>
   );
 }

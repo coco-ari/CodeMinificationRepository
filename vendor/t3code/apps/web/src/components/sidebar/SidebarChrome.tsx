@@ -165,7 +165,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
   const isOnUtilityPage = useLocation({
-    select: (location) => isSidebarUtilityPage(location.pathname) && !(isAutoOpsHosted() && (location.pathname === '/workspaces' || location.pathname === '/deployments')),
+    select: (location) => isSidebarUtilityPage(location.pathname),
   });
   const pullRequestsSupported = usePullRequestsSupported();
   const closeMobileSidebar = () => {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ScopeReadError } from "./ScopeReadError";
 import { BotIcon, EyeIcon, ServerIcon } from "lucide-react";
 import {
   scopeProjectRef,
@@ -60,6 +61,7 @@ export function AutoOpsThreadScopeControl({
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingAttempt, setPendingAttempt] = useState(0);
+  const [readAttempt, setReadAttempt] = useState(0);
   const wasSubmitting = useRef(false);
   useEffect(() => {
     if (!host) return;
@@ -75,8 +77,10 @@ export function AutoOpsThreadScopeControl({
       return;
     }
     const controller = new AbortController();
+    setLoading(true);
     void loadAutoOpsThreadScope(threadId, controller.signal)
       .then(() => {
+        if (controller.signal.aborted) return;
         setLoading(false);
         setError(null);
       })
@@ -87,7 +91,7 @@ export function AutoOpsThreadScopeControl({
         }
       });
     return () => controller.abort();
-  }, [host, threadId, projectId, isDraft, hasAcceptedMessage]);
+  }, [host, threadId, projectId, isDraft, hasAcceptedMessage, readAttempt]);
   useEffect(() => {
     if (submitting) {
       wasSubmitting.current = true;
@@ -138,7 +142,13 @@ export function AutoOpsThreadScopeControl({
   useEffect(() => {
     if (error) toastManager.add({ type: "error", title: "无法更新对话范围", description: error });
   }, [error]);
-  if (!host || !scope) return null;
+  if (!host) return null;
+  if (!scope) return error ? (
+    <ComposerSurface.ContextStrip>
+      <ScopeReadError label="对话范围读取失败" error={error} busy={loading}
+        onRetry={() => setReadAttempt((value) => value + 1)} />
+    </ComposerSurface.ContextStrip>
+  ) : null;
   const project = host.projects.find((entry) => entry.id === projectId);
   if (!project) return null;
   const locked =
@@ -322,9 +332,10 @@ export function AutoOpsThreadScopeControl({
         />
       ) : null}
       {error ? (
-        <span role="alert" className="sr-only">
-          {error}
-        </span>
+        <ScopeReadError label="对话范围读取失败" error={error} busy={loading} onRetry={() => {
+          if (scope.scopeState === "submitting") setPendingAttempt((value) => value + 1);
+          else setReadAttempt((value) => value + 1);
+        }} />
       ) : null}
     </ComposerSurface.ContextStrip>
   );
