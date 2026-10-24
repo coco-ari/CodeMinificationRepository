@@ -354,10 +354,16 @@ export interface ThreadTitlePromptInput {
   policy?: TextGenerationPolicy | undefined;
 }
 
-// Keep shared editorial rules in these two prompts in sync.
+// 首次生成与重新生成共用语言规则，避免旧英文标题影响新的默认语言。
+const THREAD_TITLE_LANGUAGE_RULES = `标题默认使用简体中文，即使消息、源码、附件或旧标题使用英文。只有用户明确要求标题使用其他语言时，才遵循该要求。
+保留必要的品牌、模型、协议、代码标识符和文件名原文，例如 Git、AutoOps、client.ts；用中文表达主题和动作。
+使用自然、简洁的中文短语，通常 6–20 个汉字，总长度少于 40 个字符；不要为了凑英文单词数插入空格。`;
+
 const INITIAL_THREAD_TITLE_PROMPT = `Generate a title that will help the user recognize this T3 Code thread weeks later.
 Return JSON with keys title and needsRefinement.
 Set needsRefinement to true only if the subject is still unknown, such as an unresolved link, "fix this", or an unexplained attachment. Otherwise set it to false.
+
+${THREAD_TITLE_LANGUAGE_RULES}
 
 Before answering, silently reduce the request to:
 - Subject: What system, feature, or problem is this really about?
@@ -367,7 +373,6 @@ Before answering, silently reduce the request to:
 Title the subject and outcome. Discard incidental instructions.
 
 Editorial rules:
-- 3-8 words, fewer than 40 characters.
 - Use a compact noun phrase or clear action phrase.
 - Capture the umbrella goal when the request lists several symptoms or steps.
 - Name the product change, not the mock, plan, report, branch, or PR used to produce it.
@@ -380,12 +385,14 @@ Editorial rules:
 - Use attached images as primary context for UI issues.
 - When a URL or attachment is the only source of the subject, use available tools to inspect it directly.
 - Local git history is not evidence of what a linked PR or issue is about. Never title the thread after branch names, commit messages, or merged commits found in the checkout.
-- If a linked PR or issue cannot be read, fall back to the user's stated action plus its number, such as "Take Over PR 8588". This is the one case where a PR or issue number belongs in the title.`;
+- If a linked PR or issue cannot be read, fall back to the user's stated action plus its number, such as "接手 PR 8588". This is the one case where a PR or issue number belongs in the title.`;
 
 function regenerateThreadTitlePrompt(previousTitle: string): string {
   return `Regenerate the title for an existing T3 Code thread so the user can recognize it weeks later.
 The previous title was ${JSON.stringify(previousTitle)}.
 Return JSON with keys title and needsRefinement. Set needsRefinement to false.
+
+${THREAD_TITLE_LANGUAGE_RULES}
 
 Determine the title in this order:
 1. Read the USER messages first. Identify the latest explicit durable goal. The original subject remains the subject until the user clearly changes what the thread is about.
@@ -394,7 +401,6 @@ Determine the title in this order:
 4. Title the durable subject and desired outcome, not the current workflow state.
 
 Editorial rules:
-- 3-8 words, fewer than 40 characters.
 - Use a compact noun phrase or clear action phrase.
 - Preserve the umbrella subject when later messages focus on one finding, provider, platform, or implementation detail.
 - A thread progressing through research, planning, implementation, review, CI, merge, and monitoring has usually not changed subjects.
@@ -409,12 +415,12 @@ Editorial rules:
 - Use attached images as primary context for UI issues.
 - When a URL or attachment is the only source of the subject, use available tools to inspect it directly.
 - Local git history is not evidence of what a linked PR or issue is about. Never title the thread after branch names, commit messages, or merged commits found in the checkout.
-- If a linked PR or issue cannot be read, fall back to the user's stated action plus its number, such as "Take Over PR 8588". This is the one case where a PR or issue number belongs in the title.
-- Keep the previous title unchanged if it is already accurate. Otherwise return a meaningfully improved title, not a cosmetic paraphrase.
+- If a linked PR or issue cannot be read, fall back to the user's stated action plus its number, such as "接手 PR 8588". This is the one case where a PR or issue number belongs in the title.
+- Keep the previous title unchanged only if it is already accurate and follows the title language rules above. Otherwise preserve its accurate meaning while improving the title and applying those language rules.
 
 Examples of the distinction:
-- A subagent-monitoring review that finds a Codex roster bug remains "Review Subagent Monitoring Risks," not "Codex Roster Bug Review."
-- A vague failing-test request later identified as a lazy thread-feed mismatch becomes "Fix Lazy Thread Feed Test," not "Prevent Mobile Feed Regressions."
+- A subagent-monitoring review that finds a Codex roster bug remains "审查子代理监控风险," not "审查 Codex 名单缺陷."
+- A vague failing-test request later identified as a lazy thread-feed mismatch becomes "修复对话流延迟加载测试," not "防止手机消息流回归."
 - A QR-sharing overhaul that ends with CI and merge work remains about QR sharing, not the PR lifecycle.`;
 }
 

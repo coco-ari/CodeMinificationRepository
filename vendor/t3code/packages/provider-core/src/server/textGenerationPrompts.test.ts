@@ -237,6 +237,22 @@ describe("buildReviewGuidePrompt", () => {
 });
 
 describe("buildThreadTitlePrompt", () => {
+  it.each([undefined, "Gateway client class constructor"])(
+    "首次生成及英文旧标题重生成均使用中文规则：%s",
+    (previousTitle) => {
+      const { prompt } = buildThreadTitlePrompt({
+        message: "分析 client.ts 的构造函数",
+        previousTitle,
+      });
+
+      expect(prompt).toContain("标题默认使用简体中文");
+      expect(prompt).toContain("只有用户明确要求标题使用其他语言时");
+      expect(prompt).toContain("保留必要的品牌、模型、协议、代码标识符和文件名原文");
+      expect(prompt).not.toContain("3-8 words");
+      expect(prompt).toContain("分析 client.ts 的构造函数");
+    },
+  );
+
   it("requires each generated field in the strict response schema", () => {
     const { outputSchema } = buildThreadTitlePrompt({ message: "Fix this" });
     expect(toJsonSchemaObject(outputSchema)).toMatchObject({
@@ -336,7 +352,7 @@ describe("sanitizeThreadTitle", () => {
     expect(sanitizeThreadTitle('{"title": "  Fix   reconnect failures  "}')).toBe(
       "Fix reconnect failures",
     );
-    expect(sanitizeThreadTitle('{"title": "  "}')).toBe("New thread");
+    expect(sanitizeThreadTitle('{"title": "  "}')).toBe("新对话");
     expect(
       sanitizeThreadTitle(
         '{"title": "Reconnect failures after restart because the session state does not recover"}',
