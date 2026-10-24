@@ -8,9 +8,9 @@
 
 ### 当前验证发行
 
-本节是验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；公网域名的准备状态见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据；旧发行和备份已清理，不能执行历史回滚脚本。
+本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据；旧发行和备份已清理，不能执行历史回滚脚本。
 
-2026-10-24，当前技能范围应用提交 `33e30846eedc82a00434b0b6b7bfe35e56fd3455` 已部署。网关、Worker、网页和重新打包的客户程序统一使用 `/home/tao/autoops-agent-demo/releases/t3-current-skills-33e30846`，数据仍为 `/home/tao/autoops-deployment-validation/data`。新旧对话都显示当前项目、助手和工作区的可用技能；停用或取消分配只移除对应项，不要求新建对话。重试同步更新业务分配和原生目录。详见[当前技能验收](../docs/runtime-modules.md#新旧对话使用当前技能2026-10-24)。
+2026-10-24，当前技能范围应用提交 `33e30846eedc82a00434b0b6b7bfe35e56fd3455` 已部署。该批网关、Worker、网页和重新打包的客户程序统一使用 `/home/tao/autoops-agent-demo/releases/t3-current-skills-33e30846`；后续公网登录页的独立静态发行见下方公网记录。数据仍为 `/home/tao/autoops-deployment-validation/data`。新旧对话都显示当前项目、助手和工作区的可用技能；停用或取消分配只移除对应项，不要求新建对话。重试同步更新业务分配和原生目录。详见[当前技能验收](../docs/runtime-modules.md#新旧对话使用当前技能2026-10-24)。
 
 | 发行身份与校验 | 实际结果 |
 | --- | --- |
@@ -32,11 +32,19 @@ macOS 完整运行类型、199 文件模块边界、46 项定向 Node、20 项�
 
 ### 公网入口与旧环境清理（2026-10-24）
 
-目标入口为 `https://auto.996788.xyz`。应用仍运行于 `192.168.31.157:28887`，公网机 `203.195.200.164` 的宝塔 Nginx 通过 ZeroTier 上游 `172.29.22.6:28887` 转发；公网机的 ZeroTier 地址为 `172.29.225.157`。没有切换独立后端身份或业务存储。
+已开放入口为 `https://auto.996788.xyz`。应用仍运行于 `192.168.31.157:28887`，公网机 `203.195.200.164` 的宝塔 Nginx 通过 ZeroTier 上游 `172.29.22.6:28887` 转发；公网机的 ZeroTier 地址为 `172.29.225.157`。没有切换独立后端身份或业务存储。
 
-目前 DNS、ZeroTier 健康请求、HTTPS 证书和 HTTP 到 HTTPS 跳转通过；域名暂时返回 503 维护页，尚未开放业务。当前应用仍使用演示共用密码，已向用户询问生成随机应用密码或由用户提供，凭据确认后才能完成公网登录、WSS 及页面验收。不能将维护页的 TLS 通过表述为项目已可通过域名使用。
+用户指定的 `admin` 登录凭据已配置并真实登录通过，旧演示口令返回 401。密码只保存在应用所有者的 `/home/tao/autoops-deployment-validation/public.env`（0600），不进入仓库、文档或验收输出；同一文件设置 `COOKIE_SECURE=1` 与 `AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN=https://auto.996788.xyz`，由网关和 Worker 的 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-public-origin.conf` 加载。现有运行身份仍采用共用密码配置，保留原账号与授权；本批没有建立独立账号密码库。
 
-代理配置来源为 [`autoops-public-nginx.conf`](autoops-public-nginx.conf)，服务器文件 `/www/server/panel/vhost/nginx/auto.996788.xyz.conf`；最终配置已准备，但等待凭据切换后启用。保留 Host/Origin、WebSocket 升级，关闭响应缓存与缓冲，读写超时 3600 秒；写请求不自动转发重试，登录独立限流，Cookie 强制 Secure/HttpOnly/SameSite=Strict。不记录访问查询参数，凭据不写入代理配置。
+代理配置来源为 [`autoops-public-nginx.conf`](autoops-public-nginx.conf)，已启用于 `/www/server/panel/vhost/nginx/auto.996788.xyz.conf`。HTTP 返回 308 并跳转 HTTPS，HTTPS 首页返回 200，匿名业务请求返回 401；证书使用正常信任链校验，没有跳过 TLS 验证。保留 Host/Origin、WebSocket 升级，关闭响应缓存与缓冲，读写超时 3600 秒；写请求不自动转发重试，登录独立限流，Cookie 已实际核验 Secure/HttpOnly/SameSite=Strict。不记录访问查询参数，凭据不写入代理配置。
+
+登录页发现并移除了失效的演示账号和口令提示，表单继续复用锁定 T3 的 Button/Input/Label，未改变认证逻辑或页面布局。网页提交 `efaca41cf880f750d6b3ef8c4331501603949d0a` 构建于 macOS，部署到独立静态发行 `/home/tao/autoops-agent-demo/releases/t3-public-login-efaca41c/dist/web`；后端、Worker 与客户包仍为上述 `33e30846`。网页归档 SHA-256 为 `40eaa26549eb6bbf8b4df4beaf0bf265871b85ab96314a3e78b4ef5e5779b52f`，实际 HTML SHA-256 为 `e8d60e50a8ca3e3090e73f769b88903b01114189bc7d13ab843a7276b38c76d4`。851 个构建文件逐项校验，保留 4110 个旧哈希资源供已打开页面使用；服务器准备过程串行、512 MiB cgroup 限额，无服务器依赖安装。
+
+`pnpm check:runtime` 与 `pnpm build:ui` 通过；网页切换只重启网关，Worker PID 未变，工作区与凭据保留检查通过。首次网页切换因已有 ExecStart 显式覆盖 STATIC_DIR 而未生效，脚本自动恢复原配置；随后只替换有效启动命令中的静态目录并重新校验成功。公网真实 WSS 读取已有对话投影，当前技能、工作区读取及原绑定保留均通过；浏览器实际登录、退出后重新登录、已有对话加载、当前两个技能候选显示和工作区 README 文件预览通过。本批未发送模型请求、创建业务任务或执行客户设备动作，不把只读检查表述为模型执行验收。
+
+网页提交两项 CI 已通过：[工作台运行链路检查 40084422441](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40084422441)、[AutoOps 质量检查 40084422445](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40084422445)。公网配置与证书维护提交 `5553eaba` 的两项 CI（40083756114、40083756108）也已通过。网页更改只删除过期辅助说明，不宣称重新完成全站浅深色、窄屏和全部上游交互验收。
+
+网页配置回退入口为 `/home/tao/autoops-deployment-validation/operations/public-gateway-20261024/rollback-public-ui.py`：以 tao 执行 `--check` 已通过，`--apply` 在空闲时仅移除本批静态目录配置并恢复 `33e30846` 网页，保留新登录凭据与当前业务数据，不恢复旧数据库。需要关闭公网访问时，root 可将 `/opt/autoops-public-proxy/maintenance-nginx.conf` 复制到本站 Nginx 配置，执行 `/www/server/nginx/sbin/nginx -t` 成功后再执行 `-s reload`；只切为本站维护页。正常运行时保留当前 HTTPS 配置，不移除公网认证配置。
 
 复用宝塔现有 ACME 账号签发本站证书，有效期至 2027-01-22，文件位于 `/www/server/panel/vhost/cert/auto.996788.xyz/`。续期来源为 [`renew-autoops-certificate.py`](../scripts/renew-autoops-certificate.py)，部署在 `/opt/autoops-public-proxy/`；`/etc/cron.d/autoops-certificate-renew` 每日 03:27 按服务器时间检查，到期前 30 天续期并在校验后平滑加载 Nginx。仅处理本站订单，签发输出不包含私钥；其他 16 个站点配置摘要未变。
 
