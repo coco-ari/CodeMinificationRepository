@@ -545,7 +545,7 @@ export default function FileBrowserPanel({
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-1 in-data-[preview-panel-mode=inline]:h-9 in-data-[preview-panel-mode=inline]:min-h-9 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
       >
-        {toolbarStart}
+        {toolbarStart ? <div className="flex min-w-0 flex-1 items-center">{toolbarStart}</div> : null}
         <RefreshFilesButton isPending={isPending} onRefresh={handleRefresh} />
         <FileSearchField
           name="project-files-search"

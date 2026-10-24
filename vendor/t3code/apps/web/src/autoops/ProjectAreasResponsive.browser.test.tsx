@@ -629,6 +629,11 @@ for (const width of [390, 1440]) {
       expect(toolbar.contains(path.element())).toBe(true)
       expect(screen.container.querySelectorAll('[data-surface-subheader]')).toHaveLength(1)
       expect(search.element().getBoundingClientRect().width).toBeGreaterThan(80)
+      const pathBounds = path.element().getBoundingClientRect()
+      const searchBounds = search.element().getBoundingClientRect()
+      expect(
+        Math.abs(pathBounds.top + pathBounds.height / 2 - searchBounds.top - searchBounds.height / 2),
+      ).toBeLessThanOrEqual(1)
     })
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
   })
