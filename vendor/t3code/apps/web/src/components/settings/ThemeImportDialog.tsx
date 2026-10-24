@@ -499,7 +499,7 @@ export function ThemeImportDialog({
                   <div className="min-w-0">
                     <p className="text-sm font-medium">主题文件</p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {fileName ?? "拖入 T3 Code 或 VS Code 的 .json 文件"}
+                      {fileName ?? "拖入主题 .json 文件（支持 T3 Code / VS Code 格式）"}
                     </p>
                   </div>
                   {chooseButton()}

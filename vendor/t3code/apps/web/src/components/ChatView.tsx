@@ -2436,7 +2436,9 @@ export default function ChatView(props: ChatViewProps) {
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant: unavailableConnection.phase === "error" ? "error" : "warning",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
+        title: isAutoOpsHosted()
+          ? environmentReconnecting ? "正在重新连接对话服务…" : "对话服务连接已断开"
+          : `${activeEnvironmentUnavailableState.label}${environmentReconnecting ? " 正在重新连接…" : " 已断开连接"}`,
         description: activeEnvironment ? (
           <ConnectionDiagnosisHeadline environment={activeEnvironment} />
         ) : undefined,

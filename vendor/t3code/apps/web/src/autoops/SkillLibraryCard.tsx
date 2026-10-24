@@ -127,7 +127,7 @@ export function SkillLibraryCard({
                 <div className="space-y-2">
                   <PopoverTitle>运行条件未满足</PopoverTitle>
                   <p className="text-xs leading-relaxed text-muted-foreground wrap-anywhere">
-                    {version.reason ?? '当前运行器无法执行此技能。'}
+                    {version.reason ?? '当前执行环境无法使用此技能。'}
                   </p>
                 </div>
               </PopoverPopup>

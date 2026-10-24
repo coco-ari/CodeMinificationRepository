@@ -2859,7 +2859,7 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           {...searchableSetting('follow-up-behavior')}
           description={
-            'Agent 执行期间，将追问加入队列或用于引导当前执行。' +
+            '智能体执行期间，将追问加入队列或用于引导当前执行。' +
             (settings.sendShortcut === 'mod-enter-multiline'
               ? `按 ${modifierLabel} + Enter（单行提示词）或 ${modifierLabel} + Shift + Enter（多行提示词），可对这一条消息使用相反的处理方式。`
               : `按 ${modifierLabel}${settings.sendShortcut === 'mod-enter' ? ' + Shift' : ''} + Enter，可对这一条消息使用相反的处理方式。`)
@@ -3388,7 +3388,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting('open-source-licenses')}
-          description="T3 Code 使用的依赖、资源及可选工具的声明。"
+          description="AutoOps 使用的开源组件、资源及许可证。"
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}

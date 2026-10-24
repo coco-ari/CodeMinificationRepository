@@ -60,16 +60,16 @@ const results = (state: SupervisorConnectionState, via?: "relay" | "direct") =>
 describe("presentConnectionDiagnosis", () => {
   it("names a dead tunnel and points the fix at the host", () => {
     const diagnosis = diagnose(backoff(unavailable("tunnel_down")));
-    expect(diagnosis?.headline).toBe("Mac mini's tunnel is offline");
+    expect(diagnosis?.headline).toBe("Mac mini 的连接通道已断开");
     expect(results(backoff(unavailable("tunnel_down")))).toEqual([
       "device:ok",
       "relay:ok",
       "tunnel:failed",
       "server:unchecked",
     ]);
-    expect(diagnosis?.steps.join(" ")).toContain("Tailscale exit node on Mac mini");
-    expect(diagnosis?.facts).toContainEqual(["HTTP status", "530"]);
-    expect(diagnosis?.facts).toContainEqual(["Trace ID", "trace-1"]);
+    expect(diagnosis?.steps.join(" ")).toContain("Mac mini 的 VPN 或 Tailscale 出口节点");
+    expect(diagnosis?.facts).toContainEqual(["HTTP 状态", "530"]);
+    expect(diagnosis?.facts).toContainEqual(["追踪标识", "trace-1"]);
     expect(diagnosis?.moreInfoUrl).toMatch(
       /t3-connect-troubleshooting\.md#the-hosts-tunnel-is-offline$/,
     );
@@ -92,7 +92,7 @@ describe("presentConnectionDiagnosis", () => {
 
   it("tells a working tunnel apart from T3 Code not answering", () => {
     expect(diagnose(backoff(unavailable("origin_unreachable")))?.headline).toBe(
-      "Tunnel works, but T3 Code on Mac mini did not answer",
+      "连接通道正常，但 Mac mini 的服务未响应",
     );
     expect(results(backoff(unavailable("origin_unreachable")), "direct")).toEqual([
       "device:ok",
@@ -109,9 +109,9 @@ describe("presentConnectionDiagnosis", () => {
     );
     // A learned LAN route makes the environment's usual route direct; the failure still names the relay.
     const diagnosis = diagnose(backoff(failure), "direct");
-    expect(diagnosis?.headline).toBe("This device can't reach Mac mini's tunnel");
+    expect(diagnosis?.headline).toBe("当前设备无法连接 Mac mini 的通道");
     expect(diagnosis?.hops).toHaveLength(4);
-    expect(diagnosis?.steps.join(" ")).not.toContain("On Mac mini");
+    expect(diagnosis?.steps.join(" ")).not.toContain("在 Mac mini");
   });
 
   it("points a relay timeout at the host, not this device", () => {
@@ -122,9 +122,9 @@ describe("presentConnectionDiagnosis", () => {
       }),
     );
     const diagnosis = diagnose(backoff(failure));
-    expect(diagnosis?.headline).toBe("Mac mini did not answer in time");
-    expect(diagnosis?.steps.join(" ")).toContain("On Mac mini");
-    expect(diagnosis?.steps.join(" ")).not.toContain("on this device");
+    expect(diagnosis?.headline).toBe("Mac mini 响应超时");
+    expect(diagnosis?.steps.join(" ")).toContain("在 Mac mini");
+    expect(diagnosis?.steps.join(" ")).not.toContain("当前设备");
   });
 
   it("stops at T3 Connect when this device cannot reach the relay", () => {
@@ -135,7 +135,7 @@ describe("presentConnectionDiagnosis", () => {
         cause: new TypeError("Failed to fetch"),
       }),
     );
-    expect(diagnose(backoff(failure))?.headline).toBe("This device can't reach T3 Connect");
+    expect(diagnose(backoff(failure))?.headline).toBe("当前设备无法连接 T3 Connect");
     expect(results(backoff(failure))).toEqual([
       "device:ok",
       "relay:failed",
@@ -153,8 +153,8 @@ describe("presentConnectionDiagnosis", () => {
       }),
     );
     const diagnosis = diagnose(backoff(failure));
-    expect(diagnosis?.headline).toBe("T3 Connect returned an error");
-    expect(diagnosis?.steps.join(" ")).not.toContain("this device");
+    expect(diagnosis?.headline).toBe("T3 Connect 连接服务出错");
+    expect(diagnosis?.steps.join(" ")).not.toContain("当前设备");
   });
 
   it("blames this device when its saved credential is missing", () => {
@@ -171,12 +171,12 @@ describe("presentConnectionDiagnosis", () => {
         traceId: "trace-2",
       }),
     );
-    expect(diagnose(backoff(failure))?.headline).toBe("This device's clock is off");
+    expect(diagnose(backoff(failure))?.headline).toBe("当前设备的时间不准确");
   });
 
   it("reports this device as offline before any other hop", () => {
     const state = { ...backoff(unavailable("tunnel_down")), network: "offline" as const };
-    expect(diagnose(state)?.headline).toBe("This device is offline");
+    expect(diagnose(state)?.headline).toBe("当前设备未连接网络");
     expect(results(state)?.[0]).toBe("device:failed");
   });
 
@@ -187,7 +187,7 @@ describe("presentConnectionDiagnosis", () => {
       via: "relay",
       relayStatus: { status: "offline", endpointFailure: "tunnel_down", endpointStatus: 530 },
     });
-    expect(diagnosis?.headline).toBe("Mac mini's tunnel is offline");
+    expect(diagnosis?.headline).toBe("Mac mini 的连接通道已断开");
     const origin = presentConnectionDiagnosis({
       hostLabel: "Mac mini",
       state: AVAILABLE_CONNECTION_STATE,
@@ -207,7 +207,7 @@ describe("presentConnectionDiagnosis", () => {
       via: "direct",
       relayStatus: { status: "offline", endpointFailure: "tunnel_down", endpointStatus: 530 },
     });
-    expect(diagnosis?.facts.map(([label]) => label)).not.toContain("HTTP status");
+    expect(diagnosis?.facts.map(([label]) => label)).not.toContain("HTTP 状态");
   });
 
   it("has nothing to say when nothing failed", () => {
@@ -218,9 +218,9 @@ describe("presentConnectionDiagnosis", () => {
     const diagnosis = diagnose(backoff(unavailable("tunnel_down")));
     if (diagnosis === null) throw new Error("expected a diagnosis");
     const text = connectionDiagnosisText("Mac mini", diagnosis);
-    expect(text).toContain("Mac mini tunnel: FAILED");
-    expect(text).toContain("T3 Code on Mac mini: not checked");
-    expect(text).toContain("Cause: tunnel_down");
-    expect(text).toContain("Attempts: 3");
+    expect(text).toContain("Mac mini 的连接通道: 失败");
+    expect(text).toContain("Mac mini 的服务: 未检查");
+    expect(text).toContain("原因: tunnel_down");
+    expect(text).toContain("尝试次数: 3");
   });
 });

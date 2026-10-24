@@ -1,5 +1,6 @@
 import { type ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { memo } from "react";
+import { isAutoOpsHosted } from "~/autoops/capabilities";
 import { InfoIcon, XIcon } from "lucide-react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button, InlineButton } from "../ui/button";
@@ -58,7 +59,17 @@ export function hasProviderSetup(status: ServerProvider): boolean {
   );
 }
 
-export function getProviderStatusMessage(status: ServerProvider): string {
+export function getProviderStatusMessage(status: ServerProvider, hosted = false): string {
+  if (hosted) {
+    if (!status.installed) return "模型服务尚未就绪，请联系管理员检查服务配置。";
+    if (status.auth.status === "unauthenticated") return "模型服务认证失败，请联系管理员检查登录或密钥配置。";
+    if (getIncompatibleVersion(status)) return "当前模型服务版本不可用或不受支持，请联系管理员处理。";
+    return status.status === "ready"
+      ? "当前模型服务没有可用模型。"
+      : status.status === "error"
+        ? "模型服务暂时不可用，请稍后重试。"
+        : "模型服务状态异常，部分功能可能不可用。";
+  }
   if (
     status.auth.status !== "unauthenticated" &&
     status.compatibilityAdvisory?.status === "broken" &&
@@ -105,9 +116,13 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   const title = isUnauthenticated
     ? `${providerName} 尚未认证`
     : incompatible
-      ? `${providerName} ${status.version ?? ""} is ${incompatible.status === "broken" ? "已知不可用" : "unsupported"}`
-      : `${providerName} 运行器状态`;
-  const message = incompatible?.message ?? getProviderStatusMessage(status);
+      ? `${providerName} ${status.version ?? ""} ${incompatible.status === "broken" ? "已知不可用" : "不受支持"}`
+      : `${providerName} 模型服务状态`;
+  const hosted = isAutoOpsHosted();
+  const originalMessage = incompatible?.message ?? status.message;
+  const message = hosted
+    ? getProviderStatusMessage(status, true)
+    : incompatible?.message ?? getProviderStatusMessage(status);
   const isWarning =
     incompatible?.status !== "broken" && (status.status === "warning" || incompatible !== null);
 
@@ -128,6 +143,12 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
               {message}
             </TooltipPopup>
           </Tooltip>
+          {hosted && originalMessage && originalMessage !== message ? (
+            <details className="mt-1">
+              <summary className="cursor-pointer">查看错误详情</summary>
+              <p className="mt-1 whitespace-pre-wrap break-words">{originalMessage}</p>
+            </details>
+          ) : null}
           {onOpenProviderSetup && hasProviderSetup(status) ? (
             <InlineButton onClick={() => onOpenProviderSetup(status.instanceId)}>
               
@@ -137,7 +158,7 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
         </AlertDescription>
         <AlertAction>
           <Button
-            aria-label={`关闭 ${providerName} provider ${status.status}`}
+            aria-label={`关闭 ${providerName} 状态提示`}
             onClick={onDismiss}
             size="icon-xs"
             variant="ghost-muted"

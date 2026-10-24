@@ -60,7 +60,7 @@ export function ConnectionDiagnosisHeadline({
 }
 
 const HOP_MARK = { ok: "✓", failed: "✕", unchecked: "–" } as const;
-const HOP_NOTE = { ok: "", failed: "Failed", unchecked: "Not checked" } as const;
+const HOP_NOTE = { ok: "", failed: "失败", unchecked: "未检查" } as const;
 
 /** Ticks once per second, and only while a retry is scheduled, so the list around it does not re-render. */
 function RetryCountdown({ retryAt }: { readonly retryAt: number }) {
@@ -71,7 +71,7 @@ function RetryCountdown({ retryAt }: { readonly retryAt: number }) {
     return () => clearInterval(timer);
   }, [retryAt]);
   const seconds = Math.ceil((retryAt - now) / 1_000);
-  return <>{seconds > 0 ? `retrying in ${seconds}s` : "retrying"}</>;
+  return <>{seconds > 0 ? `${seconds} 秒后重试` : "正在重试"}</>;
 }
 
 /** The collapsed failure: the full headline, then the retry state and a Details toggle. */
@@ -94,7 +94,7 @@ export function ConnectionDiagnosisSummary({
       <p className="flex flex-wrap items-center gap-1 text-muted-foreground">
         {retryAt !== null ? <RetryCountdown retryAt={retryAt} /> : null}
         {retryAt !== null && attempt > 0 ? <span aria-hidden>·</span> : null}
-        {attempt > 0 ? <span>attempt {attempt}</span> : null}
+        {attempt > 0 ? <span>已尝试 {attempt} 次</span> : null}
         {retryAt !== null || attempt > 0 ? <span aria-hidden>·</span> : null}
         <button
           type="button"
@@ -102,7 +102,7 @@ export function ConnectionDiagnosisSummary({
           onClick={onToggle}
           className="inline-flex items-center gap-0.5 rounded-sm outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
         >
-          Details
+          查看详情
           <ChevronRightIcon
             aria-hidden
             className={cn(
@@ -129,13 +129,13 @@ export function ConnectionDiagnosisPanel({
   readonly onAddRoute: (() => void) | null;
 }) {
   const { copyToClipboard } = useCopyToClipboard({
-    target: "connection diagnostics",
-    onCopy: () => toastManager.add({ type: "success", title: "Diagnostics copied" }),
+    target: "连接诊断",
+    onCopy: () => toastManager.add({ type: "success", title: "已复制连接诊断" }),
     onError: (error) =>
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not copy diagnostics",
+          title: "复制连接诊断失败",
           description: error.message,
         }),
       ),
@@ -160,7 +160,7 @@ export function ConnectionDiagnosisPanel({
         ))}
       </ol>
       <div>
-        <p className="font-medium text-foreground">What to try</p>
+        <p className="font-medium text-foreground">处理建议</p>
         <ol className="list-decimal pl-4 text-muted-foreground">
           {diagnosis.steps.map((step) => (
             <li key={step}>{step}</li>
@@ -173,7 +173,7 @@ export function ConnectionDiagnosisPanel({
             rel="noreferrer"
             className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
-            More info
+            了解更多
           </a>
         ) : null}
       </div>
@@ -187,7 +187,7 @@ export function ConnectionDiagnosisPanel({
       </dl>
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="xs" variant="outline" onClick={onRetry}>
-          Retry now
+          重新连接
         </Button>
         <Button
           type="button"
@@ -198,11 +198,11 @@ export function ConnectionDiagnosisPanel({
             copyToClipboard(text, undefined);
           }}
         >
-          Copy diagnostics
+          复制诊断
         </Button>
         {onAddRoute ? (
           <Button type="button" size="xs" variant="outline" onClick={onAddRoute}>
-            Add direct route
+            添加直连地址
           </Button>
         ) : null}
       </div>

@@ -91,7 +91,7 @@ function Viewport({ className, style, render, children, onPointerEnter, onPointe
   const [expanded, setExpanded] = React.useState(false);
   const state = { expanded };
   return renderWithPrimitive(Primitive.Viewport, {
-    ...props, ...stateDataAttributes(state), className: resolveStateValue(className, state), style: resolveStateValue(style, state),
+    label: "通知 ({hotkey})", ...props, ...stateDataAttributes(state), className: resolveStateValue(className, state), style: resolveStateValue(style, state),
     onPointerEnter: (event: React.PointerEvent<HTMLDivElement>) => { onPointerEnter?.(compatibleEvent(event)); setExpanded(true); },
     onPointerLeave: (event: React.PointerEvent<HTMLDivElement>) => { onPointerLeave?.(compatibleEvent(event)); if (!event.currentTarget.contains(document.activeElement)) setExpanded(false); },
     onFocusCapture: (event: React.FocusEvent<HTMLDivElement>) => { onFocusCapture?.(compatibleEvent(event)); setExpanded(true); },
@@ -164,7 +164,7 @@ function Positioner({ toast, children, ...props }: BaseToast.Positioner.Props) {
       collisionBoundary: collisionBoundary === "clipping-ancestors" ? undefined : collisionBoundary, collisionPadding,
       hideWhenDetached: true, "data-slot": "toast-positioner", className: resolveStateValue(className, state),
       style: { "--available-width": "var(--radix-popper-available-width)", "--available-height": "var(--radix-popper-available-height)", ...resolveStateValue(style, state) },
-      children: <Primitive.Viewport style={{ display: "contents" }}>{children}</Primitive.Viewport>,
+      children: <Primitive.Viewport label="通知 ({hotkey})" style={{ display: "contents" }}>{children}</Primitive.Viewport>,
     }, render, state)}
   </Popper.Root></Primitive.Provider>;
 }

@@ -283,10 +283,10 @@ const t3ToolDisplayLabels: Readonly<Record<string, string>> = {
   "scheduled tasks": "定时任务",
   "a scheduled task": "定时任务",
   "a secret": "密钥",
-  "T3 threads": "T3 对话",
-  "a T3 thread": "T3 对话",
-  "to a T3 thread": "到 T3 对话",
-  "for a T3 thread": "T3 对话",
+  "T3 threads": "对话",
+  "a T3 thread": "对话",
+  "to a T3 thread": "到对话",
+  "for a T3 thread": "对话",
   "a workflow": "工作流",
   "thread to a git worktree": "对话到 Git 工作树",
   "thread worktree status": "对话工作树状态",
@@ -301,7 +301,7 @@ const t3ToolDisplayLabels: Readonly<Record<string, string>> = {
   "thread content": "对话内容",
   "thread transfers": "对话转移记录",
   "a thread": "对话",
-  "T3 thread metadata": "T3 对话元数据",
+  "T3 thread metadata": "对话信息",
   "workspace branches": "工作区分支",
   "preview tabs": "预览标签页",
   "a preview tab": "预览标签页",
@@ -319,7 +319,66 @@ const t3ToolDisplayLabels: Readonly<Record<string, string>> = {
   "Opened": "已打开",
   "Close": "关闭",
   "Closing": "正在关闭",
-  "Closed": "已关闭"
+  "Closed": "已关闭",
+  "preview browser status": "浏览器状态",
+  "a page in the preview browser": "浏览器页面",
+  "Navigate": "导航",
+  "Navigating": "正在导航",
+  "Navigated": "已导航",
+  "the preview browser": "浏览器",
+  "Respond": "处理",
+  "Responding": "正在处理",
+  "Responded": "已处理",
+  "to a preview browser dialog": "浏览器对话框",
+  "Take a snapshot of": "读取",
+  "Taking a snapshot of": "正在读取",
+  "Took a snapshot of": "已读取",
+  "the preview page": "页面",
+  "Click": "点击",
+  "Clicking": "正在点击",
+  "Clicked": "已点击",
+  "in the preview browser": "浏览器页面",
+  "Press": "按下",
+  "Pressing": "正在按下",
+  "Pressed": "已按下",
+  "a key in the preview browser": "浏览器按键",
+  "Type": "输入",
+  "Typing": "正在输入",
+  "Typed": "已输入",
+  "Hover": "悬停",
+  "Hovering": "正在悬停",
+  "Hovered": "已悬停",
+  "Choose": "选择",
+  "Choosing": "正在选择",
+  "Chose": "已选择",
+  "an option in the preview browser": "浏览器选项",
+  "Drag": "拖动",
+  "Dragging": "正在拖动",
+  "Dragged": "已拖动",
+  "Upload": "上传",
+  "Uploading": "正在上传",
+  "Uploaded": "已上传",
+  "files to the preview browser": "文件到浏览器",
+  "Scroll": "滚动",
+  "Scrolling": "正在滚动",
+  "Scrolled": "已滚动",
+  "Resize": "调整",
+  "Resizing": "正在调整",
+  "Resized": "已调整",
+  "Evaluate": "执行",
+  "Evaluating": "正在执行",
+  "Evaluated": "已执行",
+  "script in the preview browser": "浏览器脚本",
+  "for the preview page": "页面加载",
+  "preview browser appearance": "浏览器外观",
+  "recording the preview browser": "浏览器录制",
+  "simulators and emulators": "模拟设备",
+  "a device in the Device panel": "设备面板",
+  "Take a screenshot of": "截取",
+  "Taking a screenshot of": "正在截取",
+  "Took a screenshot of": "已截取",
+  "the device": "设备截图",
+  "a device": "设备"
 };
 
 function displayT3ToolLabel(label: string): string {
@@ -808,6 +867,14 @@ function summaryActionPriority(action: ToolGroupAction | T3McpToolSummaryAction)
   }
 }
 
+function toolSourceDisplayName(source: ToolActivitySource): string {
+  // 仅按已知工具来源识别内置能力，不改写同名第三方工具及其原始记录。
+  if (/^(?:mcp:)?(?:t3-code|t3_code|t3code|t3)$/i.test(source.key)) return "工作台工具";
+  if (source.kind === "computer" && source.name === "Computer Use") return "电脑操作工具";
+  if (source.kind === "browser" && source.name === "Browser") return "浏览器工具";
+  return `${source.name}工具`;
+}
+
 export function summarizeToolGroup(entries: ReadonlyArray<WorkLogPresentationEntry>): {
   summary: string;
   hasFailure: boolean;
@@ -862,17 +929,14 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogPresentationEnt
   const labels = selected.map(({ label }) => label);
   if (sources.size > 0) {
     const sourceValues = [...sources.values()];
-    const sourceNames = [...new Set(sourceValues.map((source) => source.name))];
+    const sourceNames = [...new Set(sourceValues.map(toolSourceDisplayName))];
     const formattedNames =
       sourceNames.length < 2
         ? sourceNames[0]!
         : sourceNames.length === 2
           ? sourceNames.join("和")
           : `${sourceNames.slice(0, -1).join("、")}和${sourceNames.at(-1)}`;
-    const allIntegrations = sourceValues.every((source) => source.kind === "integration");
-    labels.unshift(
-      `已使用 ${formattedNames}${allIntegrations ? " 集成" : ""}`,
-    );
+    labels.unshift(`已调用${formattedNames}`);
   }
   const sourcedCount = entries.filter(
     (entry) =>
@@ -891,7 +955,7 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogPresentationEnt
     sentenceLabels.length < 3
       ? sentenceLabels.join("，")
       : sentenceLabels.join("，");
-  return { summary, hasFailure: summaries.some((group) => group.failedCount > 0) };
+  return { summary, hasFailure: summaries.some((group) => group.failedCount > 0) || entries.some(workEntryDisplayIndicatesToolFailure) };
 }
 
 export function toolGroupSummaryKind(

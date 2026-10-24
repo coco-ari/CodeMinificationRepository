@@ -76,7 +76,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
     <Toolbar.Root
       className="w-11 shrink-0 overflow-hidden bg-muted/30"
       data-model-picker-sidebar="true"
-      aria-label="运行器"
+      aria-label="模型服务"
       orientation="vertical"
       onKeyDown={(event) => {
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;

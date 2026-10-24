@@ -631,7 +631,7 @@ function SkillLibraryContent({
                     </div>
                     {version.readiness === 'restricted' ? (
                       <p role="status" className="text-xs text-warning-foreground wrap-anywhere">
-                        运行条件未满足：{version.reason ?? '当前运行器无法执行此技能。'}{' '}
+                        运行条件未满足：{version.reason ?? '当前执行环境无法使用此技能。'}{' '}
                         可以查看文件。
                       </p>
                     ) : null}

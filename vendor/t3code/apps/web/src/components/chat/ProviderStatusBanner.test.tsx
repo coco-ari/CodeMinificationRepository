@@ -93,7 +93,7 @@ describe("getProviderStatusMessage", () => {
         auth: { status: "unauthenticated" },
         message: "",
       }),
-    ).toBe("Open provider setup to sign in with Google.");
+    ).toBe("打开运行器配置以使用 Google 登录。");
   });
 
   it("requires installation on the environment before sign-in", () => {
@@ -107,7 +107,7 @@ describe("getProviderStatusMessage", () => {
         auth: { status: "unauthenticated" },
         message: "",
       }),
-    ).toBe("Open provider setup to install Antigravity on this environment.");
+    ).toBe("打开运行器配置以安装 Antigravity 到此环境。");
   });
 
   it("keeps CLI sign-in advice for a provider without integrated setup", () => {
@@ -118,6 +118,21 @@ describe("getProviderStatusMessage", () => {
         auth: { status: "unauthenticated" },
         message: "",
       }),
-    ).toBe("Sign in via the CLI to authenticate again.");
+    ).toBe("请通过 CLI 重新登录认证。");
+  });
+});
+
+
+describe("平台模型服务提示", () => {
+  it("服务认证失败给出平台内可执行建议，原始错误仍可读取", () => {
+    const status = { ...warningProvider(), status: "error" as const, auth: { status: "unauthenticated" as const }, message: "API_KEY_INVALID: credential rejected" };
+    expect(getProviderStatusMessage(status, true)).toBe("模型服务认证失败，请联系管理员检查登录或密钥配置。");
+    expect(getProviderStatusMessage(status)).toBe(status.message);
+    expect(shouldShowProviderStatusBanner(status, null)).toBe(true);
+  });
+  it("没有安装服务时不引导普通用户打开上游配置", () => {
+    const status = { ...warningProvider(), installed: false, message: "Binary not found" };
+    expect(getProviderStatusMessage(status, true)).toBe("模型服务尚未就绪，请联系管理员检查服务配置。");
+    expect(status.message).toBe("Binary not found");
   });
 });

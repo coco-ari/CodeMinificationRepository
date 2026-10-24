@@ -47,7 +47,7 @@
 - 授权公开门面与内部身份、投影、策略、装配分责；T3 宿主统一停止接单、排空本地任务并按依赖顺序释放，源码与部署通过明确归档和固定接口协作。前端宿主快照、会话客户端、文件浏览和技能目录控制器分开，仍复用已有 T3 能力。
 - 问答、技能、客户本机、模型及偏好继续复用原有执行与状态所有者；客户分发不包含平台存储。未实现的资源管理与机柜功能不加入本轮。
 
-验收命令采用 `pnpm check:runtime`、`pnpm test:runtime:node`、`pnpm test:runtime:server`、`pnpm test:runtime:web`、`pnpm test:runtime:markdown`、`pnpm test:runtime:customer` 与 `pnpm verify:autoops`；完整串行入口为 `pnpm verify:runtime`。部署前另构建 T3 Worker，并对实际发行目录、现有数据保留、服务健康及网页进行验证。具体范围与 Linux/Windows 差异见运行模块说明。
+验收命令采用 `pnpm check:runtime`、`pnpm test:runtime:node`、`pnpm test:runtime:server`、`pnpm test:runtime:web`、`pnpm test:runtime:language`、`pnpm test:runtime:markdown`、`pnpm test:runtime:customer` 与 `pnpm verify:autoops`；完整串行入口为 `pnpm verify:runtime`。部署前另构建 T3 Worker，并对实际发行目录、现有数据保留、服务健康及网页进行验证。具体范围与 Linux/Windows 差异见运行模块说明。
 
 这次是对当前已实现工作台的维护性改造，尚未把独立账号/项目后端替换进线上，也不等于已经完成原完整计划中尚未实现的功能。共享纯合同不建立两套业务存储双写。
 
