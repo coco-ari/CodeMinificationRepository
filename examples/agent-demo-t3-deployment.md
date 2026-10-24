@@ -10,6 +10,26 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，顶部导航直接切换应用提交 `2eb08131800c8df194c527755e5e874ac378f005` 已部署。网关、Worker、网页及客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-topbar-2eb08131`；数据仍为 `/home/tao/autoops-deployment-validation/data`。项目选择器收紧，问答、工作区、部署、技能库直接可达；低频模块紧邻常用入口，窄屏通过当前模块菜单切换；设置、外观、归档及退出保留侧栏入口。业务权限与任务归属未改变。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `71a497a56c136642f0a99bee76a8fa85cd4b4227d2fc802a913b25290850f263` |
+| 完整清单 SHA-256 | `68af55f50043d358bb3603ed8d87074346d90a3185fd5be9b645f1388a3515b9` |
+| 原生依赖清单 SHA-256 | `3792519bb6cec0b4e951b6fbe4b2ce365521faea41885d0fa248d443f8d1a3c0` |
+| 实际网页 HTML SHA-256 | `6a267213e2181f5cc5e8a302d5ff700476ee1cb4e78358248b28dcaf12ec73ac` |
+| 客户 ZIP SHA-256 / 字节 | `628529660b6ff3d142b6f0dfcbbba1937deb9bd58fdcbf82fa0da85bd5d4447a` / 1042167 |
+| 文件与旧资源 | 7486 文件、61 相对链接；保留旧哈希资源，官方原生依赖 2038 文件/21 包通过 |
+| 应用提交 CI | [工作台运行链路 40070247710](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40070247710)、[AutoOps 质量检查 40070247689](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40070247689) 均通过 |
+
+macOS Web 类型、网页构建、199 文件模块边界、17 项项目导航回归和 7 组隔离浏览器验收通过，29274 个跟踪文件与提交逐项核对。Worker/客户源码未改，沿用已验证构建。Linux 完整清单、原生 CLI、隔离资料输入及 ZIP Worker 通过；准备、校验、切换串行使用独立 512 MiB、无 swap、100% CPU 的 cgroup。浅深色、320–1440px、短窗口、长项目名与菜单键盘/焦点有独立操作记录及 15 张截图；线上另只读复核实际含“我的电脑”的菜单与侧栏设置入口。
+
+切换前确认空闲，停止接单并备份全部非空 SQLite 和业务文件；原 348 个工作区/技能文件、135 条消息、42 轮运行、422 条轮次条目、21 个绑定、客户设备/目录/收据及部署配置和历史保留。其他四项服务 PID 与 28890 站点未变；实际服务目录及网页摘要与本批一致，Worker 可达。
+
+现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-topbar-2eb08131-20261024`，程序回滚目标 `t3-skills-b973a0e1`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzzz-topbar-2eb08131.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚仅撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。本批没有模型调用或业务管理写入；Windows 真机、实体手机、公网 HTTPS 与全部 T3 上游测试未执行，按用户要求不作为本批范围。导航验收见[运行模块记录](../docs/runtime-modules.md#顶部导航直接切换2026-10-24)，证据在 `.deployment/topbar-direct/`。
+
+### 历史技能库导航与卡片优化（t3-skills-b973a0e1）
+
 2026-10-24，技能库导航与卡片优化应用提交 `b973a0e1fbf7538907ce7a6222975aa988161c46` 已部署。网关、Worker、网页及客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-skills-b973a0e1`；数据仍为 `/home/tao/autoops-deployment-validation/data`。侧栏补齐图标并改为“全部技能、助手分配、项目分配”；卡片集中图标、名称与简介，底部直接分配区分隔，使用原生描边切换按钮。业务权限、固定版本、分配范围与项目继承规则未改变。
 
 | 发行身份与校验 | 实际结果 |
@@ -26,7 +46,7 @@ macOS Web 类型、网页构建、199 文件模块边界及 13 项隔离管理�
 
 切换前确认空闲，停止接单并备份全部非空 SQLite 和业务文件；原 348 个工作区/技能文件、135 条消息、42 轮运行、422 条轮次条目、21 个绑定、客户设备/目录/收据及部署配置和历史保留。其他四项服务 PID 与 28890 站点未变。实际服务目录及网页摘要与本批发行一致，Worker 可达。线上管理页只读复核，写入验收均使用本地隔离 UUID 技能，结束已清理。
 
-现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-skills-b973a0e1-20261024`，程序回滚目标 `t3-skills-995e53b6`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzz-skills-b973a0e1.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚仅撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。未重验模型执行、客户设备及私有 Git 导入，具体边界见[技能管理验收](../docs/runtime-modules.md#技能库导航与卡片优化2026-10-24)。证据在 `.deployment/skill-visual-polish/`。
+该历史批次恢复目录 `/home/tao/autoops-agent-demo/backups/t3-skills-b973a0e1-20261024`，程序回滚目标 `t3-skills-995e53b6`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzzz-skills-b973a0e1.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚仅撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。未重验模型执行、客户设备及私有 Git 导入，具体边界见[技能管理验收](../docs/runtime-modules.md#技能库导航与卡片优化2026-10-24)。证据在 `.deployment/skill-visual-polish/`。
 
 ### 历史技能管理布局精简（t3-skills-995e53b6）
 
