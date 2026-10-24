@@ -5,11 +5,15 @@ import {
   HistoryIcon,
   InfoIcon,
   MessageSquarePlusIcon,
+  MoreHorizontalIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
 } from 'lucide-react'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '~/components/ui/menu'
+import { toastManager } from '~/components/ui/toast'
+import { workspaceFailureMessage } from './workspaceFeedback'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
@@ -98,6 +102,7 @@ function ProjectWorkspaces({
   const [error, setError] = useState<string | null>(null)
   const [previewReview, setPreviewReview] = useState(false)
   const dialogFocus = useRef<HTMLElement | null>(null)
+  const externalMenuFocus = useRef<HTMLButtonElement | null>(null)
   const [followTaskId, setFollowTaskId] = useState<string | null>(null)
   const submission = useWorkspaceTaskSubmission(projectId, (task) => {
     setFollowTaskId(task.id)
@@ -106,9 +111,6 @@ function ProjectWorkspaces({
   })
   const tasks = (overview?.tasks ?? []).filter((task) => task.type !== 'packages')
   const running = tasks.some(taskActive)
-  const failures = tasks.filter(
-    (task) => task.status === 'failed' || task.status === 'interrupted',
-  ).length
   const busy = mutationBusy || submission.busy
   const taskRevision = tasks.map((task) => `${task.id}:${task.status}`).join(':')
   const latestPublished = overview?.externalVersions.find(
@@ -133,7 +135,11 @@ function ProjectWorkspaces({
         : latestPublished
   const open = (next: Dialog) => {
     dialogFocus.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
+      next === 'external'
+        ? externalMenuFocus.current
+        : document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null
     setError(null)
     setDialog(next)
   }
@@ -146,9 +152,17 @@ function ProjectWorkspaces({
   useEffect(() => {
     const task = tasks.find((entry) => entry.id === followTaskId)
     if (!task || taskActive(task)) return
-    if (task.type === 'external' && task.status === 'completed') {
-      setTab('external')
-      setPreviewReview(true)
+    if (task.status === 'completed') {
+      toastManager.add({
+        type: 'success',
+        title: task.type === 'external' ? '外部资料已生成，请复核发布' : '源码同步成功',
+      })
+      if (task.type === 'external') {
+        setTab('external')
+        setPreviewReview(true)
+      }
+    } else {
+      setError(workspaceFailureMessage(task.failureCode, task.error ?? '操作失败，请重试。'))
     }
     setFollowTaskId(null)
   }, [tasks, followTaskId])
@@ -186,20 +200,12 @@ function ProjectWorkspaces({
       <Toggle value="external">外部工作区</Toggle>
     </ToggleGroup>
   )
-  const taskLabel = running
-    ? '任务执行中'
-    : failures
-      ? `任务记录（${failures} 项异常）`
-      : '任务记录'
+  const taskLabel = running ? '任务执行中' : '任务记录'
   const actions = (
     <>
       {manager ? (
         <FileSurfaceAction label={taskLabel} onPress={() => open('tasks')}>
-          {running ? (
-            <Spinner size="sm" />
-          ) : (
-            <HistoryIcon className={failures ? 'text-destructive' : undefined} />
-          )}
+          {running ? <Spinner size="sm" /> : <HistoryIcon />}
         </FileSurfaceAction>
       ) : null}
       <FileSurfaceAction
@@ -219,6 +225,7 @@ function ProjectWorkspaces({
   const notice = (
     <WorkspaceSubmissionNotice
       label={submission.pendingLabel}
+      paused={submission.recoveryPaused}
       retryAvailable={submission.retryAvailable && manager}
       busy={busy}
       onCheck={submission.check}
@@ -234,9 +241,11 @@ function ProjectWorkspaces({
             <AlertTitle>工作区操作未完成</AlertTitle>
             <AlertDescription>{combinedError}</AlertDescription>
           </Alert>
-          <Button size="xs" variant="outline" className="mt-2" onClick={refreshOverview}>
-            重新加载
-          </Button>
+          {loadError ? (
+            <Button size="xs" variant="outline" className="mt-2" onClick={refreshOverview}>
+              重试
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {!dialog && submission.pendingLabel ? (
@@ -257,6 +266,7 @@ function ProjectWorkspaces({
           }}
           onAccepted={(receipt) => {
             if ('task' in receipt) {
+              setError(null)
               setFollowTaskId(receipt.task.id)
               refreshOverview()
             }
@@ -265,11 +275,7 @@ function ProjectWorkspaces({
       ) : (
         <>
           <ModuleSidebar label="工作区" header={navigation}>
-            <p className="px-4 py-3 text-xs leading-relaxed text-sidebar-muted-foreground">
-              {historicalId !== undefined
-                ? '历史文件保持原来源，只读查看。新对话使用当前工作区。'
-                : '外部范围只使用已复核并发布的资料。更新期间，已有发布内容仍然可用。'}
-            </p>
+            {null}
           </ModuleSidebar>
           <ModuleHeader
             title="工作区"
@@ -304,10 +310,55 @@ function ProjectWorkspaces({
                     size="sm"
                     variant="outline"
                     disabled={busy || running || !overview}
-                    onClick={() => open('external')}
+                    onClick={() => {
+                      setError(null)
+                      if (pendingReview) {
+                        setPreviewReview(true)
+                        open('review')
+                      } else void submission.submit({ type: 'external', rules: [] })
+                    }}
                   >
-                    更新外部工作区
+                    {busy || running
+                      ? '正在处理…'
+                      : pendingReview
+                        ? '复核并发布'
+                        : '更新外部工作区'}
                   </Button>
+                ) : null}
+                {manager ? (
+                  <Menu>
+                    <MenuTrigger
+                      render={
+                        <Button
+                          ref={externalMenuFocus}
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="外部工作区操作"
+                        />
+                      }
+                    >
+                      <MoreHorizontalIcon />
+                    </MenuTrigger>
+                    <MenuPopup align="end">
+                      {pendingReview ? (
+                        <MenuItem
+                          disabled={busy || running}
+                          onClick={() => {
+                            setError(null)
+                            void submission.submit({ type: 'external', rules: [] })
+                          }}
+                        >
+                          重新生成
+                        </MenuItem>
+                      ) : null}
+                      <MenuItem
+                        disabled={busy || running || !overview}
+                        onClick={() => open('external')}
+                      >
+                        自定义脱敏
+                      </MenuItem>
+                    </MenuPopup>
+                  </Menu>
                 ) : null}
                 {pendingReview ? (
                   <Button
@@ -318,10 +369,10 @@ function ProjectWorkspaces({
                     {previewReview ? '查看已发布内容' : '查看待复核内容'}
                   </Button>
                 ) : null}
-                {manager && current?.report ? (
+                {manager && current?.report && current.status !== 'pending_review' ? (
                   <Button size="sm" variant="ghost" disabled={busy} onClick={() => open('review')}>
                     <ShieldCheckIcon />
-                    {current.status === 'pending_review' ? '复核并发布' : '脱敏检查'}
+                    脱敏检查
                   </Button>
                 ) : null}
               </>

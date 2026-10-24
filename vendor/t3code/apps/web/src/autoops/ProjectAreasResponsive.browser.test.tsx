@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   authoring: vi.fn(),
   authoringSend: vi.fn(),
   workspace: vi.fn(),
+  external: vi.fn(),
   deployment: vi.fn(),
   task: vi.fn(),
   releases: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock(import('../state/environments'), async (original) => ({
 vi.mock(import('./workspaces'), async (original) => ({
   ...(await original()),
   loadWorkspaces: mocks.workspace,
+  generateExternalWorkspace: mocks.external,
   loadWorkspaceTree: vi.fn(async () => ({
     entries: [
       { path: 'README.md', name: 'README.md', kind: 'file' as const, size: 64 },
@@ -231,6 +233,7 @@ beforeEach(() => {
     hasUnpublishedChanges: true,
   })
   mocks.authoringSend.mockReset()
+  mocks.external.mockReset()
   const data = deployment()
   mocks.deployment.mockResolvedValue(data)
   mocks.releases.mockResolvedValue({
@@ -526,9 +529,7 @@ describe('当前资料保留满高文件区域和原生操作', () => {
           expectedRevision: 1,
         })
         await expect.element(retry).toBeDisabled()
-        await expect
-          .element(page.getByRole('button', { name: '按原请求核对', exact: true }))
-          .toBeVisible()
+        await expect.element(page.getByRole('button', { name: '重试', exact: true })).toBeVisible()
       } else {
         await expect.element(retry).not.toBeInTheDocument()
         expect(mocks.authoringSend).not.toHaveBeenCalled()
@@ -577,3 +578,50 @@ describe('当前资料保留满高文件区域和原生操作', () => {
     })
   }
 })
+
+for (const width of [390, 1440]) {
+  it(`工作区在 ${width}px 一次点击提交同步与外部更新，次要脱敏设置保留`, async () => {
+    await page.viewport(width, 600)
+    mocks.authoringSend.mockImplementation(async (_project, input) => ({
+      requestId: input.requestId,
+      task: {
+        id: 'sync-new',
+        type: 'sync',
+        status: 'completed',
+        stage: 'completed',
+        createdAt: '2026-10-24T00:00:00Z',
+      },
+    }))
+    mocks.external.mockImplementation(async (_project, _source, _rules, requestId) => ({
+      id: 'external-new',
+      requestId,
+      type: 'external',
+      status: 'queued',
+      stage: 'queued',
+      createdAt: '2026-10-24T00:00:00Z',
+    }))
+    await using screen = await render(
+      <AppSidebarLayout>
+        <AutoOpsWorkspacesPage />
+      </AppSidebarLayout>,
+      { router: '/workspaces?projectId=p-one' },
+    )
+    await page.getByRole('button', { name: '同步源码', exact: true }).click()
+    expect(mocks.authoringSend).toHaveBeenCalledTimes(1)
+    expect(mocks.authoringSend.mock.calls[0]![1].command).toEqual({ kind: 'sync' })
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+    if (width < 768) await page.getByRole('button', { name: '切换主侧栏', exact: true }).click()
+    await page.getByRole('radio', { name: '外部工作区', exact: true }).click()
+    if (width < 768) await userEvent.keyboard('{Escape}')
+    await page.getByRole('button', { name: '更新外部工作区', exact: true }).click()
+    expect(mocks.external).toHaveBeenCalledTimes(1)
+    expect(mocks.external.mock.calls[0]![2]).toEqual([])
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+    await page.getByRole('button', { name: '外部工作区操作' }).click()
+    await page.getByRole('menuitem', { name: '自定义脱敏' }).click()
+    await expect.element(page.getByRole('dialog', { name: '更新外部工作区' })).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('button', { name: '外部工作区操作' })).toHaveFocus()
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
+  })
+}

@@ -15,7 +15,7 @@ import {
   ShieldCheckIcon,
   Trash2Icon,
 } from 'lucide-react'
-import { Alert } from '~/components/ui/alert'
+import { Alert, AlertDescription } from '~/components/ui/alert'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Checkbox } from '~/components/ui/checkbox'
@@ -105,42 +105,33 @@ export function WorkspaceSubmissionNotice({
   onCheck,
   onRetry,
   retryAvailable,
+  paused = false,
 }: {
   label: string | null
   retryAvailable: boolean
+  paused?: boolean
   busy: boolean
   onCheck: () => Promise<boolean>
   onRetry: () => Promise<boolean>
 }) {
   if (!label) return null
   return (
-    <Alert variant="warning" role="status">
-      <div className="flex min-w-0 flex-col gap-2">
-        <p>
-          上次{label}的结果尚未确认。先核对任务；重试会继续使用原输入，关闭弹窗不会取消后台任务。
-        </p>
-        {!retryAvailable ? <p>刷新后需重新填写原输入并提交，系统会先核对上次任务。</p> : null}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void onCheck()}
-          >
-            核对任务
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy || !retryAvailable}
-            onClick={() => void onRetry()}
-          >
-            使用原请求重试
-          </Button>
-        </div>
-      </div>
+    <Alert variant="info" role="status">
+      <AlertDescription>
+        <p>{busy ? `正在${label}…` : paused ? '暂时无法获取结果，请重试。' : '正在确认操作结果…'}</p>
+        {!busy ? (
+          <div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void (retryAvailable ? onRetry() : onCheck())}
+            >
+              重试
+            </Button>
+          </div>
+        ) : null}
+      </AlertDescription>
     </Alert>
   )
 }
@@ -340,10 +331,7 @@ export function ExternalWorkspaceDialog({
             <DialogTitle>更新外部工作区</DialogTitle>
           </DialogHeader>
           <DialogPanel>
-            <p className="text-muted-foreground text-xs">
-              从当前资料和已同步源码生成外部工作区，去除 Git 历史并脱敏，保持目录结构。
-              原始资料不会被修改；生成后需复核并发布，外部对话才会使用新内容。
-            </p>
+            <p className="text-muted-foreground text-xs">自动脱敏后，复核发布即可供外部使用。</p>
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2">
                 <Label>额外脱敏规则</Label>
@@ -363,9 +351,7 @@ export function ExternalWorkspaceDialog({
                   添加替换
                 </Button>
               </div>
-              <p className="text-muted-foreground text-xs">
-                平台凭证与私钥规则始终生效。最多添加 30 条文本替换。
-              </p>
+              <p className="text-muted-foreground text-xs">默认已过滤凭证和私钥。</p>
               {rules.map((rule, index) => (
                 <div key={rule.id} className="flex items-start gap-2">
                   <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">

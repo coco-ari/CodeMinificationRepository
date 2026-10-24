@@ -35,6 +35,7 @@ import {
   type WorkspaceUploadInput,
 } from './workspaceAuthoring'
 import type { WorkspaceAuthoringController } from './useWorkspaceAuthoring'
+import { WorkspaceSubmissionNotice } from './WorkspaceActions'
 
 export const WorkspaceAuthoringFocus = createContext<(() => HTMLElement | null) | undefined>(
   undefined,
@@ -108,38 +109,14 @@ export function AuthoringNotice({ controller }: { controller: WorkspaceAuthoring
           <AlertDescription>{controller.error}</AlertDescription>
         </Alert>
       ) : null}
-      {controller.pending ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            <div className="flex min-w-0 flex-col gap-2">
-              <p>{controller.pending.label}的结果尚未确认。关闭页面不会取消可能已保存的操作。</p>
-              <span className="break-all text-xs">请求：{controller.pending.requestId}</span>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={controller.busy}
-                  onClick={() => void controller.check()}
-                >
-                  按原请求核对
-                </Button>
-                {controller.retryAvailable ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={controller.busy}
-                    onClick={() => void controller.retry()}
-                  >
-                    使用原请求重试
-                  </Button>
-                ) : (
-                  <p>请重选原文件或填写原输入后重试。</p>
-                )}
-              </div>
-            </div>
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <WorkspaceSubmissionNotice
+        label={controller.pending?.label ?? null}
+        busy={controller.busy}
+        paused={controller.recoveryPaused}
+        retryAvailable={controller.retryAvailable}
+        onCheck={async () => !!(await controller.check())}
+        onRetry={async () => !!(await controller.retry())}
+      />
     </>
   )
 }
@@ -352,10 +329,6 @@ export function WorkspaceSourceDialog({
           onChange={(value) => field('credentialId', value)}
           disabled={controller.busy}
         />
-        <p className="text-xs text-muted-foreground">
-          保存只修改来源定义。同步源码时才获取仓库；多个来源的挂载目录不能重叠，也不能覆盖资料目录。仅检出所选目录，内部工作区仍保留仓库
-          Git 历史。
-        </p>
         {error ? (
           <Alert variant="error">
             <AlertDescription>{error}</AlertDescription>
@@ -440,9 +413,6 @@ export function WorkspaceCredentialDialog({
             disabled={controller.busy}
           />
         </AuthoringField>
-        <p className="text-xs text-muted-foreground">
-          已有凭证只显示名称和版本，不能读取秘密。替换后新任务使用新凭证。
-        </p>
         <AuthoringNotice controller={controller} />
       </form>
     </AuthoringDialog>
@@ -679,7 +649,7 @@ export function WorkspaceUploadDialog({ controller, onClose }: EditorProps) {
           update(
             index,
             controller.hasPending() ? 'unknown' : 'failed',
-            controller.hasPending() ? '请先核对原请求结果' : '保存被明确拒绝，请修正后重新上传',
+            controller.hasPending() ? '正在确认上传结果…' : '上传失败，请重试。',
           )
           break
         }
@@ -792,9 +762,6 @@ export function WorkspaceUploadDialog({ controller, onClose }: EditorProps) {
           </div>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">
-        原件保存后单独显示正文提取状态。停止传输不会把未知保存结果视为失败；刷新后需重新选择未上传文件。
-      </p>
       {error ? (
         <Alert variant="error">
           <AlertDescription>{error}</AlertDescription>

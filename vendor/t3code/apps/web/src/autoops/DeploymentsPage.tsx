@@ -147,6 +147,7 @@ function ProjectDeployments({
   const submissionNotice = (
     <WorkspaceSubmissionNotice
       label={submission.pendingLabel}
+      paused={submission.recoveryPaused}
       retryAvailable={submission.retryAvailable && canManage}
       busy={busy}
       onCheck={submission.check}

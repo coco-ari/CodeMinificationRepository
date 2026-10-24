@@ -110,6 +110,7 @@ export function createCurrentWorkspace({
     actor: string,
     status: 'queued' | 'syncing' | 'synced' | 'failed',
     versionId?: string,
+    failureCode?: string,
   ) {
     const configured = authoring.overview(project, actor).sources
     for (const source of captured.sources) {
@@ -138,8 +139,11 @@ export function createCurrentWorkspace({
           ...(status === 'failed'
             ? {
                 error: {
-                  code: 'WORKSPACE_SYNC_FAILED',
-                  message: '源码同步未完成，请核对原请求后重试',
+                  code:
+                    failureCode && unavailableGitCodes.has(failureCode)
+                      ? failureCode
+                      : 'WORKSPACE_SYNC_FAILED',
+                  message: '同步失败，请重试。',
                 },
               }
             : {}),
@@ -190,7 +194,7 @@ export function createCurrentWorkspace({
     } catch (error) {
       if (updateCurrent) {
         try {
-          syncState(project, captured, actor, 'failed')
+          syncState(project, captured, actor, 'failed', undefined, sourceFailureCode(error))
         } catch {}
       }
       if (captured.resolution === 'pending') {
@@ -432,7 +436,7 @@ export function createCurrentWorkspace({
           readPermission(project, actor)
           const code = sourceFailureCode(error)
           if (!code || !unavailableGitCodes.has(code)) throw error
-          syncState(project, captured, actor, 'failed')
+          syncState(project, captured, actor, 'failed', undefined, code)
           sourceErrors = captured.sources.map((source) => ({
             sourceId: source.id,
             name: source.name,
@@ -507,9 +511,9 @@ export function createCurrentWorkspace({
           syncState(project, fixed, actor, 'synced', value.versionId)
           store.releaseVersion(project, `task:${value.id}`)
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           try {
-            syncState(project, fixed, actor, 'failed')
+            syncState(project, fixed, actor, 'failed', undefined, sourceFailureCode(error))
           } catch {}
         })
         .finally(() => {

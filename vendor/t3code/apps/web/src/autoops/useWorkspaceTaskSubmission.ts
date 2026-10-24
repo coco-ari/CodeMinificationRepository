@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { sha256 } from '@noble/hashes/sha2'
 import { bytesToHex } from '@noble/hashes/utils'
 import { randomUUID } from '~/lib/utils'
@@ -7,6 +7,7 @@ import type { WorkspaceRepositoryRefKind } from './workspaceAuthoring'
 import { inspectAuthoringRequest } from './workspaceAuthoring'
 import type { WorkspaceBuildContext } from '../../../../../../autoops/contracts/workspaces.ts'
 import { readAutoOpsHost } from './hostConfig'
+import { useWorkspaceRequestRecovery } from './useWorkspaceRequestRecovery'
 import {
   generateExternalWorkspace,
   generateWorkspacePackages,
@@ -81,6 +82,8 @@ export function useWorkspaceTaskSubmission(
   onAccepted: (task: WorkspaceTask) => void,
 ) {
   const key = keyFor(projectId)
+  const principal = readAutoOpsHost()?.principal.id
+  const mounted = useRef(true)
   const [pending, setPending] = useState(() => readPending(key))
   const pendingRef = useRef(pending)
   const locked = useRef(false)
@@ -88,6 +91,13 @@ export function useWorkspaceTaskSubmission(
   const [error, setError] = useState<string | null>(null)
   const accepted = useRef(onAccepted)
   accepted.current = onAccepted
+  const currentScope = () => mounted.current && readAutoOpsHost()?.principal.id === principal
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   const remember = (value: PendingSubmission) => {
     // 只持久化收据和摘要，替换规则、仓库地址等完整输入只留在内存。
@@ -166,7 +176,7 @@ export function useWorkspaceTaskSubmission(
     )
   }
   const perform = async (input: WorkspaceTaskInput | null, checkOnly = false): Promise<boolean> => {
-    if (locked.current) return false
+    if (locked.current || !currentScope()) return false
     locked.current = true
     setBusy(true)
     setError(null)
@@ -176,11 +186,7 @@ export function useWorkspaceTaskSubmission(
       if (submission) {
         if (input) {
           if (submission.digest !== digestInput(input)) {
-            setError(
-              '上次' +
-                taskNames[submission.type] +
-                '的结果尚未确认。修改输入不会覆盖原请求，请先核对旧任务，再发起新操作。',
-            )
+            setError('上次操作还在确认中，请稍后再修改。')
             return false
           }
           submission = { ...submission, input: structuredClone(input) }
@@ -188,9 +194,9 @@ export function useWorkspaceTaskSubmission(
           setPending(submission)
         }
         const receipt = await inspect(submission)
+        if (!currentScope()) return false
         if (receipt) return confirm(receipt)
         if (checkOnly) {
-          setError('暂未查到上次任务。可使用原请求重试；关闭弹窗不会取消可能已接受的任务。')
           return false
         }
       } else {
@@ -209,13 +215,12 @@ export function useWorkspaceTaskSubmission(
         }
       }
       if (!submission.input) {
-        setError(
-          '暂未查到上次任务。刷新后请重新填写原输入并提交，以继续核对；不会自动创建另一项任务。',
-        )
+        setError('请重新填写刚才的内容后重试。')
         return false
       }
       sending = true
       const task = await send(submission)
+      if (!currentScope()) return false
       if (
         task.type !== taskType(submission.type) ||
         (task.requestId && task.requestId !== submission.requestId)
@@ -224,22 +229,33 @@ export function useWorkspaceTaskSubmission(
       }
       return confirm(task)
     } catch (cause) {
+      if (!currentScope()) return false
       if (
         cause instanceof AutoOpsRequestError &&
         !cause.uncertain &&
         (sending || cause.code === 'CAPTURE_FAILED')
       )
         clear()
-      setError(cause instanceof Error ? cause.message : '提交结果尚未确认，请先核对任务。')
+      setError(
+        cause instanceof AutoOpsRequestError && cause.uncertain
+          ? null
+          : cause instanceof Error
+            ? cause.message
+            : '操作失败，请重试。',
+      )
       return false
     } finally {
       locked.current = false
-      setBusy(false)
+      if (currentScope()) setBusy(false)
     }
   }
+  const recoveryPaused = useWorkspaceRequestRecovery(pending?.requestId, busy, () =>
+    perform(null, true),
+  )
   return {
     busy,
     error,
+    recoveryPaused,
     pendingLabel: pending ? taskNames[pending.type] : null,
     retryAvailable: !!pending?.input,
     submit: (input: WorkspaceTaskInput) => perform(input),

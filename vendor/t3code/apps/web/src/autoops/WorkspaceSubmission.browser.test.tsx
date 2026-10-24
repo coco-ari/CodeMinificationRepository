@@ -59,7 +59,7 @@ const overview = (tasks: WorkspaceTask[] = [], projectId = 'p-one'): WorkspaceOv
   import: { supported: true, hosts: ['isolated.invalid'], maxBytes: 10000, maxFiles: 100 },
 })
 const unknown = () =>
-  new AutoOpsRequestError('提交结果尚未确认，请先核对任务。', 'CONNECTION_FAILED', undefined, true)
+  new AutoOpsRequestError('提交结果尚未确认，请先重试。', 'CONNECTION_FAILED', undefined, true)
 const task = (type: WorkspaceTask['type'], requestId: string): WorkspaceTask => ({
   id: 'accepted-task',
   requestId,
@@ -153,15 +153,13 @@ describe('工作区任务的未知提交恢复', () => {
       await openAndFill(type)
       await page.getByRole('button', { name: submitLabel[type], exact: true }).click()
       await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1))
-      await expect
-        .element(page.getByRole('button', { name: '使用原请求重试', exact: true }))
-        .toBeEnabled()
+      await expect.element(page.getByRole('button', { name: '重试', exact: true })).toBeEnabled()
       const first = mocks.send.mock.calls[0]!
       const stored = sessionStorage.getItem('autoops:workspace-task:owner-one:p-one')!
       expect(Object.keys(JSON.parse(stored)).sort()).toEqual(['digest', 'requestId', 'type'])
       expect(stored).not.toContain('private-example-value')
       expect(stored).not.toContain('private-repository')
-      await page.getByRole('button', { name: '使用原请求重试', exact: true }).click()
+      await page.getByRole('button', { name: '重试', exact: true }).click()
       await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2))
       expect(mocks.read).toHaveBeenCalledTimes(1)
       expect(mocks.send.mock.calls[1]).toEqual(first)
@@ -183,7 +181,7 @@ describe('工作区任务的未知提交恢复', () => {
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1))
     const receipt = task('import', mocks.send.mock.calls[0]![3])
     mocks.read.mockResolvedValue(overview([receipt]))
-    await page.getByRole('button', { name: '核对任务', exact: true }).click()
+    await page.getByRole('button', { name: '重试', exact: true }).click()
     await vi.waitFor(() => expect(mocks.accepted).toHaveBeenCalledWith(receipt))
     expect(mocks.send).toHaveBeenCalledTimes(1)
     expect(sessionStorage.getItem('autoops:workspace-task:owner-one:p-one')).toBeNull()
@@ -197,12 +195,12 @@ describe('工作区任务的未知提交恢复', () => {
     await page.getByRole('button', { name: submitLabel.import }).click()
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1))
     mocks.read.mockRejectedValue(new Error('核对暂时无法连接'))
-    await page.getByRole('button', { name: '使用原请求重试' }).click()
+    await page.getByRole('button', { name: '重试' }).click()
     await vi.waitFor(() => expect(document.body.textContent).toContain('核对暂时无法连接'))
     expect(mocks.send).toHaveBeenCalledTimes(1)
     await page.getByRole('textbox', { name: '分支', exact: true }).fill('changed-branch')
     await page.getByRole('button', { name: submitLabel.import }).click()
-    await vi.waitFor(() => expect(document.body.textContent).toContain('修改输入不会覆盖原请求'))
+    await vi.waitFor(() => expect(document.body.textContent).toContain('上次操作还在确认中'))
     expect(mocks.send).toHaveBeenCalledTimes(1)
     expect(mocks.read).toHaveBeenCalledTimes(1)
   })
@@ -216,8 +214,8 @@ describe('工作区任务的未知提交恢复', () => {
     const initial = mocks.send.mock.calls[0]!
     await first.unmount()
     await using second = await render(<Harness />)
-    await expect.element(page.getByRole('button', { name: '使用原请求重试' })).toBeDisabled()
-    await page.getByRole('button', { name: '核对任务', exact: true }).click()
+    await expect.element(page.getByRole('button', { name: '重试' })).toBeEnabled()
+    await page.getByRole('button', { name: '重试', exact: true }).click()
     expect(mocks.send).toHaveBeenCalledTimes(1)
     await openAndFill('import')
     mocks.send.mockResolvedValue(task('import', initial[3]))
@@ -236,7 +234,7 @@ describe('工作区任务的未知提交恢复', () => {
     const initial = mocks.send.mock.calls[0]!
     await first.unmount()
     await using second = await render(<Harness projectId="p-two" />)
-    await expect.element(page.getByRole('button', { name: '核对任务' })).not.toBeInTheDocument()
+    await expect.element(page.getByRole('button', { name: '重试' })).not.toBeInTheDocument()
     await openAndFill('import')
     await page.getByRole('button', { name: submitLabel.import }).click()
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2))
@@ -259,9 +257,9 @@ describe('工作区任务的未知提交恢复', () => {
     ])
     await page.getByRole('textbox', { name: '前端构建上下文', exact: true }).fill('changed-root')
     await page.getByRole('button', { name: submitLabel.packages, exact: true }).click()
-    await vi.waitFor(() => expect(document.body.textContent).toContain('修改输入不会覆盖原请求'))
+    await vi.waitFor(() => expect(document.body.textContent).toContain('上次操作还在确认中'))
     expect(mocks.send).toHaveBeenCalledTimes(1)
-    await page.getByRole('button', { name: '使用原请求重试', exact: true }).click()
+    await page.getByRole('button', { name: '重试', exact: true }).click()
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2))
     expect(mocks.send.mock.calls[1]).toEqual(first)
   })
@@ -294,11 +292,11 @@ function DeploymentInputHarness() {
     </>
   )
 }
-it('独立 Git 打包丢响应后按原请求核对，不附加资料版本或重复任务', async () => {
+it('独立 Git 打包丢响应后重试，不附加资料版本或重复任务', async () => {
   setup()
   await using screen = await render(<DeploymentInputHarness />)
   await screen.getByRole('button', { name: '生成独立源码包' }).click()
-  await expect.element(page.getByRole('button', { name: '使用原请求重试' })).toBeEnabled()
+  await expect.element(page.getByRole('button', { name: '重试' })).toBeEnabled()
   expect(mocks.package).toHaveBeenCalledTimes(1)
   const [path, options] = mocks.package.mock.calls[0]!
   expect(path).toBe('/api/v1/projects/p-one/workspace/deployment-packages')
@@ -311,7 +309,7 @@ it('独立 Git 打包丢响应后按原请求核对，不附加资料版本或�
     requestId: options.body.requestId,
     task: task('packages', options.body.requestId),
   })
-  await screen.getByRole('button', { name: '核对任务', exact: true }).click()
+  await screen.getByRole('button', { name: '重试', exact: true }).click()
   await vi.waitFor(() =>
     expect(mocks.accepted).toHaveBeenCalledWith(task('packages', options.body.requestId)),
   )
@@ -319,3 +317,62 @@ it('独立 Git 打包丢响应后按原请求核对，不附加资料版本或�
   expect(mocks.receipt).toHaveBeenCalledWith('p-one', options.body.requestId, false)
   expect(sessionStorage.getItem('autoops:workspace-task:owner-one:p-one')).toBeNull()
 })
+
+it('外部更新失败的持久结果自动收敛，不再保留无效重试请求', async () => {
+  setup()
+  mocks.receipt.mockRejectedValue(
+    new AutoOpsRequestError('连接仓库超时，请重试。', 'CAPTURE_FAILED', 409),
+  )
+  await using screen = await render(<Harness type="external" />)
+  await openAndFill('external')
+  await page.getByRole('button', { name: submitLabel.external, exact: true }).click()
+  await vi.waitFor(() => expect(mocks.receipt).toHaveBeenCalled(), { timeout: 4000 })
+  await expect.element(page.getByRole('alert')).toHaveTextContent('连接仓库超时，请重试。')
+  expect(sessionStorage.getItem('autoops:workspace-task:owner-one:p-one')).toBeNull()
+  expect(mocks.send).toHaveBeenCalledTimes(1)
+  expect(mocks.accepted).not.toHaveBeenCalled()
+})
+
+it('切项目后迟到的任务收据不会触发旧页面回调', async () => {
+  setup()
+  let finish!: (value: WorkspaceTask) => void
+  mocks.send.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  await using screen = await render(<Harness key="one" type="external" />)
+  await openAndFill('external')
+  await page.getByRole('button', { name: submitLabel.external, exact: true }).click()
+  const requestId = mocks.send.mock.calls[0]![3]
+  await screen.rerender(<Harness key="two" projectId="p-two" />)
+  finish(task('external', requestId))
+  await expect.element(page.getByRole('button', { name: '打开操作' })).toBeVisible()
+  expect(mocks.accepted).not.toHaveBeenCalled()
+  expect(sessionStorage.getItem('autoops:workspace-task:owner-one:p-one')).not.toBeNull()
+})
+
+for (const width of [390, 1440]) {
+  it(`恢复状态在 ${width}px 内换行，不挤入图标列或溢出容器`, async () => {
+    setup()
+    await page.viewport(width, 600)
+    await using screen = await render(
+      <WorkspaceSubmissionNotice
+        label="更新外部工作区"
+        busy={false}
+        retryAvailable
+        onCheck={async () => false}
+        onRetry={async () => false}
+      />,
+    )
+    await expect.element(page.getByRole('button', { name: '重试', exact: true })).toBeVisible()
+    const alert = screen.container.querySelector<HTMLElement>('[data-slot="alert"]')!
+    const description = alert.querySelector<HTMLElement>('[data-slot="alert-description"]')!
+    const bounds = alert.getBoundingClientRect()
+    expect(description.getBoundingClientRect().width).toBeGreaterThan(250)
+    expect(description.getBoundingClientRect().bottom).toBeLessThanOrEqual(bounds.bottom)
+    expect(bounds.height).toBeLessThan(160)
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
+  })
+}

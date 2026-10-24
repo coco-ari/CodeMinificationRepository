@@ -15,7 +15,6 @@ import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
 import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
 import { WorkspacePageContainer } from '~/components/WorkspacePageContainer'
 import { SettingsRow, SettingsSection } from '~/components/settings/settingsLayout'
-import { Alert, AlertDescription } from '~/components/ui/alert'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
@@ -26,6 +25,7 @@ import { usePrimaryEnvironmentId } from '~/state/environments'
 import { ModuleHeader, ModuleSidebar, ModuleSidebarItem } from './ModuleWorkspace'
 import { readSelection, saveSelection } from './workspaceViewState'
 import { useWorkspaceAuthoring } from './useWorkspaceAuthoring'
+import { workspaceFailureMessage } from './workspaceFeedback'
 import {
   authoringFileUrl,
   loadAuthoringContent,
@@ -52,11 +52,11 @@ export type WorkspaceSection = 'current' | 'sources'
 function sourceStatusLabel(
   status: NonNullable<WorkspaceAuthoringOverview['sourceStatus']>[number] | undefined,
 ) {
-  if (!status || status.status === 'unsynced') return '当前配置尚未同步'
+  if (!status || status.status === 'unsynced') return '未同步'
   if (status.status === 'synced') return `已同步 ${status.commit?.slice(0, 12) ?? ''}`
   if (status.status === 'queued') return '等待同步'
   if (status.status === 'syncing') return '正在同步'
-  return `同步失败：${status.error?.message ?? '请查看任务记录'}`
+  return workspaceFailureMessage(status.error?.code, '同步失败，请重试。')
 }
 export function WorkspaceAuthoringNavigation({
   section,
@@ -90,7 +90,6 @@ type AuthoringDialog =
   | { type: 'revoke-credential'; credential: WorkspaceCredentialMetadata }
   | { type: 'file'; action: 'mkdir' | 'save' | 'move' | 'delete'; entry?: WorkspaceMaterialEntry }
   | { type: 'upload' }
-  | { type: 'sync' }
   | null
 
 export function WorkspaceAuthoring({
@@ -204,11 +203,7 @@ export function WorkspaceAuthoring({
             </>
           }
         >
-          <div className="px-4 py-3 text-xs leading-relaxed text-sidebar-muted-foreground">
-            {section === 'current'
-              ? '资料保存后即可使用；对话每次运行读取当前工作区。'
-              : '来源保存后，点击同步源码获取最新代码。部署独立选择 Git 来源。'}
-          </div>
+          {null}
         </ModuleSidebar>
         <ModuleHeader
           title="工作区"
@@ -258,7 +253,10 @@ export function WorkspaceAuthoring({
                       添加仓库凭证
                     </MenuItem>
                     <MenuSeparator />
-                    <MenuItem disabled={syncDisabled} onClick={() => open({ type: 'sync' })}>
+                    <MenuItem
+                      disabled={syncDisabled}
+                      onClick={() => void controller.submit({ kind: 'sync' })}
+                    >
                       <RefreshCwIcon />
                       同步源码
                     </MenuItem>
@@ -270,7 +268,7 @@ export function WorkspaceAuthoring({
         />
         <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5">
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {overview ? `资料修订 ${overview.revision}` : '正在读取资料…'}
+            {!overview ? '正在读取…' : taskActive ? '正在处理…' : ''}
             {!manager ? ' · 只读' : ''}
           </span>
           {manager ? (
@@ -290,7 +288,7 @@ export function WorkspaceAuthoring({
                 size="sm"
                 variant="outline"
                 disabled={syncDisabled}
-                onClick={() => open({ type: 'sync' })}
+                onClick={() => void controller.submit({ kind: 'sync' })}
               >
                 同步源码
               </Button>
@@ -359,7 +357,7 @@ export function WorkspaceAuthoring({
             <AuthoringNotice controller={controller} />
           </div>
         ) : null}
-        {section === 'current' && entry?.extraction ? (
+        {section === 'current' && entry?.extraction && entry.extraction.status !== 'ready' ? (
           <div
             className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5 text-xs text-muted-foreground"
             role="status"
@@ -472,16 +470,9 @@ export function WorkspaceAuthoring({
                       />
                     ))
                   ) : (
-                    <p className="px-4 py-5 text-sm text-muted-foreground">
-                      尚未定义仓库来源。可以只添加一个仓库，或按实际需要添加多个来源。
-                    </p>
+                    <p className="px-4 py-5 text-sm text-muted-foreground">还没有源码来源。</p>
                   )}
                 </SettingsSection>
-                <Alert>
-                  <AlertDescription>
-                    保存配置后需同步源码。同步成功后更新当前文件；失败会保留上次成功内容并显示原因，已有任务仍使用原输入。
-                  </AlertDescription>
-                </Alert>
                 {manager ? (
                   <SettingsSection
                     title="仓库凭证"
@@ -532,7 +523,7 @@ export function WorkspaceAuthoring({
                       ))
                     ) : (
                       <p className="px-4 py-5 text-sm text-muted-foreground">
-                        公开仓库不需要凭证；私有仓库只保存凭证引用。
+                        私有仓库需要添加凭证。
                       </p>
                     )}
                   </SettingsSection>
@@ -604,17 +595,6 @@ export function WorkspaceAuthoring({
             }
           >
             撤回「{dialog.credential.name}」后，使用此凭证的新获取操作将被拒绝。
-          </WorkspaceAuthoringConfirm>
-        ) : null}
-        {dialog?.type === 'sync' ? (
-          <WorkspaceAuthoringConfirm
-            title="同步源码"
-            controller={controller}
-            onClose={close}
-            onConfirm={() => controller.submit({ kind: 'sync' })}
-          >
-            按已保存配置同步 {overview?.sources.length ?? 0} 个 Git
-            来源。同步完成后，下一次对话运行使用最新资料和源码；已提交任务的输入不会改变。
           </WorkspaceAuthoringConfirm>
         ) : null}
       </div>

@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2";
 import { bytesToHex } from "@noble/hashes/utils";
 import { AutoOpsRequestError, autoOpsApiUrl, autoOpsRequest, errorDetails } from "./apiClient";
 import { readAutoOpsHost } from "./hostConfig";
+import { workspaceFailureMessage } from "./workspaceFeedback";
 import type { WorkspaceTask } from "./workspaces";
 import type {
   WorkspaceAuthoringOverview,
@@ -122,7 +123,7 @@ export async function inspectAuthoringRequest(
   }>(projectId, `/requests/${encodeURIComponent(requestId)}`, undefined, signal);
   if (capture?.resolution === "failed")
     throw new AutoOpsRequestError(
-      capture.resolutionError?.message ?? "工作区输入准备失败，请修正后重新提交。",
+      workspaceFailureMessage(capture.resolutionError?.code, capture.resolutionError?.message ?? "操作失败，请重试。"),
       "CAPTURE_FAILED",
       409,
       false,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { randomUUID } from "~/lib/utils";
 import { AutoOpsRequestError, isAutoOpsAccessError } from "./apiClient";
 import { readAutoOpsHost } from "./hostConfig";
+import { useWorkspaceRequestRecovery } from "./useWorkspaceRequestRecovery";
 import {
   authoringDigest,
   inspectAuthoringRequest,
@@ -35,8 +36,7 @@ const labels = {
   version: "更新固定版本",
   sync: "同步源码",
 };
-const credentialRecoveryNotice =
-  "浏览器未保存凭证秘密，也无法在刷新后比较原秘密。请先核对原请求；没有收据时仅重新填写原输入，使用原请求重试。";
+const credentialRecoveryNotice = "请重新填写刚才的凭证后重试。";
 export function readAuthoringPending(key: string): Pending | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as Pending | null;
@@ -92,7 +92,18 @@ export function useWorkspaceAuthoring(
     submission: AuthoringSubmission;
     file?: File;
     originalSecretKnown: boolean;
-  } | null>(null);
+  } | null>(
+    pending?.kind === "sync"
+      ? {
+          submission: {
+            requestId: pending.requestId,
+            expectedRevision: pending.expectedRevision,
+            command: { kind: "sync" },
+          },
+          originalSecretKnown: true,
+        }
+      : null,
+  );
   const [progress, setProgress] = useState<number | null>(null);
   const [lastOutcome, setLastOutcome] = useState<{
     digest: string | null;
@@ -205,7 +216,7 @@ export function useWorkspaceAuthoring(
           (active.kind !== command.kind ||
             (active.digest !== null && active.digest !== authoringDigest(command)))
         )
-          throw new Error("上次操作结果尚未确认，请先核对原请求，不能改用其他输入。");
+          throw new Error("上次操作还在确认中，请稍后再修改。");
         if (
           command?.kind === "credential" &&
           command.action === "save" &&
@@ -213,9 +224,7 @@ export function useWorkspaceAuthoring(
           previous.action === "save" &&
           command.secret !== previous.secret
         )
-          throw new Error(
-            "上次凭证操作结果尚未确认，秘密已修改。请先按原请求核对，不能把新秘密当作原输入提交。",
-          );
+          throw new Error("上次凭证还在确认中，请暂时保留刚才填写的内容。");
         const restoredCredential =
           active.hasSecretInput && !retryInput.current?.originalSecretKnown;
         const receipt = await inspectAuthoringRequest(
@@ -228,19 +237,12 @@ export function useWorkspaceAuthoring(
         if (receipt) {
           const confirmed = confirm(receipt, active.requestId);
           if (restoredCredential) {
-            setError(
-              "已核对原凭证操作，原请求已保存。本页面重新输入的秘密未提交；如需更换秘密，请再明确保存一次。",
-            );
+            setError("上次凭证已保存。如需更换，请再次保存。");
             return null;
           }
           return confirmed;
         }
         if (checkOnly) {
-          setError(
-            active.hasSecretInput
-              ? `尚未找到原请求收据。${credentialRecoveryNotice}`
-              : "尚未找到原请求收据。可重选原文件或填写原输入，使用同一请求重试。",
-          );
           return null;
         }
         if (command) {
@@ -283,7 +285,7 @@ export function useWorkspaceAuthoring(
         };
       }
       const retry = retryInput.current;
-      if (!retry) throw new Error("请重新选择原文件或填写原输入，再使用原请求重试。");
+      if (!retry) throw new Error("请重新选择刚才的文件或填写刚才的内容后重试。");
       sending = true;
       const receipt =
         retry.submission.command.kind === "upload"
@@ -309,7 +311,7 @@ export function useWorkspaceAuthoring(
         (sending || cause.code === "CAPTURE_FAILED")
       )
         clear();
-      setError(errorText(cause));
+      setError(cause instanceof AutoOpsRequestError && cause.uncertain ? null : errorText(cause));
       return null;
     } finally {
       locked.current = false;
@@ -320,11 +322,15 @@ export function useWorkspaceAuthoring(
       controller.current = null;
     }
   };
+  const recoveryPaused = useWorkspaceRequestRecovery(pending?.requestId, busy, () =>
+    perform(undefined, undefined, true),
+  );
   return {
     overview,
     accessDenied,
     credentials,
     error,
+    recoveryPaused,
     busy,
     pending,
     progress,

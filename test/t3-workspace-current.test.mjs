@@ -340,6 +340,7 @@ test('显式同步有真实持久收据，失败不伪装成功且保留最近�
   const request = f.mutation()
   await assert.rejects(f.service.sync(projectId, request, owner))
   assert.equal(f.service.overview(projectId, owner).sourceStatus[0].status, 'failed')
+  assert.equal(f.service.overview(projectId, owner).sourceStatus[0].error.code, 'WORKSPACE_GIT_FAILED')
   assert.match(
     f.service.currentFile(projectId, 'apps/web/README.md', owner).bytes.toString(),
     /固定源码/,

@@ -84,18 +84,16 @@ describe('当前资料的原请求恢复和范围隔离', () => {
     setup()
     await using screen = await render(<Harness />)
     await page.getByRole('button', { name: '保存目录', exact: true }).click()
-    await expect.element(page.getByRole('button', { name: '使用原请求重试' })).toBeEnabled()
+    await expect.element(page.getByRole('button', { name: '重试' })).toBeEnabled()
     const first = mocks.send.mock.calls[0]![1]
     const stored = sessionStorage.getItem('autoops:workspace-authoring:isolated-owner:p-one')!
     expect(stored).not.toContain('测试目录')
     await page.getByRole('button', { name: '保存其他目录' }).click()
     await expect
-      .element(
-        page.getByText('上次操作结果尚未确认，请先核对原请求，不能改用其他输入。', { exact: true }),
-      )
+      .element(page.getByText('上次操作还在确认中，请稍后再修改。', { exact: true }))
       .toBeVisible()
     expect(mocks.send).toHaveBeenCalledTimes(1)
-    await page.getByRole('button', { name: '使用原请求重试' }).click()
+    await page.getByRole('button', { name: '重试' }).click()
     await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2))
     expect(mocks.send.mock.calls[1]![1]).toEqual(first)
     expect(mocks.inspect).toHaveBeenCalledWith(
@@ -109,11 +107,11 @@ describe('当前资料的原请求恢复和范围隔离', () => {
     setup()
     await using screen = await render(<Harness key="before" />)
     await page.getByRole('button', { name: '保存目录', exact: true }).click()
-    await expect.element(page.getByRole('button', { name: '使用原请求重试' })).toBeEnabled()
+    await expect.element(page.getByRole('button', { name: '重试' })).toBeEnabled()
     const first = mocks.send.mock.calls[0]![1]
     mocks.inspect.mockResolvedValue({ requestId: first.requestId, revision: 1 })
     await screen.rerender(<Harness key="after" />)
-    await page.getByRole('button', { name: '按原请求核对' }).click()
+    await page.getByRole('button', { name: '重试' }).click()
     await vi.waitFor(() =>
       expect(mocks.accepted).toHaveBeenCalledWith({ requestId: first.requestId, revision: 1 }),
     )
@@ -180,4 +178,38 @@ describe('当前资料的原请求恢复和范围隔离', () => {
     await expect.element(page.getByRole('button', { name: '保存目录', exact: true })).toBeDisabled()
     await expect.element(page.getByText('项目 正在读取', { exact: true })).toBeVisible()
   })
+})
+
+it('同步准备已失败时自动结束待确认状态，下次点击使用新的请求', async () => {
+  setup()
+  mocks.inspect.mockRejectedValue(
+    new AutoOpsRequestError('连接仓库超时，请重试。', 'CAPTURE_FAILED', 409),
+  )
+  await using screen = await render(<Harness />)
+  await page.getByRole('button', { name: '保存目录', exact: true }).click()
+  const first = mocks.send.mock.calls[0]![1]
+  await vi.waitFor(
+    () =>
+      expect(sessionStorage.getItem('autoops:workspace-authoring:isolated-owner:p-one')).toBeNull(),
+    { timeout: 4000 },
+  )
+  await expect.element(page.getByRole('alert')).toHaveTextContent('连接仓库超时，请重试。')
+  mocks.send.mockImplementation(async (_project, input) => ({
+    requestId: input.requestId,
+    revision: 1,
+  }))
+  await page.getByRole('button', { name: '保存目录', exact: true }).click()
+  expect(mocks.send.mock.calls[1]![1].requestId).not.toBe(first.requestId)
+  expect(mocks.accepted).toHaveBeenCalledTimes(1)
+})
+
+it('断网后自动查到保存结果，无需用户核对且不重复写入', async () => {
+  setup()
+  await using screen = await render(<Harness />)
+  await page.getByRole('button', { name: '保存目录', exact: true }).click()
+  const first = mocks.send.mock.calls[0]![1]
+  mocks.inspect.mockResolvedValue({ requestId: first.requestId, revision: 1 })
+  await vi.waitFor(() => expect(mocks.accepted).toHaveBeenCalledTimes(1), { timeout: 4000 })
+  expect(mocks.send).toHaveBeenCalledTimes(1)
+  await expect.element(page.getByRole('status')).not.toBeInTheDocument()
 })
