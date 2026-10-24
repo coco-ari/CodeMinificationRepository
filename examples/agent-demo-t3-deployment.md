@@ -8,7 +8,29 @@
 
 ### 当前验证发行
 
-本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据；旧发行和备份已清理，不能执行历史回滚脚本。
+本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次仅作历史证据，是否仍保留由当前恢复方案决定；不要执行已清理发行对应的历史脚本。
+
+2026-10-24，中文对话标题修复 `ed4b944370a000edd1e61ce453ae0af36ea11747` 已完整部署。网关、Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-chinese-titles-ed4b9443`，数据仍为 `/home/tao/autoops-deployment-validation/data`。本批重建实际 Worker；网页和客户包未修改，复用上一批已验证构建，网页摘要保持一致。
+
+| 当前发行证据 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `277f65d19cca35c232d181f1604f100427425fa3f714791a250e978b48f557b9` |
+| 完整清单 SHA-256 | `5dfc690b9db5afa5e7080b39d6ac002890224c64ed54466e0d73b38e8863abb5` |
+| 原生依赖清单 SHA-256 | `ef13be1e55401a665cf2c1ac6e62759ab018828c31913231d5b968d9d941f8e0` |
+| 实际网页 HTML SHA-256 | `123d094caf06330ada5464d8558f89d012a430fa2e0252343f1078290cb351d3` |
+| 来源与发行 | 29282 个跟踪文件与提交逐项一致；8499 文件、61 相对链接；保留 4272 个旧静态资源 |
+| Linux 原生运行 | 官方 2038 个原生文件、21 包、实际 CLI、隔离资料与 ZIP Worker 通过 |
+| CI | [运行链路 40100247987](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40100247987)、[AutoOps 质量 40100247983](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40100247983) 均通过 |
+
+标题首次生成与重新生成复用 T3 原生服务，只调整默认语言与中文占位标题的失败保护；生成失败保留原名，不批量重写历史。macOS 标题提示词/提供方定向 61 项、标题服务及 Codex/Claude 67 项、中文门禁 64+12 项、运行类型检查与 Worker 构建通过。首次提供方测试在受限沙盒中有 3 项监听端口 EPERM，按明确测试命令授权后全部通过；未把该环境失败计作产品缺陷。标题服务回归已加入中文门禁。
+
+公网 HTTPS、登录、匿名拒绝、WSS、原会话绑定、技能和工作区读取通过。真实模型通过正式 RPC 将本任务独立验收对话 `1bea28c4-7ed3-4b71-90e5-cf3118e165de` 从“Gateway client class constructor”重新生成为“说明 client.ts 导出类与构造”，消息正文摘要前后一致。未修改用户其他旧标题。随后通过真实网页以英文提交独立只读问题，新对话 `6cb41649-ba82-49eb-91f1-9d33c7e621c9` 自动命名为“Git 分支与提交的区别”，回答正常完成。截图只证明呈现，原生生成结果与正式 RPC 收据分别保存在 `initial-title-result.json`、`regeneration-result.json`。
+
+用户确认任务结束后再次核对空闲，停止接单并备份。348 个资料/技能文件、157 条消息、49 轮运行、502 条轮次条目、24 个绑定及客户设备/收据、部署记录保留；部署执行器与 28890 站点不变。两服务新增 `zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-chinese-titles-ed4b9443.conf`。恢复点 `/home/tao/autoops-agent-demo/backups/t3-chinese-titles-ed4b9443-20261024` 内的 `rollback-program.sh --check` 已通过，实际回滚仅恢复上一完整发行 `90cea0a6`，保留回滚时业务数据，不恢复旧数据库。29 项恢复脚本隔离测试通过，未执行真实降级。
+
+准备、Linux 校验、切换和回滚预检全部串行，独立 cgroup 为 512 MiB、无 swap、100% CPU。候选 `8f93f116` 在补充中文占位标题保护后被最终发行取代，未切换线上。证据位于 `.deployment/chinese-titles/`。本批未修改布局或重跑整站浅深色/手机交互，不重复声明上一批 UI 证据。
+
+### 历史批次：源码超时与手机阅读（2026-10-24）
 
 2026-10-24，源码超时保留可用内容与手机阅读修复 `90cea0a6f3e3be6ae93b9f18d9f78a94f4cd5f07` 已完整部署。网关、Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-workspace-mobile-90cea0a6`；客户包未改动，沿用已校验字节。数据继续使用 `/home/tao/autoops-deployment-validation/data`，公网代理与 Secure 登录配置保留。
 
