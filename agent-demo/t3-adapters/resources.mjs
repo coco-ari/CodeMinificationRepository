@@ -53,7 +53,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     access.requireEnvironment(principal, projectId, environmentId)
     let binding = access.getThreadBinding(threadId)
     const parameters = new URLSearchParams(query || '')
-    const workspaceType = parameters.get('workspaceType'), workspaceVersionId = parameters.get('workspaceVersionId'), inputId = parameters.get('inputId')
+    const workspaceType = parameters.get('workspaceType'), workspaceVersionId = parameters.get('workspaceVersionId') ?? undefined, inputId = parameters.get('inputId')
     if ([...parameters.keys()].some(key => !['workspaceType', 'workspaceVersionId', 'inputId'].includes(key)) || parameters.size !== new Set(parameters.keys()).size || (parameters.size && !['internal', 'external'].includes(workspaceType)) || (workspaceVersionId && inputId)) fail('工作区范围参数无效')
     if (binding) {
       access.requireThread(principal, threadId)

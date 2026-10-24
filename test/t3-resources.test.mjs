@@ -147,7 +147,7 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   const draft = 'autoops://projects/p-autoops/environments/env-test/threads/new-draft'
   assert.throws(() => catalog.search(principal, { cwd: draft, query: '', limit: 100 }), { code: 'WORKSPACE_REQUIRED' })
   assert.ok(catalog.search(principal, { cwd: draft + '?workspaceType=external&workspaceVersionId=external-v1', query: '', limit: 100 }).entries.some(({path}) => path === externalPath))
-  for (const query of ['workspaceType=internal&workspaceVersionId=external-v1', 'workspaceType=external&workspaceVersionId=external-pending', 'workspaceType=external&workspaceVersionId=missing', 'workspaceType=external'])
+  for (const query of ['workspaceType=internal&workspaceVersionId=external-v1', 'workspaceType=external&workspaceVersionId=external-pending', 'workspaceType=external&workspaceVersionId=missing', 'workspaceType=external&workspaceVersionId=', 'workspaceType=external&workspaceType=internal'])
     assert.throws(() => catalog.search(principal, { cwd: draft + '?' + query, query: '', limit: 100 }))
   assert.throws(() => catalog.search(principal, { cwd: cwd + '?workspaceType=external&workspaceVersionId=external-v2', query: '', limit: 100 }), /不能切换/)
 })

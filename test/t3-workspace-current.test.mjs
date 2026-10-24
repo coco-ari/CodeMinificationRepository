@@ -375,6 +375,106 @@ test('显式同步有真实持久收据，失败不伪装成功且保留最近�
   )
 })
 
+test('新对话的当前资料候选包含源码和上传文件，固定引用且撤权后不可读', async (t) => {
+  const f = await fixture(t)
+  await f.source('frontend')
+  await f.service.captureAgentInput(
+    projectId,
+    { requestId: 'picker-source', workspaceType: 'internal' },
+    owner,
+  )
+  await f.upload('docs/product.md', '项目产品说明')
+  const catalog = createBusinessResourceCatalog({
+    access: f.access,
+    workspaceStore: f.store,
+    workspaceInputs: f.service,
+  })
+  const principal = { id: 'reader', sessionHash: 'session-reader' }
+  const cwd = `autoops://projects/${projectId}/environments/env-test/threads/new-draft?workspaceType=internal`
+  const networkCalls = f.calls.resolve.length
+  const result = await catalog.search(principal, { cwd, query: './', limit: 80 })
+  assert.deepEqual(
+    result.entries.map((entry) => [entry.path.split('/').at(-1), entry.kind]),
+    [
+      ['apps', 'directory'],
+      ['docs', 'directory'],
+    ],
+  )
+  assert.deepEqual(await catalog.list(principal, { cwd }), result)
+  const files = await catalog.search(principal, { cwd, query: './docs/', limit: 80 })
+  assert.equal(files.entries.length, 1)
+  assert.match(files.entries[0].path, /^autoops\/p-test\/inputs\/[^/]+\/docs\/product.md$/)
+  const file = await catalog.read(principal, { cwd, relativePath: files.entries[0].path })
+  assert.equal(file.contents, '项目产品说明')
+  const sources = await catalog.search(principal, { cwd, query: './apps/web/README', limit: 80 })
+  assert.match(
+    (await catalog.read(principal, { cwd, relativePath: sources.entries[0].path })).contents,
+    /frontend 固定源码/,
+  )
+  assert.equal(f.calls.resolve.length, networkCalls)
+  assert.equal((await catalog.metadata(principal, [files.entries[0].path])).entries[0].kind, 'file')
+  await f.upload('docs/product.md', '更新后的产品说明')
+  assert.equal(
+    (await catalog.read(principal, { cwd, relativePath: files.entries[0].path })).contents,
+    '项目产品说明',
+  )
+  const updated = await catalog.search(principal, { cwd, query: './docs/', limit: 80 })
+  assert.equal(
+    (await catalog.read(principal, { cwd, relativePath: updated.entries[0].path })).contents,
+    '更新后的产品说明',
+  )
+  assert.throws(
+    () =>
+      catalog.search(principal, {
+        cwd: `${cwd}&workspaceVersionId=missing-version`,
+        query: './',
+        limit: 80,
+      }),
+    { code: 'WORKSPACE_NOT_FOUND' },
+  )
+  f.memberships.find((entry) => entry.userId === principal.id).workspaceAccess = 'external'
+  assert.throws(() => catalog.search(principal, { cwd, query: './', limit: 80 }), {
+    code: 'WORKSPACE_FORBIDDEN',
+  })
+  await assert.rejects(catalog.read(principal, { cwd, relativePath: files.entries[0].path }), {
+    code: 'WORKSPACE_FORBIDDEN',
+  })
+})
+
+test('新外部对话的文件候选读取已发布资料并拒绝内部范围', async (t) => {
+  const f = await fixture(t)
+  await f.upload('docs/public.md', '已发布正文')
+  const task = await f.service.generateCurrentExternal(
+    projectId,
+    { requestId: 'picker-external' },
+    owner,
+  )
+  assert.equal((await f.finish(task)).status, 'completed')
+  await f.upload('docs/public.md', '尚未发布正文')
+  const catalog = createBusinessResourceCatalog({
+    access: f.access,
+    workspaceStore: f.store,
+    workspaceInputs: f.service,
+  })
+  const principal = { id: 'external', sessionHash: 'session-external' }
+  const cwd = `autoops://projects/${projectId}/environments/env-test/threads/new-external-draft?workspaceType=external`
+  const result = await catalog.search(principal, { cwd, query: './docs/', limit: 80 })
+  assert.equal(result.entries.length, 1)
+  assert.equal(
+    (await catalog.read(principal, { cwd, relativePath: result.entries[0].path })).contents,
+    '已发布正文',
+  )
+  assert.throws(
+    () =>
+      catalog.search(principal, {
+        cwd: cwd.replace('workspaceType=external', 'workspaceType=internal'),
+        query: './',
+        limit: 80,
+      }),
+    { code: 'WORKSPACE_FORBIDDEN' },
+  )
+})
+
 test('文件选择捕获只使用已同步源码和当前文档，不联网且相同内容键复用原输入', async (t) => {
   const f = await fixture(t)
   const front = await f.source('frontend')
