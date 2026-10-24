@@ -5830,12 +5830,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       liveAttachmentTargetKey: attachmentTargetKeyRef.current,
       references,
       insertReferences: () => {
-        if (selection) {
-          const edit = inlineContextReferenceReplacement(promptRef.current, selection, references);
-          return applyPromptReplacement(edit.start, edit.end, edit.text);
-        }
-        const text = references.map(formatInlineContextReference).join(" ");
-        const inserted = insertComposerText(`${text} `, "cursor", { ensureLeadingBoundary: true });
+        // 已接收附件的引用由当前草稿拥有，不能走外部文本的上下文过滤。
+        const cursor = readComposerSnapshot().expandedCursor;
+        const edit = inlineContextReferenceReplacement(
+          promptRef.current,
+          selection ?? { start: cursor, end: cursor },
+          references,
+        );
+        const inserted = applyPromptReplacement(edit.start, edit.end, edit.text);
         if (!inserted) {
           setPrompt(ensureInlineContextReferences(promptRef.current, references));
         }

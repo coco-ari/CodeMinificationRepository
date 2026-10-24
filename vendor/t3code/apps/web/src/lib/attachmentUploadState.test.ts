@@ -34,7 +34,7 @@ describe("attachmentUploadBlockReason", () => {
           "image-1": { status: "uploading", environmentId, progress: 0.5 },
         },
       }),
-    ).toBe("Attachments still uploading");
+    ).toBe("附件正在上传");
   });
 
   it("leaves send enabled for failed uploads so sending can retry them", () => {
@@ -62,7 +62,7 @@ describe("attachmentUploadBlockReason", () => {
           },
         },
       }),
-    ).toBe("Attachment still uploading");
+    ).toBe("附件正在上传");
   });
 });
 

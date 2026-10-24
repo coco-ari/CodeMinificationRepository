@@ -43,7 +43,7 @@ export function attachmentUploadBlockReason(input: {
   }
 
   if (pending > 0) {
-    return pending === 1 ? "Attachment still uploading" : "Attachments still uploading";
+    return "附件正在上传";
   }
   return null;
 }
