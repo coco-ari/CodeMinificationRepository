@@ -28,3 +28,26 @@ it('文件读取失败明确展示错误并允许重试', async () => {
   await page.getByRole('button', { name: '重试读取文件' }).click()
   expect(retry).toHaveBeenCalledTimes(2)
 })
+
+it('技能读取失败复用候选菜单并支持键盘重试', async () => {
+  const retry = vi.fn()
+  await using screen = await render(
+    <ComposerCommandMenu
+      listId="test-skills"
+      items={[]}
+      resolvedTheme="light"
+      isLoading={false}
+      triggerKind="skill"
+      error="技能加载失败，请重试。"
+      onRetry={retry}
+      activeItemId={null}
+      onHighlightedItemChange={() => {}}
+      onSelect={() => {}}
+    />,
+  )
+  expect(screen.container.textContent).not.toContain('读取文件')
+  await userEvent.tab()
+  await expect.element(page.getByRole('button', { name: '重试', exact: true })).toHaveFocus()
+  await userEvent.keyboard('{Enter}')
+  expect(retry).toHaveBeenCalledTimes(1)
+})

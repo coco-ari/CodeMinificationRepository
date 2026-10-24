@@ -135,7 +135,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                 }}
                 onClick={props.onRetry}
               >
-                重试读取文件
+                {props.triggerKind === "skill" ? "重试" : "重试读取文件"}
               </Button>
             ) : null}
           </div>

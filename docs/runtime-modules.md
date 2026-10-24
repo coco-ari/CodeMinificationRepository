@@ -404,3 +404,9 @@ Windows 上的目录 fsync、POSIX 权限、静态站点符号链接和 shell �
 自动验收证据：[工作台运行链路](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39923043878)、[独立后端](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/39923043841)。服务器保留本次 before/result、SQLite 一致性副本和程序回滚脚本；程序回滚不会覆盖新产生的业务数据。
 
 验收期间，共享主机安装依赖曾导致旧 worker 因内存压力自动重启；已核对恢复后的健康及任务完成状态。随后验收进程采用独立 512 MiB cgroup，完整回归移至独立 CI；服务器限额内未完成的整套测试没有计作通过。此限制已纳入上面的运维要求。
+
+### 技能候选等待恢复（2026-10-24）
+
+截图中的持续“同步”由两处缺口造成：缺失目录时原重试计时器只处理 `slashCommandsPending`，普通失败无法自动续试；已返回空目录也被文案误判为仍在加载。原生目录刷新从 `ChatComposer` 收拢为 `useProviderWorkspaceSnapshotRefresh`，继续调用 `serverEnvironment.refreshProviders`，负责读取等待、重试和清理，不拥有技能数据。技能库、原生模型目录及授权交集的所有权不变，客户本机目录仍保持隔离。
+
+复用 `ComposerCommandMenu` 错误行及键盘重试。目录暂缺自动续试，30 秒总等待结束后失败；空目录停止等待且允许重新扫描。授权目录支持手动重试与网络恢复刷新；切范围和卸载清理定时器并忽略旧请求完成，旧标签与光标维持已有复核规则。macOS Web 类型检查、26 项定向浏览器回归、199 文件模块边界检查、完整网页和 Worker 构建通过。完整问答页面本机故障注入 3 项通过：挂起读取超时、浅深色 × 1440/390×560 错误行、键盘重试保留输入与焦点及 Esc 关闭；没有业务写入或模型调用。截图和操作记录位于 `.deployment/skill-picker/ui/`。线上抽查原版本技能候选可以正常出现，间歇故障未当场复现；发行及部署后实际读取证据随后补录。未修改服务端权限或执行协议。

@@ -107,7 +107,12 @@ function Probe({
       <output data-testid="status">
         {result?.isRefreshing ? "正在复核" : result ? "已完成" : "初次读取"}
       </output>
-      {result?.error ? <p role="alert">{result.error}</p> : null}
+      {result?.error ? (
+        <>
+          <p role="alert">{result.error}</p>
+          <button onClick={result.refresh}>重试</button>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -144,7 +149,10 @@ describe("技能上下文的同范围刷新", () => {
       snapshotId: "next-snapshot",
       skills: [{ name: skillName, displayName: "新版发布检查", versionId: "skill-version-two" }],
     };
-    const fetcher = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(Response.json(next));
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(Response.json(next));
     using _fetch = stubGlobal("fetch", fetcher);
     await using screen = await render(view({ showEditor: true }));
     const node = screen.container.querySelector<HTMLElement & { editor: Editor }>(".tiptap")!;
@@ -156,7 +164,9 @@ describe("技能上下文的同范围刷新", () => {
     await vi.waitFor(() => expect(node.textContent).toContain("新版发布检查"));
     expect(editor.state.selection.from).toBe(cursor);
     expect(serializeEditorDoc(editor.state.doc).value).toBe(prompt);
-    expect(node.querySelectorAll('button[aria-label="技能 新版发布检查，查看详情"]')).toHaveLength(1);
+    expect(node.querySelectorAll('button[aria-label="技能 新版发布检查，查看详情"]')).toHaveLength(
+      1,
+    );
     expect(skillContextDisplaySkills(next)[0]?.path).toBe(
       "/api/agent-demo/t3/autoops/skill-library/contexts/next-snapshot/files/autoops-readiness?path=SKILL.md",
     );
@@ -407,3 +417,30 @@ describe("技能上下文的身份和范围隔离", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
+
+for (const recovery of ["manual", "online"] as const) {
+  it(`技能授权目录读取失败后通过 ${recovery} 恢复且不提前放行`, async () => {
+    setup();
+    const pending = deferred<Response>();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ error: "技能加载失败" }, { status: 503 }))
+      .mockReturnValueOnce(pending.promise);
+    using _fetch = stubGlobal("fetch", fetcher);
+    await using screen = await render(view());
+    await vi.waitFor(() => expect(panel(screen).textContent).toContain("技能加载失败"));
+    expect(newSelection(screen).disabled).toBe(true);
+    await act(() => {
+      if (recovery === "online") window.dispatchEvent(new Event("online"));
+      else (panel(screen).querySelectorAll("button")[1] as HTMLButtonElement).click();
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(newSelection(screen).disabled).toBe(true);
+    await act(() => pending.resolve(response()));
+    await vi.waitFor(() => expect(newSelection(screen).disabled).toBe(false));
+    expectLabel(screen);
+    await screen.unmount();
+    await act(() => window.dispatchEvent(new Event("online")));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+}

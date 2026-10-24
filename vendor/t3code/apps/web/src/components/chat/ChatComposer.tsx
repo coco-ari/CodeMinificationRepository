@@ -73,7 +73,6 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
-  PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
@@ -1125,8 +1124,6 @@ import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   getProviderSlashCommandsForSlashMenu,
   getProviderSkillsForSlashMenu,
-  hasCompleteProviderWorkspaceSnapshot,
-  hasCurrentProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
@@ -1138,10 +1135,8 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { usePanelAnimationSettings } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
-import { serverEnvironment } from "../../state/server";
+import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
-
-const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
 
 /** Reads and disarms a paste-as-text deadline: the shortcut applies to one paste only. */
 function consumePasteAsTextShortcut(deadline: { current: number }): boolean {
@@ -1686,127 +1681,6 @@ export interface ChatComposerProps {
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
-}
-
-/**
- * Keeps the selected provider's workspace snapshot fresh for the composer's
- * cwd. Returns a check to run when the user types.
- */
-function useProviderWorkspaceSnapshotRefresh(input: {
-  readonly environmentId: EnvironmentId;
-  readonly gitCwd: string | null;
-  readonly selectedProviderEntry: ProviderInstanceEntry | undefined;
-  readonly selectedProviderStatus: ServerProvider | null;
-}) {
-  const { environmentId, gitCwd, selectedProviderEntry, selectedProviderStatus } = input;
-  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
-    reportFailure: false,
-  });
-  // The last scan this composer asked for. A request inside the TTL is not
-  // repeated, so a client clock ahead of the server's cannot loop rescans.
-  const workspaceRefreshKeyRef = useRef<{ key: string; requestedAt: number } | null>(null);
-  const [workspaceRefreshRetry, setWorkspaceRefreshRetry] = useState<{
-    key: string;
-    notBefore: number;
-  } | null>(null);
-  const workspaceRefreshScopeKey =
-    gitCwd && selectedProviderEntry
-      ? `${environmentId}:${selectedProviderEntry.instanceId}:${gitCwd}`
-      : null;
-  const workspaceSlashCommandsPending =
-    selectedProviderStatus?.workspaceSnapshots?.some(
-      (snapshot) => snapshot.cwd === gitCwd && snapshot.slashCommandsPending === true,
-    ) ?? false;
-  useEffect(() => {
-    if (
-      !workspaceSlashCommandsPending ||
-      !workspaceRefreshRetry ||
-      workspaceRefreshRetry.key !== workspaceRefreshScopeKey
-    )
-      return;
-    const timeout = setTimeout(
-      () => {
-        setWorkspaceRefreshRetry((current) => (current === workspaceRefreshRetry ? null : current));
-      },
-      Math.max(0, workspaceRefreshRetry.notBefore - Date.now()),
-    );
-    return () => clearTimeout(timeout);
-  }, [workspaceRefreshRetry, workspaceRefreshScopeKey, workspaceSlashCommandsPending]);
-  // Losing a snapshot (the server dropped it) lifts both the TTL and the retry
-  // cooldown so the next check rescans at once.
-  const hasWorkspaceSnapshot = hasCompleteProviderWorkspaceSnapshot(selectedProviderStatus, gitCwd);
-  const [hadWorkspaceSnapshot, setHadWorkspaceSnapshot] = useState(hasWorkspaceSnapshot);
-  const [workspaceSnapshotLossCount, setWorkspaceSnapshotLossCount] = useState(0);
-  if (hadWorkspaceSnapshot !== hasWorkspaceSnapshot) {
-    setHadWorkspaceSnapshot(hasWorkspaceSnapshot);
-    if (!hasWorkspaceSnapshot) {
-      setWorkspaceSnapshotLossCount((count) => count + 1);
-      setWorkspaceRefreshRetry(null);
-    }
-  }
-  const lastWorkspaceSnapshotLossRef = useRef(workspaceSnapshotLossCount);
-  const refreshWorkspaceSnapshotIfStale = (
-    now: number,
-    key: string | null,
-    retry: { key: string; notBefore: number } | null,
-    snapshotLossCount: number,
-  ) => {
-    if (lastWorkspaceSnapshotLossRef.current !== snapshotLossCount) {
-      lastWorkspaceSnapshotLossRef.current = snapshotLossCount;
-      workspaceRefreshKeyRef.current = null;
-    }
-    if (key === null || !gitCwd || !selectedProviderEntry) return;
-    const lastRequest = workspaceRefreshKeyRef.current;
-    if (
-      lastRequest?.key === key &&
-      now - lastRequest.requestedAt < PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS
-    )
-      return;
-    // A pending retry needs no clearing here: its cooldown lapses long before the TTL.
-    if (hasCurrentProviderWorkspaceSnapshot(selectedProviderStatus, gitCwd, now)) return;
-    if (retry?.key === key && now < retry.notBefore) return;
-    const request = { key, requestedAt: now };
-    workspaceRefreshKeyRef.current = request;
-    const retryLater = () => {
-      if (workspaceRefreshKeyRef.current !== request) return;
-      workspaceRefreshKeyRef.current = null;
-      setWorkspaceRefreshRetry({
-        key,
-        notBefore: Date.now() + WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS,
-      });
-    };
-    void refreshProviders({
-      environmentId,
-      input: { instanceId: selectedProviderEntry.instanceId, cwd: gitCwd },
-    }).then((result) => {
-      const refreshedSnapshot =
-        result._tag === "Success" &&
-        hasCompleteProviderWorkspaceSnapshot(
-          result.value.providers.find(
-            (provider) => provider.instanceId === selectedProviderEntry.instanceId,
-          ),
-          gitCwd,
-        );
-      if (!refreshedSnapshot) retryLater();
-    }, retryLater);
-  };
-  const refreshWorkspaceSnapshotOnChange = useEffectEvent(refreshWorkspaceSnapshotIfStale);
-  useEffect(() => {
-    refreshWorkspaceSnapshotOnChange(
-      Date.now(),
-      workspaceRefreshScopeKey,
-      workspaceRefreshRetry,
-      workspaceSnapshotLossCount,
-    );
-  }, [workspaceRefreshScopeKey, workspaceRefreshRetry, workspaceSnapshotLossCount]);
-  return useStableCallback(() =>
-    refreshWorkspaceSnapshotIfStale(
-      Date.now(),
-      workspaceRefreshScopeKey,
-      workspaceRefreshRetry,
-      workspaceSnapshotLossCount,
-    ),
-  );
 }
 
 const NO_PROVIDER_MODELS: ServerProvider["models"] = [];
@@ -2441,11 +2315,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, skillsCwd)
     : NO_PROVIDER_SLASH_COMMANDS;
-  const refreshWorkspaceSnapshotOnTyping = useProviderWorkspaceSnapshotRefresh({
+  const workspaceSkillRefresh = useProviderWorkspaceSnapshotRefresh({
     environmentId,
     gitCwd: skillsCwd,
-    selectedProviderEntry,
-    selectedProviderStatus: selectedProviderStatus,
+    instanceId: selectedProviderEntry?.instanceId,
+    selectedProviderStatus,
   });
 
   const selectedPromptEffort = composerProviderState.promptEffort;
@@ -2967,16 +2841,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return selectedProviderSkills.length === 0
           ? "本机尚未发现可用技能，请在连接程序中检查并刷新。"
           : "未找到匹配的本地技能。";
-      return isAutoOpsHosted()
-        ? (autoOpsSkillContext?.error ??
-            (!autoOpsSkillContext || autoOpsSkillContext.isRefreshing
-              ? "正在读取当前范围的技能…"
-              : selectedProviderSkills.length === 0
-                ? autoOpsSkillContext.authorizedContext?.skills.length
-                  ? "正在同步当前范围的技能，请稍候…"
-                  : "当前助手与项目暂无可用技能，可在“更多功能 → 技能库”查看分配。"
-                : "未找到匹配的技能，请更换名称。"))
-        : "没有找到技能。可输入 / 浏览运行器命令。";
+      if (!isAutoOpsHosted()) return "没有找到技能。可输入 / 浏览运行器命令。";
+      if (autoOpsSkillContext?.error) return autoOpsSkillContext.error;
+      if (!autoOpsSkillContext || autoOpsSkillContext.isRefreshing) return "正在读取技能…";
+      if (!autoOpsSkillContext.authorizedContext?.skills.length)
+        return "暂无可用技能，可在技能库中分配。";
+      if (workspaceSkillRefresh.isRefreshing) return "正在读取技能…";
+      if (selectedProviderSkills.length === 0)
+        return workspaceSkillRefresh.error ?? "当前模型服务未能读取技能，请重试。";
+      return "未找到匹配的技能，请更换名称。";
     }
     if (composerTriggerKind === "pull-request") {
       if (pullRequestProjectId === null || pullRequestRepository === null) {
@@ -2996,6 +2869,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? (workspaceEntries.error ?? "没有匹配的文件或文件夹。")
       : "没有匹配的命令。";
   })();
+
+  const skillMenuError =
+    composerTriggerKind === "skill" && isAutoOpsHosted() && !customerScope
+      ? (autoOpsSkillContext?.error ??
+        (autoOpsSkillContext?.authorizedContext?.skills.length &&
+        !workspaceSkillRefresh.isRefreshing &&
+        selectedProviderSkills.length === 0
+          ? composerMenuEmptyState
+          : null))
+      : null;
 
   const setPromptFromTraits = (nextPrompt: string) => {
     if (nextPrompt === promptRef.current) {
@@ -3729,7 +3612,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     expandComposerForEditorChange();
     // Typing is when the menu is about to need skills, so it re-checks a
     // snapshot that has aged past its TTL.
-    refreshWorkspaceSnapshotOnTyping();
+    workspaceSkillRefresh.refreshIfStale();
     if (activePendingProgress?.activeQuestion && pendingUserInputs.length > 0) {
       if (activePendingProgress.activeQuestion.allowCustomAnswer === false) return;
       setComposerCursor(nextCursor);
@@ -7087,9 +6970,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       workspacePathCompletion && composerTriggerKind === "path"
                     }
                     emptyStateText={composerMenuEmptyState}
-                    error={composerTriggerKind === "path" ? workspaceEntries.error : null}
+                    error={composerTriggerKind === "path" ? workspaceEntries.error : skillMenuError}
                     onRetry={() => {
-                      workspaceEntries.refresh();
+                      if (composerTriggerKind === "skill") {
+                        if (autoOpsSkillContext?.error) autoOpsSkillContext.refresh();
+                        else workspaceSkillRefresh.retry();
+                      } else workspaceEntries.refresh();
                       scheduleComposerFocus();
                     }}
                     activeItemId={activeComposerMenuItem?.id ?? null}

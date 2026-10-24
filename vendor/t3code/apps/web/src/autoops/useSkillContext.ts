@@ -64,9 +64,11 @@ const skillContextQueries = Atom.family((key: string) => {
     };
     const changed = () => get.refreshSelf();
     window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
     window.addEventListener("autoops:skill-library-changed", changed);
     get.addFinalizer(() => {
       window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
       window.removeEventListener("autoops:skill-library-changed", changed);
     });
     return Effect.tryPromise({
@@ -135,5 +137,6 @@ export function useAutoOpsSkillContext(
     authorizedContext: query.isSuccess && !query.isPending && error === null ? context : null,
     error,
     isRefreshing: query.isPending,
+    refresh: query.refresh,
   };
 }
