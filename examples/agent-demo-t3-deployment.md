@@ -10,6 +10,32 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，工作区操作简化应用提交 `db9a9968be9afa370c827cd6fab54fcf0ed75f08` 已完整部署。网关、T3 Worker、网页与客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-workspace-db9a9968`；数据仍为 `/home/tao/autoops-deployment-validation/data`。内部同步和默认外部资料生成一键执行，自动查询原收据；失败显示简短原因。次要操作进入原生菜单，修复提示正文被误作图标而竖排溢出的缺陷，保留对外发布复核。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `b35fd17cea7cc6f4b35d9a885eb5d2ea8a6c724e1ce0f56963e5078d6755abf3` |
+| 完整清单 SHA-256 | `58b43e509378ca590b578ab50b75661c24d66add83e8a2f89bb08fb45efcf8a7` |
+| 原生依赖清单 SHA-256 | `12c083f8cd3e5beddb93e42273427b82f7fd1b231774b192cc0b1d361c89b5a2` |
+| 实际网页 HTML SHA-256 | `c13d8931a979b2cb36059bded1c20fcc1b4786ed7847c03649ca259b0a8543ee` |
+| 客户 ZIP SHA-256 / 字节 | `628529660b6ff3d142b6f0dfcbbba1937deb9bd58fdcbf82fa0da85bd5d4447a` / 1042167 |
+| 文件与旧资源 | 6670 文件、61 相对链接；保留 2444 个旧哈希资源；官方同版原生依赖 2038 文件/21 包校验通过 |
+| 应用提交 CI | [工作台运行链路 40055680366](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40055680366)、[AutoOps 质量检查 40055680327](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40055680327) 均通过 |
+
+构建在开发机完成，29272 个跟踪文件与干净提交逐项核对。服务器准备、Linux 发行校验、隔离资料输入与 ZIP Worker 冒烟及切换串行使用独立 `MemoryMax=512M / MemorySwapMax=0 / CPUQuota=100%` cgroup。macOS 打归档使用 `COPYFILE_DISABLE=1`；本批首次候选因 AppleDouble 附属文件被清单校验拒绝，未切换服务，重打干净归档后通过，不放宽清单校验。
+
+本批先部署 `6c726034` 完成真实业务操作，再以 `db9a9968` 收拢窄屏的次要查看入口。最后切换前检查全部活动任务并正常排空，备份 15 个非空 SQLite 与业务文件；两个验证服务仅增加 `zzzzzzzzzzzzzzzzzzzzz-workspace-db9a9968.conf`，停止预算 90 秒。切换前后 348 个工作区/技能文件、113 条消息、36 轮运行、333 条轮次条目、18 个绑定、3 份成果、1 台客户设备及其目录、13 条客户命令和 3 个游标均保留；原部署配置与记录、28890 站点及其他四项服务 PID 不变。当前两服务 active、重启计数 0，Worker 可达，实际网页摘要与新发行一致。
+
+真实浏览器一次点击“同步源码”后，任务 `66064f79-f35c-4b3d-9091-285d5344a024` 完成，两个来源显示已同步：ai-gateway 为 `792144145a68f7c69271536a35ce5a86e653036e`，travel-map 为 `514e596978dc46ad494ad2904b8112b8d4d84689`。一次点击“更新外部工作区”后，任务 `c5bb14e9-a6a8-4d4d-a563-dac880fcf946` 完成，生成外部 v002 `54f468aa-8070-4a0f-8532-6f47976fb5b1` 并展示待复核内容。原 v001 仍已发布且可查看；新资料中的 PDF 尚需决定保留或排除，未执行对外发布。最后版本只调整菜单，未重复提交上述写操作；升级后两条成功收据、来源状态与原 PDF 摘要 `4bd5d8a8e80e8ee0b7dfeee3b85a9c7c8f88526c57f39116e224d8363938e482` 再次只读核对通过。
+
+UI 实际核对浅深色、1440px 桌面、390×480 窄屏短窗口、已发布/待复核切换、菜单 Esc 与焦点恢复；复核弹窗的长文件名、内部滚动和固定底部操作已验证。最终窄屏待复核状态与主操作完整显示，页面无横向溢出。失败收据、网络恢复及换项目后的迟到结果由定向浏览器回归覆盖；未在真实业务环境故意断网或修改权限。截图证明静态呈现，前述真实点击与持久收据证明同步/生成成功，两者分别记录。
+
+现行恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-workspace-db9a9968-20261024`，程序回滚目标为 `t3-workspace-6c726034`。`rollback-program.sh --check` 已通过，仅撤销本批且摘要未变的配置，继续使用回滚当下数据，不覆盖新资料或恢复旧数据库。本批未实际降级；29 项恢复辅助脚本检查使用本地临时库和模拟服务。旧 `6c726034` 恢复点可作为历史证据，不能越过当前配置执行。
+
+证据在 `.deployment/workspace-flow-fix/`（故障调查、完整回归、首次部署与真实操作）和 `.deployment/workspace-flow-final/`（最终构建源核对、清单、服务器校验与切换、回滚预检、业务摘要和浅深色截图）。未执行 Windows 真机、实体手机、公网 HTTPS 或全部 T3 上游测试，未把本次生成成功表述为对外发布通过。
+
+### 历史程序与网页：非工作区 UI 修复（t3-ui-b0cda944）
+
 2026-10-24，合入非工作区 UI 修复后的应用提交 `b0cda944d5fcd6c46aef70a2b0d8ec0cb197aa1a` 已完整部署。网关、T3 Worker、网页与客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-ui-b0cda944`；数据仍为 `/home/tao/autoops-deployment-validation/data`，未切换身份后端或初始化空库。当前资料、每轮固定输入和独立 Git 部署来源继续保留。
 
 | 发行身份与校验          | 实际结果                                                                                                                                                                                                                              |
