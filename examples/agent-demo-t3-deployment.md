@@ -10,6 +10,26 @@
 
 本节是独立验证入口 `http://192.168.31.157:28887/` 当前程序、网页、客户包及恢复配置的唯一现行记录；逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次只保留历史证据，不能越过当前配置层直接执行旧回滚脚本。原 8787/18887 和技能服务未切换。
 
+2026-10-24，技能管理布局精简应用提交 `995e53b6049c532c02ad4bfcb5e1fc961ecebb33` 已部署。网关、Worker、网页及客户包统一使用 `/home/tao/autoops-agent-demo/releases/t3-skills-995e53b6`；数据仍为 `/home/tao/autoops-deployment-validation/data`。技能卡片保留助手与当前项目快切，其他项目按需搜索；文件详情工具栏、侧栏及操作提示已收拢。业务权限、固定版本、分配范围与项目继承规则未改变。
+
+| 发行身份与校验 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `ef0ea6443018eec225bca72f7b40e60443af7f67d3c4707ee12ac3955302d6ec` |
+| 完整清单 SHA-256 | `c678a88e9762bf69675cb60e707f976a0c8d2ef140712787e4ca5294dfe44b43` |
+| 原生依赖清单 SHA-256 | `65270092e4ad888040ff3b8c9655df13412ed605994412831d813ff43c3259ab` |
+| 实际网页 HTML SHA-256 | `4330f24758de155b75eebed237e89663962874179beeaacb3ae0483c55e2e4f9` |
+| 客户 ZIP SHA-256 / 字节 | `628529660b6ff3d142b6f0dfcbbba1937deb9bd58fdcbf82fa0da85bd5d4447a` / 1042167 |
+| 文件与旧资源 | 7157 文件、61 相对链接；保留旧哈希资源，官方原生依赖 2038 文件/21 包通过 |
+| 应用提交 CI | [工作台运行链路 40066978457](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40066978457)、[AutoOps 质量检查 40066978473](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40066978473) 均通过 |
+
+macOS Web 类型、网页构建、199 文件模块边界、10 项定向回归及 13 项隔离管理验收通过，29274 个跟踪文件与提交逐项核对。Worker/客户源码未改，沿用已验证构建。Linux 完整清单、原生 CLI、隔离资料输入及 ZIP Worker 通过；准备、校验、切换串行使用独立 512 MiB、无 swap、100% CPU 的 cgroup。浅深色、桌面、390px 窄屏、短窗口、长内容、菜单/弹窗、滚动与焦点分别以截图和真实操作验收。
+
+切换前确认空闲，停止接单并备份全部非空 SQLite 和业务文件；原 348 个工作区/技能文件、135 条消息、42 轮运行、422 条轮次条目、21 个绑定、客户设备/目录/收据及部署配置和历史保留。其他四项服务 PID 与 28890 站点未变。实际服务目录及网页摘要与本批发行一致，Worker 可达。线上管理页只读复核，写入验收均使用本地隔离 UUID 技能，结束已清理。
+
+现行恢复目录 `/home/tao/autoops-agent-demo/backups/t3-skills-995e53b6-20261024`，程序回滚目标 `t3-reference-17ea104c`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzzz-skills-995e53b6.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚仅撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。未重验模型执行、客户设备及私有 Git 导入，具体边界见[技能管理验收](../docs/runtime-modules.md#技能管理布局与操作精简2026-10-24)。证据在 `.deployment/skill-layout/`。
+
+### 历史文件引用分析修复（t3-reference-17ea104c）
+
 2026-10-24，文件引用分析修复应用提交 `17ea104c343e682af41bb8221124aca32be1b306` 已部署。网关和重构建的 T3 Worker 使用 `/home/tao/autoops-agent-demo/releases/t3-reference-17ea104c`；数据仍为 `/home/tao/autoops-deployment-validation/data`。原生文件标签随消息保留业务引用授权，工具可按所选路径读取原件；未切换账号后端或修改用户原失败消息。
 
 | 发行身份与校验 | 实际结果 |
@@ -28,7 +48,7 @@ macOS 34 项资料/权限回归、9 项消息入口测试、运行链路检查�
 
 线上独立测试对话通过真实选择 `client.ts` → 发送分析 → 继续追问；两轮读取工具成功，所选原件摘要一致、答案与正文相符。引用授权已在真实消息和业务收据中保存；本轮新输入与已选原件身份各自保留。线上 Git 正常；Git 失败、未授权和撤权条件使用隔离回归，不能混称线上故障注入。未执行资料写入、部署业务任务、权限变更或客户操作。完整证据与未测边界见[引用分析修复](../docs/runtime-modules.md#引用文件分析链路修复2026-10-24)。
 
-现行恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-reference-17ea104c-20261024`，程序回滚目标 `t3-mention-424f6b35`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzz-reference-17ea104c.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚只撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。证据在 `.deployment/reference-read-fix/`。
+该历史批次恢复目录为 `/home/tao/autoops-agent-demo/backups/t3-reference-17ea104c-20261024`，程序回滚目标 `t3-mention-424f6b35`；本批配置 `zzzzzzzzzzzzzzzzzzzzzzzzz-reference-17ea104c.conf`。29 项恢复脚本测试及 `rollback-program.sh --check` 通过，未实际降级；回滚只撤销本批且摘要未变的程序配置，保留当下业务数据，不恢复旧库。证据在 `.deployment/reference-read-fix/`。
 
 ### 历史文件选择修复（t3-mention-424f6b35）
 
