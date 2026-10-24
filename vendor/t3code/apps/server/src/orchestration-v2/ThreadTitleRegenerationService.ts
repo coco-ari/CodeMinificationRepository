@@ -119,6 +119,7 @@ const make = Effect.gen(function* () {
       });
       const generatedTitle = result.title.trim();
       return generatedTitle === "New thread" ||
+        generatedTitle === "新对话" ||
         (input.kind.type === "regenerate" && generatedTitle === projection.thread.title.trim())
         ? { type: "complete" as const }
         : { type: "complete" as const, title: result.title };

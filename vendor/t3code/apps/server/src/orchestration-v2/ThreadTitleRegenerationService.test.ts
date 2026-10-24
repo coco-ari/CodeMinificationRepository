@@ -334,33 +334,36 @@ describe("ThreadTitleRegenerationService", () => {
     }),
   );
 
-  it.effect("keeps the current title when generation returns the fallback", () =>
-    Effect.gen(function* () {
-      const harness = makeHarness({
-        generateTitle: () => Effect.succeed({ title: "New thread" }),
-      });
-      yield* Effect.gen(function* () {
-        const threads = yield* ThreadManagement.ThreadManagementService;
-        const titleRegeneration = yield* ThreadTitleRegeneration.ThreadTitleRegenerationService;
-        const threadId = yield* createThread({
-          command: "command:title:fallback:create",
-          thread: "thread:title:fallback",
+  for (const fallback of ["New thread", "新对话"]) {
+    it.effect(`生成返回占位标题时保留原名：${fallback}`, () =>
+      Effect.gen(function* () {
+        const harness = makeHarness({
+          generateTitle: () => Effect.succeed({ title: fallback }),
         });
-        yield* dispatchUserMessage({
-          command: "command:title:fallback:message",
-          threadId,
-          text: "Some conversation",
-        });
-        const requestId = yield* armRegeneration({ command: "command:title:fallback:1", threadId });
+        yield* Effect.gen(function* () {
+          const threads = yield* ThreadManagement.ThreadManagementService;
+          const titleRegeneration = yield* ThreadTitleRegeneration.ThreadTitleRegenerationService;
+          const threadId = yield* createThread({
+            command: "command:title:fallback:create",
+            thread: "thread:title:fallback",
+          });
+          yield* dispatchUserMessage({
+            command: "command:title:fallback:message",
+            threadId,
+            text: "Some conversation",
+          });
+          const requestId = yield* armRegeneration({ command: "command:title:fallback:1", threadId });
 
-        yield* titleRegeneration.execute({ threadId, requestId, kind: { type: "regenerate" } });
+          yield* titleRegeneration.execute({ threadId, requestId, kind: { type: "regenerate" } });
 
-        const projection = yield* threads.getThreadProjection(threadId);
-        assert.equal(projection.thread.title, "Seed title");
-        assert.isNotOk(projection.thread.titleRegeneration);
-      }).pipe(Effect.provide(harness.layer));
-    }),
-  );
+          const projection = yield* threads.getThreadProjection(threadId);
+          assert.equal(projection.thread.title, "Seed title");
+          assert.isNotOk(projection.thread.titleRegeneration);
+        }).pipe(Effect.provide(harness.layer));
+      }),
+    );
+
+  }
 
   it.effect("keeps the current title when regeneration reproduces it", () =>
     Effect.gen(function* () {
