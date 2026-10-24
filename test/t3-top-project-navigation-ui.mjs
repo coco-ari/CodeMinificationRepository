@@ -27,7 +27,7 @@ let page, currentSession, fixture
 const redact = value => String(value).replaceAll(password,'[已隐藏]').replace(/(Bearer\s+)[A-Za-z0-9_.-]+/gi,'$1[已隐藏]')
 const safeProject = value => /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value || '')
 const projectApi = id => {assert(safeProject(id));return `${api}/projects/${encodeURIComponent(id)}`}
-const areaLabels = {chat:'问答',workspaces:'工作区',deployments:'部署发布'}
+const areaLabels = {chat:'问答',workspaces:'工作区',deployments:'部署'}
 const root = area => page.getByTestId(area === 'workspaces' ? 'workspace-page' : 'deployments-page')
 const navigation = () => page.getByTestId('project-area-navigation').filter({visible:true})
 const sidebar = () => page.locator('[data-sidebar="sidebar"]').filter({visible:true}).first()
@@ -138,7 +138,7 @@ async function login(name,touch=false,username='admin') {
   await page.getByRole('button',{name:'登录',exact:true}).click()
   await page.getByTestId('composer-editor').waitFor({timeout:60000});routeState()
   assert.equal((await page.getByTestId('composer-editor').innerText()).trim(),'')
-  const bootstrap=await get(api+'/bootstrap');session.principalId=bootstrap.principal.id;session.projects=bootstrap.projects
+  const bootstrap=await get(api+'/bootstrap');session.principalId=bootstrap.principal.id;session.projects=bootstrap.projects;session.customerAgentsEnabled=bootstrap.customerAgentsEnabled===true
   const shell=await get('/api/agent-demo/t3/api/orchestration/shell',200,{'x-t3-orchestration-protocol':'2'})
   session.threads=(shell.threads||[]).map(({id,projectId})=>({id,projectId}));session.nativeThreadIds=new Set(session.threads.map(item=>item.id))
   await dismissToasts();return session
@@ -184,13 +184,13 @@ async function assertArea(name,id) {
     await featureSearch().waitFor()
     assert.equal(await page.getByRole('option',{name:'问答',exact:true}).count(),1)
     assert.equal(await page.getByRole('option',{name:'工作区',exact:true}).count(),1)
-    if(currentSession.username==='admin')assert.equal(await page.getByRole('option',{name:'部署发布',exact:true}).count(),1)
-    else assert.equal(await page.getByRole('option',{name:'部署发布',exact:true}).count(),0)
+    if(currentSession.username==='admin')assert.equal(await page.getByRole('option',{name:'部署',exact:true}).count(),1)
+    else assert.equal(await page.getByRole('option',{name:'部署',exact:true}).count(),0)
     await page.keyboard.press('Escape');await until(()=>moduleTrigger.evaluate(element=>element===document.activeElement),'模块菜单关闭应恢复入口焦点')
   }else{
     for(const label of ['问答','工作区'])assert.equal(await navigation().locator(`button[aria-label="${label}"]`).filter({visible:true}).count(),1)
-    if(currentSession.username==='admin')assert.equal(await navigation().locator('button[aria-label="部署发布"]').filter({visible:true}).count(),1)
-    else assert.equal(await navigation().locator('button[aria-label="部署发布"]').count(),0)
+    if(currentSession.username==='admin')assert.equal(await navigation().locator('button[aria-label="部署"]').filter({visible:true}).count(),1)
+    else assert.equal(await navigation().locator('button[aria-label="部署"]').count(),0)
   }
   if(name==='chat')await openSidebar()
   const rows=await page.getByTestId('sidebar-row-slim').count(),cards=await page.getByTestId('sidebar-row-card').count(),search=await page.getByLabel('搜索对话',{exact:true}).count()
@@ -336,11 +336,11 @@ async function keyboardProjectPicker() {
 async function keyboardModuleMenu(){
   await closeMobile()
   const trigger=navigation().getByRole('button',{name:'切换模块',exact:true}).filter({visible:true})
-  if(page.viewportSize().width>=1024){assert.equal(await trigger.count(),0,'桌面宽度应直接展示三个模块按钮');return {desktopButtons:true}}
+  if(page.viewportSize().width>=1024){assert.equal(await trigger.count(),0,'桌面宽度应直接展示四个模块按钮');return {desktopButtons:true}}
   assert.equal(await trigger.count(),1,'窄屏应通过模块菜单保留全部已授权入口')
   await trigger.focus();await trigger.press('Enter')
   const search=featureSearch();await search.waitFor()
-  for(const label of ['问答','工作区','部署发布'])assert.equal(await page.getByRole('option',{name:label,exact:true}).count(),1)
+  for(const label of ['问答','工作区','部署','技能库'])assert.equal(await page.getByRole('option',{name:label,exact:true}).count(),1)
   await until(()=>search.evaluate(element=>element===document.activeElement),'键盘打开模块菜单应聚焦原生功能搜索')
   await search.press('ArrowDown')
   const popup=page.locator('[data-slot="combobox-popup"]').filter({visible:true}),bounds=await popup.boundingBox();assert(bounds&&bounds.x>=-1&&bounds.x+bounds.width<=page.viewportSize().width+1,'模块菜单应在窄屏视窗内')
@@ -348,20 +348,27 @@ async function keyboardModuleMenu(){
   return {nativeCombobox:true,allAuthorizedModules:true,arrowNavigation:true,escapeFocus:true}
 }
 async function moreFunctionSearch(){
-  await closeMobile();const trigger=featureTrigger();await trigger.focus();await trigger.press('Enter')
-  const search=featureSearch();await search.waitFor();await until(()=>search.evaluate(element=>element===document.activeElement),'更多功能搜索应自动获取焦点')
-  const authorizedLabels=['问答','工作区','部署发布','常规设置','外观设置','归档对话','退出登录']
-  for(const label of authorizedLabels)assert.equal(await page.getByRole('option',{name:label,exact:true}).count(),1,'只展示已经接入的真实功能')
-  const allLabels=await page.getByRole('option').allTextContents();assert(!allLabels.some(label=>/MCP|插件/i.test(label)),'未接入的 MCP/插件不可成为假入口')
-  for(const query of ['MCP','插件']){await search.fill(query);await until(async()=>await page.getByRole('option').count()===0,'未接入功能不应被检索为可用入口')}
-  await search.fill('外观');await page.getByRole('option',{name:'外观设置',exact:true}).waitFor();assert.equal(await page.getByRole('option').count(),1,'搜索应筛选实际现有功能')
-  const popup=page.locator('[data-slot="combobox-popup"]').filter({visible:true}),bounds=await popup.boundingBox(),viewport=page.viewportSize();assert(bounds&&bounds.x>=-1&&bounds.y>=-1&&bounds.x+bounds.width<=viewport.width+1&&bounds.y+bounds.height<=viewport.height+1,'更多功能弹层应完整留在视窗内部')
-  const mode=await page.evaluate(()=>document.documentElement.classList.contains('dark')?'dark':'light')
-  await capture(`${currentSession.name}-more-function-search-${viewport.width}-${viewport.height}-${mode}`)
-  await page.keyboard.press('Escape');await search.waitFor({state:'hidden'});await until(()=>trigger.evaluate(element=>element===document.activeElement),'更多功能 Escape 应恢复入口焦点')
-  return {existingFunctions:authorizedLabels,searchedAppearance:true,noFakeMcpOrPlugins:true,escapeFocus:true}
+  await closeMobile();const trigger=featureTrigger();const wide=page.viewportSize().width>=1024
+  if(wide&&!currentSession.customerAgentsEnabled){assert.equal(await trigger.count(),0,'没有低频模块时不显示空菜单');return {emptyMenuHidden:true}}
+  await trigger.press('Enter');const search=featureSearch();await search.waitFor()
+  const authorizedLabels=wide?['我的电脑']:['问答','工作区','部署','技能库',...(currentSession.customerAgentsEnabled?['我的电脑']:[])]
+  for(const label of authorizedLabels)assert.equal(await page.getByRole('option',{name:label,exact:true}).count(),1)
+  for(const label of ['常规设置','外观设置','归档对话','退出登录',...(wide?['问答','工作区','部署','技能库']:[])])assert.equal(await page.getByRole('option',{name:label,exact:true}).count(),0,'模块菜单不应混入设置或重复常用入口')
+  for(const query of ['MCP','插件']){await search.fill(query);assert.equal(await page.getByRole('option').count(),0)}
+  const searched=authorizedLabels[0];await search.fill(searched);await page.getByRole('option',{name:searched,exact:true}).waitFor();assert.equal(await page.getByRole('option').count(),1)
+  const popup=page.locator('[data-slot="combobox-popup"]').filter({visible:true}),bounds=await popup.boundingBox(),viewport=page.viewportSize();assert(bounds&&bounds.x>=-1&&bounds.y>=-1&&bounds.x+bounds.width<=viewport.width+1&&bounds.y+bounds.height<=viewport.height+1,'模块弹层应完整留在视窗内')
+  await capture(`${currentSession.name}-module-search-${viewport.width}-${viewport.height}`)
+  await page.keyboard.press('Escape');await search.waitFor({state:'hidden'});await until(()=>trigger.evaluate(element=>element===document.activeElement),'模块菜单 Escape 应恢复入口焦点')
+  return {existingFunctions:authorizedLabels,searched,escapeFocus:true}
 }
-async function openGeneralSettings(){await closeMobile();await featureTrigger().click();await featureSearch().waitFor();await page.getByRole('option',{name:'常规设置',exact:true}).click();await until(()=>routeState().pathname==='/settings/general','更多功能应进入已接入的常规设置')}
+async function openGeneralSettings(){
+  await openSidebar()
+  const settings=page.getByRole('button',{name:'设置',exact:true})
+  if(await settings.count())await settings.click()
+  await openSidebar();await page.getByRole('button',{name:'常规',exact:true}).click()
+  await until(()=>routeState().pathname==='/settings/general','侧栏应进入常规设置')
+  await closeMobile()
+}
 async function topGeometry(area,label){
   await closeMobile();await dismissToasts();await navigation().waitFor()
   const value=await navigation().evaluate(element=>{
@@ -488,7 +495,7 @@ try{
   await run('touch-project-context-and-source-package',async()=>({context:await switchAndHistory(),package:await packages()}))
   const guest=await login('guest-external',false,'guest');currentSession=guest;page=guest.page
   await run('external-project-boundary-and-deployment403',async()=>{
-    await selectProject(projectA);await area('workspaces',projectA);const entry=navigation().locator('[aria-label="部署发布"]');assert(await entry.count()===0||await entry.isDisabled(),'外部成员不能操作部署入口');await closeMobile()
+    await selectProject(projectA);await area('workspaces',projectA);const entry=navigation().locator('[aria-label="部署"]');assert(await entry.count()===0||await entry.isDisabled(),'外部成员不能操作部署入口');await closeMobile()
     await get(projectApi(projectA)+'/deployments',403)
     const deniedAt=Date.now();await page.goto(`${origin}/agent-demo.html#/deployments?projectId=${projectA}`);await page.getByTestId('project-unavailable').waitFor({timeout:60000});assert.equal(await page.locator('[aria-label="服务发布"]').count(),0)
     assert(!report.projectRequests.some(item=>item.session===guest.name&&item.at>=deniedAt&&item.kind==='deployments'),'外部部署页不应自动请求执行数据')

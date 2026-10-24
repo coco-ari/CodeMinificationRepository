@@ -24,7 +24,7 @@ assert(!resumeFrom || resumeFrom === 'settings', '仅支持从已验证前四项
 const targetedCase = process.env.T3_SKILL_NAV_CASE
 assert(!targetedCase || targetedCase === 'delayed-import-refresh', '未知的技能导航定向检查')
 assert(!(resumeFrom && targetedCase), '继续检查与定向检查不能同时使用')
-const verifiedBeforeSettings = new Set(['skills-enters-through-unified-more-menu', 'native-card-agent-and-project-toggle-round-trip', 'project-view-follows-top-project-with-history-and-refresh', 'accepted-version-import-cannot-navigate-later-project'])
+const verifiedBeforeSettings = new Set(['skills-enters-through-unified-module-navigation', 'native-card-agent-and-project-toggle-round-trip', 'project-view-follows-top-project-with-history-and-refresh', 'accepted-version-import-cannot-navigate-later-project'])
 const report = { origin, marker, startedAt: new Date().toISOString(), cases: [], mutations: [], blockedMutations: [], blockedThreadReads: [], pageErrors: [], geometry: [], cleanup: {}, coverage: { modelCalls: 0, existingThreadsOpened: false, touch: 'Chromium 390px 触屏模拟，非物理手机' } }
 if (resumeFrom) report.continuedFrom = resumeFrom
 if (targetedCase) report.targetedCase = targetedCase
@@ -142,7 +142,19 @@ async function dismissToasts() {
   await until(async () => await page.locator('[data-slot="toast-viewport"] [data-slot="toast-title"], [data-slot="toast-viewport-anchored"] [data-slot="toast-title"], [data-sonner-toast]').count() === 0, '原生通知退出动画完成', 6000)
 }
 async function chooseFeature(label) {
-  await dismissToasts(); await featureTrigger().click(); await featureSearch().waitFor(); await featureSearch().fill(label)
+  await dismissToasts()
+  if (['常规设置', '外观设置'].includes(label)) {
+    const sidebar = page.locator('[data-sidebar="sidebar"]').filter({ visible: true }).first()
+    if (!(await sidebar.count())) await navigation().getByRole('button', { name: '切换主侧栏', exact: true }).click()
+    const settings = page.getByRole('button', { name: '设置', exact: true })
+    if (await settings.count()) await settings.click()
+    const target = page.getByRole('button', { name: label === '外观设置' ? '外观' : '常规', exact: true })
+    if (!(await target.isVisible())) await navigation().getByRole('button', { name: '切换主侧栏', exact: true }).click()
+    await target.click(); await closeSettingsSidebar(); return
+  }
+  const direct = navigation().locator(`button[aria-label="${label}"]`)
+  if (await direct.count()) { await direct.click(); return }
+  await featureTrigger().click(); await featureSearch().waitFor(); await featureSearch().fill(label)
   await page.getByRole('option', { name: label, exact: true }).click()
 }
 async function selectProject(id) {
@@ -162,8 +174,8 @@ async function assertSkills(projectId, view) {
   assert.equal(await page.getByLabel('搜索对话', { exact: true }).count(), 0)
   assert.equal(await page.getByTestId('sidebar-draft-row').count(), 0)
   assert.equal(await page.getByRole('combobox', { name: '技能范围项目', exact: true }).count(), 0, '项目范围统一使用顶栏，不重复项目选择器')
-  assert.equal(await navigation().locator('button[aria-label="技能库"]').count(), 0, '技能不得成为第四个常用顶部按钮')
-  if (page.viewportSize().width >= 1024) for (const name of ['问答', '工作区', '部署发布']) assert.equal(await navigation().locator(`button[aria-label="${name}"]`).count(), session.username === 'admin' || name !== '部署发布' ? 1 : 0)
+  assert.equal(await navigation().locator('button[aria-label="技能库"]').count(), page.viewportSize().width >= 1024 ? 1 : 0, '技能库桌面直接可达，窄屏统一进入模块菜单')
+  if (page.viewportSize().width >= 1024) for (const name of ['问答', '工作区', '部署', '技能库']) assert.equal(await navigation().locator(`button[aria-label="${name}"]`).count(), session.username === 'admin' || name !== '部署' ? 1 : 0)
   return current
 }
 async function central() {
@@ -304,7 +316,7 @@ try {
   if (targetedCase === 'delayed-import-refresh') {
     await run('delayed-import-refreshes-current-project-without-changing-assignment', delayedImportRefresh)
   } else {
-  await run('skills-enters-through-unified-more-menu', async () => {
+  await run('skills-enters-through-unified-module-navigation', async () => {
     await page.goto(`${origin}/agent-demo.html#/workspaces?projectId=${projectA.id}`); await navigation().waitFor()
     await chooseFeature('技能库'); const state = await assertSkills(projectA.id); await central(); await card().waitFor(); return state
   })

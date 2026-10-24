@@ -27,7 +27,7 @@ let page, currentSession, fixture
 const redact = value => String(value).replaceAll(password,'[已隐藏]').replace(/(Bearer\s+)[A-Za-z0-9_.-]+/gi,'$1[已隐藏]')
 const safeProject = value => /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value || '')
 const projectApi = id => {assert(safeProject(id));return `${api}/projects/${encodeURIComponent(id)}`}
-const areaLabels = {chat:'问答',workspaces:'工作区',deployments:'部署发布'}
+const areaLabels = {chat:'问答',workspaces:'工作区',deployments:'部署'}
 const root = area => page.getByTestId(area === 'workspaces' ? 'workspace-page' : 'deployments-page')
 const navigation = () => page.getByTestId('project-area-navigation').filter({visible:true})
 const sidebar = () => page.locator('[data-sidebar="sidebar"]').filter({visible:true}).first()
@@ -173,7 +173,7 @@ async function assertArea(name,id) {
   assert((await picker().innerText()).includes(currentSession.projects.find(item=>item.id===id).name),'侧栏统一项目选择应保持当前项目')
   assert.equal(await navigation().locator('[aria-label="问答"]').count(),1)
   assert.equal(await navigation().locator('[aria-label="工作区"]').count(),1)
-  if(currentSession.username==='admin')assert.equal(await navigation().locator('[aria-label="部署发布"]').count(),1)
+  if(currentSession.username==='admin')assert.equal(await navigation().locator('[aria-label="部署"]').count(),1)
   const rows=await page.getByTestId('sidebar-row-slim').count(),cards=await page.getByTestId('sidebar-row-card').count(),search=await page.getByLabel('搜索对话',{exact:true}).count()
   if(name==='chat'){
     assert(search>0,'问答区域应保留原生对话搜索');assert.equal(cards,0,'保持原生紧凑对话列表')
@@ -350,7 +350,7 @@ try{
   await run('touch-project-context-and-source-package',async()=>({context:await switchAndHistory(),package:await packages()}))
   const guest=await login('guest-external',false,'guest');currentSession=guest;page=guest.page
   await run('external-project-boundary-and-deployment403',async()=>{
-    await selectProject(projectA);await area('workspaces',projectA);await openSidebar();const entry=navigation().locator('[aria-label="部署发布"]');assert(await entry.count()===0||await entry.isDisabled(),'外部成员不能操作部署入口');await closeMobile()
+    await selectProject(projectA);await area('workspaces',projectA);await openSidebar();const entry=navigation().locator('[aria-label="部署"]');assert(await entry.count()===0||await entry.isDisabled(),'外部成员不能操作部署入口');await closeMobile()
     await get(projectApi(projectA)+'/deployments',403)
     const deniedAt=Date.now();await page.goto(`${origin}/agent-demo.html#/deployments?projectId=${projectA}`);await page.getByTestId('project-unavailable').waitFor({timeout:60000});assert.equal(await page.locator('[aria-label="服务发布"]').count(),0)
     assert(!report.projectRequests.some(item=>item.session===guest.name&&item.at>=deniedAt&&item.kind==='deployments'),'外部部署页不应自动请求执行数据')

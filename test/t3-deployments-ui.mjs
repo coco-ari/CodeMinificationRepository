@@ -442,7 +442,7 @@ try {
   const guest = await login('guest-readonly',false,'guest')
   await run('guest-denied',async()=>{
     await workspace(guest)
-    assert.equal(await page.getByTestId('project-area-navigation').getByRole('button',{name:'部署发布',exact:true}).count(),0)
+    assert.equal(await page.getByTestId('project-area-navigation').getByRole('button',{name:'部署',exact:true}).count(),0)
     assert.equal(await page.getByRole('combobox',{name:'部署环境',exact:true}).count(),0)
     assert.equal(guest.deploymentReads,0,'外部账号界面不应自动访问部署接口')
     await get(api+'/deployments?environmentId='+environmentId,403)
