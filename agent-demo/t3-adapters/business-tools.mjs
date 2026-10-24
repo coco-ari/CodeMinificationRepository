@@ -84,7 +84,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
   }
   const workspacePath = (binding, relativePath) => materialInput ? `autoops/${binding.projectId}/inputs/${materialInput.id}/${relativePath}` : `autoops/${binding.projectId}/workspaces/${binding.workspaceVersionId}/${relativePath}`
   const workspaceSource = (binding, path) => `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(workspacePath(binding, path))}`
-  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: workspacePath(binding, '').replace(/\/$/, ''), ...(materialInput ? { inputId: materialInput.id, capturedAt: materialInput.createdAt, revision: materialInput.revision, sourceErrors: materialInput.sourceErrors ?? [] } : {}), source: { ...(version.source?.contentHash === undefined ? {} : { contentHash: version.source.contentHash }), repositories: version.type === 'external' ? [] : (version.source?.repositories ?? []).map(({ path, commit }) => ({ path, commit })) } })
+  const workspaceIdentity = ({ version }, binding) => ({ id: version.id, type: version.type, root: workspacePath(binding, '').replace(/\/$/, ''), ...(materialInput ? { inputId: materialInput.id, capturedAt: materialInput.createdAt, revision: materialInput.revision, sourceErrors: materialInput.sourceErrors ?? [], sourceWarnings: materialInput.sourceWarnings ?? [] } : {}), source: { ...(version.source?.contentHash === undefined ? {} : { contentHash: version.source.contentHash }), repositories: version.type === 'external' ? [] : (version.source?.repositories ?? []).map(({ path, commit }) => ({ path, commit })) } })
   return {
     async listMaterials(threadId) {
       const { project, binding } = await authorize(threadId)

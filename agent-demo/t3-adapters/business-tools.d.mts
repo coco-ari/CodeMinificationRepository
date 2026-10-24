@@ -23,6 +23,7 @@ export function createAutoOpsBusinessTools(options: {
   materialInput?: {
     id: string; workspaceType: 'internal'|'external'; createdAt: string; revision: number;
     sourceErrors?: ReadonlyArray<{sourceId:string;name:string;mountPath:string;code:string;message:string}>;
+    sourceWarnings?: ReadonlyArray<{sourceId:string;name:string;mountPath:string;code:string;message:string}>;
     repositories: ReadonlyArray<{path:string;commit:string}>;
     files: ReadonlyArray<{path:string;name:string;mime:string;size:number}>;
     read(path:string): Promise<{contents:string;byteLength:number;truncated:boolean}>;

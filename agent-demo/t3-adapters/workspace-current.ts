@@ -17,6 +17,7 @@ import type {
   WorkspaceInputRepository,
   WorkspaceMaterialContent,
   WorkspaceCapturedFile,
+  WorkspaceRepositorySource,
 } from '../../autoops/contracts/workspace-authoring.ts'
 import type { WorkspaceTask } from '../../autoops/contracts/workspaces.ts'
 
@@ -124,8 +125,9 @@ export function createCurrentWorkspace({
       const commit = captured.resolvedRepositories?.find(
         (value) => value.sourceId === source.id,
       )?.commit
-      const retainedVersion = versionId ?? previous?.versionId
-      const retainedCommit = commit ?? previous?.commit
+      const sameConfiguration = previous?.configurationHash === digest(source)
+      const retainedVersion = versionId ?? (sameConfiguration ? previous?.versionId : undefined)
+      const retainedCommit = versionId ? commit : sameConfiguration ? previous?.commit : undefined
       authoring.recordSync(
         project,
         {
@@ -316,6 +318,56 @@ export function createCurrentWorkspace({
     if (value.status !== 'active') fail(410, 'WORKSPACE_INPUT_RELEASED', '本轮资料输入已释放')
     return value
   }
+  function availableRepositories(
+    project: string,
+    sources: WorkspaceRepositorySource[],
+    actor: string,
+  ): WorkspaceInputRepository[] {
+    readPermission(project, actor)
+    const current = authoring.overview(project, actor)
+    const records = authoring.syncRecords(project, actor)
+    return sources.flatMap((source) => {
+      const configurationHash = digest(source)
+      if (
+        !current.sources.some(
+          (value) => value.id === source.id && digest(value) === configurationHash,
+        )
+      )
+        return []
+      const record = records.find(
+        (value) =>
+          value.sourceId === source.id &&
+          value.configurationHash === configurationHash &&
+          value.versionId,
+      )
+      if (!record?.versionId) return []
+      const fixed = store
+        .getVersion(project, record.versionId)
+        .source.repositories.find(
+          (value) =>
+            value.sourceId === source.id &&
+            value.configurationHash === configurationHash &&
+            value.path === source.mountPath,
+        )
+      if (!fixed) return []
+      // 只沿用当前配置下已同步的完整源码；凭证与资料权限仍按当前授权核对。
+      const credentialVersion = source.credentialId
+        ? credentials.referenceVersion(actor, project, source.credentialId)
+        : undefined
+      return [
+        {
+          sourceId: source.id,
+          commit: fixed.commit,
+          refKind: source.refKind,
+          ref: source.ref,
+          defaultRef: null,
+          ...(credentialVersion ? { credentialVersion } : {}),
+          source,
+          versionId: record.versionId,
+        },
+      ]
+    })
+  }
   function inputFiles(project: string, inputId: string, actor: string): WorkspaceCapturedFile[] {
     const input = readInput(project, inputId, actor)
     const files = new Map(input.files.map((file) => [file.path, file]))
@@ -410,6 +462,8 @@ export function createCurrentWorkspace({
         let captured = authoring.capture(project, undefined, actor, input.requestId)
         let versionId: string | undefined
         let sourceErrors: WorkspaceInputCapture['sourceErrors']
+        let sourceWarnings: WorkspaceInputCapture['sourceWarnings']
+        let retainedRepositories: WorkspaceInputRepository[] = []
         try {
           captured = await resolveCapture(project, captured, actor, currentSignal, true)
           if (captured.sources.length) {
@@ -437,13 +491,26 @@ export function createCurrentWorkspace({
           const code = sourceFailureCode(error)
           if (!code || !unavailableGitCodes.has(code)) throw error
           syncState(project, captured, actor, 'failed', undefined, code)
-          sourceErrors = captured.sources.map((source) => ({
+          retainedRepositories = availableRepositories(project, captured.sources, actor)
+          const issues = captured.sources.map((source) => ({
             sourceId: source.id,
             name: source.name,
             mountPath: source.mountPath,
             code,
-            message: '本轮源码同步失败，未使用历史缓存；上传资料仍可读取',
           }))
+          const available = new Set(retainedRepositories.map((repository) => repository.sourceId))
+          sourceErrors = issues
+            .filter((issue) => !available.has(issue.sourceId))
+            .map((issue) => ({
+              ...issue,
+              message: '源码更新失败，此仓库尚无可读取的同步内容；上传资料仍可读取',
+            }))
+          sourceWarnings = issues
+            .filter((issue) => available.has(issue.sourceId))
+            .map((issue) => ({
+              ...issue,
+              message: '源码更新失败，继续使用工作区已同步的内容；远端最新提交尚未确认',
+            }))
         }
         readPermission(project, actor)
         const value: WorkspaceInputCapture = {
@@ -454,13 +521,19 @@ export function createCurrentWorkspace({
           revision: captured.revision,
           createdAt: captured.createdAt,
           status: 'active',
-          repositories: versionId ? repositories(captured, versionId) : [],
+          repositories: versionId ? repositories(captured, versionId) : retainedRepositories,
           files: captured.files,
           directories: captured.directories,
           captureId: captured.id,
-          ...(sourceErrors ? { sourceErrors } : {}),
+          ...(sourceErrors?.length ? { sourceErrors } : {}),
+          ...(sourceWarnings?.length ? { sourceWarnings } : {}),
         }
-        if (versionId) store.retainVersion(project, versionId, `input:${value.id}`)
+        for (const repository of value.repositories)
+          store.retainVersion(
+            project,
+            repository.versionId,
+            `input:${value.id}:${repository.sourceId}`,
+          )
         const saved = authoring.saveInput(value, actor)
         const completed = store.taskForRequest(project, 'input', input.requestId, actor)
         if (completed) store.releaseVersion(project, `task:${completed.id}`)
@@ -720,37 +793,17 @@ export function createCurrentWorkspace({
       )
     }
     const current = authoring.overview(project, actor)
-    const records = authoring.syncRecords(project, actor)
-    const available = current.sources
-      .map((source) => ({
-        source,
-        record: records.find(
-          (value) =>
-            value.sourceId === source.id &&
-            value.configurationHash === digest(source) &&
-            value.versionId,
-        ),
-      }))
-      .filter((value) => value.record)
-    const requestId = `picker:${digest([actor, current.revision, available.map((value) => [value.source.id, value.record!.versionId])])}`
+    const available = availableRepositories(project, current.sources, actor)
+    const requestId = `picker:${digest([actor, current.revision, available.map((value) => [value.source.id, value.versionId])])}`
     const previous = authoring.inputByRequest(project, requestId, actor, 'internal')
     if (previous) return readInput(project, previous.id, actor)
     let captured = authoring.capture(project, current.revision, actor, requestId, {
       sources: available.map((value) => value.source),
       documents: true,
     })
-    const resolved = available.map(({ source, record }) => ({
-      sourceId: source.id,
-      commit: store
-        .getVersion(project, record!.versionId!)
-        .source.repositories.find((value) => value.sourceId === source.id)!.commit,
-      refKind: source.refKind,
-      ref: source.ref,
-      defaultRef: null,
-      ...(source.credentialId
-        ? { credentialVersion: credentials.referenceVersion(actor, project, source.credentialId) }
-        : {}),
-    }))
+    const resolved = available.map(
+      ({ source: _source, versionId: _versionId, ...resolved }) => resolved,
+    )
     if (captured.resolution === 'pending')
       captured = authoring.freezeCaptureRepositories(project, captured.id, resolved, actor)
     const value: WorkspaceInputCapture = {
@@ -761,11 +814,7 @@ export function createCurrentWorkspace({
       revision: captured.revision,
       createdAt: captured.createdAt,
       status: 'active',
-      repositories: available.map(({ source, record }) => ({
-        ...resolved.find((value) => value.sourceId === source.id)!,
-        source,
-        versionId: record!.versionId!,
-      })),
+      repositories: available,
       files: captured.files,
       directories: captured.directories,
       captureId: captured.id,
@@ -833,7 +882,7 @@ export function createCurrentWorkspace({
     )
     if (input.expectedRevision !== undefined && input.expectedRevision !== captured.revision)
       fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原外部请求已经固定其他资料修订')
-    if (captured.sourceErrors?.length)
+    if (captured.sourceErrors?.length || captured.sourceWarnings?.length)
       fail(
         503,
         'WORKSPACE_EXTERNAL_SOURCE_UNAVAILABLE',
@@ -1003,7 +1052,7 @@ export function createCurrentWorkspace({
       const captured = authoring.captureByRequest(project, request, actor)
       if (!captured) return null
       const input = authoring.inputByRequest(project, request, actor, 'internal')
-      const failure = input?.sourceErrors?.[0]
+      const failure = input?.sourceErrors?.[0] ?? input?.sourceWarnings?.[0]
       return {
         id: captured.id,
         resolution: failure ? ('failed' as const) : captured.resolution,

@@ -341,7 +341,10 @@ test('显式同步有真实持久收据，失败不伪装成功且保留最近�
   const request = f.mutation()
   await assert.rejects(f.service.sync(projectId, request, owner))
   assert.equal(f.service.overview(projectId, owner).sourceStatus[0].status, 'failed')
-  assert.equal(f.service.overview(projectId, owner).sourceStatus[0].error.code, 'WORKSPACE_GIT_FAILED')
+  assert.equal(
+    f.service.overview(projectId, owner).sourceStatus[0].error.code,
+    'WORKSPACE_GIT_FAILED',
+  )
   assert.match(
     f.service.currentFile(projectId, 'apps/web/README.md', owner).bytes.toString(),
     /固定源码/,
@@ -627,7 +630,7 @@ test('外部新输入只取最新已发布资料，旧输入保持固定且拒�
   )
 })
 
-test('Git暂不可用时固定上传资料与明确失败事实，不回退旧源码且原轮不重新联网', async (t) => {
+test('Git暂不可用时保留工作区已同步源码与更新警告，原轮不重新联网且对外生成仍拒绝', async (t) => {
   const f = await fixture(t)
   await f.source('frontend')
   await f.upload('docs/product.md', '网络故障仍须可读的产品资料')
@@ -642,15 +645,16 @@ test('Git暂不可用时固定上传资料与明确失败事实，不回退旧�
     { requestId: 'agent-run:network-failed', workspaceType: 'internal' },
     'reader',
   )
-  assert.equal(input.repositories.length, 0)
-  assert.equal(input.sourceErrors[0].code, 'WORKSPACE_GIT_FAILED')
+  assert.equal(input.repositories.length, 1)
+  assert.equal(input.sourceErrors, undefined)
+  assert.equal(input.sourceWarnings[0].code, 'WORKSPACE_GIT_FAILED')
   assert.equal(
     f.service.readInputFile(projectId, input.id, 'docs/product.md', 'reader').bytes.toString(),
     '网络故障仍须可读的产品资料',
   )
-  assert.throws(
-    () => f.service.readInputFile(projectId, input.id, 'apps/web/README.md', 'reader'),
-    (error) => error.code === 'WORKSPACE_INPUT_SOURCE_UNAVAILABLE',
+  assert.match(
+    f.service.readInputFile(projectId, input.id, 'apps/web/README.md', 'reader').bytes.toString(),
+    /frontend 固定源码/,
   )
   await assert.rejects(
     f.service.generateCurrentExternal(projectId, { requestId: 'external-unavailable' }, owner),
@@ -665,7 +669,7 @@ test('Git暂不可用时固定上传资料与明确失败事实，不回退旧�
     { requestId: 'agent-run:network-failed', workspaceType: 'internal' },
     'reader',
   )
-  assert.deepEqual(repeated.sourceErrors, input.sourceErrors)
+  assert.deepEqual(repeated, input)
   assert.equal(f.calls.resolve.length, calls)
   f.control.failResolve = false
   const next = await f.service.captureAgentInput(
@@ -675,7 +679,137 @@ test('Git暂不可用时固定上传资料与明确失败事实，不回退旧�
   )
   assert.equal(next.repositories.length, 1)
   assert.equal(next.sourceErrors, undefined)
+  assert.equal(next.sourceWarnings, undefined)
   assert.equal(f.calls.fetch.length, 1)
+})
+
+test('抓取新提交失败保留旧源码及其真实提交，恢复后新轮更新而原轮保持不变', async (t) => {
+  const f = await fixture(t)
+  await f.source('frontend')
+  const capture = (requestId) =>
+    f.service.captureAgentInput(projectId, { requestId, workspaceType: 'internal' }, 'reader')
+  const first = await capture('first')
+  const repo = await f.repository('frontend')
+  await writeFile(join(repo.directory, 'README.md'), '更新后的源码正文')
+  execFileSync('git', ['-C', repo.directory, 'add', 'README.md'])
+  execFileSync('git', [
+    '-C',
+    repo.directory,
+    '-c',
+    'user.name=隔离验收',
+    '-c',
+    'user.email=fixture@example.invalid',
+    'commit',
+    '--quiet',
+    '-m',
+    '更新隔离源码',
+  ])
+  repo.commit = execFileSync('git', ['-C', repo.directory, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+  }).trim()
+  f.control.beforeFetch = () => {
+    throw Object.assign(new Error('隔离抓取超时'), { code: 'WORKSPACE_GIT_TIMEOUT', status: 504 })
+  }
+  const retained = await capture('failed-new-commit')
+  assert.equal(retained.repositories[0].commit, first.repositories[0].commit)
+  assert.equal(retained.repositories[0].versionId, first.repositories[0].versionId)
+  assert.equal(retained.sourceWarnings[0].code, 'WORKSPACE_GIT_TIMEOUT')
+  assert.match(
+    f.service
+      .readInputFile(projectId, retained.id, 'apps/web/README.md', 'reader')
+      .bytes.toString(),
+    /frontend 固定源码/,
+  )
+  const record = f.authoring.syncRecords(projectId, owner)[0]
+  assert.equal(record.status, 'failed')
+  assert.equal(record.commit, first.repositories[0].commit)
+  assert.equal(record.versionId, first.repositories[0].versionId)
+  f.control.beforeFetch = undefined
+  const restored = await capture('restored')
+  assert.equal(restored.sourceWarnings, undefined)
+  assert.equal(restored.repositories[0].commit, repo.commit)
+  assert.equal(
+    f.service
+      .readInputFile(projectId, restored.id, 'apps/web/README.md', 'reader')
+      .bytes.toString(),
+    '更新后的源码正文',
+  )
+  assert.match(
+    f.service
+      .readInputFile(projectId, retained.id, 'apps/web/README.md', 'reader')
+      .bytes.toString(),
+    /frontend 固定源码/,
+  )
+})
+
+test('只沿用当前配置已同步的源码，未同步和改过配置的仓库不借用历史文件', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const capture = (requestId) =>
+    f.service.captureAgentInput(projectId, { requestId, workspaceType: 'internal' }, 'reader')
+  await capture('initial')
+  const other = await f.source('backend')
+  f.control.failResolve = true
+  const partial = await capture('partial')
+  assert.deepEqual(
+    partial.repositories.map((repository) => repository.sourceId),
+    [source.id],
+  )
+  assert.deepEqual(
+    partial.sourceErrors.map((issue) => issue.sourceId),
+    [other.id],
+  )
+  assert.deepEqual(
+    partial.sourceWarnings.map((issue) => issue.sourceId),
+    [source.id],
+  )
+  const updated = await f.http('sources', {
+    method: 'POST',
+    input: {
+      action: 'save',
+      input: { ...source, ...f.mutation(), url: 'https://github.com/fixtures/changed.git' },
+    },
+  })
+  assert.equal(updated.status, 200)
+  const changed = await capture('changed-source')
+  assert.equal(changed.repositories.length, 0)
+  assert.equal(changed.sourceWarnings, undefined)
+  assert.equal(changed.sourceErrors.length, 2)
+  const record = f.authoring
+    .syncRecords(projectId, owner)
+    .find((record) => record.sourceId === source.id)
+  assert.equal(record.versionId, undefined)
+  assert.equal(record.commit, undefined)
+  const picker = await f.service.captureAvailableInput(
+    projectId,
+    { workspaceType: 'internal' },
+    'reader',
+  )
+  assert.equal(picker.repositories.length, 0)
+  assert.throws(() =>
+    f.service.readInputFile(projectId, changed.id, 'apps/web/README.md', 'reader'),
+  )
+})
+
+test('更新失败时仍核对最新来源与读取权限，删除来源或撤权不能借用已同步源码', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const capture = (requestId) =>
+    f.service.captureAgentInput(projectId, { requestId, workspaceType: 'internal' }, 'reader')
+  await capture('initial')
+  f.control.failResolve = true
+  f.control.beforeResolve = () => {
+    f.memberships.find((member) => member.userId === 'reader').status = 'disabled'
+  }
+  await assert.rejects(capture('revoked'))
+  f.memberships.find((member) => member.userId === 'reader').status = 'active'
+  f.control.beforeResolve = () => {
+    f.authoring.removeSource(projectId, source.id, f.mutation(), owner)
+  }
+  const removed = await capture('removed')
+  assert.equal(removed.repositories.length, 0)
+  assert.equal(removed.sourceWarnings, undefined)
+  assert.equal(removed.sourceErrors[0].sourceId, source.id)
 })
 
 test('已选源码引用在新轮Git失败时仍能按所选原件读取，未发送引用和撤权仍拒绝', async (t) => {
@@ -683,25 +817,44 @@ test('已选源码引用在新轮Git失败时仍能按所选原件读取，未�
   await f.source('frontend')
   const principal = { id: 'reader', sessionHash: 'session-reader' }
   for (const threadId of ['selected', 'unselected'])
-    f.access.bindThread(principal, { threadId, projectId, environmentId: 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: 'internal' })
-  await f.service.captureAgentInput(projectId, { requestId: 'sync', workspaceType: 'internal' }, 'reader')
-  const catalog = createBusinessResourceCatalog({ access: f.access, workspaceStore: f.store, workspaceInputs: f.service })
+    f.access.bindThread(principal, {
+      threadId,
+      projectId,
+      environmentId: 'env-test',
+      agentId: 'a-project',
+      visibility: 'private',
+      workspaceType: 'internal',
+    })
+  await f.service.captureAgentInput(
+    projectId,
+    { requestId: 'sync', workspaceType: 'internal' },
+    'reader',
+  )
+  const catalog = createBusinessResourceCatalog({
+    access: f.access,
+    workspaceStore: f.store,
+    workspaceInputs: f.service,
+  })
   const cwd = `autoops://projects/${projectId}/environments/env-test/threads/selected?workspaceType=internal`
   const found = await catalog.search(principal, { cwd, query: 'README', limit: 10 })
-  const path = found.entries.find(entry => entry.path.endsWith('/README.md')).path
+  const path = found.entries.find((entry) => entry.path.endsWith('/README.md')).path
   const selectedInputId = path.split('/')[3]
   catalog.requireContext('selected', { records: [{ kind: 'mention', path }] })
   f.control.failResolve = true
   const inputs = createBusinessRunInputs(f.access, f.service)
   const current = await inputs.prepare('selected', 'current')
-  assert.equal(current.repositories.length, 0)
-  assert.equal(current.sourceErrors[0].code, 'WORKSPACE_GIT_FAILED')
+  assert.equal(current.repositories.length, 1)
+  assert.equal(current.sourceErrors, undefined)
+  assert.equal(current.sourceWarnings[0].code, 'WORKSPACE_GIT_FAILED')
   assert.notEqual(current.id, selectedInputId)
   await assert.rejects(catalog.readForThread('selected', path, current.id))
-  assert.match((await catalog.readForThread('selected', path, current.id, [selectedInputId])).content, /frontend 固定源码/)
+  assert.match(
+    (await catalog.readForThread('selected', path, current.id, [selectedInputId])).content,
+    /frontend 固定源码/,
+  )
   const other = await inputs.prepare('unselected', 'other')
   await assert.rejects(catalog.readForThread('unselected', path, other.id, [selectedInputId]))
-  f.memberships.find(member => member.userId === 'reader').status = 'disabled'
+  f.memberships.find((member) => member.userId === 'reader').status = 'disabled'
   await assert.rejects(catalog.readForThread('selected', path, current.id, [selectedInputId]))
 })
 

@@ -365,7 +365,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
           return { path, name: file.name, mime: file.mime, content, source: 'workspace_input', inputId: identity.inputId, capturedAt: selected.capture.createdAt, sourceUrl: file.sourceUrl }
         }
         if (path !== selected.root && !entriesWithFolders(selected.files).some(entry => entry.path === path && entry.kind === 'directory')) fail()
-        return { path, kind: 'directory', sourceErrors: selected.capture.sourceErrors ?? [], entries: selected.files.filter(file => file.type !== 'directory' && file.path.startsWith(path + '/')).map(({ path, name, mime }) => ({ path, name, mime })) }
+        return { path, kind: 'directory', sourceErrors: selected.capture.sourceErrors ?? [], sourceWarnings: selected.capture.sourceWarnings ?? [], entries: selected.files.filter(file => file.type !== 'directory' && file.path.startsWith(path + '/')).map(({ path, name, mime }) => ({ path, name, mime })) }
       }
       if(path.startsWith('autoops/skills/'))return readScopedSkillResourceForThread(process.env.AUTOOPS_T3_DATA_DIR,threadId,path,access)
       const historical = path.startsWith(`autoops/${access.requireToolThread(threadId).binding.projectId}/workspaces/`)

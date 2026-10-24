@@ -3062,6 +3062,8 @@ export default function ChatView(props: ChatViewProps) {
     backgroundSubmissionPending,
     hasWorktreeSetupCard: worktreeSetup !== null,
   });
+  // 窄屏将输入区放入原生画布布局，正文滚动范围不再延伸到输入框背后。
+  const isComposerDocked = isAutoOpsHosted() && isMobileViewport && !isDraftHeroState;
   const {
     transitionGroupRef: draftHeroTransitionGroupRef,
     composerAnchorRef: draftHeroComposerAnchorRef,
@@ -4394,7 +4396,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeActivityRun, activeThreadKey, isServerThread, serverProjection, threadStatus]);
   const timelineRealContentOverflowsViewport = (list?: LegendListRef | null) =>
     timelineContentOverflowsViewport((list ?? legendListRef.current)?.getState(), {
-      composerInset: composerTimelineInset,
+      composerInset: isComposerDocked ? 0 : composerTimelineInset,
       anchorOffset: CHAT_TIMELINE_ANCHOR_OFFSET,
     });
   const timelineRealContentOverflowsViewportStable = useStableCallback(
@@ -4416,7 +4418,8 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const controller = createPageScrollController({
       getContainer: () => legendListRef.current?.getScrollableNode() ?? null,
-      getScrollPaddingBottomPx: () => composerOverlayElement?.getBoundingClientRect().height ?? 0,
+      getScrollPaddingBottomPx: () =>
+        isComposerDocked ? 0 : (composerOverlayElement?.getBoundingClientRect().height ?? 0),
       onScrollStart: handlePageScrollStart,
     });
     pageScrollControllerRef.current = controller;
@@ -4427,7 +4430,7 @@ export default function ChatView(props: ChatViewProps) {
         pageScrollControllerRef.current = null;
       }
     };
-  }, [composerOverlayElement]);
+  }, [composerOverlayElement, isComposerDocked]);
   const onComposerPageScrollKeyDown = (key: PageScrollKey) => {
     pageScrollControllerRef.current?.handleKeyDown(key);
   };
@@ -8478,7 +8481,7 @@ export default function ChatView(props: ChatViewProps) {
                 anchorMessageId={paintOnlyDisplayedTimeline ? null : timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReadyStable}
                 onAnchorSizeChanged={onTimelineAnchorSizeChangedStable}
-                contentInsetEndAdjustment={composerTimelineInset}
+                contentInsetEndAdjustment={isComposerDocked ? 0 : composerTimelineInset}
                 liveFollowEnabled={!paintOnlyDisplayedTimeline && timelineLiveFollowEnabled}
                 onIsAtEndChange={onIsAtEndChangeStable}
                 onContentOverflowChange={setTimelineOverflows}
@@ -8486,7 +8489,7 @@ export default function ChatView(props: ChatViewProps) {
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigationStable}
                 cancelPositionRestoreRef={cancelPositionRestoreRef}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
-                emptyPlaceholderInset={composerReservedHeight}
+                emptyPlaceholderInset={isComposerDocked ? 0 : composerReservedHeight}
                 topFadeEnabled={!hasTimelineTopBanner}
                 {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
                   ? {}
@@ -8496,7 +8499,7 @@ export default function ChatView(props: ChatViewProps) {
               {showScrollToBottom && !isThreadFindActive && (
                 <div
                   className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
-                  style={{ bottom: scrollToEndClearance + 4 }}
+                  style={{ bottom: isComposerDocked ? 4 : scrollToEndClearance + 4 }}
                 >
                   <Button
                     aria-label="滚动到底部"
@@ -8524,7 +8527,9 @@ export default function ChatView(props: ChatViewProps) {
                 "scrollbar-gutter-both",
                 isDraftHeroState
                   ? "pointer-events-auto absolute inset-0 z-20 flex items-start overflow-y-auto overscroll-contain py-6"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2",
+                  : isComposerDocked
+                    ? "pointer-events-none relative z-20 shrink-0 bg-background pt-1.5"
+                    : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2",
               )}
             >
               <div ref={draftHeroTransitionGroupRef} className={cn("chat-composer-lane w-full", isDraftHeroState && "my-auto")}>

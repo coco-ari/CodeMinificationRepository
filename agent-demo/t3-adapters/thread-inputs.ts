@@ -42,9 +42,9 @@ export async function prepareBusinessRunContext(threadId: string, runId: string,
   const capture = await createBusinessRunInputs(access, configuredWorkspaceManagement(access)).prepare(threadId, runId, inheritedRunId, signal)
   return {
     key: 'autoops_turn_input',
-    text: `本轮任务已自动固定当前可用资料。后续同步或编辑不改变本轮输入，下一轮重新获取。业务工具的 inputId 参数必须使用下列标识。用户明确引用的文件路径保持原样，用 read_project_material 读取所选内容；引用路径中的输入标识可以与工具 inputId 参数不同。源码同步失败不代表已授权引用不可读，先读取所选文件再判断。历史资料只表示当时事实，不得冒充当前最新状态。\n${JSON.stringify({
+    text: `本轮任务已自动固定当前可用资料。后续同步或编辑不改变本轮输入，下一轮重新获取。业务工具的 inputId 参数必须使用下列标识。用户明确引用的文件路径保持原样，用 read_project_material 读取所选内容；引用路径中的输入标识可以与工具 inputId 参数不同。源码同步失败不代表已授权引用不可读，先读取所选文件再判断。sourceWarnings 表示更新失败但所列源码仍可读取，按 repositories 中的真实提交分析，不得声称已确认远端最新状态；sourceErrors 才表示对应仓库不可读取。历史资料只表示当时事实，不得冒充当前最新状态。\n${JSON.stringify({
       inputId: capture.id, runId, projectId: capture.projectId, workspaceType: capture.workspaceType,
-      capturedAt: capture.createdAt, revision: capture.revision, sourceErrors: capture.sourceErrors ?? [], root: `autoops/${capture.projectId}/inputs/${capture.id}`,
+      capturedAt: capture.createdAt, revision: capture.revision, sourceErrors: capture.sourceErrors ?? [], sourceWarnings: capture.sourceWarnings ?? [], root: `autoops/${capture.projectId}/inputs/${capture.id}`,
       repositories: capture.workspaceType === 'external' ? [] : capture.repositories.map(repository => ({ path: repository.source.mountPath, commit: repository.commit })),
     })}`,
   }

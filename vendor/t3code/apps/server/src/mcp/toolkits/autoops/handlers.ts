@@ -66,6 +66,7 @@ const current = (inputId: string) => Effect.gen(function* () {
     materialInput: {
       id: capture.id, workspaceType: capture.workspaceType, createdAt: capture.createdAt, revision: capture.revision,
       sourceErrors: capture.sourceErrors ?? [],
+      sourceWarnings: capture.sourceWarnings ?? [],
       repositories: capture.repositories.map((repository) => ({ path: repository.source.mountPath, commit: repository.commit })),
       files: inputFiles.map((file) => ({ ...file, name: file.path.split("/").at(-1)! })),
       read: async (path) => {

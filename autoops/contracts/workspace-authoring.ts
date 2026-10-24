@@ -150,6 +150,13 @@ export interface WorkspaceInputRepository extends WorkspaceResolvedRepository {
   source: WorkspaceRepositorySource
   versionId: string
 }
+export interface WorkspaceInputSourceIssue {
+  sourceId: string
+  name: string
+  mountPath: string
+  code: string
+  message: string
+}
 export interface WorkspaceInputCapture {
   id: string
   projectId: string
@@ -163,13 +170,8 @@ export interface WorkspaceInputCapture {
   directories: string[]
   captureId?: string
   externalVersionId?: string
-  sourceErrors?: Array<{
-    sourceId: string
-    name: string
-    mountPath: string
-    code: string
-    message: string
-  }>
+  sourceErrors?: WorkspaceInputSourceIssue[]
+  sourceWarnings?: WorkspaceInputSourceIssue[]
 }
 export interface WorkspaceDeploymentSourceInput {
   requestId: string

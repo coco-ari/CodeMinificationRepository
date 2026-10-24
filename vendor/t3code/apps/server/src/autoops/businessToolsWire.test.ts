@@ -25,6 +25,7 @@ function tools(workspaceType: "internal" | "external", legacy = false) {
       id: "input-wire", workspaceType, createdAt: "2026-10-24T00:00:00.000Z", revision: 2,
       repositories: [],
       sourceErrors: workspaceType === "external" ? [] : [{ sourceId: "source-one", name: "公开源码", mountPath: "demo", code: "WORKSPACE_GIT_TIMEOUT", message: "源码获取超时，本轮仅提供资料" }],
+      sourceWarnings: workspaceType === "external" ? [] : [{ sourceId: "source-ready", name: "已同步源码", mountPath: "ready", code: "WORKSPACE_GIT_TIMEOUT", message: "更新失败，已同步内容仍可读取" }],
       files: [{ path: "docs/产品.pdf", name: "产品.pdf", mime: "application/pdf", size: 128 }],
       read: async () => ({ contents: "产品说明正文", byteLength: 18, truncated: false }),
     },
@@ -54,7 +55,8 @@ describe("业务工具使用真实 MCP JSON 结果合同", () => {
       inputId: "input-wire", workspaceType, content: "产品说明正文",
     });
     if (workspaceType === "internal") {
-      expect(result.structuredContent).toMatchObject({ workspace: { sourceErrors: [{ code: "WORKSPACE_GIT_TIMEOUT" }] } });
+      expect(result.structuredContent).toMatchObject({ workspace: { sourceErrors: [{ code: "WORKSPACE_GIT_TIMEOUT" }], sourceWarnings: [{ mountPath: "ready", code: "WORKSPACE_GIT_TIMEOUT" }] } });
+      expect(encodeResult(await business.queryEnvironment("thread-input-wire", "env-test")).structuredContent).toMatchObject({ workspace: { sourceWarnings: [{ mountPath: "ready" }] } });
       await expect(business.readDocument("thread-input-wire", "demo/README.md")).rejects.toMatchObject({ code: "WORKSPACE_INPUT_SOURCE_UNAVAILABLE" });
     }
   });
