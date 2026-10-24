@@ -129,6 +129,22 @@ test('停用与撤销拒绝新调用/轮次和资源读取，但不会删除执�
  assert.match(readFileSync(c.skills[0].path,'utf8'),/references/)
  assert.deepEqual(prepareScopedBusinessSkills(f.directory,{...f.binding,threadId:'new'}).skills,[])
 })
+test('旧对话部分技能撤回后候选入口立即拒绝，新对话可用且旧快照保持不变',t=>{
+ const f=fixture(t),kept=f.importSkill('kept'),removed=f.importSkill('removed')
+ f.assign(kept);f.assign(removed)
+ const context=prepareScopedBusinessSkills(f.directory,f.binding),options={access:f.access,principal:f.principal}
+ assert.equal(resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},options).skills.length,2)
+ const manifest=join(context.physicalCwd,'snapshot.json'),before=readFileSync(manifest,'utf8')
+ f.library.setEnabled({revision:f.library.catalog().revision,skillId:removed.id,enabled:false})
+ assert.throws(()=>resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},options),{status:409,code:'SKILL_SCOPE_CHANGED'})
+ assert.throws(()=>authorizeBusinessSkillCwd(f.directory,context.cwd,options),{code:'SKILL_SCOPE_CHANGED'})
+ const fresh=resolveBusinessSkillContext(f.directory,{...f.binding,threadId:undefined},options)
+ assert.deepEqual(fresh.skills.map(skill=>skill.name),['autoops-kept'])
+ assert.notEqual(fresh.snapshotId,context.snapshotId)
+ assert.equal(readFileSync(manifest,'utf8'),before)
+ f.library.setEnabled({revision:f.library.catalog().revision,skillId:removed.id,enabled:true})
+ assert.equal(resolveBusinessSkillContext(f.directory,{threadId:f.binding.threadId},options).snapshotId,context.snapshotId)
+})
 test('完整只读包可按固定版本读取参考资料；禁止跨会话范围和路径穿越',t=>{
  const f=fixture(t),skill=f.importSkill();f.assign(skill);const c=prepareScopedBusinessSkills(f.directory,f.binding)
  const root=`autoops/skills/${c.snapshotId}/autoops-sample`

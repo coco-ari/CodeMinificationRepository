@@ -4,7 +4,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import { useEnvironmentQuery } from "~/state/query";
-import { isAutoOpsAccessError } from "./apiClient";
+import { AutoOpsRequestError, isAutoOpsAccessError } from "./apiClient";
 import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from "./hostConfig";
 
 import { loadSkillContext, type SkillContext } from "./skillLibrary";
@@ -87,7 +87,10 @@ const skillContextQueries = Atom.family((key: string) => {
           return { context, error: null };
         } catch (cause) {
           // 撤权成为新的读取基线，之后的网络失败也不能复活此前的技能展示。
-          if (isAutoOpsAccessError(cause)) {
+          if (
+            isAutoOpsAccessError(cause) ||
+            (cause instanceof AutoOpsRequestError && cause.code === "SKILL_SCOPE_CHANGED")
+          ) {
             return {
               context: null,
               error: cause instanceof Error ? cause.message : "当前技能访问已失效。",

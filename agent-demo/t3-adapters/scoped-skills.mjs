@@ -105,7 +105,7 @@ function readContext(directory,snapshotId) {
 function assertCurrent(directory,context,{strict=false}={}) {
   const allowed=new Set(resolveSkillLibrary(directory,context.scope).map(entry=>entry.skillId||entry.id))
   const skills=context.skills.filter(entry=>allowed.has(entry.skillId||entry.id))
-  if(strict&&skills.length!==context.skills.length)throw new AutoOpsAccessError(409,'SKILL_SCOPE_CHANGED','此对话的技能授权已撤回或停用，请新建对话以使用当前技能范围；历史记录仍保留')
+  if(strict&&skills.length!==context.skills.length)throw new AutoOpsAccessError(409,'SKILL_SCOPE_CHANGED','此对话的部分技能已停用或取消分配，请新建对话。历史记录仍保留。')
   return {...context,skills}
 }
 const lockPath=(directory,threadId)=>join(contextRoot(directory),'threads',digest(threadId)+'.json')
@@ -148,7 +148,8 @@ function authorizeSnapshotViewer(directory,context,{access,principal}) {
 }
 export function resolveBusinessSkillContext(directory,input,{access=configuredAutoOpsAccess(),principal}={}) {
   const scope=authorizeScope(access,principal,input)
-  const context=prepareScopedBusinessSkills(directory,scope,{lock:false})
+  // 候选读取与目录扫描、继续对话采用同一校验，不能返回无法扫描的旧快照。
+  const context=prepareScopedBusinessSkills(directory,scope,{lock:false,strict:true})
   if(scope.threadId&&scope.scopeState!=='locked')authorizeSnapshotViewer(directory,context,{access,principal})
   return {cwd:context.cwd,snapshotId:context.snapshotId,skills:context.skills.map(({name,displayName,description,versionId,contentHash})=>({name,displayName,description,versionId,contentHash,enabled:true}))}
 }
