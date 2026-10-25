@@ -35,6 +35,60 @@ afterEach(() => {
 })
 
 describe('部署增量日志生命周期', () => {
+  for (const width of [1440, 390]) {
+    for (const dark of [false, true]) {
+      it(`${width}px ${dark ? '深色' : '浅色'}日志工具条同行且筛选复制可用`, async () => {
+        const previousViewport = { width: window.innerWidth, height: window.innerHeight }
+        const previousDark = document.documentElement.classList.contains('dark')
+        await page.viewport(width, 500)
+        document.documentElement.classList.toggle('dark', dark)
+        try {
+          const data = details('toolbar', 'target-one', '构建完成', 2)
+          data.logs = [
+            { seq: 1, stage: 'building', message: '构建完成' },
+            { seq: 2, stage: 'verifying', message: '健康检查通过' },
+          ]
+          load.mockResolvedValue(data)
+          using copied = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+          await using screen = await render(
+            <div style={{ width: width === 1440 ? 1184 : width, height: 400, display: 'flex' }}>
+              <DeploymentLogs
+                projectId="p-one"
+                targetId="target-one"
+                taskId="toolbar"
+                refresh={0}
+              />
+            </div>,
+          )
+          const search = screen.getByRole('textbox', { name: '搜索部署日志' })
+          const stage = screen.getByRole('combobox', { name: '日志阶段' })
+          const copy = screen.getByRole('button', { name: '复制日志' })
+          const download = screen.getByRole('button', { name: '下载日志' })
+          await expect.element(copy).toBeEnabled()
+          const bounds = [search, stage, copy, download].map((item) =>
+            item.element().getBoundingClientRect(),
+          )
+          const centers = bounds.map((rect) => rect.top + rect.height / 2)
+          expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(2)
+          const panel = screen.container.firstElementChild!.getBoundingClientRect()
+          for (const rect of bounds) {
+            expect(rect.left).toBeGreaterThanOrEqual(panel.left)
+            expect(rect.right).toBeLessThanOrEqual(panel.right)
+          }
+          await stage.click()
+          await page.getByRole('option', { name: '构建', exact: true }).click()
+          await search.fill('完成')
+          await copy.click()
+          expect(copied).toHaveBeenCalledWith('[构建] 构建完成')
+          await expect.element(download).toBeEnabled()
+        } finally {
+          document.documentElement.classList.toggle('dark', previousDark)
+          await page.viewport(previousViewport.width, previousViewport.height)
+        }
+      })
+    }
+  }
+
   it('补读完成前禁止导出，不把尚未读到的搜索结果显示为空', async () => {
     const initial = details('backfill', 'target-one', '第一批日志', 501)
     initial.logs = Array.from({ length: 500 }, (_, index) => ({

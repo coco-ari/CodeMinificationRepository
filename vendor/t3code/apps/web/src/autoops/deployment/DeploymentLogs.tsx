@@ -276,20 +276,22 @@ function DeploymentTaskLog({
             setCopied(false)
           }}
         />
-        <Choice
-          label="日志阶段"
-          value={stage}
-          options={[
-            { id: 'all', name: '全部阶段' },
-            ...[...new Set(logs.flatMap((entry) => (entry.stage ? [entry.stage] : [])))].map(
-              (id) => ({ id, name: deploymentStageLabel(id) }),
-            ),
-          ]}
-          onChange={(value) => {
-            setStage(value)
-            setCopied(false)
-          }}
-        />
+        <div className="w-36 min-w-0 shrink-0">
+          <Choice
+            label="日志阶段"
+            value={stage}
+            options={[
+              { id: 'all', name: '全部阶段' },
+              ...[...new Set(logs.flatMap((entry) => (entry.stage ? [entry.stage] : [])))].map(
+                (id) => ({ id, name: deploymentStageLabel(id) }),
+              ),
+            ]}
+            onChange={(value) => {
+              setStage(value)
+              setCopied(false)
+            }}
+          />
+        </div>
         <Button
           size="icon-xs"
           variant="ghost"
