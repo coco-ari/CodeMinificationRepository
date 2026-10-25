@@ -3,20 +3,33 @@ const fail = (status, code, message) => {
 }
 
 export async function handleDeploymentRequest({ access, store, principal, url, method, input }) {
+  const readChecks = []
+  const checkAccess = (check) => {
+    const result = check()
+    if (method === 'GET') readChecks.push(check)
+    return result
+  }
+  const response = await routeDeploymentRequest({ access, store, principal, url, method, input, checkAccess })
+  // 异步读取完成后重新裁决原对象范围，不沿用等待前的成员、环境或会话状态。
+  for (const check of readChecks) check()
+  return response
+}
+
+async function routeDeploymentRequest({ access, store, principal, url, method, input, checkAccess }) {
   const match = /^\/autoops\/projects\/([^/]+)\/deployments(?:\/(.*))?$/.exec(url.pathname)
   if (!match) fail(404, 'DEPLOYMENT_ROUTE_NOT_FOUND', '此部署操作不存在')
   const projectId = decodeURIComponent(match[1]),
-    project = access.requireProject(principal, projectId),
-    membership = access.requireWorkspaceManager(principal, projectId)
+    project = checkAccess(() => access.requireProject(principal, projectId)),
+    membership = checkAccess(() => access.requireWorkspaceManager(principal, projectId))
   const parts = (match[2] || '').split('/').filter(Boolean).map(decodeURIComponent)
   const body = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
   const actor = { id: principal.id, displayName: principal.displayName }
   const authorize = (action, environmentId) =>
-    access.requireDeploymentAction(principal, projectId, action, environmentId)
+    checkAccess(() => access.requireDeploymentAction(principal, projectId, action, environmentId))
   const requireEnvironment = (environmentId) => {
     if (typeof environmentId !== 'string')
       fail(400, 'DEPLOYMENT_ENVIRONMENT_REQUIRED', '请选择部署环境')
-    access.requireEnvironment(principal, projectId, environmentId)
+    checkAccess(() => access.requireEnvironment(principal, projectId, environmentId))
     return environmentId
   }
   if (method === 'GET' && !parts.length) {
