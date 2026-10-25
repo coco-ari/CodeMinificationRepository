@@ -98,12 +98,16 @@ function panelProps(relativePath: string | null): FilePreviewPanelProps {
 function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
   const input = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState('')
+  const [composerExpanded, setComposerExpanded] = useState(false)
   const handle = useRef({
     insertTextAtEnd: (text: string) => {
       setDraft((value) => value + text)
       return true
     },
-    focusAtEnd: () => input.current?.focus(),
+    focusAtEnd: () => {
+      setComposerExpanded(true)
+      requestAnimationFrame(() => input.current?.focus())
+    },
   } as ChatComposerHandle)
   const state = useRightPanelStore((value) =>
     selectThreadRightPanelState(value.byThreadKey, threadRef),
@@ -130,13 +134,15 @@ function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
             aria-label="测试消息"
             ref={input}
             value={draft}
-            hidden={sheet && !draft}
+            hidden={sheet && !draft && !composerExpanded}
             onChange={(event) => setDraft(event.target.value)}
           />
-          <CustomerFileAttachMenu
-            onUpload={() => {}}
-            onBrowse={() => useRightPanelStore.getState().open(threadRef, 'files')}
-          />
+          {(!sheet || !state.isOpen) && (
+            <CustomerFileAttachMenu
+              onUpload={() => {}}
+              onBrowse={() => useRightPanelStore.getState().open(threadRef, 'files')}
+            />
+          )}
           <CustomerFileLink
             scope={scope}
             threadRef={threadRef}
@@ -149,6 +155,7 @@ function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
             animationDurationMs={0}
             keepMounted={false}
             restoreFocus
+            onRestoreFocusFallback={() => handle.current.focusAtEnd()}
             open={state.isOpen}
             onClose={() => {
               useRightPanelStore.getState().close(threadRef)
@@ -259,7 +266,7 @@ describe('客户文件的原生选择与范围隔离', () => {
     ).toBe(false)
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390)
   })
-  it('窄屏从附件菜单进入目录，取消后返回附件按钮', async () => {
+  it('窄屏目录关闭时附件入口已收起，自动恢复输入框', async () => {
     await page.viewport(390, 500)
     const { scope } = setup()
     await using screen = await render(<Workbench scope={scope} />)
@@ -267,7 +274,7 @@ describe('客户文件的原生选择与范围隔离', () => {
     await page.getByRole('menuitem', { name: '引用电脑文件', exact: true }).click()
     await expect.element(page.getByRole('searchbox')).toBeVisible()
     await userEvent.keyboard('{Escape}')
-    await expect.element(page.getByRole('button', { name: '添加文件', exact: true })).toHaveFocus()
+    await expect.element(page.getByRole('textbox', { name: '测试消息', exact: true })).toHaveFocus()
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   })
   it('旧搜索取消后迟到结果不能覆盖新目录，新范围不复用旧结果', async () => {

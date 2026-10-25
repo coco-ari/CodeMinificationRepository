@@ -9,6 +9,7 @@ export function RightPanelSheet(props: {
   onClose: () => void;
   keepMounted?: boolean;
   restoreFocus?: boolean;
+  onRestoreFocusFallback?: (() => void) | undefined;
 }) {
   const opener = useRef<HTMLElement | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
@@ -31,7 +32,10 @@ export function RightPanelSheet(props: {
           props.restoreFocus
             ? () => {
                 opener.current =
-                  document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                  document.activeElement instanceof HTMLElement &&
+                  document.activeElement !== document.body
+                    ? document.activeElement
+                    : null;
                 return panel.current;
               }
             : undefined
@@ -48,7 +52,10 @@ export function RightPanelSheet(props: {
                   !active.closest('[role="dialog"]')
                 )
                   return active;
-                return opener.current?.isConnected ? opener.current : false;
+                if (opener.current?.isConnected && opener.current.getClientRects().length > 0)
+                  return opener.current;
+                props.onRestoreFocusFallback?.();
+                return false;
               }
             : undefined
         }

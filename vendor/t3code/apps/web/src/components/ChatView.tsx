@@ -9097,6 +9097,7 @@ export default function ChatView(props: ChatViewProps) {
           onClose={closePreviewPanelStable}
           keepMounted={!customerScope}
           restoreFocus={!!customerScope}
+          onRestoreFocusFallback={customerScope ? focusComposerStable : undefined}
         >
           <RightPanelTabs
             mode="sheet"

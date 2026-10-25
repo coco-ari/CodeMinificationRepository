@@ -6375,6 +6375,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         focusComposer();
       },
       focusAtEnd: () => {
+        // 显式恢复焦点时先展开窄屏输入区，隐藏的编辑器无法接收焦点。
+        if (isComposerCollapsedMobile) {
+          expandMobileComposerStable();
+          return;
+        }
         composerEditorRef.current?.focusAtEnd();
       },
       focusAt: (cursor: number) => {
@@ -6624,6 +6629,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerPreviewAnnotations,
       composerReviewComments,
       focusComposer,
+      isComposerCollapsedMobile,
+      expandMobileComposerStable,
       environmentId,
       primaryEnvironmentId,
       isConnecting,
