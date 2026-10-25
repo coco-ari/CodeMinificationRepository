@@ -2,13 +2,17 @@ import { CustomerAttachmentDelivery } from './CustomerAttachmentDelivery.ts';
 import { customerMessageAttachments } from '../../../../packages/contracts/src/customerAttachments.ts';
 import { ServerConfig } from '../config.ts';
 import { DatabaseSync } from 'node:sqlite';
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- 请求标识只在现有 Promise/WebSocket 传输边界使用。
+import { randomUUID } from 'node:crypto';
+import { CUSTOMER_FILE_LIMITS, decodeCustomerFileResult, type CustomerFileInput, type CustomerFileResult } from '../../../../packages/contracts/src/customerFiles.ts';
+import type { CustomerExecutionBinding } from '../../../../../../autoops/contracts/runtime.ts';
 import { EventEmitter } from 'node:events';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
 import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
-import { SKILL_MENTION_PATTERN } from '@t3tools/shared/composerInlineTokens';
+import { SKILL_MENTION_PATTERN, collectComposerInlineTokens } from '@t3tools/shared/composerInlineTokens';
 import { ProviderAdapterV2Event } from '@t3tools/provider-core/server/ProviderAdapter';
 import { validateCustomerEvent, validateCustomerResult } from './CustomerEventValidation.ts';
 export { validateCustomerEvent } from './CustomerEventValidation.ts';
@@ -19,7 +23,7 @@ import { customerProviderInstanceId,customerWorkspaceKey } from '../../../../../
 import { createCustomerTransportJournal, customerCommandId, CustomerTransportError, type CustomerTransportJournal, type TransportSession, type TransportReceipt } from '../../../../../../agent-demo/t3-adapters/customer-transport.mjs';
 
 type Send = (frame: CustomerAgentServerFrame) => Promise<void>;
-type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
+type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
 type Delivery = {sessionId:string;epoch:string;seq:number};
 const error = (code:string,message:string) => new CustomerTransportError(code,message);
 export class RemoteDeviceHub {
@@ -30,6 +34,7 @@ export class RemoteDeviceHub {
   private readonly metadata=new WeakMap<object,Delivery>();
   private readonly waiters=new Map<string,Set<(receipt:TransportReceipt)=>void>>();
   private readonly attachments:CustomerAttachmentDelivery|undefined;
+  private readonly fileWaiters = new Map<string, { connection: Connection; resolve: (value: CustomerFileResult) => void; reject: (cause: unknown) => void }>();
   constructor(access:AutoOpsAccess,journal:CustomerTransportJournal,attachments?:CustomerAttachmentDelivery) {this.attachments=attachments;this.access=access;this.journal=journal;this.signals.setMaxListeners(0);access.customerRegistry.resetPresence();}
   session(id:string) {return this.journal.session(id);}
   hasDispatchedRun(sessionId:string,runId:string,attemptId:string) {
@@ -107,6 +112,33 @@ export class RemoteDeviceHub {
     });
   }
   online(deviceId:string) {return this.connections.get(deviceId)?.hello===true;}
+  async readFiles(ownerId: string, projectId: string, target: CustomerExecutionBinding, input: CustomerFileInput, signal?: AbortSignal, authorize: () => void = () => {}): Promise<CustomerFileResult> {
+    const check = () => { this.access.assertAccepting(); authorize(); this.access.customerRegistry.validateTarget(ownerId, projectId, target, { requireOnline: true }); };
+    check();
+    const connection = this.connections.get(target.deviceId);
+    if (!connection?.hello) throw error('DEVICE_OFFLINE', '电脑已离线，请等待重新连接');
+    if (!connection.workspaceFiles) throw error('CONNECTOR_UPDATE_REQUIRED', '请更新这台电脑的连接程序后引用文件');
+    if ([...this.fileWaiters.values()].filter(item => item.connection === connection).length >= 4) throw error('FILES_BUSY', '文件读取正忙，请稍后重试');
+    const requestId = randomUUID();
+    return new Promise<CustomerFileResult>((resolve, reject) => {
+      const cleanup = () => { this.fileWaiters.delete(requestId); clearTimeout(timer); signal?.removeEventListener('abort', abort); };
+      const cancel = (cause: unknown) => { cleanup(); void connection.send({ type: 'filesCancel', requestId }).catch(() => {}); reject(cause); };
+      const abort = () => cancel(error('FILES_CANCELLED', '已取消文件读取'));
+      // 文件读取不进入执行日志，超时或取消只结束本次读取，不影响正在运行的 Agent。
+      // @effect-diagnostics-next-line globalTimers:off
+      const timer = setTimeout(() => cancel(error('FILES_TIMEOUT', '电脑文件读取超时，请重试')), CUSTOMER_FILE_LIMITS.timeoutMs);
+      this.fileWaiters.set(requestId, { connection,
+        resolve: value => { cleanup(); try { check(); resolve(value); } catch (cause) { reject(cause); } },
+        reject: cause => { cleanup(); reject(cause); },
+      });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
+      void connection.send({ type: 'files', requestId, target, input }).catch(() => {
+        const pending = this.fileWaiters.get(requestId);
+        pending?.reject(error('DEVICE_OFFLINE', '电脑已离线，请等待重新连接'));
+      });
+    });
+  }
   identity(event:ProviderAdapterV2Event) {const delivery=this.metadata.get(event);return delivery?customerCommandId(delivery.sessionId,'event',[delivery.epoch,delivery.seq]):undefined;}
   async acknowledge(event:ProviderAdapterV2Event) {
     const delivery=this.metadata.get(event);if(!delivery)return;
@@ -139,6 +171,7 @@ export class RemoteDeviceHub {
           if(connection.hello || frame.deviceId!==principal.deviceId)throw error('INVALID_HELLO','设备握手信息不匹配');
           // HTTP registration is authoritative; a hello cannot register a directory.
           connection.attachmentTransfers = frame.attachmentTransfers === true;
+          connection.workspaceFiles = frame.workspaceFiles === true;
           const registered=this.access.customerRegistry.listWorkspaces(principal.ownerId);
           for(const workspace of frame.workspaces)if(!registered.some(item=>item.deviceId===principal.deviceId&&item.projectId===workspace.projectId&&item.registeredWorkspaceId===workspace.registeredWorkspaceId&&item.workspaceBindingRevision===workspace.workspaceBindingRevision&&item.runtimeId===workspace.runtimeId))throw error('WORKSPACE_SCOPE','客户设备声明了未登记的工作区');
           connection.hello=true;
@@ -168,6 +201,21 @@ export class RemoteDeviceHub {
         if(!connection.hello)throw error('HELLO_REQUIRED','请先完成设备握手');
         if(frame.type==='ping') {await send({type:'pong',at:frame.at});return;}
         if(frame.type==='pong')return;
+        if (frame.type === 'filesResult') {
+          const pending = this.fileWaiters.get(frame.requestId);
+          if (!pending) return;
+          if (pending.connection !== connection) throw error('FILES_SCOPE', '文件结果不属于此连接');
+          if (Buffer.byteLength(JSON.stringify(frame)) > CUSTOMER_FILE_LIMITS.responseBytes) {
+            pending.reject(error('FILES_LIMIT', '文件结果超过大小限制')); return;
+          }
+          if (frame.error) pending.reject(error('FILES_UNAVAILABLE', frame.error.message.slice(0, 200)));
+          else if (frame.result) {
+            try { pending.resolve(decodeCustomerFileResult(frame.result)); }
+            catch { pending.reject(error('FILES_INVALID', '电脑返回的文件结果无效，请更新连接程序')); }
+          }
+          else pending.reject(error('FILES_UNAVAILABLE', '文件读取失败，请重试'));
+          return;
+        }
         const session=this.journal.session(frame.sessionId);
         if(!session || session.deviceId!==principal.deviceId || session.ownerId!==principal.ownerId)throw error('SESSION_SCOPE','客户会话不属于此设备');
         if(frame.type==='receipt') {
@@ -218,7 +266,7 @@ export class RemoteDeviceHub {
         // Duplicate batches can arrive after a lost ACK; reply with applied, never received.
         await send({type:'ack',sessionId:session.sessionId,runtimeEpoch:frame.runtimeEpoch,seq:this.journal.cursor(session.sessionId,frame.runtimeEpoch).applied});
       },
-      disconnect:()=>{if(this.connections.get(principal.deviceId)!==connection)return;this.connections.delete(principal.deviceId);this.access.customerRegistry.markDisconnected(principal.deviceId,connectionEpoch);this.signals.emit('connection',principal.deviceId);},
+      disconnect:()=>{if(this.connections.get(principal.deviceId)!==connection)return;this.connections.delete(principal.deviceId);for(const pending of this.fileWaiters.values())if(pending.connection===connection)pending.reject(error('DEVICE_OFFLINE','电脑已离线，请等待重新连接'));this.access.customerRegistry.markDisconnected(principal.deviceId,connectionEpoch);this.signals.emit('connection',principal.deviceId);},
     };
   }
   bind(binding:ThreadBinding,sessionId:string) {
@@ -252,6 +300,8 @@ export class RemoteDeviceHub {
     const commandId=customerCommandId(sessionId,method,key);
     const prior=this.journal.command(commandId);
     const requestedAttachments=['startTurn','steerTurn'].includes(method)?customerMessageAttachments(input):[];
+    const fileMentions = ['startTurn', 'steerTurn'].includes(method) && collectComposerInlineTokens(String((input as { message?: { text?: string } })?.message?.text ?? '') + '\n').some(token => token.type === 'mention' && token.value.startsWith('autoops-customer/'));
+    if (fileMentions && !connection?.workspaceFiles) throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED', '请更新这台电脑的连接程序后引用文件'), { outcome: 'not_started' });
     if(requestedAttachments.length && (!this.attachments || !connection?.attachmentTransfers))throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED','请更新这台电脑的连接程序后发送附件'),{outcome:'not_started'});
     const attachments=!prior && requestedAttachments.length?await this.attachments!.prepare(session,input):undefined;
     if(signal?.aborted)throw Object.assign(error('WAIT_CANCELLED','已取消发送附件'),{outcome:'not_started'});
@@ -303,7 +353,7 @@ export class RemoteDeviceHub {
       } finally {this.signals.off(sessionId,wake);signal?.removeEventListener('abort',wake);}
     }}finally{this.signals.off(`delta:${sessionId}`,onDelta);}
   }
-  close() {for(const connection of this.connections.values())connection.close();this.connections.clear();this.signals.removeAllListeners();}
+  close() {for(const pending of this.fileWaiters.values())pending.reject(error('FILES_UNAVAILABLE','服务正在重启，请稍后重试'));for(const connection of this.connections.values())connection.close();this.connections.clear();this.signals.removeAllListeners();}
 }
 
 export class RemoteDeviceService extends Context.Service<RemoteDeviceService,{readonly hub:RemoteDeviceHub|undefined}>()('t3/autoops/RemoteDeviceService') {}

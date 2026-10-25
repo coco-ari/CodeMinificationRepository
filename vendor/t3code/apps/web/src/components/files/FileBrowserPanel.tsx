@@ -63,13 +63,14 @@ function useReadOnlyPathSearch(source: ReadOnlyFileSource | undefined, query: st
   useEffect(() => {
     if (!source || !key) return;
     let active = true;
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void source.search(query.slice(0, 256), 200).then(
+      void source.search(query.slice(0, 256), 200, controller.signal).then(
         (data) => { if (active) setResult({ key, data }); },
         (error: unknown) => { if (active) setResult({ key, error: error instanceof Error ? error.message : "文件搜索失败。" }); },
       );
     }, 120);
-    return () => { active = false; window.clearTimeout(timer); };
+    return () => { active = false; controller.abort(); window.clearTimeout(timer); };
   }, [source, key, query]);
   const current = result?.key === key ? result : null;
   return { entries: current?.data?.entries ?? [], error: current?.error ?? null, isPending: key !== null && !current, truncated: current?.data?.truncated ?? false, refresh: () => setRevision((value) => value + 1) };
@@ -554,7 +555,7 @@ export default function FileBrowserPanel({
           onValueChange={handleSearchValueChange}
           onClose={closeSearch}
         />
-        {directoryPaths.length > 0 && !hostFolder ? (
+        {directoryPaths.length > 0 && !hostFolder && readOnlySource?.allowExpandAll !== false ? (
           <Tooltip>
             <TooltipTrigger
               render={

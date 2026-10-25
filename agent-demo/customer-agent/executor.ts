@@ -7,6 +7,7 @@ import type { CustomerAgentCommand, CustomerAgentReceipt, CustomerAgentClientFra
 import { ConnectorError, CustomerAgentStore, type LocalSession, type LocalWorkspace } from "./store.ts";
 import type { HeadlessCodexRunner, HeadlessCodexRunnerOptions } from "../../vendor/t3code/apps/server/src/provider/HeadlessCodexRunner.ts";
 import { SKILL_MENTION_PATTERN } from "../../vendor/t3code/packages/shared/src/composerInlineTokens.ts";
+import { resolveCustomerFileReferences } from "./files.ts";
 
 export type RunnerFactory = (options: HeadlessCodexRunnerOptions) => Promise<HeadlessCodexRunner>;
 export const customerSkillId = (workspaceId: string, localPath: string): string =>
@@ -144,7 +145,7 @@ export class CustomerAgentExecutor {
       if (control && (!command.runtimeEpoch || command.runtimeEpoch !== session?.runtimeEpoch || !this.runners.has(command.sessionId))) {
         throw new ConnectorError("stale_runtime", "控制指令对应的本机运行已失效，正在核实执行状态");
       }
-      const input = command.method === "catalog" ? {} : object(command.input);
+      const input = command.method === "catalog" ? {} : { ...object(command.input) };
       if (control && ["steerTurn", "interruptTurn"].includes(command.method) && this.providerTurns.get(command.sessionId) !== input.providerTurnId) {
         throw new ConnectorError("stale_turn", "这条控制指令不属于本机当前轮次");
       }
@@ -167,6 +168,7 @@ export class CustomerAgentExecutor {
           this.store.finish(epochReceipt); this.notify(epochReceipt);
         }
         if (command.method === "startTurn" || command.method === "steerTurn") {
+          if (input.message) input.message = await resolveCustomerFileReferences(this.store, this.deviceId, command.target, input.message, this.shutdown.signal);
           if (this.attachments) await this.attachments.prepare(command, this.shutdown.signal, () => { this.store.resolveWorkspace(command.target); });
           else if (input.message?.attachments?.length || command.attachments?.length) throw new ConnectorError("attachment_unavailable", "请更新连接程序后再发送附件");
           const names = [...new Set([...String(input.message?.text ?? "").matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!))];
@@ -246,6 +248,7 @@ export class CustomerAgentExecutor {
     return {
       registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
       runtimeId: "codex", protocolVersion: 1,
+      workspaceFiles: true,
       ...(this.attachments ? {attachments: CUSTOMER_ATTACHMENT_LIMITS} : {}),
       revision: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
       models: catalog.models.map((model) => {

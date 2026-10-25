@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { CustomerAttachmentManifest } from "./customerAttachments.ts";
+import { CustomerFileInput, CustomerFileResult } from "./customerFiles.ts";
 
 /** Device transport only. Browser chat and Provider events retain their T3 contracts. */
 export const CUSTOMER_AGENT_PROTOCOL_VERSION = 1;
@@ -48,6 +49,7 @@ export const CustomerAgentClientFrame = Schema.Union([
     type: Schema.Literal("hello"), protocolVersion: Schema.Literal(1), deviceId: Id,
     connectorVersion: Id, connectorEpoch: Id,
     attachmentTransfers: Schema.optional(Schema.Boolean),
+    workspaceFiles: Schema.optional(Schema.Boolean),
     workspaces: Schema.Array(Schema.Struct({
       ...CustomerAgentTarget.fields, projectId: Id, label: Schema.String,
     })),
@@ -58,6 +60,10 @@ export const CustomerAgentClientFrame = Schema.Union([
     })),
   }),
   CustomerAgentReceipt,
+  Schema.Struct({ type: Schema.Literal("filesResult"), requestId: Id,
+    result: Schema.optional(CustomerFileResult),
+    error: Schema.optional(Schema.Struct({ code: Id, message: Schema.String })),
+  }),
   CustomerAgentEvents,
   Schema.Struct({ type: Schema.Literal("runtimeState"), sessionId: Id, runtimeEpoch: Id,
     state: Schema.Literal("unknown"), reason: Schema.Literals(["runtime_lost", "journal_unavailable", "outcome_unknown"]) }),
@@ -69,6 +75,8 @@ export type CustomerAgentClientFrame = typeof CustomerAgentClientFrame.Type;
 export const CustomerAgentServerFrame = Schema.Union([
   Schema.Struct({ type: Schema.Literal("welcome"), connectionEpoch: Id }),
   CustomerAgentCommand,
+  Schema.Struct({ type: Schema.Literal("files"), requestId: Id, target: CustomerAgentTarget, input: CustomerFileInput }),
+  Schema.Struct({ type: Schema.Literal("filesCancel"), requestId: Id }),
   Schema.Struct({ type: Schema.Literal("ack"), sessionId: Id, runtimeEpoch: Id, seq: Cursor }),
   Schema.Struct({ type: Schema.Literal("replay"), sessionId: Id, runtimeEpoch: Id, afterSeq: Cursor }),
   Schema.Struct({ type: Schema.Literal("ping"), at: Schema.Number }),

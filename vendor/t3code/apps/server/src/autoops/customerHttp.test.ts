@@ -23,6 +23,8 @@ import {
   initializeAutoOpsAccessSchema,
 } from "../../../../../../agent-demo/t3-adapters/access.mjs";
 import { layer } from "./customerHttp.ts";
+import { layer as filesLayer } from "./customerFilesHttp.ts";
+import { RemoteDeviceService, type RemoteDeviceHub } from "./RemoteDeviceService.ts";
 const cleanup: Array<() => Promise<void> | void> = [];
 beforeEach(() => {
   process.env.AUTOOPS_CUSTOMER_AGENTS = "1";
@@ -33,7 +35,7 @@ afterEach(async () => {
   delete process.env.AUTOOPS_CUSTOMER_AGENTS;
   delete process.env.AUTOOPS_CUSTOMER_AGENT_BUNDLE;
 });
-function fixture() {
+function fixture(fileReader?: RemoteDeviceHub["readFiles"]) {
   const sessions = new DatabaseSync(":memory:"),
     bindings = new DatabaseSync(":memory:");
   cleanup.push(() => {
@@ -51,7 +53,8 @@ function fixture() {
     access.recordNativeSession(access.authenticateCookie(`demo_session=${ownerId}`), ownerId);
   mock.access = access;
   const app = HttpRouter.toWebHandler(
-    layer.pipe(
+    Layer.mergeAll(layer, filesLayer).pipe(
+      Layer.provideMerge(Layer.succeed(RemoteDeviceService, { hub: fileReader ? { readFiles: fileReader } as RemoteDeviceHub : undefined })),
       Layer.provideMerge(
         Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
           authenticateHttpRequest: (request: { headers: Record<string, string> }) =>
@@ -85,9 +88,30 @@ function fixture() {
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
       }),
     );
-  return { request };
+  return { request, access };
 }
 describe("customer registration HTTP boundaries", () => {
+  it("电脑文件只允许所有者及当前项目环境，不接受设备令牌冒充浏览器", async () => {
+    const f = fixture(async (ownerId, projectId, target, _input, _signal, authorize) => {
+      authorize?.();
+      f.access.customerRegistry.validateTarget(ownerId, projectId, target);
+      return { entries: [{ path: "src/client.ts", kind: "file" }], truncated: false };
+    });
+    const registry = f.access.customerRegistry;
+    const paired = registry.consumePairing(registry.createPairing("u-admin").pairingCode, { label: "文件验收电脑" });
+    registry.registerWorkspace(registry.authenticateToken(paired.deviceToken), { registeredWorkspaceId: "files", projectId: "p-autoops", label: "目录", workspaceBindingRevision: 1, runtimeId: "codex" });
+    const query = new URLSearchParams({ projectId: "p-autoops", environmentId: "env-test", deviceId: paired.device.id, registeredWorkspaceId: "files", workspaceBindingRevision: "1", input: '{"operation":"list"}' });
+    const path = () => `files?${query}`;
+    expect((await f.request(path())).status).toBe(401);
+    expect((await f.request(path(), { token: paired.deviceToken })).status).toBe(401);
+    const valid = await f.request(path(), { ownerId: "u-admin" });
+    expect(valid.status).toBe(200); expect(valid.headers.get("cache-control")).toBe("private, no-store");
+    expect(await valid.json()).toEqual({ entries: [{ path: "src/client.ts", kind: "file" }], truncated: false });
+    expect([403, 404]).toContain((await f.request(path(), { ownerId: "u-guest" })).status);
+    query.set("environmentId", "not-authorized"); expect((await f.request(path(), { ownerId: "u-admin" })).status).toBe(403);
+    query.set("environmentId", "env-test"); query.set("workspaceBindingRevision", "2");
+    expect((await f.request(path(), { ownerId: "u-admin" })).status).toBe(409);
+  });
   it("downloads only an authenticated fixed build artifact and reports an unpublished bundle", async () => {
     const { request } = fixture();
     expect((await request("download")).status).toBe(401);

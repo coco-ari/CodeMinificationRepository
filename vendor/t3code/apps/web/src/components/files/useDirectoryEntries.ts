@@ -21,19 +21,26 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
   const requested = useRef(new Set<string>());
   const active = useRef(true);
   const running = useRef(0);
+  const controllers = useRef(new Set<AbortController>());
   const waiting = useRef<Array<() => void>>([]);
+  useEffect(() => () => {
+    for (const controller of controllers.current) controller.abort();
+    for (const release of waiting.current.splice(0)) release();
+  }, []);
 
   // Callers count the request as pending first; the mount load is counted by the initial state.
   const startRequest = (directoryPath: string, refresh: boolean): Promise<void> => {
     loaded.current.add(directoryPath);
     requested.current.add(directoryPath);
     const request = (async () => {
-      if (running.current >= 4) await new Promise<void>((resolve) => waiting.current.push(resolve));
+      if (running.current >= (source?.directoryConcurrency ?? 4)) await new Promise<void>((resolve) => waiting.current.push(resolve));
       else running.current++;
       // executeAtomQuery settles instead of throwing, so the slot is always released.
+      const controller = new AbortController();
+      controllers.current.add(controller);
       const result = active.current
         ? source
-          ? await source.list(directoryPath).then(
+          ? await source.list(directoryPath, controller.signal).then(
               (value) => ({ _tag: "Success" as const, value }),
               (error: unknown) => ({ _tag: "Failure" as const, cause: Cause.fail(error) }),
             )
@@ -43,6 +50,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
             reportDefect: false,
           })
         : undefined;
+      controllers.current.delete(controller);
       const next = waiting.current.shift();
       if (next) next();
       else running.current--;
@@ -125,7 +133,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
 
   const refresh = () => {
     const paths = [...requested.current].filter((path) => reachableDirectories.has(path));
-    const workerCount = Math.min(4, paths.length);
+    const workerCount = Math.min(source?.directoryConcurrency ?? 4, paths.length);
     const worker = async () => {
       while (active.current) {
         const path = paths.shift();

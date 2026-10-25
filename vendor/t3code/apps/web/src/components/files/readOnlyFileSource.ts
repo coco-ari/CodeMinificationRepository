@@ -13,12 +13,14 @@ export interface ReadOnlyFileResource {
 export interface ReadOnlyFileSource {
   readonly id: string;
   readonly allowReferences: boolean;
+  readonly allowExpandAll?: boolean;
+  readonly directoryConcurrency?: number;
   readonly origin?: string;
   /** Package sources resolve relative Markdown links within their immutable file manifest. */
   readonly resolveLink?: (fromPath: string, href: string) =>
     { readonly path: string; readonly kind: "file" | "directory" } | { readonly error: string } | null;
-  readonly list: (directoryPath: string) => Promise<ProjectListEntriesResult>;
-  readonly search: (query: string, limit: number) => Promise<ProjectListEntriesResult>;
+  readonly list: (directoryPath: string, signal?: AbortSignal) => Promise<ProjectListEntriesResult>;
+  readonly search: (query: string, limit: number, signal?: AbortSignal) => Promise<ProjectListEntriesResult>;
   readonly metadata: (path: string) => Promise<ReadOnlyFileResource | { readonly kind: "directory" }>;
   readonly mentionPath: (path: string) => string;
 }

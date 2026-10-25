@@ -8657,6 +8657,7 @@ export default function ChatView(props: ChatViewProps) {
                               environmentId={environmentId}
                               attachmentUploadsCapabilityKnown={attachmentUploadsCapabilityKnown}
                               supportsAttachmentUploads={supportsAttachmentUploads}
+                              supportsCustomerFiles={customerRuntime.catalog?.workspaceFiles === true}
                               supportsQuestionAttachments={supportsQuestionAttachments}
                               maxFileAttachmentBytes={maxFileAttachmentBytes}
                               routeKind={routeKind}

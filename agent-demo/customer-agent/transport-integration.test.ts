@@ -16,11 +16,81 @@ import { RemoteDeviceHub } from "../../vendor/t3code/apps/server/src/autoops/Rem
 import { createCustomerRegistry } from "../t3-adapters/customer-registry.mjs";
 import { createCustomerTransportJournal } from "../t3-adapters/customer-transport.mjs";
 import { decodeCustomerAgentClientFrame } from "../../vendor/t3code/packages/contracts/src/autoopsRemote.ts";
+import { CUSTOMER_FILE_LIMITS } from "../../vendor/t3code/packages/contracts/src/customerFiles.ts";
 
 async function until(condition: () => boolean, timeout = 10000): Promise<void> {
   const deadline = Date.now() + timeout;
   while (!condition()) { if (Date.now() > deadline) throw new Error("condition timed out"); await new Promise((resolve) => setTimeout(resolve, 20)); }
 }
+
+test("模拟4G真实WS：本机目录、搜索和预览有界，不启动Codex或写执行日志", { timeout: 30000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "autoops-files-wire-")), directory = join(root, "project");
+  mkdirSync(join(directory, "src"), { recursive: true });
+  writeFileSync(join(directory, "src", "client.ts"), "export const marker = 'WIRE-7624';\n".repeat(4000));
+  const store = new CustomerAgentStore(join(root, "state"));
+  const workspace = store.register(directory, "project", "客户目录"); store.markPublished(workspace.registeredWorkspaceId);
+  const registryDb = new DatabaseSync(":memory:"), transportDb = new DatabaseSync(":memory:");
+  const registry = createCustomerRegistry({ db: registryDb, enabled: () => true, requireOwner() {}, requireProjectForUser() {} });
+  const paired = registry.consumePairing(registry.createPairing("owner").pairingCode, { label: "4G测试电脑" });
+  const principal = registry.authenticateToken(paired.deviceToken);
+  registry.registerWorkspace(principal, { registeredWorkspaceId: workspace.registeredWorkspaceId, projectId: "project", label: "客户目录", workspaceBindingRevision: 1, runtimeId: "codex" });
+  const hub = new RemoteDeviceHub({ assertAccepting() {}, customerRegistry: registry } as any, createCustomerTransportJournal(transportDb));
+  const server = createServer(), wss = new NodeWS.WebSocketServer({ server });
+  const errors: unknown[] = [], measurements: Array<{ operation: string; ms: number; responseBytes: number }> = [];
+  let fileResponseBytes = 0;
+  wss.on("connection", (socket: InstanceType<typeof NodeWS.WebSocket>) => {
+    const peer = hub.connect(principal, async frame => {
+      if (frame.type === "files") await new Promise(resolve => setTimeout(resolve, 150 + Buffer.byteLength(JSON.stringify(frame)) * 8 / 1_000_000 * 1000));
+      if (socket.readyState === NodeWS.WebSocket.OPEN) socket.send(JSON.stringify(frame));
+    }, () => socket.close());
+    socket.on("message", (raw: unknown) => {
+      const frame = decodeCustomerAgentClientFrame(String(raw));
+      void (async () => {
+        if (frame.type === "filesResult") {
+          fileResponseBytes = Buffer.byteLength(String(raw));
+          await new Promise(resolve => setTimeout(resolve, 150 + fileResponseBytes * 8 / 256_000 * 1000));
+        }
+        await peer.accept(frame);
+      })().catch(error => errors.push(error));
+    });
+    socket.on("close", () => peer.disconnect());
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  let ready!: () => void;
+  const connected = new Promise<void>(resolve => { ready = resolve; });
+  const connection = new CustomerAgentConnection({ store,
+    credentials: { deviceId: paired.device.id, token: paired.deviceToken, baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}` },
+    runnerFactory: async () => { throw new Error("文件浏览不能启动Codex"); }, onReady: async () => ready(),
+  });
+  const target = { kind: "customer" as const, deviceId: paired.device.id, registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: 1, runtimeId: "codex" as const };
+  try {
+    connection.start(); await connected;
+    for (const input of [{ operation: "list" as const }, { operation: "search" as const, query: "client" }, { operation: "preview" as const, path: "src/client.ts" }]) {
+      const started = performance.now();
+      const result = await hub.readFiles("owner", "project", target, input);
+      const ms = performance.now() - started;
+      measurements.push({ operation: input.operation, ms: Math.round(ms), responseBytes: fileResponseBytes });
+      assert(ms < 3000, `模拟4G读取应在3秒内完成：${input.operation} ${ms}`);
+      assert(fileResponseBytes <= CUSTOMER_FILE_LIMITS.responseBytes);
+      if (input.operation === "preview") { assert.equal(result.truncated, true); assert(result.preview?.contents?.includes("WIRE-7624")); }
+    }
+    const abort = new AbortController();
+    const canceled = hub.readFiles("owner", "project", target, { operation: "search", query: "x" }, abort.signal); abort.abort();
+    await assert.rejects(canceled, { code: "FILES_CANCELLED" });
+    const delayed = hub.readFiles("owner", "project", target, { operation: "preview", path: "src/client.ts" });
+    registry.setDeviceStatus("owner", paired.device.id, "disabled");
+    await assert.rejects(delayed, { code: "CUSTOMER_DEVICE_DISABLED" });
+    assert.equal(store.sessions().length, 0);
+    assert.equal(transportDb.prepare("SELECT count(*) n FROM customer_transport_commands").get()?.n, 0);
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({ network: { rttMs: 300, downstreamBps: 1_000_000, customerUploadBps: 256_000 }, measurements, nativeRuns: 0 }));
+  } finally {
+    await connection.close(); hub.close();
+    for (const socket of wss.clients) socket.terminate();
+    await new Promise<void>(resolve => wss.close(() => resolve())); await new Promise<void>(resolve => server.close(() => resolve()));
+    store.close(); registryDb.close(); transportDb.close(); rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠事件补传不重复执行", { timeout: 30000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "autoops-remote-wire-"));

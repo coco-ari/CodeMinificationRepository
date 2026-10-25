@@ -1,3 +1,4 @@
+import { CustomerFileLink } from "~/autoops/CustomerFilePicker";
 import { autoOpsFeature } from "~/autoops/capabilities";
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { AutoOpsResourceLink } from "~/autoops/ResourceLink";
@@ -2746,6 +2747,8 @@ function useChatMarkdownState({
     copyMarkdown: string,
     mediaSource?: string,
   ) => {
+    if (customerScope && businessScope && threadRef && fileLinkMeta.filePath.startsWith("autoops-customer/"))
+      return <CustomerFileLink scope={businessScope} threadRef={threadRef} path={fileLinkMeta.filePath} copyMarkdown={copyMarkdown} />;
     const resolveHostPath = () =>
       resolveMarkdownFileHostPath({
         meta: fileLinkMeta,

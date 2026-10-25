@@ -164,7 +164,8 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       return publicWorkspace(workspaceRow(device.id, workspaceId))
     },
     updateCapabilities(principal, input) {
-      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments'])
+      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments', 'workspaceFiles'])
+      if (input.workspaceFiles !== undefined && typeof input.workspaceFiles !== 'boolean') fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '文件浏览能力无效')
       const device = activeDevice(principal), workspace = workspaceRow(device.id, input.registeredWorkspaceId)
       if (!workspace) fail(404, 'CUSTOMER_WORKSPACE_NOT_FOUND', '请先在本机登记工作区')
       validateTarget(device.owner_id, workspace.project_id, {kind:'customer',deviceId:device.id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:input.workspaceBindingRevision,runtimeId:input.runtimeId})
@@ -188,6 +189,7 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
         return {...input.attachments}
       })()
       const snapshot = {...(attachments ? {attachments} : {}),deviceId:device.id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:workspace.binding_revision,runtimeId:workspace.runtime_id,revision:text(input.revision,'能力版本'),protocolVersion:1,...(input.runtimeVersion ? {runtimeVersion:text(input.runtimeVersion,'运行器版本',100)} : {}),...(input.configRevision ? {configRevision:text(input.configRevision,'配置版本')} : {}),models,skills,...(permissions ? {permissions} : {})}
+      if (input.workspaceFiles === true) snapshot.workspaceFiles = true
       const encoded = JSON.stringify(snapshot)
       if (Buffer.byteLength(encoded) > 1024 * 1024) fail(413, 'CUSTOMER_CAPABILITIES_LIMIT', '能力目录超过大小限制')
       db.prepare('INSERT INTO customer_capabilities VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id,workspace_id,runtime_id) DO UPDATE SET binding_revision=excluded.binding_revision,revision=excluded.revision,snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at').run(device.id,workspace.id,workspace.runtime_id,workspace.binding_revision,snapshot.revision,encoded,now())

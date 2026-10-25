@@ -3,9 +3,12 @@ import { WebSocket, EnvHttpProxyAgent, fetch } from "../../vendor/t3code/apps/se
 import { decodeCustomerAgentServerFrame, type CustomerAgentClientFrame } from "../../vendor/t3code/packages/contracts/src/autoopsRemote.ts";
 import { CustomerAgentExecutor } from "./executor.ts";
 import type { CustomerAgentStore } from "./store.ts";
+import { CustomerWorkspaceFiles } from "./files.ts";
+import { ConnectorError } from "./store.ts";
+import { CUSTOMER_FILE_LIMITS } from "../../vendor/t3code/packages/contracts/src/customerFiles.ts";
 
 export interface DeviceCredentials { deviceId: string; token: string; baseUrl: string; allowInsecure?: boolean; }
-export const CONNECTOR_VERSION = "0.2.1";
+export const CONNECTOR_VERSION = "0.3.0";
 export function validateBaseUrl(value: string, allowInsecure = false): string {
   const url = new URL(value);
   if (url.username || url.password || url.hash || url.search) throw new Error("中心地址不能包含账号、密码、查询参数或片段");
@@ -67,6 +70,7 @@ export class CustomerAgentConnection {
   private readonly control: CustomerAgentClientFrame[] = [];
   private readonly sent = new Map<string, { seq: number; at: number }>();
   private readonly connectionLost = new Set<() => void>();
+  private readonly fileReads = new Map<string, AbortController>();
   constructor(options: {
     store: CustomerAgentStore; credentials: DeviceCredentials;
     runnerFactory: ConstructorParameters<typeof CustomerAgentExecutor>[0]["runnerFactory"];
@@ -103,7 +107,7 @@ export class CustomerAgentConnection {
       if (this.socket !== socket || this.stopped) return;
       this.lastReceived = Date.now(); this.sent.clear();
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: this.credentials.deviceId,
-        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true,
+        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true, workspaceFiles: true,
         workspaces: this.store.workspaces().filter((workspace) => !workspace.revoked && workspace.published).map((workspace) => ({
           registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
           runtimeId: workspace.runtimeId, projectId: workspace.projectId, label: workspace.label,
@@ -119,6 +123,29 @@ export class CustomerAgentConnection {
         if (typeof event.data !== "string") throw new Error("text frames required");
         const frame = decodeCustomerAgentServerFrame(event.data); this.lastReceived = Date.now();
         switch (frame.type) {
+          case "filesCancel": this.fileReads.get(frame.requestId)?.abort(); break;
+          case "files": {
+            if (!this.ready) throw new Error("handshake required");
+            if (this.fileReads.size >= 2 || this.fileReads.has(frame.requestId)) {
+              this.enqueue({ type: "filesResult", requestId: frame.requestId, error: { code: "FILES_BUSY", message: "文件读取正忙，请稍后重试" } });
+              break;
+            }
+            const controller = new AbortController();
+            this.fileReads.set(frame.requestId, controller);
+            void new CustomerWorkspaceFiles(this.store).read(frame.target, frame.input,
+              AbortSignal.any([controller.signal, AbortSignal.timeout(CUSTOMER_FILE_LIMITS.timeoutMs)]))
+              .then((result) => {
+                if (this.socket === socket && this.ready && !controller.signal.aborted)
+                  this.enqueue({ type: "filesResult", requestId: frame.requestId, result });
+              }, (error: unknown) => {
+                if (this.socket === socket && this.ready && !controller.signal.aborted)
+                  this.enqueue({ type: "filesResult", requestId: frame.requestId, error: {
+                    code: error instanceof ConnectorError ? error.code : "FILES_UNAVAILABLE",
+                    message: error instanceof ConnectorError ? error.message : "文件读取失败，请刷新后重试",
+                  } });
+              }).finally(() => this.fileReads.delete(frame.requestId));
+            break;
+          }
           case "welcome":
             this.ready = true; this.retry = 0; this.onState("已连接中心，正在核对待回传结果");
             for (const receipt of this.store.pendingReceipts()) this.enqueue(receipt);
@@ -141,6 +168,7 @@ export class CustomerAgentConnection {
     socket.addEventListener("error", () => { this.onState("中心连接暂不可用，本机执行与恢复记录保留"); });
     socket.addEventListener("close", (event) => {
       if (this.socket !== socket) return;
+      for (const controller of this.fileReads.values()) controller.abort();
       this.ready = false; this.socket = undefined;
       for (const listener of this.connectionLost) listener();
       if (this.stopped) return;
@@ -175,6 +203,7 @@ export class CustomerAgentConnection {
     }
   }
   async close(): Promise<void> {
+    for (const controller of this.fileReads.values()) controller.abort();
     this.stopped = true; clearTimeout(this.retryTimer); clearInterval(this.flushTimer); clearInterval(this.heartbeatTimer);
     this.socket?.close(1000, "connector shutdown");
     await this.executor.close();

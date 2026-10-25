@@ -123,7 +123,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
   if (method === 'orchestration.launchThread') {
     const binding = access.requireThread(principal, payload.threadId)
     const customer = binding.executionBinding?.kind === 'customer'
-    if (customer) { access.requireThreadExecution(principal, binding.threadId, {requireOnline:true}); assertCustomerInput(payload.initialMessage) }
+    if (customer) { access.requireThreadExecution(principal, binding.threadId, {requireOnline:true}); assertCustomerInput(payload.initialMessage, binding.executionBinding) }
     else resolveBusinessSkillMentions(payload.initialMessage?.text,process.env,binding)
     if (binding.nativeParentThreadId) denied('原生子任务由父会话控制，仅供查看')
     if (binding.compatibilityReadOnly) denied('兼容历史仅供查看，不能继续执行')
@@ -148,9 +148,9 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     const customer = binding.executionBinding?.kind === 'customer'
     if (customer) {
       if (['provider-session.detach','prepared-run.retry','thread.fork','checkpoint.rollback'].includes(payload.type)) denied('客户首版不支持此运行操作')
-      assertCustomerInput(payload)
-      assertCustomerInput(payload.message)
-      assertCustomerInput(payload.initialMessage)
+      assertCustomerInput(payload, binding.executionBinding)
+      assertCustomerInput(payload.message, binding.executionBinding)
+      assertCustomerInput(payload.initialMessage, binding.executionBinding)
       if (['message.dispatch','queue.resume','thread.model-selection.set','queued-run.edit','runtime-request.respond'].includes(payload.type))
         access.requireThreadExecution(principal, binding.threadId, {requireOnline:true})
       if (payload.type === 'queued-message.promote-to-steer')

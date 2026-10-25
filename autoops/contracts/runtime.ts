@@ -53,6 +53,7 @@ export interface CustomerSkill {
   description: string
 }
 export interface CustomerCapabilityInput {
+  workspaceFiles?: boolean
   registeredWorkspaceId: string
   workspaceBindingRevision: number
   runtimeId: 'codex'

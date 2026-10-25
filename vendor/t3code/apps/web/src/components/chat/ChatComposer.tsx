@@ -1,5 +1,9 @@
 import { customerInstanceId, customerProviderAvailability } from "~/autoops/customerAgents";
 import { customerComposerText } from "~/autoops/customerComposerText";
+import { customerFilesKey, useCustomerFileSearch } from "~/autoops/customerFiles";
+import { CustomerFilePicker, CustomerFileAttachMenu } from "~/autoops/CustomerFilePicker";
+import { customerFilePathForTarget } from "@t3tools/contracts";
+import { formatWorkspacePathQuery } from "~/autoops/pathCompletion";
 import {
   chatSubmissionIntentAllowed,
   chatSlashCommandAllowed,
@@ -1524,6 +1528,7 @@ export interface ChatComposerProps {
   canOperateThread: boolean;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
+  supportsCustomerFiles?: boolean;
   supportsQuestionAttachments: boolean;
   maxFileAttachmentBytes: number | null;
   routeKind: "server" | "draft";
@@ -1807,6 +1812,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     canOperateThread,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
+    supportsCustomerFiles = false,
     supportsQuestionAttachments,
     maxFileAttachmentBytes,
     routeKind,
@@ -2026,9 +2032,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? autoOpsThreadScope.executionBinding
       : null;
   const customerScope = customerTarget !== null;
+  const [customerFilePicker, setCustomerFilePicker] = useState<{ key: string; path: string | null } | null>(null);
+  const customerFileScopeKey = `${activeThreadId}/${customerFilesKey(autoOpsThreadScope)}`;
   const composerContextActions = {
     environmentId: customerScope ? null : environmentId,
-    canPreviewFiles: !customerScope,
+    canPreviewFiles: !customerScope || supportsCustomerFiles,
     cwd: gitCwd ?? undefined,
     expandImage: (imageId: string) => {
       const preview = buildExpandedImagePreview(composerImages, imageId);
@@ -2036,7 +2044,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     openFile: setPreviewFileId,
     openMention: (path: string) => {
-      if (customerScope) return;
+      if (customerTarget) {
+        const relative = customerFilePathForTarget(path, customerTarget);
+        if (supportsCustomerFiles && relative) setCustomerFilePicker({ key: customerFileScopeKey, path: relative });
+        return;
+      }
       if (autoOpsResourceUrl(path)) void openAutoOpsResource(path, routeThreadRef);
       else useRightPanelStore.getState().openFile(routeThreadRef, path);
     },
@@ -2527,16 +2539,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
   const composerReferenceCwd = customerScope
-    ? null
+    ? customerFilesKey(autoOpsThreadScope)
     : (autoOpsResourceCwd(activeThreadId, activeThread?.projectId, autoOpsThreadScope) ?? gitCwd);
 
   const workspacePathCompletion = isAutoOpsWorkspaceResourceCwd(composerReferenceCwd);
-  const environmentThreadShells = useThreadShells(isPathTrigger && !workspacePathCompletion);
-  const workspaceEntries = useComposerPathSearch({
+  const environmentThreadShells = useThreadShells(isPathTrigger && !workspacePathCompletion && !customerScope);
+  const nativeWorkspaceEntries = useComposerPathSearch({
     environmentId,
-    cwd: isPathTrigger ? composerReferenceCwd : null,
+    cwd: isPathTrigger && !customerScope ? composerReferenceCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
+  const customerWorkspaceEntries = useCustomerFileSearch(autoOpsThreadScope, activeThreadId, environmentId,
+    isPathTrigger && customerScope && supportsCustomerFiles ? pathTriggerQuery : null);
+  const workspaceEntries = customerScope ? customerWorkspaceEntries : nativeWorkspaceEntries;
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
     prompt.slice(0, composerTrigger.rangeStart).trim() === "" &&
@@ -2611,7 +2626,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (composerTrigger.kind === "path") {
       if (workspaceEntries.error) return [];
       if (
-        workspacePathCompletion &&
+        (workspacePathCompletion || customerScope) &&
         (workspaceEntries.isPending ||
           !isPathSuggestionCurrent(
             workspaceEntries.searchedTarget,
@@ -2622,7 +2637,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       )
         return [];
       return [
-        ...(workspacePathCompletion
+        ...(workspacePathCompletion || customerScope
           ? []
           : matchComposerThreadItems({
               shells: environmentThreadShells,
@@ -2637,7 +2652,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           pathKind: entry.kind,
           searchTarget: workspaceEntries.searchedTarget,
           label: basenameOfPath(entry.path),
-          description: autoOpsResourcePathDescription(entry.path, autoOpsThreadScope),
+          description: customerTarget ? (customerFilePathForTarget(entry.path, customerTarget) ?? "").split("/").slice(0, -1).join("/") : autoOpsResourcePathDescription(entry.path, autoOpsThreadScope),
         })),
       ];
     }
@@ -2826,7 +2841,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const isComposerMenuLoading =
     (composerTriggerKind === "path" &&
-      (workspacePathCompletion || pathTriggerQuery.length > 0) &&
+      (workspacePathCompletion || customerScope || pathTriggerQuery.length > 0) &&
       workspaceEntries.isPending) ||
     (composerTriggerKind === "pull-request" &&
       pullRequestProjectId !== null &&
@@ -2866,7 +2881,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : "此仓库中没有拉取请求。";
     }
     return composerTriggerKind === "path"
-      ? (workspaceEntries.error ?? "没有匹配的文件或文件夹。")
+      ? (customerScope && !supportsCustomerFiles ? "请更新电脑连接程序后引用文件。" : workspaceEntries.error ?? "没有匹配的文件或文件夹。")
       : "没有匹配的命令。";
   })();
 
@@ -3850,7 +3865,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!isPathSuggestionCurrent(item.searchTarget, trigger, environmentId, composerReferenceCwd))
         return;
       const directoryCompletion =
-        completeDirectory && item.pathKind === "directory"
+        customerTarget && item.pathKind === "directory"
+          ? formatWorkspacePathQuery(`${customerFilePathForTarget(item.path, customerTarget)}/`)
+          : completeDirectory && item.pathKind === "directory"
           ? autoOpsWorkspaceDirectoryCompletion(item.path, autoOpsThreadScope)
           : null;
       const replacement = directoryCompletion ?? `${serializeComposerFileLink(item.path)} `;
@@ -6737,6 +6754,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           )
         : null}
       <ComposerBanner.Dock>
+        {supportsCustomerFiles && autoOpsThreadScope && customerFilePicker?.key === customerFileScopeKey ?
+          <CustomerFilePicker key={customerFileScopeKey} scope={autoOpsThreadScope} threadId={activeThreadId} environmentId={environmentId}
+            initialPath={customerFilePicker.path} onClose={() => { setCustomerFilePicker(null); focusComposer(); }}
+            onSelect={path => {
+              insertComposerTextAtEndStable(`${serializeComposerFileLink(path)} `, { ensureLeadingBoundary: true });
+              setCustomerFilePicker(null);
+            }} /> : null}
         <ComposerBanner.Column>
           <ComposerBannerStack
             key={activeThreadId}
@@ -7572,7 +7596,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           });
                         }}
                       />
-                      <Tooltip>
+                      {customerScope && supportsCustomerFiles ? <CustomerFileAttachMenu
+                        onUpload={() => attachmentInputRef.current?.click()}
+                        onBrowse={() => setCustomerFilePicker({ key: customerFileScopeKey, path: null })}
+                      /> : <Tooltip>
                         <TooltipTrigger
                           render={
                             <Button
@@ -7588,7 +7615,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           <PaperclipIcon />
                         </TooltipTrigger>
                         <TooltipPopup>添加文件</TooltipPopup>
-                      </Tooltip>
+                      </Tooltip>}
                     </>
                   ) : null}
                   <ComposerFooterPrimaryActions

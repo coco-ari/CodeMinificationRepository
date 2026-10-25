@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { users, projects, agents } from '../fixtures.mjs'
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from './access.mjs'
 import { authorizeAutoOpsRpc } from './rpc-policy.mjs'
+import { customerFileReference } from '../../vendor/t3code/packages/contracts/src/customerFiles.ts'
+import { serializeComposerFileLink } from '../../vendor/t3code/packages/shared/src/composerTrigger.ts'
 
 function fixture(t) {
   const previous = process.env.AUTOOPS_CUSTOMER_AGENTS
@@ -43,6 +45,17 @@ test('客户输入仍拒绝平台资料和未开放的自主目标',t=>{
   const {dispatch}=fixture(t)
   for(const patch of [{context:{records:[{}]}},{initialMessage:{text:'/goal work forever'}},{text:'/goal work forever'},{text:'/plan'}])
     assert.throws(()=>dispatch(patch),error=>['CUSTOMER_CONTEXT_UNSUPPORTED','CUSTOMER_COMMAND_UNSUPPORTED'].includes(error.code))
+})
+
+test('本机引用只接受当前目录身份，不能借用另一设备或登记版本',t=>{
+  const {dispatch,device}=fixture(t)
+  const target={deviceId:device.id,registeredWorkspaceId:'workspace',workspaceBindingRevision:1}
+  const path=customerFileReference(target,'src/client.ts')
+  dispatch({text:serializeComposerFileLink(path)+' 分析文件'})
+  dispatch({context:{version:1,records:[{version:1,kind:'mention',contextId:'mention:test',label:'client.ts',path}]}})
+  for(const patch of [{deviceId:'another-device'},{registeredWorkspaceId:'other'},{workspaceBindingRevision:2}])
+    assert.throws(()=>dispatch({text:serializeComposerFileLink(customerFileReference({...target,...patch},'src/client.ts'))+' 分析'}),{code:'CUSTOMER_FILE_SCOPE'})
+  assert.throws(()=>dispatch({context:{records:[{kind:'mention',path:'autoops/p-autoops/inputs/old/private.ts'}]}}),{code:'CUSTOMER_CONTEXT_UNSUPPORTED'})
 })
 
 test('offline blocks new work but preserves stop and history controls',t=>{

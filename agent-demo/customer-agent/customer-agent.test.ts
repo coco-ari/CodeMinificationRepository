@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { customerFileReference } from "../../vendor/t3code/packages/contracts/src/customerFiles.ts";
+import { serializeComposerFileLink } from "../../vendor/t3code/packages/shared/src/composerTrigger.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CustomerAgentStore } from "./store.ts";
@@ -33,6 +35,21 @@ function runnerHarness(f: ReturnType<typeof fixture>, behavior?: (method: string
   const executor = new CustomerAgentExecutor({ store: f.store, deviceId: "device-a", runnerFactory: factory, notify: () => {} });
   return { executor, calls, emit: (event: unknown) => emit(event) };
 }
+
+test("本机引用解析不修改原命令，重复收据不会重新开始执行", async () => {
+  const f = fixture(), h = runnerHarness(f);
+  writeFileSync(join(f.directory, "client.ts"), "export const marker = 'ONCE-1248';");
+  try {
+    await h.executor.execute(command(f.workspace, "openSession", "open"));
+    const path = customerFileReference({ deviceId: "device-a", ...f.workspace }, "client.ts");
+    const start = command(f.workspace, "startTurn", "file-start", { runId: "run-file", attemptId: "attempt-file", message: { text: serializeComposerFileLink(path) + " 分析" } });
+    const before = JSON.stringify(start);
+    assert.equal((await h.executor.execute(start)).state, "completed");
+    assert.equal(JSON.stringify(start), before);
+    assert.equal((await h.executor.execute(start)).state, "completed");
+    assert.equal(h.calls.filter(method => method === "startTurn").length, 1);
+  } finally { await h.executor.close(); f.close(); }
+});
 
 test("客户目录保留运行器报告的默认思考档位，不从选项顺序推测", async () => {
   const f = fixture();
