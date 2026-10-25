@@ -30,14 +30,14 @@ async function finish(workspaces, projectId, task) {
   for (let index = 0; index < 200; index++) { const current = workspaces.overview(projectId).tasks.find((item) => item.id === task.id); if (!['queued','running'].includes(current.status)) { assert.equal(current.status,'completed',current.error); return current }; await new Promise((done) => setTimeout(done,10)) }
   assert.fail('工作区生成任务超时')
 }
-async function fixture(t, {listener = false, accessLayer = access, requestPrincipal = principal, workspaceManagement} = {}) {
+async function fixture(t, {listener = false, accessLayer = access, requestPrincipal = principal, workspaceManagement, installAssetsRoot} = {}) {
   const dataDir = await mkdtemp(join(tmpdir(),'t3-deployment-')), workspaceStore = createWorkspaceStore({dataDir,authorizeTask:()=>{}})
   for (const project of projects) await workspaceStore.ensureProject(project)
-  let store = createDeploymentStore({dataDir,workspaceStore,workspaceManagement,access:accessLayer,...(listener ? {agentPort:0} : {})})
+  let store = createDeploymentStore({dataDir,workspaceStore,workspaceManagement,access:accessLayer,...(listener ? {agentPort:0} : {}),...(installAssetsRoot ? {installAssetsRoot} : {})})
   await store.initialize()
   const request = (suffix = '', method = 'GET', input, p = requestPrincipal, projectId = 'p-one') => handleDeploymentRequest({access:accessLayer, store, principal:p, url:new URL(`http://demo/autoops/projects/${projectId}/deployments${suffix}`), method,input})
   t.after(async () => { await store.close(); await workspaceStore.close(); await rm(dataDir,{recursive:true,force:true}) })
-  return {dataDir,workspaceStore,get store(){return store}, request, async reopen(){await store.close();store = createDeploymentStore({dataDir,workspaceStore,workspaceManagement,access:accessLayer,...(listener ? {agentPort:0} : {})});await store.initialize();return store}}
+  return {dataDir,workspaceStore,get store(){return store}, request, async reopen(){await store.close();store = createDeploymentStore({dataDir,workspaceStore,workspaceManagement,access:accessLayer,...(listener ? {agentPort:0} : {}),...(installAssetsRoot ? {installAssetsRoot} : {})});await store.initialize();return store}}
 }
 async function records(f) {
   const serverInput = {name:'隔离服务器',environmentId:'env-one',requestId:randomUUID()}
@@ -55,6 +55,26 @@ async function agent(f, route, input, token) {
   const response=await fetch(`http://127.0.0.1:${address.port}/api/agent/v1${route}`,{method:input===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},...(input===undefined?{}:{body:JSON.stringify(input)})})
   const body=await response.json();assert.ok(response.ok,JSON.stringify(body));return body
 }
+
+test('部署监听器使用宿主指定的发行资源提供安装脚本和执行器包', async t => {
+  const installAssetsRoot = await mkdtemp(join(tmpdir(), 't3-install-release-'))
+  t.after(() => rm(installAssetsRoot, {recursive:true, force:true}))
+  await mkdir(join(installAssetsRoot, 'agent')); await mkdir(join(installAssetsRoot, 'dist'))
+  const assets = [
+    ['/agent/install.sh', 'agent/install.sh', Buffer.from('#!/bin/sh\nprintf isolated-release\n')],
+    ['/agent/bundle.tar.gz', 'dist/agent-bundle.tar.gz', Buffer.from([31,139,8,0,8,5])],
+  ]
+  for (const [, file, bytes] of assets) await writeFile(join(installAssetsRoot, file), bytes)
+  const f = await fixture(t, {listener:true, installAssetsRoot})
+  for (const [route, , bytes] of assets) {
+    for (const method of ['GET', 'HEAD']) {
+      const response = await fetch(`http://127.0.0.1:${f.store.agentAddress.port}${route}`, {method})
+      assert.equal(response.status, 200)
+      assert.equal(Number(response.headers.get('content-length')), bytes.length)
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), method === 'HEAD' ? Buffer.alloc(0) : bytes)
+    }
+  }
+})
 
 test('真实成员排队后撤权、重启后撤权均不能领取，权限服务故障保留排队并在恢复后可执行', async (t) => {
   const sessionDb = new DatabaseSync(':memory:'), bindingDb = new DatabaseSync(':memory:')

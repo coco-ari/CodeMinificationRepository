@@ -60,7 +60,7 @@ function safeTask(value, environmentId) {
 }
 
 
-export function createDeploymentStore({dataDir, workspaceStore, workspaceManagement, access, agentPort, publicOrigin = ''} = {}) {
+export function createDeploymentStore({dataDir, workspaceStore, workspaceManagement, access, agentPort, installAssetsRoot, publicOrigin = ''} = {}) {
   if (!dataDir || !workspaceStore) fail(500, 'DEPLOYMENT_NOT_CONFIGURED', '部署验证存储尚未配置')
   if (!access || typeof access.requireDeploymentActor !== 'function' || typeof access.requireDeploymentActionForActor !== 'function') fail(500, 'DEPLOYMENT_AUTHORIZATION_REQUIRED', '部署任务和写入必须配置当前授权检查')
   const directory = join(resolve(dataDir), 'deployment-center')
@@ -149,7 +149,7 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
               const json = (response, status, body) => { response.writeHead(status, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store'}); response.end(JSON.stringify(body)) }
               const body = async (request) => { let size = 0; const chunks = []; for await (const chunk of request) { size += chunk.length; if (size > 1024 * 1024) fail(413, 'BODY_TOO_LARGE', 'Agent 请求过大'); chunks.push(chunk) } try { return JSON.parse(Buffer.concat(chunks).toString()) } catch { fail(400, 'INVALID_JSON', 'Agent 请求格式错误') } }
               if (closed) { json(res,503,{error:'部署服务正在停止，请稍后重试',code:'DEPLOYMENT_STOPPING'}); return }
-              try { if (!await handleInstallRequest(req, res, new URL(req.url || '/', 'http://127.0.0.1').pathname) && !await handleAgentRequest(req, res, new URL(req.url || '/', 'http://127.0.0.1'), {deployment, body, json})) json(res, 404, {error:'Agent 接口不存在'}) }
+              try { if (!await handleInstallRequest(req, res, new URL(req.url || '/', 'http://127.0.0.1').pathname, {assetsRoot:installAssetsRoot}) && !await handleAgentRequest(req, res, new URL(req.url || '/', 'http://127.0.0.1'), {deployment, body, json})) json(res, 404, {error:'Agent 接口不存在'}) }
               catch (error) { if (!res.headersSent) json(res, Number.isInteger(error.status) ? error.status : 500, {error:error.status ? error.message : '部署 Agent 请求失败'}); else res.destroy() }
             })()
             operations.add(operation)
@@ -305,6 +305,8 @@ export function configuredDeploymentStore() {
   const dataDir = process.env.AUTOOPS_T3_DATA_DIR, workspaceStore = configuredWorkspaceStore()
   if (!dataDir || !workspaceStore) fail(500, 'DEPLOYMENT_NOT_CONFIGURED', '部署验证存储尚未配置')
   const port = process.env.AUTOOPS_DEPLOYMENT_AGENT_PORT
-  if (!configured || configured.dataDir !== dataDir) configured = {dataDir, store:createDeploymentStore({dataDir, workspaceStore, workspaceManagement:configuredWorkspaceManagement(configuredAutoOpsAccess()), access:configuredAutoOpsAccess(), ...(port === undefined ? {} : {agentPort:Number(port)}), publicOrigin:process.env.AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN || ''})}
+  // Worker 打包会移动模块位置，安装资产沿用启动器已固定的业务资源根。
+  const installAssetsRoot = process.env.AUTOOPS_BUSINESS_RESOURCES_DIR ? resolve(process.env.AUTOOPS_BUSINESS_RESOURCES_DIR, '../..') : undefined
+  if (!configured || configured.dataDir !== dataDir) configured = {dataDir, store:createDeploymentStore({dataDir, workspaceStore, workspaceManagement:configuredWorkspaceManagement(configuredAutoOpsAccess()), access:configuredAutoOpsAccess(), ...(port === undefined ? {} : {agentPort:Number(port)}), ...(installAssetsRoot === undefined ? {} : {installAssetsRoot}), publicOrigin:process.env.AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN || ''})}
   return configured.store
 }

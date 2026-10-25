@@ -36,7 +36,7 @@ export interface DeploymentStore {
  stopAccepting():void;
  close():Promise<void>;
 }
-export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;workspaceManagement?:WorkspaceManagement;access:Pick<AutoOpsAccess,'requireDeploymentActor'|'requireDeploymentActionForActor'>;agentPort?:number;publicOrigin?:string}):DeploymentStore;
+export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;workspaceManagement?:WorkspaceManagement;access:Pick<AutoOpsAccess,'requireDeploymentActor'|'requireDeploymentActionForActor'>;agentPort?:number;installAssetsRoot?:string;publicOrigin?:string}):DeploymentStore;
 export function configuredDeploymentStore():DeploymentStore|undefined;
 
 export function stopConfiguredDeploymentStore():void;
