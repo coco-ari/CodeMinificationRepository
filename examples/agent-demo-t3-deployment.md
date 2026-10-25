@@ -8,7 +8,47 @@
 
 ### 当前验证发行
 
-本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次仅作历史证据，是否仍保留由当前恢复方案决定；不要执行已清理发行对应的历史脚本。
+本节是当前程序、网页、客户包及恢复配置的唯一现行记录。正式入口为 `https://auto.996788.xyz/`；`192.168.31.157:28887` 保留为后端地址，日常访问使用 HTTPS 域名。公网配置见[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)，模块归属及验收分层见[部署核心适配运行记录](../docs/runtime-modules.md#main-部署核心适配2026-10-25)。历史记录不代表旧发行仍可执行恢复。
+
+2026-10-25，本批应用提交为 `cb2cda6a75bff612b3874445e806d2158a09cdd2`，完整发行目录为 `/home/tao/autoops-agent-demo/releases/t3-deployment-ui-cb2cda6a`，继续使用 `/home/tao/autoops-deployment-validation/data`。已成功切换；网关 PID 236561、Worker PID 236560 的实际工作目录与配置均指向本发行。
+
+已确认方案中的服务与位置、Java/static 配置及发布入口、Git 来源、节点管理、历史档案与日志适配已实施，旧 Jenkins／脚本直取源码能力已退役；沿用原引擎、Agent、身份及业务存储。本次后续修正仅涉及日志工具栏布局和专有测试。完整发行中 32 个 Worker 文件、客户 ZIP 和部署 Agent 包均与已上线 8c 逐字节一致，不仅替换网页静态目录。
+
+| 本批发行证据 | 已核实结果 |
+| --- | --- |
+| 归档 SHA-256 | `4a0ddda9f6c04b9c2ef97021ad163139055d6a5594073e7daff62eaa4befc31e` |
+| 完整清单 SHA-256 | `eb051d8d0feed272424725fe68b50ac9cef3577097e8c9bf50c8d9cecb24b5bf` |
+| 原生依赖清单 SHA-256 | `3cd007442c37b7cb9a39f3d9f32c5367aaf57b6bf6210753e029e7a86f5570e0` |
+| 网页 HTML SHA-256 | `cd15802bb0c7bafbb74e7b9e5c9986b24e4b97c5d312fa510554437e0fbfac51`；公网 GET/HEAD 200，正文与发行目录一致 |
+| 来源与发行 | 29329 个跟踪文件；10243 个发行文件、61 个相对链接；保留 6006 个旧静态资源 |
+| 客户 ZIP | 0.3.0，1051718 字节；`f562543a616957782d608d755ba3cd0fbb5566876a6d6aeedcda59b24deb3dd1`；与 8c 字节一致 |
+| 部署 Agent 包 | 33028 字节、20 个程序文件；`660a805240637e5d4e6c2b708761203758d964556d98a906a381d440cb2ca0b7`；与 8c 字节一致 |
+| Linux 发行校验 | prepare/verify 通过；真实存活进程 cgroup 总内存上限 512 MiB、swap 0、OOM 0，峰值 348819456 字节（约 332.66 MiB） |
+| 同提交 CI | [运行链路 40169667941](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40169667941) 已成功；[AutoOps 质量 40169667961](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40169667961) 已成功 |
+
+切换前核对活动任务、停止接单并排空，创建一致性备份；348 个资料/技能文件、175 条消息、57 轮运行、531 条轮次条目、29 个绑定、8 项附件授权、1 台客户设备与工作区、35 条客户命令及全部部署配置/历史保留；部署执行器、共享 Docker 等无关服务 PID 及 28890 站点摘要不变。准备、校验、切换及恢复预检使用同一发行锁串行运行，保持独立 cgroup 总量限制。切换后应用与 Worker 健康、实际程序/网页/安装资源字节均通过；安装脚本和 Agent 包 GET/HEAD 与发行字节一致。
+
+恢复点为 `/home/tao/autoops-agent-demo/backups/t3-deployment-ui-cb2cda6a-20261025`，`rollback-program.sh --check` 已通过；恢复目标为完整发行 `t3-deployment-core-8c434a1a`，继续使用回滚时数据，不覆盖新业务记录。本次未执行真实降级。既有唯一空会话未知收据和原人工核实证明保留，不改成成功或扩大例外。
+
+8c 上线后，正式页面只读验证了服务与位置选择、9 条发布历史、历史冻结配置、运行信息、添加服务时的 Java/static 类型选择，以及 Esc 关闭与焦点恢复；没有保存服务、修改配置或执行发布/回退。新工具栏本机 `DeploymentLogs.browser.test.tsx` 14/14 通过，覆盖 1440px/390px × 浅深色、筛选、复制/下载、补读、错误、切范围及迟到响应。新发行线上实测 1440×600、390×600 浅深色，工具栏同行且无横向溢出；阶段筛选、搜索、复制及实际下载内容一致，Esc 返回阶段选择器；窄屏配置表单保持内部滚动和可达操作区。线上所选任务仅有 4 条日志，长日志内部滚动由本机浏览器回归覆盖，未宣称线上长日志已验证。
+
+相同任务、权限和数据下，搜索并复制前后均为“输入筛选 → 复制”（2→2 次）；按阶段复制均为“打开阶段 → 选择阶段 → 复制”（3→3 次）。本次减少工具栏换行、增加日志空间，保留 T3 组件、ARIA、权限、错误及日志游标，不宣称点击或网络等待减少。开发者只需维护局部布局约束；AI Agent 继续通过原可访问名称和自动化交互判断结果。详细红绿证据见 `.deployment/deployment-core-20261025/log-toolbar-investigation.md`。
+
+**核心迁移实现已完成；新增真实业务写入验收尚未全部闭环。** Java 多模块构建、发布、重启、回退与失败恢复，static 发布、回退与失败恢复，以及断线补报、原收据恢复和节点存储策略实际应用，仍需独立 Linux 目标逐项验证。本机单测、模拟 Agent、只读页面和程序回滚不替代这些业务操作，不宣布四批全部验收完成。
+
+已有节点在线但存储维护失败：发布前备份与当前报告均为拉取 BuildKit 镜像访问 Docker Hub 超时，目标历史清理正常；实际 Agent 1.6.0 的 20 个程序文件与本批包一致。未修改策略、缓存、镜像或全局 Docker/网络，后续真实构建需先满足镜像供应条件。另，本批临时 Docker/slirp 验收设施的挂载传播事故已受控恢复，13 个系统挂载、PTY、cgroup 和应用健康已核对，临时进程已停止；该方案停用，不能在共享宿主重试。最初防火墙语义基线的证据缺口保留。调查与恢复记录位于 `.deployment/deployment-core-20261025/`，不把事故恢复计为部署业务验收成功。
+
+### 历史批次：部署核心适配（2026-10-25）
+
+`8c434a1a49d48729498d32e83f1e6e7dc26dc93f` 已部署到 `/home/tao/autoops-agent-demo/releases/t3-deployment-core-8c434a1a`，[CI 40168509811](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40168509811) 和 [CI 40168509844](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40168509844) 均成功。29329 个跟踪文件核对无差异，公网应用及 Worker 健康、网页与安装资源 GET/HEAD 通过。该批主要摘要保留如下，不能替代上方新网页的验收：
+
+- 归档：`2e5534b7a5697a48cf659d57a820ee54818fa4e7e8852ce52ca88bf30369d961`；完整清单：`d66e00d5093f67364270e7b802546c259826cfb464964cc880f26c1d10c9647e`。
+- 原生清单：`a73a7309d258ac7d7a1986930d6a51c68a73f98f34de98deb874aecf6a583993`；公网 HTML：`70613114f392ea7260b4a8175337f665799b63b476ad7ee90306ca6c5ee10a87`。
+- 安装脚本：3710 字节，`408aac8e4c1ddeba7884a47d9e9ab43a1a630804c1705a2017fb3d6aec34b0e7`；部署 Agent 包与上方当前批次字节一致。
+
+首次 `8b5b9e59` 候选因安装脚本 503 自动程序回滚至 `27fa5b34`，未恢复旧业务数据。随后分别修复打包后资产相对路径错误、部署监听器依赖首次页面请求的冷启动问题；最终实际 Worker 在访问 overview 前即可读取安装资源。8c 恢复点为 `/home/tao/autoops-agent-demo/backups/t3-deployment-core-8c434a1a-20261025`，回滚预检通过，程序恢复目标为 `t3-ui-alignment-27fa5b34`；未以程序恢复证明 Java/static 业务回退通过。具体结果见 `public-verification.json`、`failed-switch-restoration.json` 和安装入口调查记录。
+
+### 历史批次：工作台原生呈现优化（2026-10-25）
 
 2026-10-25，工作台原生呈现优化 `27fa5b349e9b5e0e30c105f453ffca45216f45ad` 已部署。网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-ui-alignment-27fa5b34`；数据继续使用 `/home/tao/autoops-deployment-validation/data`。本批仅更新 UI；Worker 的 32 个构建文件和客户 ZIP 0.3.0 与前一发行逐字节相同，没有迁移 main 的新部署入口。
 
@@ -27,7 +67,7 @@
 
 恢复点为 `/home/tao/autoops-agent-demo/backups/t3-ui-alignment-27fa5b34-20261025`。其中自包含 `rollback-program.sh --check` 已直接执行并通过，回退目标为上一完整发行 `t3-customer-files-8b5be65e`；只恢复程序配置，保留回滚时业务数据，不以旧备份覆盖新增记录。35 项离线用例覆盖脚本参数绑定、Worker/客户包不变、活动任务拒绝、备份与失败恢复。既有唯一空会话未知收据及原人工核实证明继续保留，具体边界见下一历史批次；未执行真实降级。
 
-公网已实际打开新对话、技能库与部署页：重复欢迎标题不再出现，范围控件为可编辑的 14px/28px；技能分配状态与历史部署日志保留；执行器重连后恢复在线；运行信息按 Esc 关闭并回到触发按钮。本轮未对线上业务执行发布、回退或分配写入。浅深色、390px/短窗口、真实隔离技能分配与恢复、49 个浏览器用例、27 个单元/编译用例及操作步骤对比见[原生呈现验收](../docs/runtime-modules.md#工作台原生呈现优化2026-10-25)。证据保存于 `.deployment/t3-ui-alignment-20261025/`。main 的 23 项部署能力及适配方案仍[等待用户确认](deployment-core-adaptation-plan.md)，不得将本次 UI 更新称为功能迁移完成。
+公网已实际打开新对话、技能库与部署页：重复欢迎标题不再出现，范围控件为可编辑的 14px/28px；技能分配状态与历史部署日志保留；执行器重连后恢复在线；运行信息按 Esc 关闭并回到触发按钮。本轮未对线上业务执行发布、回退或分配写入。浅深色、390px/短窗口、真实隔离技能分配与恢复、49 个浏览器用例、27 个单元/编译用例及操作步骤对比见[原生呈现验收](../docs/runtime-modules.md#工作台原生呈现优化2026-10-25)。证据保存于 `.deployment/t3-ui-alignment-20261025/`。本批是工作台呈现优化，不含后来实施的 main 部署核心适配；已确认范围和实施进度见[部署核心适配方案](deployment-core-adaptation-plan.md)及上方当前发行。
 
 ### 历史批次：客户电脑文件引用（2026-10-25）
 
