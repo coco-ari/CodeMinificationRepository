@@ -10,24 +10,26 @@
 
 本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次仅作历史证据，是否仍保留由当前恢复方案决定；不要执行已清理发行对应的历史脚本。
 
-2026-10-25，客户电脑文件选择与引用 `f30a52b28c6e444f31f34d46724fed54acce4b50`（含主实现 `26308cda`）已完整部署。网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-files-f30a52b2`，数据仍为 `/home/tao/autoops-deployment-validation/data`。客户包为 0.3.0，当前 Mac 已更新，原配对、目录与执行记录保留。使用附件菜单“引用电脑文件”或输入 `@`，只读取当前电脑已登记项目目录；上传附件入口继续保留。
+2026-10-25，客户电脑文件选择与引用 `8b5be65ecaced6701dbccbae0b7a92d155ece513`（含主实现 `26308cda`、发送与引用修复 `f30a52b2`）已完整部署。网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-files-8b5be65e`，数据仍为 `/home/tao/autoops-deployment-validation/data`。客户包为 0.3.0，当前 Mac 已更新，原配对、目录与执行记录保留。使用附件菜单“引用电脑文件”或输入 `@`，只读取当前电脑已登记项目目录；上传附件入口继续保留。
 
 | 当前发行证据 | 实际结果 |
 | --- | --- |
-| 归档 SHA-256 | `a75b3cbc513caf6a54d22eb3f8637b995350816ac879417abc325834d43cb683` |
-| 完整清单 SHA-256 | `5fd9ddeb695874248de8af8bbcbf60499991c142701c20463af9a955ff99faca` |
-| 原生依赖清单 SHA-256 | `4b42ad9d4a6b3a3a5d4f29d18799c0ff137d4557555870915f1e8f8c3af3c238` |
-| 实际网页 HTML SHA-256 | `c53fb578960f5fea2ef0083af8b7d512fb75b7a0c1ba4a5098ef59ba3b7acfc4` |
+| 归档 SHA-256 | `280355ee8c5a5330071919ec8ee6957e0c253277c7ce46b7bbb1856660535c51` |
+| 完整清单 SHA-256 | `f8ad2fecbe49c25a8617834d08d185335b1bd76c014559a4e91456898c1fec7d` |
+| 原生依赖清单 SHA-256 | `e978b831eed91b9ca5d2626aca3a6e78f7f0d26e98eae65f7a6458c19d35b96a` |
+| 实际网页 HTML SHA-256 | `aafba3c44b984e579e114a417a68f8e58994bc353fd745065bc6f617093d04f3` |
 | 客户 ZIP | 0.3.0，1051718 字节；`f562543a616957782d608d755ba3cd0fbb5566876a6d6aeedcda59b24deb3dd1` |
-| 来源与发行 | 29295 个跟踪文件与干净提交逐项一致；9495 个发行文件、61 个相对链接；保留 5262 个旧静态资源 |
+| 来源与发行 | 29295 个跟踪文件与干净提交逐项一致；9658 个发行文件、61 个相对链接；保留 5425 个旧静态资源 |
 | Linux 原生运行 | 官方 2038 个原生文件、21 包、实际 CLI、隔离资料与 ZIP Worker 通过 |
-| CI | [运行链路 40154576320](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40154576320)、[AutoOps 质量 40154576407](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40154576407) 均通过 |
+| CI | [运行链路 40155498904](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40155498904)、[AutoOps 质量 40155498897](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40155498897) 均通过 |
 
-切换前检查空闲、停止接单并一致备份，保留 348 个资料/技能文件、165 条消息、53 轮运行、517 条轮次条目、28 个绑定、8 项附件授权及设备、收据和部署数据。网关 PID 216986、Worker PID 216985，无关服务 PID 与 28890 站点摘要不变。准备、校验、切换及恢复预检串行使用独立 512 MiB、无 swap、100% CPU cgroup。公网 HTTPS 200、HTTP 308、匿名 401、Secure/HttpOnly/SameSite Cookie、WSS、旧会话绑定与资料读取通过。
+切换前检查空闲、停止接单并一致备份，保留 348 个资料/技能文件、175 条消息、57 轮运行、531 条轮次条目、29 个绑定、8 项附件授权及设备、收据和部署数据。网关 PID 218459、Worker PID 218458，无关服务 PID 与 28890 站点摘要不变。准备、校验、切换及恢复预检串行使用独立 512 MiB、无 swap、100% CPU cgroup。公网 HTTPS 200、HTTP 308、匿名 401、Secure/HttpOnly/SameSite Cookie、WSS、旧会话绑定与资料读取通过。
 
-恢复点为 `/home/tao/autoops-agent-demo/backups/t3-customer-files-f30a52b2-20261025`，`rollback-program.sh --check` 通过。当前脚本先恢复本批首份 `26308cda` 程序；完整退回本功能前稳定版须再执行 `backups/t3-customer-files-26308cda-20261025/rollback-program.sh` 恢复 `46ee03b2-r2`，并在空闲时以该发行 ZIP 0.2.1 恢复客户程序，继续使用同一状态目录。两层均保留回滚时业务数据，不覆盖发布后新记录；未执行真实降级。客户连接程序、网页和 Worker 的版本须同时核对，不能仅替换前端静态资源。
+恢复点为 `/home/tao/autoops-agent-demo/backups/t3-customer-files-8b5be65e-20261025`，`rollback-program.sh --check` 通过；实际执行恢复上一完整发行 `f30a52b2`，保留回滚时业务数据与 0.3.0 客户包，不恢复发布前数据库。当前脚本及恢复目录同时保存下述唯一命令的人工核实证明。退回更早客户包或发行前须重新核对这些已知收据和配置，不直接执行历史多层恢复链；未执行真实降级。
 
-本批定向测试、低带宽模拟和真实操作边界见[客户电脑文件引用](../docs/runtime-modules.md#客户电脑文件引用2026-10-25)。首份发行真实发送发现目录授权检查漏传绑定、旧 `@` 限制与历史普通链接，已在当前发行修正；首次失败记录保留。证据位于 `.deployment/customer-files/` 与 `.deployment/customer-files-r2/`。
+首次失败的测试空会话留有 1 条中心 `unknown` 的 `resumeThread` 历史收据，本机原生 CLI 已确认停止且无活动运行、待回传命令或目录锁。中心没有自动接受这类无 run 身份的核实结果，原记录继续保留。仅本批发布预检识别确切命令、会话、运行代次、空 run/attempt 及人工证明；不接受其他未知命令，不改写为成功。证明 `customer-command-reconciliation.json` 的 SHA-256 为 `7b2750d07cb64b86bd982b58b24ff4c81814f3f20cfab987a71c1bdecb973457`，随恢复脚本保留。30 项恢复脚本隔离测试覆盖该例外的身份、命令类型、代次与摘要拒绝。该空会话的自动恢复/收据收敛仍是已知边界，成功会话的三轮读取与重启恢复另外实测通过。
+
+最终批仅重建网页；Worker 与客户 ZIP 沿用 `f30a52b2` 已校验且未修改的构建。实际网页中附件菜单选择、`@` 选择、历史预览、Esc 关闭和两种焦点恢复均已验证，主题与窗口恢复原状。本批定向测试、低带宽模拟和真实操作边界见[客户电脑文件引用](../docs/runtime-modules.md#客户电脑文件引用2026-10-25)。首份发行真实发送发现目录授权检查漏传绑定、旧 `@` 限制与历史普通链接，已在当前发行修正；首次失败记录保留。证据位于 `.deployment/customer-files/`、`.deployment/customer-files-r2/` 与 `.deployment/customer-files-r3/`。
 
 ### 历史批次：客户默认思考档位（2026-10-25）
 
