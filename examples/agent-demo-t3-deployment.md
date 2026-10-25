@@ -10,7 +10,28 @@
 
 本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次仅作历史证据，是否仍保留由当前恢复方案决定；不要执行已清理发行对应的历史脚本。
 
-2026-10-25，客户默认思考档位修复 `46ee03b27e317032dc8e05d1ed694d7ccb9eb3a2` 已完整部署。网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-reasoning-46ee03b2-r2`，数据仍为 `/home/tao/autoops-deployment-validation/data`。客户包为 0.2.1，当前 Mac 已更新，原配对、目录与执行记录保留。
+2026-10-25，客户电脑文件选择与引用 `f30a52b28c6e444f31f34d46724fed54acce4b50`（含主实现 `26308cda`）已完整部署。网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-files-f30a52b2`，数据仍为 `/home/tao/autoops-deployment-validation/data`。客户包为 0.3.0，当前 Mac 已更新，原配对、目录与执行记录保留。使用附件菜单“引用电脑文件”或输入 `@`，只读取当前电脑已登记项目目录；上传附件入口继续保留。
+
+| 当前发行证据 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `a75b3cbc513caf6a54d22eb3f8637b995350816ac879417abc325834d43cb683` |
+| 完整清单 SHA-256 | `5fd9ddeb695874248de8af8bbcbf60499991c142701c20463af9a955ff99faca` |
+| 原生依赖清单 SHA-256 | `4b42ad9d4a6b3a3a5d4f29d18799c0ff137d4557555870915f1e8f8c3af3c238` |
+| 实际网页 HTML SHA-256 | `c53fb578960f5fea2ef0083af8b7d512fb75b7a0c1ba4a5098ef59ba3b7acfc4` |
+| 客户 ZIP | 0.3.0，1051718 字节；`f562543a616957782d608d755ba3cd0fbb5566876a6d6aeedcda59b24deb3dd1` |
+| 来源与发行 | 29295 个跟踪文件与干净提交逐项一致；9495 个发行文件、61 个相对链接；保留 5262 个旧静态资源 |
+| Linux 原生运行 | 官方 2038 个原生文件、21 包、实际 CLI、隔离资料与 ZIP Worker 通过 |
+| CI | [运行链路 40154576320](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40154576320)、[AutoOps 质量 40154576407](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40154576407) 均通过 |
+
+切换前检查空闲、停止接单并一致备份，保留 348 个资料/技能文件、165 条消息、53 轮运行、517 条轮次条目、28 个绑定、8 项附件授权及设备、收据和部署数据。网关 PID 216986、Worker PID 216985，无关服务 PID 与 28890 站点摘要不变。准备、校验、切换及恢复预检串行使用独立 512 MiB、无 swap、100% CPU cgroup。公网 HTTPS 200、HTTP 308、匿名 401、Secure/HttpOnly/SameSite Cookie、WSS、旧会话绑定与资料读取通过。
+
+恢复点为 `/home/tao/autoops-agent-demo/backups/t3-customer-files-f30a52b2-20261025`，`rollback-program.sh --check` 通过。当前脚本先恢复本批首份 `26308cda` 程序；完整退回本功能前稳定版须再执行 `backups/t3-customer-files-26308cda-20261025/rollback-program.sh` 恢复 `46ee03b2-r2`，并在空闲时以该发行 ZIP 0.2.1 恢复客户程序，继续使用同一状态目录。两层均保留回滚时业务数据，不覆盖发布后新记录；未执行真实降级。客户连接程序、网页和 Worker 的版本须同时核对，不能仅替换前端静态资源。
+
+本批定向测试、低带宽模拟和真实操作边界见[客户电脑文件引用](../docs/runtime-modules.md#客户电脑文件引用2026-10-25)。首份发行真实发送发现目录授权检查漏传绑定、旧 `@` 限制与历史普通链接，已在当前发行修正；首次失败记录保留。证据位于 `.deployment/customer-files/` 与 `.deployment/customer-files-r2/`。
+
+### 历史批次：客户默认思考档位（2026-10-25）
+
+2026-10-25，客户默认思考档位修复 `46ee03b27e317032dc8e05d1ed694d7ccb9eb3a2` 已完整部署。该批网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-reasoning-46ee03b2-r2`，数据仍为 `/home/tao/autoops-deployment-validation/data`。客户包为 0.2.1，当时 Mac 已更新，原配对、目录与执行记录保留。
 
 | 当前发行证据 | 实际结果 |
 | --- | --- |

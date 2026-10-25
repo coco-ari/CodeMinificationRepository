@@ -6757,7 +6757,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       <ComposerBanner.Dock>
         {supportsCustomerFiles && autoOpsThreadScope && customerFilePicker?.key === customerFileScopeKey ?
           <CustomerFilePicker key={customerFileScopeKey} scope={autoOpsThreadScope} threadId={activeThreadId} environmentId={environmentId}
-            initialPath={customerFilePicker.path} onClose={() => { setCustomerFilePicker(null); focusComposer(); }}
+            initialPath={customerFilePicker.path} onClose={() => setCustomerFilePicker(null)} onRestoreFocus={focusComposer}
             onSelect={path => {
               insertComposerTextAtEndStable(`${serializeComposerFileLink(path)} `, { ensureLeadingBoundary: true });
               setCustomerFilePicker(null);

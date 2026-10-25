@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   customerFileReference,
@@ -58,6 +58,7 @@ export function CustomerFilePicker(props: {
   environmentId: EnvironmentId;
   initialPath: string | null;
   onClose: () => void;
+  onRestoreFocus?: () => void;
   onSelect?: (path: string) => void;
 }) {
   const [selected, setSelected] = useState(props.initialPath);
@@ -117,7 +118,19 @@ export function CustomerFilePicker(props: {
         if (!open) props.onClose();
       }}
     >
-      <DialogPopup className="flex h-[80dvh] max-w-5xl flex-col overflow-hidden p-0">
+      <DialogPopup
+        className="flex h-[80dvh] max-w-5xl flex-col overflow-hidden p-0"
+        finalFocus={
+          props.onRestoreFocus
+            ? () => {
+                props.onRestoreFocus?.();
+                return document.activeElement instanceof HTMLElement
+                  ? document.activeElement
+                  : false;
+              }
+            : undefined
+        }
+      >
         <DialogHeader className="shrink-0 border-b px-4 py-3">
           <DialogTitle>电脑文件</DialogTitle>
         </DialogHeader>
@@ -203,6 +216,7 @@ export function CustomerFileLink(props: {
   copyMarkdown: string;
 }) {
   const [open, setOpen] = useState(false);
+  const previewButton = useRef<HTMLButtonElement>(null);
   const theme = useRenderedAppearance();
   const target = props.scope.executionBinding;
   const path = target?.kind === "customer" ? customerFilePathForTarget(props.path, target) : null;
@@ -214,6 +228,7 @@ export function CustomerFileLink(props: {
         data-markdown-copy={props.copyMarkdown}
         render={
           <button
+            ref={previewButton}
             type="button"
             aria-label={`预览 ${path.split("/").at(-1)}`}
             onClick={() => setOpen(true)}
@@ -229,6 +244,7 @@ export function CustomerFileLink(props: {
           environmentId={props.threadRef.environmentId}
           initialPath={path}
           onClose={() => setOpen(false)}
+          onRestoreFocus={() => previewButton.current?.focus()}
         />
       ) : null}
     </>

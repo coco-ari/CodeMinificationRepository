@@ -1,11 +1,12 @@
-import type { PropsWithChildren } from "react";
+import { useRef, useState, type PropsWithChildren } from "react";
 import { EnvironmentId, customerFileReference } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { autoOpsRequest } from "./apiClient";
 import { useCustomerFileSearch } from "./customerFiles";
-import { CustomerFilePicker } from "./CustomerFilePicker";
+import { CustomerFileLink, CustomerFilePicker } from "./CustomerFilePicker";
+import { ThreadId } from "@t3tools/contracts";
 import type { AutoOpsThreadScope } from "./hostConfig";
 import "../index.css";
 
@@ -51,6 +52,61 @@ function Search(props: { scope: AutoOpsThreadScope; query: string }) {
 }
 
 describe("客户文件的原生选择与范围隔离", () => {
+  it("Esc 关闭后回到输入框，历史预览关闭后回到原文件标签", async () => {
+    const { scope } = setup();
+    vi.mocked(autoOpsRequest).mockImplementation((path) => {
+      const input = JSON.parse(new URL(path, "http://localhost").searchParams.get("input")!);
+      return Promise.resolve(
+        input.operation === "preview"
+          ? {
+              entries: [],
+              truncated: false,
+              preview: { path: "src/client.ts", size: 12, binary: false, contents: "FOCUS-7625" },
+            }
+          : { entries: [], truncated: false },
+      );
+    });
+    function Composer() {
+      const [open, setOpen] = useState(false);
+      const input = useRef<HTMLInputElement>(null);
+      return (
+        <>
+          <input aria-label="测试消息" ref={input} />
+          <button onClick={() => setOpen(true)}>选择电脑文件</button>
+          {open ? (
+            <CustomerFilePicker
+              scope={scope}
+              threadId="draft"
+              environmentId={environmentId}
+              initialPath={null}
+              onClose={() => setOpen(false)}
+              onRestoreFocus={() => input.current?.focus()}
+            />
+          ) : null}
+          <CustomerFileLink
+            scope={scope}
+            threadRef={{ environmentId, threadId: ThreadId.make("draft") }}
+            path="autoops-customer/device/workspace/1/src/client.ts"
+            copyMarkdown=""
+          />
+        </>
+      );
+    }
+    await using screen = await render(<Composer />);
+    await screen.getByRole("button", { name: "选择电脑文件", exact: true }).click();
+    await page.getByRole("searchbox").click();
+    await userEvent.keyboard("{Escape}");
+    await expect
+      .element(screen.getByRole("textbox", { name: "测试消息", exact: true }))
+      .toHaveFocus();
+    await screen.getByRole("button", { name: "预览 client.ts", exact: true }).click();
+    await expect.element(page.getByText(/FOCUS-7625/u)).toBeVisible();
+    await page.getByRole("button", { name: "取消", exact: true }).click();
+    await expect
+      .element(screen.getByRole("button", { name: "预览 client.ts", exact: true }))
+      .toHaveFocus();
+  });
+
   it("旧搜索取消后迟到结果不能覆盖新目录，新范围不复用旧结果", async () => {
     const { scope } = setup();
     let finishOld!: (value: unknown) => void;
