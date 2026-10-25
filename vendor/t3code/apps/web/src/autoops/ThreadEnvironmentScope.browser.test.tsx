@@ -52,7 +52,7 @@ it('空草稿可选择无环境再恢复原环境，不创建其他会话且菜�
 it('外部成员无环境仍能呈现问答范围，不出现未分配环境或内部范围', async () => {
   await using screen = await render(setup(true, 'scope-external-draft'))
   await expect.element(screen.getByRole('button', { name: '业务环境' })).toHaveTextContent('无环境')
-  await expect.element(screen.getByRole('button', { name: '对话工作区' })).toHaveTextContent('外部脱敏')
+  await expect.element(screen.getByRole('button', { name: '对话工作区' })).toHaveTextContent('外部脱敏 · 当前工作区')
   await screen.getByRole('button', { name: '业务环境' }).click()
   await expect.element(page.getByRole('menuitemradio', { name: '无环境', exact: true })).toBeVisible()
   await expect.element(page.getByRole('menuitemradio', { name: '测试环境', exact: true })).not.toBeInTheDocument()
