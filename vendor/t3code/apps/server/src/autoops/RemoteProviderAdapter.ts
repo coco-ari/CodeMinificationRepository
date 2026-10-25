@@ -196,7 +196,7 @@ export function makeRemoteProviderAdapter(
               yield* Effect.try({
                 try: () => {
                   authorizeCustomerModel(hub.access, binding, value.modelSelection);
-                  assertCustomerInput(value.message);
+                  assertCustomerInput(value.message, customerTarget);
                   const session = hub.session(input.providerSessionId)!;
                   const runs = [...(session.runs ?? [])];
                   if (
@@ -236,12 +236,15 @@ export function makeRemoteProviderAdapter(
               }),
             ),
           steerTurn: (value) =>
-            command(
-              "steerTurn",
-              value,
-              [value.runId, value.message.messageId],
-              Schema.Unknown,
-            ).pipe(Effect.asVoid),
+            Effect.try({
+              try: () => assertCustomerInput(value.message, customerTarget),
+              catch: protocolError,
+            }).pipe(
+              Effect.andThen(() =>
+                command("steerTurn", value, [value.runId, value.message.messageId], Schema.Unknown),
+              ),
+              Effect.asVoid,
+            ),
           interruptTurn: (value) =>
             command("interruptTurn", value, [value.providerTurnId], Schema.Unknown).pipe(
               Effect.asVoid,

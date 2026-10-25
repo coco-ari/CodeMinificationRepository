@@ -17,6 +17,7 @@ import {
   extractInlineCodeSpans,
   extractMarkdownLinkHrefs,
   inlineCodeFilePathCandidate,
+  safeDecodeURIComponent,
 } from "@t3tools/shared/markdownLinks";
 import { isHostPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
@@ -2747,8 +2748,6 @@ function useChatMarkdownState({
     copyMarkdown: string,
     mediaSource?: string,
   ) => {
-    if (customerScope && businessScope && threadRef && fileLinkMeta.filePath.startsWith("autoops-customer/"))
-      return <CustomerFileLink scope={businessScope} threadRef={threadRef} path={fileLinkMeta.filePath} copyMarkdown={copyMarkdown} />;
     const resolveHostPath = () =>
       resolveMarkdownFileHostPath({
         meta: fileLinkMeta,
@@ -2825,6 +2824,7 @@ function useChatMarkdownState({
 
   const componentState = {
     customerScope,
+    businessScope,
     canOperateHost,
     canOperatePreview,
     cwd,
@@ -2989,6 +2989,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
   a: function MarkdownAnchor({ node, href, children, title: _title, ...props }) {
     const {
       customerScope,
+      businessScope,
       canOperateHost,
       canOperatePreview,
       cwd,
@@ -3053,6 +3054,24 @@ const CHAT_MARKDOWN_COMPONENTS = {
       );
     }
     const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
+    if (
+      customerScope &&
+      businessScope &&
+      threadRef &&
+      normalizedHref.startsWith("autoops-customer/")
+    ) {
+      const start = node?.position?.start.offset;
+      const end = node?.position?.end.offset;
+      const copyMarkdown = start !== undefined && end !== undefined ? text.slice(start, end) : "";
+      return (
+        <CustomerFileLink
+          scope={businessScope}
+          threadRef={threadRef}
+          path={safeDecodeURIComponent(normalizedHref)}
+          copyMarkdown={copyMarkdown}
+        />
+      );
+    }
     const fileLinkMeta = normalizedHref
       ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
         resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd))

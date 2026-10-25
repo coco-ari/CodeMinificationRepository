@@ -7,7 +7,7 @@ import type { RemoteDeviceHub } from "./RemoteDeviceService.ts";
 import { CustomerCodexCapabilities } from "../provider/HeadlessCodexRunner.ts";
 import { HeadlessCodexInputs } from "../provider/HeadlessCodexProtocol.ts";
 
-it.each(["restart", "preflight-failure", "dispatch-unknown"] as const)(
+it.each(["restart", "preflight-failure", "dispatch-unknown", "same-file", "other-file"] as const)(
   "keeps the native thread and start outcome across %s",
   async (scenario) => {
     const instanceId = C.ProviderInstanceId.make(
@@ -98,6 +98,7 @@ it.each(["restart", "preflight-failure", "dispatch-unknown"] as const)(
           if (scenario === "dispatch-unknown") throw Error("Connection lost after durable start");
           return;
         }
+        if (method === "steerTurn") return;
         throw Error("Unexpected command");
       },
     } as unknown as RemoteDeviceHub;
@@ -136,7 +137,9 @@ it.each(["restart", "preflight-failure", "dispatch-unknown"] as const)(
         createdBy: "user",
         creationSource: "web",
         messageId: "message-two",
-        text: "Continue this same conversation",
+        text: scenario.endsWith("file")
+          ? `[client (4G).ts](autoops-customer/11111111-1111-1111-1111-111111111111/${scenario === "same-file" ? "workspace" : "other-workspace"}/1/src/client%20%284G%29.ts) Read this file`
+          : "Continue this same conversation",
         attachments: [],
       },
       modelSelection,
@@ -153,25 +156,50 @@ it.each(["restart", "preflight-failure", "dispatch-unknown"] as const)(
         Effect.gen(function* () {
           const runtime = yield* makeRemoteProviderAdapter(hub, instanceId).openSession(openInput);
           const result = yield* Effect.result(runtime.startTurn(input));
-          if (scenario === "restart") expect(result._tag).toBe("Success");
+          if (scenario === "restart" || scenario === "same-file")
+            expect(result._tag).toBe("Success");
           else {
             expect(result._tag).toBe("Failure");
             if (result._tag === "Failure")
               expect((result.failure as { outcome?: string }).outcome).toBe(
-                scenario === "preflight-failure" ? "not_started" : undefined,
+                scenario === "dispatch-unknown" ? undefined : "not_started",
               );
+          }
+          if (scenario === "same-file") {
+            const steering = yield* Schema.decodeUnknownEffect(HeadlessCodexInputs.steerTurn)({
+              threadId: input.threadId,
+              providerThread: nativeThread,
+              providerTurnId: "turn-two",
+              runId: input.runId,
+              attemptId: input.attemptId,
+              message: { ...input.message, messageId: "steer-message" },
+            });
+            yield* runtime.steerTurn(steering);
+            const rejected = yield* Effect.result(
+              runtime.steerTurn({
+                ...steering,
+                message: {
+                  ...steering.message,
+                  text: steering.message.text.replace("/workspace/", "/other-workspace/"),
+                },
+              }),
+            );
+            expect(rejected._tag).toBe("Failure");
           }
         }),
       ),
     );
     expect(commands.map((c) => c.method)).toEqual(
-      scenario === "preflight-failure"
+      scenario === "preflight-failure" || scenario === "other-file"
         ? ["openSession", "resumeThread"]
-        : ["openSession", "resumeThread", "startTurn"],
+        : scenario === "same-file"
+          ? ["openSession", "resumeThread", "startTurn", "steerTurn"]
+          : ["openSession", "resumeThread", "startTurn"],
     );
     expect(commands[1]!.input.providerThread.nativeThreadRef.nativeId).toBe(
       "original-native-thread",
     );
-    if (scenario !== "preflight-failure") expect(commands[2]!.input.runId).toBe("run-two");
+    if (scenario !== "preflight-failure" && scenario !== "other-file")
+      expect(commands[2]!.input.runId).toBe("run-two");
   },
 );

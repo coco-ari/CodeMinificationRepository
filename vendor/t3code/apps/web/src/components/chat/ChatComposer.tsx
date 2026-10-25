@@ -2395,7 +2395,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const composerTrigger =
     customerScope &&
-    (rawComposerTrigger?.kind === "path" || rawComposerTrigger?.kind === "pull-request")
+    ((rawComposerTrigger?.kind === "path" && !supportsCustomerFiles) ||
+      rawComposerTrigger?.kind === "pull-request")
       ? null
       : rawComposerTrigger;
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
@@ -7488,7 +7489,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                     ? "项目助手暂时不可用，请稍后重试"
                                     : "请在设置中启用运行器后发送消息"
                                 : customerScope
-                                  ? "输入需求，$ 使用本机技能"
+                                  ? supportsCustomerFiles
+                                    ? "输入需求，@ 引用电脑文件，$ 使用本机技能"
+                                    : "输入需求，$ 使用本机技能"
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                     : isAutoOpsHosted()

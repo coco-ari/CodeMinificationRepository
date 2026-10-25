@@ -20,6 +20,18 @@ import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { MarkdownFindContext } from "./chat/markdownFindContext";
 import { useThreadFindHighlights } from "./chat/threadFindHighlights";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
+import type { AutoOpsThreadScope } from "../autoops/hostConfig";
+import { readCustomerFiles } from "../autoops/customerFiles";
+
+const customerHistory = vi.hoisted(() => ({ scope: undefined as AutoOpsThreadScope | undefined }));
+vi.mock(import("../autoops/useThreadScope"), async (original) => ({
+  ...(await original()),
+  useAutoOpsThreadScope: () => customerHistory.scope,
+}));
+vi.mock(import("../autoops/customerFiles"), async (original) => ({
+  ...(await original()),
+  readCustomerFiles: vi.fn(),
+}));
 
 const { workspaceSearch, filesystemMetadata } = vi.hoisted(() => ({
   workspaceSearch: vi.fn(),
@@ -88,6 +100,8 @@ import { serializeTableElementToCsv, chatMarkdownClipboardPayload } from "../mar
 import { captureAssistantTextSelection } from "../lib/assistantTextSelection";
 
 function setup() {
+  customerHistory.scope = undefined;
+  vi.mocked(readCustomerFiles).mockReset();
   settingsOverrides.mathRenderingEnabled = false;
   renderDiagram.mockReset();
   workspaceSearch.mockReset().mockResolvedValue(AsyncResult.success({ entries: [] }));
@@ -839,6 +853,59 @@ describe("ChatMarkdown workspace file opens", () => {
 });
 
 describe("ChatMarkdown file citations", () => {
+  it("opens an encoded customer reference without a center filesystem path", async () => {
+    setup();
+    customerHistory.scope = {
+      projectId: "project",
+      environmentId: "test",
+      agentId: "agent",
+      visibility: "private",
+      executionBinding: {
+        kind: "customer",
+        deviceId: "device",
+        runtimeId: "codex",
+        registeredWorkspaceId: "workspace",
+        workspaceBindingRevision: 1,
+      },
+    };
+    vi.mocked(readCustomerFiles).mockImplementation(async (_scope, _thread, input) =>
+      input.operation === "preview"
+        ? {
+            entries: [],
+            truncated: false,
+            preview: {
+              path: input.path!,
+              size: 42,
+              binary: false,
+              contents: "CUSTOMER-HISTORY-7624",
+            },
+          }
+        : { entries: [], truncated: false },
+    );
+    await using screen = await renderText(
+      "[client (4G).ts](autoops-customer/device/workspace/1/src/client%20%284G%29.ts)",
+      {
+        cwd: undefined,
+        threadRef: {
+          environmentId: EnvironmentId.make("fixture-env"),
+          threadId: ThreadId.make("customer-thread"),
+        },
+      },
+    );
+    await screen.getByRole("button", { name: "预览 client (4G).ts", exact: true }).click();
+    await expect.element(page.getByText(/CUSTOMER-HISTORY-7624/u)).toBeVisible();
+    expect(
+      vi
+        .mocked(readCustomerFiles)
+        .mock.calls.some(
+          ([, threadId, input]) =>
+            threadId === "customer-thread" &&
+            input.operation === "preview" &&
+            input.path === "src/client (4G).ts",
+        ),
+    ).toBe(true);
+  });
+
   it.each([true, false])(
     "renders Codex file citations as file chips with parseRawHtml=%s",
     async (parseRawHtml) => {
