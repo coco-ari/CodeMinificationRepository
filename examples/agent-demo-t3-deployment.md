@@ -10,6 +10,27 @@
 
 本节是当前程序、网页、客户包及恢复配置的唯一现行记录；正式访问入口为 `https://auto.996788.xyz/`，公网配置与验收见下方[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)。`192.168.31.157:28887` 继续作为后端地址，登录 Cookie 已启用 Secure，日常访问使用 HTTPS 域名。逐模块验收与完成边界见[第二步最终验收](../docs/runtime-modules.md#第二步最终验收)。旧批次仅作历史证据，是否仍保留由当前恢复方案决定；不要执行已清理发行对应的历史脚本。
 
+2026-10-25，工作台原生呈现优化 `27fa5b349e9b5e0e30c105f453ffca45216f45ad` 已部署。网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-ui-alignment-27fa5b34`；数据继续使用 `/home/tao/autoops-deployment-validation/data`。本批仅更新 UI；Worker 的 32 个构建文件和客户 ZIP 0.3.0 与前一发行逐字节相同，没有迁移 main 的新部署入口。
+
+| 当前发行证据 | 实际结果 |
+| --- | --- |
+| 归档 SHA-256 | `b3aa6ec25b9973a0bacaa15121636ca3c9bc8bb1b5f7991863880abbbfa05261` |
+| 完整清单 SHA-256 | `a376aecf4220cb78bab0ce154a2bc5c9aaaaf665be4baa7f382038bd7c945c42` |
+| 原生依赖清单 SHA-256 | `3ce336fc017086a56ef6821c8ca8e021f5228b845637f1d5c0bea717c4c1925c` |
+| 实际网页 HTML SHA-256 | `b2fec5f2191d23d9f1ec6b2d982bdf102a237496cbdf545ea39a54274d88d2d1`，公网与发行目录一致 |
+| 客户 ZIP | 0.3.0，1051718 字节；`f562543a616957782d608d755ba3cd0fbb5566876a6d6aeedcda59b24deb3dd1`，未更新本机程序 |
+| 来源与发行 | 29298 个跟踪文件与干净提交逐项一致；9822 个发行文件、61 个相对链接；保留 5589 个旧静态资源 |
+| Linux 原生运行 | 官方 2038 个原生文件、21 包、实际 CLI、隔离资料与 ZIP Worker 通过 |
+| CI | [运行链路 40162793902](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40162793902)、[AutoOps 质量 40162793949](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40162793949) 均通过 |
+
+切换前检查空闲、停止接单、排空并一致备份；保留 348 个资料/技能文件、175 条消息、57 轮运行、531 条轮次条目、29 个绑定、8 项附件授权、1 台客户设备及其工作区、35 条客户命令与全部部署配置/记录。网关 PID 226509、Worker PID 226508；部署执行器、无关服务 PID 和 28890 站点摘要不变。准备、校验、切换及恢复预检按同一文件锁串行，使用独立 512 MiB、无 swap、100% CPU cgroup；切换阶段峰值约 224.4 MiB。公网 HTTPS 200、Worker 健康、实际网页摘要核对通过。
+
+恢复点为 `/home/tao/autoops-agent-demo/backups/t3-ui-alignment-27fa5b34-20261025`。其中自包含 `rollback-program.sh --check` 已直接执行并通过，回退目标为上一完整发行 `t3-customer-files-8b5be65e`；只恢复程序配置，保留回滚时业务数据，不以旧备份覆盖新增记录。35 项离线用例覆盖脚本参数绑定、Worker/客户包不变、活动任务拒绝、备份与失败恢复。既有唯一空会话未知收据及原人工核实证明继续保留，具体边界见下一历史批次；未执行真实降级。
+
+公网已实际打开新对话、技能库与部署页：重复欢迎标题不再出现，范围控件为可编辑的 14px/28px；技能分配状态与历史部署日志保留；执行器重连后恢复在线；运行信息按 Esc 关闭并回到触发按钮。本轮未对线上业务执行发布、回退或分配写入。浅深色、390px/短窗口、真实隔离技能分配与恢复、49 个浏览器用例、27 个单元/编译用例及操作步骤对比见[原生呈现验收](../docs/runtime-modules.md#工作台原生呈现优化2026-10-25)。证据保存于 `.deployment/t3-ui-alignment-20261025/`。main 的 23 项部署能力及适配方案仍[等待用户确认](deployment-core-adaptation-plan.md)，不得将本次 UI 更新称为功能迁移完成。
+
+### 历史批次：客户电脑文件引用（2026-10-25）
+
 2026-10-25，客户电脑文件选择与引用 `8b5be65ecaced6701dbccbae0b7a92d155ece513`（含主实现 `26308cda`、发送与引用修复 `f30a52b2`）已完整部署。网关、实际 Worker、网页统一使用 `/home/tao/autoops-agent-demo/releases/t3-customer-files-8b5be65e`，数据仍为 `/home/tao/autoops-deployment-validation/data`。客户包为 0.3.0，当前 Mac 已更新，原配对、目录与执行记录保留。使用附件菜单“引用电脑文件”或输入 `@`，只读取当前电脑已登记项目目录；上传附件入口继续保留。
 
 | 当前发行证据 | 实际结果 |
