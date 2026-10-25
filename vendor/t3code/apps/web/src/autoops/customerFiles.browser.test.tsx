@@ -130,6 +130,7 @@ function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
             aria-label="测试消息"
             ref={input}
             value={draft}
+            hidden={sheet && !draft}
             onChange={(event) => setDraft(event.target.value)}
           />
           <CustomerFileAttachMenu
@@ -147,7 +148,7 @@ function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
           <RightPanelSheet
             animationDurationMs={0}
             keepMounted={false}
-            finalFocus={() => input.current}
+            restoreFocus
             open={state.isOpen}
             onClose={() => {
               useRightPanelStore.getState().close(threadRef)
@@ -244,7 +245,7 @@ describe('客户文件的原生选择与范围隔离', () => {
           selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).isOpen,
       )
       .toBe(false)
-    await expect.element(page.getByRole('textbox', { name: '测试消息', exact: true })).toHaveFocus()
+    await expect.element(page.getByRole('button', { name: '预览 client.ts', exact: true })).toHaveFocus()
     await page.getByRole('button', { name: '预览 client.ts', exact: true }).click()
     await page.getByRole('button', { name: '添加到对话', exact: true }).click()
     await expect.element(page.getByRole('textbox')).toHaveFocus()

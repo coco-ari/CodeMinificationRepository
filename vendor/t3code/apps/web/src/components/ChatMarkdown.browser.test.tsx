@@ -15,13 +15,15 @@ import { applyThemeColorPreview, getStandardThemeColors } from "../themePalette"
 import { readLocalApi } from "../localApi";
 import { toastManager } from "./ui/toast";
 import { filesystemEnvironment } from "../state/filesystem";
-import { useRightPanelStore } from "../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { MarkdownFindContext } from "./chat/markdownFindContext";
 import { useThreadFindHighlights } from "./chat/threadFindHighlights";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
 import type { AutoOpsThreadScope } from "../autoops/hostConfig";
 import { readCustomerFiles } from "../autoops/customerFiles";
+import { CustomerFilePanel } from "../autoops/CustomerFilePanel";
+import type { FilePreviewPanelProps } from "./files/FilePreviewPanel";
 
 const customerHistory = vi.hoisted(() => ({ scope: undefined as AutoOpsThreadScope | undefined }));
 vi.mock(import("../autoops/useThreadScope"), async (original) => ({
@@ -882,18 +884,66 @@ describe("ChatMarkdown file citations", () => {
           }
         : { entries: [], truncated: false },
     );
-    await using screen = await renderText(
-      "[client (4G).ts](autoops-customer/device/workspace/1/src/client%20%284G%29.ts)",
-      {
-        cwd: undefined,
-        threadRef: {
-          environmentId: EnvironmentId.make("fixture-env"),
-          threadId: ThreadId.make("customer-thread"),
-        },
+    const threadRef = {
+      environmentId: EnvironmentId.make("fixture-env"),
+      threadId: ThreadId.make("customer-thread"),
+    };
+    const previousPanels = useRightPanelStore.getState().byThreadKey;
+    using _panels = {
+      [Symbol.dispose]() {
+        useRightPanelStore.setState({ byThreadKey: previousPanels });
       },
-    );
+    };
+    useRightPanelStore.setState({ byThreadKey: {} });
+    function CustomerHistory() {
+      const state = useRightPanelStore((value) =>
+        selectThreadRightPanelState(value.byThreadKey, threadRef),
+      );
+      const surface = state.surfaces.find((item) => item.id === state.activeSurfaceId);
+      return (
+        <div style={{ display: "flex", height: 420 }}>
+        <ChatMarkdown
+          cwd={undefined}
+          text="[client (4G).ts](autoops-customer/device/workspace/1/src/client%20%284G%29.ts)"
+            threadRef={threadRef}
+          />
+          {state.isOpen && surface?.kind === "file" ? (
+            <aside aria-label="电脑文件面板" style={{ display: "flex", flex: 1, minWidth: 0 }}>
+              <CustomerFilePanel
+                scope={customerHistory.scope!}
+                environmentId={threadRef.environmentId}
+                threadRef={threadRef}
+                composerDraftTarget={threadRef}
+                cwd="customer"
+                projectName="测试"
+                relativePath={surface.relativePath}
+                folderTrail={surface.folderTrail}
+                keybindings={{} as FilePreviewPanelProps["keybindings"]}
+                availableEditors={[]}
+                openInShortcutEnabled={false}
+                revealLine={null}
+                revealRequestId={0}
+                onOpenFile={(path) => useRightPanelStore.getState().openFile(threadRef, path)}
+                onNavigateFolder={(path, trail, keep) =>
+                  useRightPanelStore
+                    .getState()
+                    .navigateFolder(threadRef, surface.id, path, trail, keep)
+                }
+                onPendingChange={() => {}}
+                selectedFilePending={false}
+                workspaceMutationId={null}
+              />
+            </aside>
+          ) : null}
+        </div>
+      );
+    }
+    await using screen = await render(<CustomerHistory />);
     await screen.getByRole("button", { name: "预览 client (4G).ts", exact: true }).click();
     await expect.element(page.getByText(/CUSTOMER-HISTORY-7624/u)).toBeVisible();
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+    expect(workspaceSearch).not.toHaveBeenCalled();
+    expect(filesystemMetadata).not.toHaveBeenCalled();
     expect(
       vi
         .mocked(readCustomerFiles)

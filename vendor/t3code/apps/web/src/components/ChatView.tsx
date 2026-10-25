@@ -9096,10 +9096,7 @@ export default function ChatView(props: ChatViewProps) {
           open={rightPanelOpen}
           onClose={closePreviewPanelStable}
           keepMounted={!customerScope}
-          finalFocus={customerScope ? () => {
-            composerRef.current?.focusAtEnd();
-            return document.activeElement instanceof HTMLElement ? document.activeElement : false;
-          } : undefined}
+          restoreFocus={!!customerScope}
         >
           <RightPanelTabs
             mode="sheet"
