@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ComponentProps, type ReactNode } from "react";
 
 import { Sheet, SheetPopup } from "./ui/sheet";
 
@@ -7,6 +7,8 @@ export function RightPanelSheet(props: {
   children: ReactNode;
   open: boolean;
   onClose: () => void;
+  keepMounted?: boolean;
+  finalFocus?: ComponentProps<typeof SheetPopup>["finalFocus"];
 }) {
   return (
     <Sheet
@@ -21,7 +23,8 @@ export function RightPanelSheet(props: {
         transitionDurationMs={props.animationDurationMs}
         side="right"
         showCloseButton={false}
-        keepMounted
+        keepMounted={props.keepMounted ?? true}
+        finalFocus={props.finalFocus}
         className="w-[min(42vw,28rem)] min-w-80 max-w-[28rem] max-[760px]:w-[min(88vw,24rem)] max-[760px]:min-w-0 wco:mt-(--workspace-topbar-height) wco:h-[calc(100%-var(--workspace-topbar-height))] wco:max-h-[calc(100%-var(--workspace-topbar-height))]"
       >
         {props.children}

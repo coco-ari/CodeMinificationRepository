@@ -1,7 +1,7 @@
 import { customerInstanceId, customerProviderAvailability } from "~/autoops/customerAgents";
 import { customerComposerText } from "~/autoops/customerComposerText";
 import { customerFilesKey, useCustomerFileSearch } from "~/autoops/customerFiles";
-import { CustomerFilePicker, CustomerFileAttachMenu } from "~/autoops/CustomerFilePicker";
+import { CustomerFileAttachMenu } from "~/autoops/CustomerFilePanel";
 import { customerFilePathForTarget } from "@t3tools/contracts";
 import { formatWorkspacePathQuery } from "~/autoops/pathCompletion";
 import {
@@ -2032,8 +2032,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? autoOpsThreadScope.executionBinding
       : null;
   const customerScope = customerTarget !== null;
-  const [customerFilePicker, setCustomerFilePicker] = useState<{ key: string; path: string | null } | null>(null);
-  const customerFileScopeKey = `${activeThreadId}/${customerFilesKey(autoOpsThreadScope)}`;
   const composerContextActions = {
     environmentId: customerScope ? null : environmentId,
     canPreviewFiles: !customerScope || supportsCustomerFiles,
@@ -2046,7 +2044,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     openMention: (path: string) => {
       if (customerTarget) {
         const relative = customerFilePathForTarget(path, customerTarget);
-        if (supportsCustomerFiles && relative) setCustomerFilePicker({ key: customerFileScopeKey, path: relative });
+        if (supportsCustomerFiles && relative) useRightPanelStore.getState().openFile(routeThreadRef, path);
         return;
       }
       if (autoOpsResourceUrl(path)) void openAutoOpsResource(path, routeThreadRef);
@@ -6755,13 +6753,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           )
         : null}
       <ComposerBanner.Dock>
-        {supportsCustomerFiles && autoOpsThreadScope && customerFilePicker?.key === customerFileScopeKey ?
-          <CustomerFilePicker key={customerFileScopeKey} scope={autoOpsThreadScope} threadId={activeThreadId} environmentId={environmentId}
-            initialPath={customerFilePicker.path} onClose={() => setCustomerFilePicker(null)} onRestoreFocus={focusComposer}
-            onSelect={path => {
-              insertComposerTextAtEndStable(`${serializeComposerFileLink(path)} `, { ensureLeadingBoundary: true });
-              setCustomerFilePicker(null);
-            }} /> : null}
         <ComposerBanner.Column>
           <ComposerBannerStack
             key={activeThreadId}
@@ -7601,7 +7592,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       />
                       {customerScope && supportsCustomerFiles ? <CustomerFileAttachMenu
                         onUpload={() => attachmentInputRef.current?.click()}
-                        onBrowse={() => setCustomerFilePicker({ key: customerFileScopeKey, path: null })}
+                        onBrowse={() => useRightPanelStore.getState().open(routeThreadRef, "files")}
                       /> : <Tooltip>
                         <TooltipTrigger
                           render={

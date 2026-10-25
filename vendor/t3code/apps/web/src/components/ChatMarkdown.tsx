@@ -1,4 +1,4 @@
-import { CustomerFileLink } from "~/autoops/CustomerFilePicker";
+import { CustomerFileLink } from "~/autoops/CustomerFilePanel";
 import { autoOpsFeature } from "~/autoops/capabilities";
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { AutoOpsResourceLink } from "~/autoops/ResourceLink";

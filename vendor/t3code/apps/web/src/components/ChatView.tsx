@@ -1,3 +1,4 @@
+import { customerFilesCwd } from "~/autoops/customerFiles";
 import {
   useCustomerRuntime,
   customerScopedProviders,
@@ -3233,10 +3234,12 @@ export default function ChatView(props: ChatViewProps) {
   const businessWorkspaceCwd = isAutoOpsHosted()
     ? autoOpsResourceCwd(threadId, activeThread?.projectId, businessScope)
     : null;
-  const businessFilesAvailable =
-    businessWorkspaceCwd !== null && businessScope?.workspaceType !== undefined;
+  const customerWorkspaceCwd = customerFilesCwd(businessScope);
+  const businessFilesAvailable = customerScope
+    ? customerWorkspaceCwd !== null && customerRuntime.catalog?.workspaceFiles === true
+    : businessWorkspaceCwd !== null && businessScope?.workspaceType !== undefined;
   const activeWorkspaceRoot =
-    businessWorkspaceCwd ?? activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+    customerWorkspaceCwd ?? businessWorkspaceCwd ?? activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   useLayoutEffect(() => {
     if (
       threadDetailLoading ||
@@ -4126,7 +4129,7 @@ export default function ChatView(props: ChatViewProps) {
       !rightPanelState.surfaces.some(
         (surface) =>
           surface.kind === "file" &&
-          (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null),
+          (surface.attachment !== undefined || autoOpsBusinessPath(surface.relativePath) !== null || surface.relativePath.startsWith("autoops-customer/")),
       )
     )
       return;
@@ -8204,7 +8207,7 @@ export default function ChatView(props: ChatViewProps) {
           (surface) =>
             surface.kind === "file" &&
             (surface.attachment !== undefined ||
-              autoOpsBusinessPath(surface.relativePath) !== null),
+              autoOpsBusinessPath(surface.relativePath) !== null || surface.relativePath.startsWith("autoops-customer/")),
         )),
     rightPanelOpen,
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
@@ -9092,6 +9095,11 @@ export default function ChatView(props: ChatViewProps) {
           animationDurationMs={panelAnimationsActive ? panelAnimationDurationMs : 0}
           open={rightPanelOpen}
           onClose={closePreviewPanelStable}
+          keepMounted={!customerScope}
+          finalFocus={customerScope ? () => {
+            composerRef.current?.focusAtEnd();
+            return document.activeElement instanceof HTMLElement ? document.activeElement : false;
+          } : undefined}
         >
           <RightPanelTabs
             mode="sheet"

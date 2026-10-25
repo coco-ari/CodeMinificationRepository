@@ -29,6 +29,11 @@ vi.mock(import('./hostConfig'), async (original) => ({
   readAutoOpsThreadScope: mocks.scope,
 }))
 vi.mock(import('./useThreadScope'), () => ({ useAutoOpsThreadScope: mocks.scope }))
+vi.mock(import('./CustomerFilePanel'), () => ({
+  CustomerFilePanel: ({ relativePath }: FilePreviewPanelProps) => (
+    <section aria-label="客户文件合同">{relativePath ?? '电脑目录'}</section>
+  ),
+}))
 vi.mock(import('@t3tools/client-runtime/state/runtime'), async (original) => ({
   ...(await original()),
   executeAtomQuery: mocks.execute,
@@ -113,6 +118,41 @@ beforeEach(() => {
   mocks.search.mockImplementation((input) => input)
 })
 describe('当前对话文件预览的输入和范围边界', () => {
+  it('客户会话使用客户文件面板，不走平台目录和元数据接口', async () => {
+    mocks.scope.mockReturnValue({
+      ...scope(),
+      executionBinding: {
+        kind: 'customer',
+        deviceId: 'device',
+        registeredWorkspaceId: 'workspace',
+        workspaceBindingRevision: 1,
+        runtimeId: 'codex',
+      },
+    })
+    await using screen = await render(
+      <AutoOpsMaterialPreview {...props('autoops-customer/device/workspace/1/src/client.ts')} />,
+      { router: false },
+    )
+    await expect.element(screen.getByRole('region', { name: '客户文件合同' })).toBeVisible()
+    expect(mocks.execute).not.toHaveBeenCalled()
+    expect(mocks.list).not.toHaveBeenCalled()
+    await screen.rerender(<AutoOpsMaterialPreview {...props()} />)
+    await expect.element(screen.getByText('电脑目录')).toBeVisible()
+  })
+  it('客户范围丢失后保留错误，不将旧文件或目录解释成平台路径', async () => {
+    mocks.scope.mockReturnValue(undefined)
+    await using screen = await render(
+      <AutoOpsMaterialPreview {...props('autoops-customer/device/workspace/1/src/client.ts')} />,
+      { router: false },
+    )
+    await expect.element(screen.getByText('此文件不属于当前电脑工作区。')).toBeVisible()
+    await screen.rerender(
+      <AutoOpsMaterialPreview {...props()} cwd="autoops-customer://old-scope" />,
+    )
+    await expect.element(screen.getByText('此文件不属于当前电脑工作区。')).toBeVisible()
+    expect(mocks.execute).not.toHaveBeenCalled()
+    expect(mocks.list).not.toHaveBeenCalled()
+  })
   it('空根先捕获当前输入，后续搜索继续同一身份', async () => {
     mocks.execute.mockResolvedValue(result('input-one'))
     await using screen = await render(<AutoOpsMaterialPreview {...props()} />, { router: false })

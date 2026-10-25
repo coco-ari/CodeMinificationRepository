@@ -2,7 +2,7 @@ import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import * as Schema from "effect/Schema";
 import { FolderTreeIcon, MessageSquarePlusIcon, RefreshCwIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useComposerHandleContext } from "~/composerHandleContext";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
@@ -16,6 +16,8 @@ import { FileSurfaceAction, FileSurfaceFailure, FileSurfaceLoading, FILE_SURFACE
 import { retainedBreadcrumbTrail } from "./filePath";
 import { ReadOnlyFileSourceContext, type ReadOnlyFileSource, type ReadOnlyFileResource } from "./readOnlyFileSource";
 
+const SourcePreview = lazy(() => import("./ReadOnlySourcePreview"));
+
 export interface ReadOnlyWorkspaceFilesProps {
   readonly environmentId: EnvironmentId;
   readonly cwd: string;
@@ -28,6 +30,7 @@ export interface ReadOnlyWorkspaceFilesProps {
   readonly folderTrail?: string | undefined;
   readonly compactNavigation?: boolean;
   readonly onRefresh?: (() => void) | undefined;
+  readonly onReferenceAdded?: (() => void) | undefined;
   readonly onOpenFile: (path: string) => void;
   readonly onNavigateFolder: (path: string, trail: string, keepSource: boolean) => void;
 }
@@ -42,12 +45,12 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
   const [explorerOpen, setExplorerOpen] = useLocalStorage("t3code.fileExplorerOpen", true, Schema.Boolean);
   useEffect(() => {
     if (!props.relativePath || props.knownDirectory) return;
-    let active = true;
-    void props.source.metadata(props.relativePath).then(
-      (resource) => { if (active) setResult({ key, resource }); },
-      (error: unknown) => { if (active) setResult({ key, error: error instanceof Error ? error.message : "无法读取项目资料。" }); },
+    const controller = new AbortController();
+    void props.source.metadata(props.relativePath, controller.signal).then(
+      (resource) => { if (!controller.signal.aborted) setResult({ key, resource }); },
+      (error: unknown) => { if (!controller.signal.aborted) setResult({ key, error: error instanceof Error ? error.message : "无法读取项目资料。" }); },
     );
-    return () => { active = false; };
+    return () => controller.abort();
   }, [props.source, props.relativePath, props.knownDirectory, key]);
   const current = result?.key === key ? result : null;
   const folder = !props.relativePath || props.knownDirectory || current?.resource?.kind === "directory";
@@ -75,6 +78,7 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
     const mention = serializeComposerFileLink(props.source.mentionPath(previewPath));
     const inserted = composer?.current?.insertTextAtEnd(`${mention} `, { ensureLeadingBoundary: true });
     if (!inserted) toastManager.add({ type: "error", title: "无法添加到对话", description: "请打开此项目的对话后重试。" });
+    else props.onReferenceAdded?.();
   }}><MessageSquarePlusIcon className="size-3.5" /></FileSurfaceAction> : null;
   const actions = <>{addToChat}{props.compactNavigation && previewPath && !showExplorer ? <FileSurfaceAction label="刷新当前资料" onPress={refreshFiles}><RefreshCwIcon /></FileSurfaceAction> : null}{explorerAction}</>;
   return <ReadOnlyFileSourceContext.Provider value={props.source}>
@@ -96,10 +100,14 @@ export function ReadOnlyWorkspaceFiles(props: ReadOnlyWorkspaceFilesProps) {
         }
       }}
     >
-      {(folder && !props.compactNavigation) || (!folder && !resource) ? <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>{breadcrumbs}{actions}</div> : null}
+      {(folder && !props.compactNavigation) || (!folder && (!resource || resource.preview)) ? <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>{breadcrumbs}{actions}</div> : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {previewPath ? <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {current?.error ? <FileSurfaceFailure message={current.error} onRetry={() => setRevision((value) => value + 1)} /> : resource ?
+          {current?.error ? <FileSurfaceFailure message={current.error} onRetry={() => setRevision((value) => value + 1)} /> : resource?.preview ? <>
+            {resource.preview.binary ? <p className="p-4 text-sm text-muted-foreground">此文件不支持文字预览，可以直接引用。</p> :
+              <Suspense fallback={<FileSurfaceLoading />}><SourcePreview name={previewPath} text={resource.preview.contents ?? ""} cacheKey={key} /></Suspense>}
+            {resource.preview.truncated ? <p className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground">仅预览文件开头，Agent 会读取本机原文件。</p> : null}
+          </> : resource ?
             <AttachmentFilePreview
               key={`${props.source.id}:${previewPath}:${revision}`} name={resource.name} mimeType={resource.mimeType} sizeBytes={resource.sizeBytes}
               resourceUrl={resource.url} header={breadcrumbs} toolbarEnd={actions} origin={props.source.origin ?? "项目资料"}

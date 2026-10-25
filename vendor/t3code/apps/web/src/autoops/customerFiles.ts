@@ -16,6 +16,11 @@ export function customerFilesKey(scope: AutoOpsThreadScope | undefined): string 
     : null;
 }
 
+export function customerFilesCwd(scope: AutoOpsThreadScope | undefined): string | null {
+  const key = customerFilesKey(scope);
+  return key ? `autoops-customer://${key}` : null;
+}
+
 export async function readCustomerFiles(
   scope: AutoOpsThreadScope,
   threadId: string | null,

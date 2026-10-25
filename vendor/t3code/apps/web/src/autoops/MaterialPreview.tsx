@@ -1,3 +1,4 @@
+import { CustomerFilePanel } from './CustomerFilePanel'
 import { isAutoOpsHosted } from './capabilities'
 import { useEffect, useMemo, useState } from 'react'
 import { executeAtomQuery } from '@t3tools/client-runtime/state/runtime'
@@ -111,6 +112,23 @@ function LegacyMaterialPreview(props: FilePreviewPanelProps) {
 
 /** 消息保留不可变输入身份，原生文件面板只显示项目相对路径。 */
 export default function AutoOpsMaterialPreview(props: FilePreviewPanelProps) {
+  const scope = useAutoOpsThreadScope(props.threadRef.threadId)
+  if (
+    !props.attachment &&
+    (scope?.executionBinding?.kind === 'customer' ||
+      props.relativePath?.startsWith('autoops-customer/') ||
+      props.cwd.startsWith('autoops-customer://'))
+  ) {
+    return scope?.executionBinding?.kind === 'customer' ? (
+      <CustomerFilePanel {...props} scope={scope} />
+    ) : (
+      <FileSurfaceFailure message="此文件不属于当前电脑工作区。" />
+    )
+  }
+  return <WorkspaceMaterialPreview {...props} />
+}
+
+function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
   const knownScope = useAutoOpsThreadScope(props.threadRef.threadId)
   const canonical = autoOpsBusinessPath(props.relativePath ?? undefined)
   const providedCwd = isAutoOpsResourceCwd(props.cwd) ? props.cwd : null
