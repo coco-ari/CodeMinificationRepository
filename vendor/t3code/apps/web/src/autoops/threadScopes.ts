@@ -13,7 +13,7 @@ export type AutoOpsExecutionBinding =
 export interface AutoOpsThreadScope {
   executionBinding?: AutoOpsExecutionBinding
   projectId: string
-  environmentId: string
+  environmentId: string | null
   agentId: string
   visibility: 'private' | 'project'
   workspaceType?: 'internal' | 'external' | undefined
@@ -70,10 +70,11 @@ export function sameAutoOpsThreadScope(left: AutoOpsThreadScope, right: AutoOpsT
   )
 }
 function scopeAllowed(scope: AutoOpsThreadScope, project: AutoOpsT3Bootstrap['projects'][number]) {
+  const savedCustomer = scope.executionBinding?.kind === 'customer' && scope.scopeState !== undefined
   return (
-    project.environments.some((entry) => entry.id === scope.environmentId) &&
+    (savedCustomer || scope.environmentId === null || project.environments.some((entry) => entry.id === scope.environmentId)) &&
     project.agents.some((entry) => entry.id === scope.agentId) &&
-    (!project.membership || project.membership.environmentIds.includes(scope.environmentId)) &&
+    (savedCustomer || scope.environmentId === null || !project.membership || project.membership.environmentIds.includes(scope.environmentId)) &&
     (scope.executionBinding?.kind === 'customer'
       ? scope.visibility === 'private' &&
         scope.agentId === 'a-project' &&
@@ -105,10 +106,10 @@ export function readAutoOpsThreadScope(
   const environment = project?.environments.find(
     (entry) => !project.membership || project.membership.environmentIds.includes(entry.id),
   )
-  if (!project || !environment || !project.agents[0]) return undefined
+  if (!project || !project.agents[0]) return undefined
   return {
     projectId,
-    environmentId: environment.id,
+    environmentId: environment?.id ?? null,
     agentId: project.agents[0].id,
     visibility: 'private',
     workspaceType: project.membership?.workspaceAccess === 'external' ? 'external' : 'internal',
@@ -224,8 +225,7 @@ function requireThreadBinding(
     !binding ||
     typeof binding.projectId !== 'string' ||
     !binding.projectId ||
-    typeof binding.environmentId !== 'string' ||
-    !binding.environmentId ||
+    (binding.environmentId !== null && (typeof binding.environmentId !== 'string' || !binding.environmentId)) ||
     typeof binding.agentId !== 'string' ||
     !binding.agentId ||
     (binding.visibility !== 'private' && binding.visibility !== 'project')

@@ -56,7 +56,7 @@ test('工作区导入、脱敏和打包领取时重查真实项目权限，撤�
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
   initializeAutoOpsAccessSchema(bindingDb)
   t.after(() => { sessionDb.close(); bindingDb.close() })
-  const membership = { userId: 'manager', workspaceAccess: 'internal', role: 'manager', status: 'active', environmentIds: ['env-test'] }
+  const membership = { userId: 'manager', workspaceAccess: 'internal', role: 'project_admin', status: 'active', environmentIds: ['env-test'] }
   const catalog = { users: [{ id: 'manager', name: '项目管理者', role: 'member', status: 'active' }, { id: 'other-manager', name: '另一管理者', role: 'member', status: 'active' }], agents: [], projects: [{ id: 'p-test', name: '验证项目', memberships: [membership, { ...membership, userId: 'other-manager' }], memberIds: ['manager', 'other-manager'], environments: [{ id: 'env-test', name: '测试' }], documents: [], resources: [] }] }
   access = createAutoOpsAccess({ sessionDb, bindingDb, catalog, workspaceStore: store, deploymentEnabled: () => false })
   const before = store.overview('p-test')
@@ -66,7 +66,7 @@ test('工作区导入、脱敏和打包领取时重查真实项目权限，撤�
     store.startImport('p-test', { repositoryUrl: 'https://github.com/example/repository', requestId: 'revoked-import' }, 'manager'),
   ]
   assert.throws(() => store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'revoked-packages' }, 'other-manager'), { code: 'WORKSPACE_REQUEST_CONFLICT' })
-  membership.role = 'member'
+  membership.role = 'reader'
   await store.whenIdle()
   const after = store.overview('p-test')
   for (const task of tasks) {
@@ -80,7 +80,7 @@ test('工作区导入、脱敏和打包领取时重查真实项目权限，撤�
   assert.throws(() => store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'unknown-actor' }, 'unknown'), { code: 'PROJECT_NOT_FOUND' })
   const unconfigured = createWorkspaceStore({ dataDir })
   assert.throws(() => unconfigured.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'missing-port' }, 'manager'), { code: 'WORKSPACE_AUTHORIZATION_REQUIRED' })
-  membership.role = 'manager'
+  membership.role = 'project_admin'
   assert.throws(() => access.requireDeploymentActor('manager', 'p-test', 'env-test'), { code: 'DEPLOYMENT_DISABLED' })
   const independent = store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'package-with-deployment-disabled' }, 'manager')
   await store.whenIdle()

@@ -33,7 +33,7 @@ function setup({ reader = true, manager = true } = {}) {
     csrf: "fixture-csrf", expiresAt: 60_000,
   };
   const membership: ProjectMembership = {
-    userId: principal.id, workspaceAccess: "internal", role: manager ? "manager" : "member",
+    userId: principal.id, workspaceAccess: "internal", role: manager ? "project_admin" : "reader",
     environmentIds: [], status: "active",
   };
   const deny = (code: string) => { throw Object.assign(new Error("测试权限拒绝"), { status: 403, code }); };

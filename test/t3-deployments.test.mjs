@@ -20,10 +20,10 @@ const principal = {id:'manager', displayName:'真实管理者', allowed:['env-on
 const forbidden = () => { throw Object.assign(new Error('无权访问'), {status:403}) }
 const access = {
   requireDeploymentActionForActor(userId, projectId, action, environmentId) { if (userId !== principal.id) forbidden(); return this.requireDeploymentAction(principal, projectId, action, environmentId) },
-  requireDeploymentAction(p, projectId, action, environmentId) { this.requireWorkspaceManager(p, projectId); if (environmentId) this.requireEnvironment(p, projectId, environmentId); if (['server.admin','server.bind'].includes(action)) forbidden() },
+  requireDeploymentAction(p, projectId, action, environmentId) { const member = this.requireWorkspaceManager(p, projectId); if (environmentId) this.requireEnvironment(p, projectId, environmentId); if (['server.admin','server.bind'].includes(action)) forbidden(); return member },
   requireDeploymentActor(userId, projectId, environmentId) { if (userId !== principal.id) forbidden(); this.requireWorkspaceManager(principal, projectId); this.requireEnvironment(principal, projectId, environmentId) },
   requireProject(p, id) { const project = projects.find((item) => item.id === id); if (!project || p.id === 'other-user') forbidden(); return project },
-  requireWorkspaceManager(p) { if (p.id !== 'manager' || p.external) forbidden(); return {workspaceAccess:'internal', role:'manager', environmentIds:p.allowed} },
+  requireWorkspaceManager(p) { if (p.id !== 'manager' || p.external) forbidden(); return {workspaceAccess:'internal', role:'project_admin', environmentIds:p.allowed} },
   requireEnvironment(p, id, env) { if (!this.requireProject(p,id).environments.some((item) => item.id === env) || !p.allowed.includes(env)) forbidden() },
 }
 async function finish(workspaces, projectId, task) {
@@ -82,7 +82,7 @@ test('真实成员排队后撤权、重启后撤权均不能领取，权限服�
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
   initializeAutoOpsAccessSchema(bindingDb)
   sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('real-manager-session').digest('hex'), 'manager', 'csrf', Date.now() + 60_000)
-  const catalog = { users: [{ id: 'manager', name: '真实管理者', role: 'member', status: 'active' }], agents: [], projects: projects.map((project) => ({ ...project, documents: [], resources: [], memberIds: ['manager'], memberships: [{ userId: 'manager', workspaceAccess: 'internal', role: 'manager', status: 'active', environmentIds: ['env-one'] }] })) }
+  const catalog = { users: [{ id: 'manager', name: '真实管理者', role: 'member', status: 'active' }], agents: [], projects: projects.map((project) => ({ ...project, documents: [], resources: [], memberIds: ['manager'], memberships: [{ userId: 'manager', workspaceAccess: 'internal', role: 'project_admin', status: 'active', environmentIds: ['env-one'] }] })) }
   let outage = false
   const realAccess = createAutoOpsAccess({ sessionDb, bindingDb, catalog, deploymentEnabled: () => { if (outage) throw new Error('授权配置不可用'); return true } })
   const realPrincipal = realAccess.authenticateCookie('demo_session=real-manager-session')
@@ -91,7 +91,8 @@ test('真实成员排队后撤权、重启后撤权均不能领取，权限服�
   const submit = async () => (await f.request('/tasks', 'POST', { targetId: r.target.id, action: 'deploy', service: 'frontend', packageId: r.pack.id, configKey: r.target.configKey, requestId: randomUUID() })).body.task
   const claim = (signal) => fetch(`http://127.0.0.1:${f.store.agentAddress.port}/api/agent/v1/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registered.token}` }, body: '{}', signal })
   const membership = catalog.projects[0].memberships[0]
-  for (const revoke of [() => { membership.environmentIds = [] }, () => { membership.role = 'member' }, () => { membership.status = 'disabled' }]) {
+  membership.role = 'release_operator'
+  for (const revoke of [() => { membership.environmentIds = [] }, () => { membership.role = 'reader' }, () => { membership.status = 'disabled' }]) {
     const task = await submit()
     if (membership.status === 'active') await f.reopen()
     revoke()
@@ -103,7 +104,7 @@ test('真实成员排队后撤权、重启后撤权均不能领取，权限服�
       assert.match(persisted.error, /权限已失效/)
       assert.equal((await f.request('', 'GET', undefined, realPrincipal, 'p-other')).body.targets.length, 0)
     } finally { controller.abort(); await pending }
-    Object.assign(membership, { environmentIds: ['env-one'], role: 'manager', status: 'active' })
+    Object.assign(membership, { environmentIds: ['env-one'], role: 'release_operator', status: 'active' })
   }
   const task = await submit()
   outage = true
@@ -155,6 +156,38 @@ test('项目与同名环境使用持久ID映射，重启不新增默认环境；
   principal.allowed.push('env-two')
   try { await assert.rejects(f.request('/targets','POST',{...r.targetInput,requestId:randomUUID(),environmentId:'env-two'}),{status:404}) }
   finally { principal.allowed.splice(principal.allowed.indexOf('env-two'), 1) }
+})
+
+test('真实角色经 HTTP 与引擎同源裁决环境覆盖，伪造环境和隐式创建共享服务都拒绝', async t => {
+  const sessionDb = new DatabaseSync(':memory:'), bindingDb = new DatabaseSync(':memory:')
+  t.after(() => { sessionDb.close(); bindingDb.close() })
+  sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
+  initializeAutoOpsAccessSchema(bindingDb)
+  sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('role-http-session').digest('hex'), 'manager', 'csrf', Date.now() + 60_000)
+  const membership = { userId: 'manager', role: 'project_admin', workspaceAccess: 'internal', environmentIds: ['env-one', 'env-two'], environmentRoles: {}, status: 'active' }
+  const catalog = { users: [{ id: 'manager', name: '真实角色成员', role: 'member' }], projects: [{ ...projects[0], memberships: [membership], memberIds: ['manager'], documents: [], resources: [] }], agents: [] }
+  const realAccess = createAutoOpsAccess({ sessionDb, bindingDb, catalog, deploymentEnabled: () => true })
+  const realPrincipal = realAccess.authenticateCookie('demo_session=role-http-session')
+  const f = await fixture(t, { listener: true, accessLayer: realAccess, requestPrincipal: realPrincipal }), r = await records(f)
+  await agent(f, '/register', { registrationToken: r.server.registrationToken, capabilities: ['static-site-v1'] })
+  const server = (await f.request('/servers', 'POST', { name: '生产隔离节点', environmentId: 'env-two', requestId: randomUUID() })).body.server
+  const production = (await f.request('/targets', 'POST', { ...r.targetInput, name: '生产隔离目标', serverId: server.id, environmentId: 'env-two', requestId: randomUUID() })).body.target
+  Object.assign(membership, { role: 'developer', environmentRoles: { 'env-one': 'release_operator', 'env-two': 'reader' } })
+  const input = { targetId: r.target.id, action: 'deploy', service: 'frontend', packageId: r.pack.id, configKey: r.target.configKey, requestId: randomUUID() }
+  const task = (await f.request('/tasks', 'POST', input)).body.task
+  assert.equal(task.environmentId, 'env-one')
+  assert.equal((await f.request(`/tasks/${task.id}`)).body.task.id, task.id)
+  const forged = { ...input, targetId: production.id, configKey: production.configKey, requestId: randomUUID(), environmentId: 'env-one' }
+  await assert.rejects(f.request('/tasks', 'POST', forged), { code: 'DEPLOYMENT_ACTION_FORBIDDEN' })
+  await assert.rejects(f.store.createTask('p-one', forged, realPrincipal), { code: 'DEPLOYMENT_ACTION_FORBIDDEN' })
+  const before = f.store.overview(catalog.projects[0], ['env-one', 'env-two'])
+  await assert.rejects(f.request('/services', 'POST', { name: '越权共享服务', kind: 'java', requestId: randomUUID() }), { code: 'DEPLOYMENT_ACTION_FORBIDDEN' })
+  await assert.rejects(f.request('/targets', 'POST', { ...r.targetInput, name: '隐式共享服务', requestId: randomUUID() }), { code: 'DEPLOYMENT_ACTION_FORBIDDEN' })
+  const after = f.store.overview(catalog.projects[0], ['env-one', 'env-two'])
+  assert.deepEqual(after.services, before.services)
+  assert.deepEqual(after.targets, before.targets)
+  assert.equal(after.tasks.length, 1)
+  assert.equal((await f.request('/tasks', 'POST', input)).body.task.id, task.id)
 })
 
 test('真实内部ZIP移交原引擎归档、原Agent协议、日志补读、发布和回退；幂等不执行Git并忽略伪造actor',async t=>{

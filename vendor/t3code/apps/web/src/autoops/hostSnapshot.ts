@@ -1,4 +1,5 @@
 import type { ProjectCapabilities } from '../../../../../../autoops/contracts/runtime.ts'
+import type { ProjectRole } from '../../../../../../autoops/contracts/project-access.ts'
 import { ClientSettingsPatch, type ClientSettings } from '@t3tools/contracts/settings'
 import * as Schema from 'effect/Schema'
 // 在 T3 状态初始化前保存已认证的宿主快照；独立 T3 客户端保持原有行为。
@@ -21,7 +22,9 @@ export interface AutoOpsT3Bootstrap {
     readonly capabilities?: Readonly<ProjectCapabilities>
     readonly membership?: {
       readonly workspaceAccess: 'internal' | 'external'
-      readonly role: 'manager' | 'member'
+      readonly role: ProjectRole
+      readonly canAdjustChat?: boolean
+      readonly authorizationPending?: boolean
       readonly environmentIds: ReadonlyArray<string>
     }
   }>

@@ -97,7 +97,8 @@ test('scope revocation blocks tools, csrf and bootstrap reflect the authenticate
   assert.throws(() => access.requireCsrf(admin, 'csrf-u-lin'), { code: 'CSRF' })
   assert.throws(() => access.authenticateCookie('demo_session=u-admin; demo_session=u-lin'), { code: 'UNAUTHENTICATED' })
   assert.deepEqual(access.bootstrap(principal('u-lin')).projects.map((p) => p.id), ['p-autoops'])
-  catalog.projects.find((p) => p.id === 'p-autoops').memberIds = ['u-lin']
+  catalog.users.find(user => user.id === admin.id).role = 'member'
+  catalog.projects.find(p => p.id === 'p-autoops').memberships.find(member => member.userId === admin.id).status = 'disabled'
   assert.throws(() => access.requireToolThread('thread'), { code: 'THREAD_SCOPE_REVOKED' })
   assert.equal(access.canSeeThread(admin, 'thread'), false)
 })
@@ -249,26 +250,26 @@ function customerScope(t, ownerId = 'u-guest') {
 
 test('external members can bind their own customer directory without platform internal access', t => {
   const {access,owner,principal,executionBinding} = customerScope(t)
-  const binding = access.reserveThread(owner,{...scope,threadId:'customer-draft',executionBinding})
+  const binding = access.reserveThread(owner,{...scope,environmentId:null,threadId:'customer-draft',executionBinding})
   assert.equal(binding.executionBinding.kind,'customer')
   assert.equal(binding.scopeState,'draft')
   assert.equal(access.canSeeThread(owner,'customer-draft'),true)
   assert.equal(access.canSeeThread(principal('u-admin'),'customer-draft'),false)
   assert.deepEqual(access.threadAudience(binding),[owner.id])
-  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'shared-customer',visibility:'project',executionBinding}),{code:'CUSTOMER_OWNER_REQUIRED'})
-  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'report-customer',agentId:'a-report',executionBinding}),{code:'INVALID_CUSTOMER_SCOPE'})
-  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'prod-customer',environmentId:'env-prod',executionBinding}),{code:'ENVIRONMENT_FORBIDDEN'})
+  assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'shared-customer',visibility:'project',executionBinding}),{code:'CUSTOMER_OWNER_REQUIRED'})
+  assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'report-customer',agentId:'a-report',executionBinding}),{code:'INVALID_CUSTOMER_SCOPE'})
+  assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'prod-customer',environmentId:'env-prod',executionBinding}),{code:'ENVIRONMENT_FORBIDDEN'})
   assert.throws(()=>access.requireToolThread('customer-draft'),{code:'CUSTOMER_BUSINESS_TOOLS_DISABLED'})
 })
 
 test('customer conversation locks exact execution target after acceptance and history survives revoke', t => {
   const {access,owner,registry,devicePrincipal,executionBinding,paired} = customerScope(t)
-  access.reserveThread(owner,{...scope,threadId:'customer-history',executionBinding})
+  access.reserveThread(owner,{...scope,environmentId:null,threadId:'customer-history',executionBinding})
   assert.throws(()=>access.beginThreadSubmission(owner,'customer-history','cmd-1'),{code:'CUSTOMER_DEVICE_OFFLINE'})
   registry.markConnected(devicePrincipal)
   assert.equal(access.beginThreadSubmission(owner,'customer-history','cmd-1').scopeState,'submitting')
   registry.registerWorkspace(devicePrincipal,{registeredWorkspaceId:'local-other',projectId:'p-autoops',label:'其他目录',workspaceBindingRevision:1,runtimeId:'codex'})
-  assert.throws(()=>access.reserveThread(owner,{...scope,threadId:'customer-history',executionBinding:{...executionBinding,registeredWorkspaceId:'local-other'}}),{code:'THREAD_SCOPE_LOCKED'})
+  assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'customer-history',executionBinding:{...executionBinding,registeredWorkspaceId:'local-other'}}),{code:'THREAD_SCOPE_LOCKED'})
   access.finishThreadSubmission('customer-history','cmd-1',true)
   registry.revokeWorkspace(devicePrincipal,'local-project')
   registry.revokeCredential(owner.id,paired.device.id)
@@ -284,4 +285,20 @@ test('old bindings normalize to platform and do not gain remote capabilities', t
   access.bindThread(principal('u-admin'),{...scope,threadId:'old-platform'})
   bindingDb.prepare('UPDATE t3_thread_bindings SET execution_binding_json=NULL WHERE thread_id=?').run('old-platform')
   assert.deepEqual(access.getThreadBinding('old-platform').executionBinding,{kind:'platform'})
+})
+
+test('外部角色迁为无环境后，历史自用电脑保留固定身份和未知收据，不放开新环境绑定', t => {
+  const { access, owner, principal, executionBinding, registry, devicePrincipal, bindingDb } = customerScope(t)
+  registry.markConnected(devicePrincipal)
+  access.reserveThread(owner, { ...scope, environmentId: null, threadId: 'legacy-self-computer', executionBinding })
+  access.beginThreadSubmission(owner, 'legacy-self-computer', 'original-unknown-command')
+  // 隔离旧记录保留原环境标识；新角色不改写已接受请求的执行身份。
+  bindingDb.prepare('UPDATE t3_thread_bindings SET environment_id=? WHERE thread_id=?').run('env-test', 'legacy-self-computer')
+  const binding = access.requireThread(owner, 'legacy-self-computer')
+  assert.equal(binding.environmentId, 'env-test')
+  assert.deepEqual(binding.executionBinding, executionBinding)
+  assert.equal(access.beginThreadSubmission(owner, binding.threadId, 'original-unknown-command').scopeState, 'submitting')
+  assert.equal(access.canSeeThread(principal('u-admin'), binding.threadId), false)
+  assert.throws(() => access.reserveThread(owner, { ...scope, threadId: 'new-forged-environment', executionBinding }), { code: 'ENVIRONMENT_FORBIDDEN' })
+  assert.throws(() => access.requireToolThread(binding.threadId), { code: 'CUSTOMER_BUSINESS_TOOLS_DISABLED' })
 })

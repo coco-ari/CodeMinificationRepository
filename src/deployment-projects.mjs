@@ -197,7 +197,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
       const fields = { name: input.name, kind: input.kind, module: input.module || '.', id: input.id || null, configKey: input.configKey || null }
       const result = await store.change(state => {
         const map = mapping(projectId, state)
-        authorize(projectId, 'configure', input)
+        authorize(projectId, 'service.configure', input)
         return receipt(map, 'save-service', input, fields, () => {
           if (input.id) expected(input.configKey, service(projectId, input.id, state).configKey, '服务配置已变化，请刷新后再保存')
           const saved = saveEntity(state, 'services', { ...fields, applicationId: map.applicationId }, input.id)
@@ -230,6 +230,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
       const result = await store.change(state => {
         const map = mapping(projectId, state), env = environment(map, input.environmentId), data = state.deployments
         authorize(projectId, 'configure', input, input.environmentId)
+        if (!input.serviceId) authorize(projectId, 'service.configure', input)
         const submitted = { serviceId: input.serviceId || null, name: input.name, environmentId: input.environmentId, serverId: input.serverId, config: input.config || {}, networkIdentity: input.networkIdentity }
         const repeated = replayReceipt(map, 'create-target', input, submitted)
         if (repeated !== undefined) return repeated

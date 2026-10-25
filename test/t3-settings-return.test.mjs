@@ -8,10 +8,10 @@ import { createAutoOpsProjectNavigation } from '../vendor/t3code/apps/web/src/au
 
 function fixture() {
   const projects = [
-    { id: 'a', agents: [{ id: 'agent-a' }], membership: { workspaceAccess: 'internal', role: 'manager' } },
-    { id: 'b', agents: [{ id: 'agent-b' }], membership: { workspaceAccess: 'internal', role: 'manager' } },
-    { id: 'member', membership: { workspaceAccess: 'internal', role: 'member' } },
-    { id: 'external', membership: { workspaceAccess: 'external', role: 'manager' } },
+    { id: 'a', agents: [{ id: 'agent-a' }], capabilities: { 'deployment.read': true }, membership: { workspaceAccess: 'internal', role: 'project_admin' } },
+    { id: 'b', agents: [{ id: 'agent-b' }], capabilities: { 'deployment.read': true }, membership: { workspaceAccess: 'internal', role: 'project_admin' } },
+    { id: 'member', membership: { workspaceAccess: 'internal', role: 'reader' } },
+    { id: 'external', membership: { workspaceAccess: 'external', role: 'project_admin' } },
   ]
   const chatOwners = new Map([['/env/thread-a', 'a'], ['/draft/draft-b', 'b']])
   const navigation = createAutoOpsProjectNavigation({
@@ -70,7 +70,7 @@ test('部署权限按返回时项目检查，成员与外部项目返回工作�
   const f = fixture()
   assert.equal(f.resolve('/deployments?projectId=a', 'a', 'member'), '/workspaces?projectId=member')
   assert.equal(f.resolve('/deployments?projectId=a', 'a', 'external'), '/workspaces?projectId=external')
-  f.projects[0].membership.role = 'member'
+  f.projects[0].capabilities['deployment.read'] = false
   assert.equal(f.resolve('/deployments?projectId=a', 'a', 'a'), '/workspaces?projectId=a')
   assert.equal(f.resolve('/workspaces?projectId=a', 'a', 'removed-project'), '/')
 })

@@ -606,7 +606,7 @@ export function createCurrentWorkspace({
     signal?: AbortSignal,
     buildCache?: (captured: WorkspaceAuthoringCapture) => Promise<string>,
   ): Promise<WorkspaceDeploymentSourceCapture> {
-    access.requireWorkspaceActor(actor, project)
+    access.requireProjectActionForActor(actor, project, 'source.generate')
     const fingerprint = digest(input)
     const previous = authoring.deploymentInput(project, input.requestId, fingerprint, actor)
     if (previous) return previous
@@ -685,7 +685,7 @@ export function createCurrentWorkspace({
     requestId: string,
     actor: string,
   ): boolean {
-    access.requireWorkspaceActor(actor, project)
+    access.requireProjectActionForActor(actor, project, 'source.generate')
     const task = store.taskForRequest(project, 'packages', requestId, actor)
     if (task?.status !== 'failed') return false
     // 同一请求仍被其他资料操作使用时，失败部署不能代替其所有者归还捕获。
@@ -727,7 +727,7 @@ export function createCurrentWorkspace({
     input: WorkspaceDeploymentSourceInput,
     actor: string,
   ): WorkspaceTask {
-    access.requireWorkspaceActor(actor, project)
+    access.requireProjectActionForActor(actor, project, 'source.generate')
     ensureAccepting()
     const task = store.startSourcePackages(
       project,
@@ -841,7 +841,7 @@ export function createCurrentWorkspace({
     },
     actor: string,
   ) {
-    access.requireWorkspaceActor(actor, project)
+    access.requireProjectActionForActor(actor, project, 'workspace.external.publish')
     const previous = store.taskForRequest(project, 'external', input.requestId, actor)
     if (previous) {
       const prepared = store.taskForRequest(
@@ -1047,7 +1047,7 @@ export function createCurrentWorkspace({
       }
     },
     externalPreparationReceipt(project: string, requestId: string, actor: string) {
-      access.requireWorkspaceActor(actor, project)
+      access.requireProjectActionForActor(actor, project, 'workspace.external.publish')
       const request = `external-${digest(requestId)}`
       const captured = authoring.captureByRequest(project, request, actor)
       if (!captured) return null
@@ -1076,11 +1076,11 @@ export function createCurrentWorkspace({
       return value
     },
     releaseDeploymentSource(project: string, inputId: string, actor: string) {
-      access.requireWorkspaceActor(actor, project)
+      access.requireProjectActionForActor(actor, project, 'source.generate')
       store.releaseVersion(project, `deployment:${inputId}`)
     },
     planCleanupVersions(project: string, versionIds: string[], actor: string) {
-      access.requireWorkspaceActor(actor, project)
+      access.requireProjectActionForActor(actor, project, 'workspace.cleanup')
       return {
         ...store.planCleanupVersions(
           project,
@@ -1092,7 +1092,7 @@ export function createCurrentWorkspace({
       }
     },
     cleanupVersions(project: string, versionIds: string[], actor: string) {
-      access.requireWorkspaceActor(actor, project)
+      access.requireProjectActionForActor(actor, project, 'workspace.cleanup')
       return store.pruneVersions(
         project,
         versionIds,

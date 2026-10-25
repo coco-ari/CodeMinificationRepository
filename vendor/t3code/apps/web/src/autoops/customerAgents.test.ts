@@ -30,7 +30,7 @@ const bootstrap: AutoOpsT3Bootstrap = {
       name: "AutoOps",
       environments: [{ id: "test", name: "测试" }],
       agents: [{ id: "a-project", name: "项目助手" }],
-      membership: { workspaceAccess: "external", role: "member", environmentIds: ["test"] },
+      membership: { workspaceAccess: "external", role: "external", environmentIds: ["test"] },
     },
   ],
   capabilities: {},

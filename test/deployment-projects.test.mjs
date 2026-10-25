@@ -268,7 +268,7 @@ test('项目写入在事务内重新裁决当前授权，排队期间撤权不�
   const node = await f.projects.createServer('p-one', mutation({ name: '待删除节点', environmentId: 'test' }))
   await f.projects.revokeServer('p-one', node.server.id, mutation())
   const attempts = [
-    { action: 'configure', execute: input => f.projects.saveService('p-one', input), input: mutation({ id: initial.id, name: '新服务', kind: 'java', module: '.', configKey: initial.configKey }) },
+    { action: 'service.configure', execute: input => f.projects.saveService('p-one', input), input: mutation({ id: initial.id, name: '新服务', kind: 'java', module: '.', configKey: initial.configKey }) },
     { action: 'server.admin', execute: input => f.projects.saveStoragePolicy('p-one', f.server.id, input), input: mutation({ expectedRevision: 1, retainedVersions: 5, buildCacheGiB: 6 }) },
     { action: 'server.admin', execute: input => f.projects.revokeServer('p-one', f.server.id, input), input: mutation() },
     { action: 'server.admin', execute: input => f.projects.deleteServer('p-one', node.server.id, input), input: mutation() },

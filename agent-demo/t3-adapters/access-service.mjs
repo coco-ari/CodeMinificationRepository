@@ -32,7 +32,7 @@ const requireMatchingWorkspaces = (source, target) => {
 const fromRow = (row) => row && ({
   threadId: row.thread_id,
   projectId: row.project_id,
-  environmentId: row.environment_id,
+  environmentId: row.environment_id || null,
   agentId: row.agent_id,
   ownerId: row.owner_id,
   visibility: row.visibility,
@@ -94,7 +94,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
   const { refresh } = identity
-  const { membershipForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction: deploymentActionForUser, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
+  const { membershipForUser, requireProjectActionForUser, requireEnvironmentQueryForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction: deploymentActionForUser, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
   const customerRegistry = suppliedCustomerRegistry || createCustomerRegistry({
     db: bindingDb, now,
     requireOwner(userId) {
@@ -107,7 +107,8 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     if (binding.executionBinding?.kind !== 'customer') return workspaceForUser(userId, binding.projectId, binding.workspaceType || 'internal', undefined, binding.environmentId)
     if (userId !== binding.ownerId || binding.visibility !== 'private') fail(403, 'CUSTOMER_OWNER_REQUIRED', '客户工作区对话仅限设备所有者访问')
     const membership = membershipForUser(userId, binding.projectId)
-    if (!membership.environmentIds.includes(binding.environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
+    // 历史自用电脑不使用平台环境资源；外部角色收回环境后仍核对原设备和原收据。
+    if (membership.workspaceAccess !== 'external' && binding.environmentId !== null && !membership.environmentIds.includes(binding.environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
     return membership
   }
   const requireMembership = (principal, projectId) => membershipForUser(refresh(principal).id, projectId)
@@ -120,7 +121,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     const membership = membershipForUser(userId, projectId)
     if (!['internal', 'external'].includes(type) || (type === 'internal' && membership.workspaceAccess !== 'internal'))
       fail(403, 'WORKSPACE_FORBIDDEN', '无权访问内部原始资料')
-    if (environmentId !== undefined && !membership.environmentIds.includes(environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
+    if (environmentId !== undefined && environmentId !== null && !membership.environmentIds.includes(environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
     if (versionId !== undefined && workspaceStore) {
       const version = workspaceStore.getVersion(projectId, versionId)
       if (version.type !== type || version.status !== 'published') fail(403, 'WORKSPACE_NOT_AVAILABLE', '此工作区版本尚未发布或已不可用')
@@ -160,7 +161,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     }
     const project = catalog.projects.find((entry) => entry.id === binding.projectId)
     const agent = catalog.agents.find((entry) => entry.id === binding.agentId)
-    if (!project?.environments.some((entry) => entry.id === binding.environmentId) ||
+    if (!project || (binding.environmentId !== null && !project.environments.some((entry) => entry.id === binding.environmentId)) ||
         !agent?.projectIds.includes(binding.projectId))
       fail(403, 'THREAD_SCOPE_REVOKED', '会话的项目、环境或 Agent 授权已失效')
     return { binding, project, agent }
@@ -192,7 +193,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     const binding = {
       threadId: identifier(input.threadId, '会话ID'),
       projectId: input.projectId,
-      environmentId: identifier(input.environmentId, '环境ID'),
+      environmentId: input.environmentId === null ? null : identifier(input.environmentId, '环境ID'),
       agentId: identifier(input.agentId, 'Agent ID'),
       ownerId: current.id,
       visibility: input.visibility,
@@ -204,6 +205,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       } : {}),
     }
     if (!['private', 'project'].includes(binding.visibility)) fail(400, 'INVALID_VISIBILITY', '会话可见范围无效')
+    if (binding.environmentId !== null) requireEnvironment(current, binding.projectId, binding.environmentId)
     bindingAudienceForUser(current.id, binding)
     if (binding.workspaceVersionId) workspaceForUser(current.id, binding.projectId, binding.workspaceType, binding.workspaceVersionId, binding.environmentId)
     validateBinding(binding)
@@ -222,7 +224,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       return existing
     }
     bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
-      binding.threadId, binding.projectId, binding.environmentId, binding.agentId,
+      binding.threadId, binding.projectId, binding.environmentId ?? '', binding.agentId,
       binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding),
     )
     const stored = getThreadBinding(binding.threadId)
@@ -239,9 +241,9 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
         if (existing.ownerId !== current.id || existing.nativeParentThreadId || existing.revokedAt) fail(409, 'THREAD_BINDING_CONFLICT', '无法修改此会话的范围')
         const changed = bindingChanged(existing, binding)
         if (changed && existing.scopeState !== 'draft') fail(409, 'THREAD_SCOPE_LOCKED', '消息提交中或已被接受，请新建对话以切换范围')
-        if (changed) bindingDb.prepare('UPDATE t3_thread_bindings SET project_id=?,environment_id=?,agent_id=?,visibility=?,workspace_type=?,workspace_version_id=?,execution_binding_json=? WHERE thread_id=? AND scope_state=\'draft\'').run(binding.projectId, binding.environmentId, binding.agentId, binding.visibility, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding), binding.threadId)
+        if (changed) bindingDb.prepare('UPDATE t3_thread_bindings SET project_id=?,environment_id=?,agent_id=?,visibility=?,workspace_type=?,workspace_version_id=?,execution_binding_json=? WHERE thread_id=? AND scope_state=\'draft\'').run(binding.projectId, binding.environmentId ?? '', binding.agentId, binding.visibility, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding), binding.threadId)
       } else {
-        bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json,scope_state) VALUES(?,?,?,?,?,?,?,?,?,?,\'draft\')').run(binding.threadId, binding.projectId, binding.environmentId, binding.agentId, binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding))
+        bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json,scope_state) VALUES(?,?,?,?,?,?,?,?,?,?,\'draft\')').run(binding.threadId, binding.projectId, binding.environmentId ?? '', binding.agentId, binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding))
       }
       bindingDb.exec('COMMIT')
       return getThreadBinding(binding.threadId)
@@ -456,6 +458,9 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       bindingDb.prepare('UPDATE t3_thread_bindings SET continuation_verified=1,native_thread_id=? WHERE thread_id=?').run(targetNativeId, targetThreadId)
     },
     requireDeploymentActor,
+    requireProjectAction: (principal, projectId, action) => requireProjectActionForUser(refresh(principal).id, projectId, action),
+    requireProjectActionForActor: requireProjectActionForUser,
+    requireEnvironmentQuery: (principal, projectId, environmentId) => requireEnvironmentQueryForUser(refresh(principal).id, projectId, environmentId),
     requireDeploymentAction: (principal, projectId, action, environmentId) => deploymentActionForUser(refresh(principal).id, projectId, action, environmentId),
     requireDeploymentActionForActor: deploymentActionForUser,
     requireWorkspaceActor: requireWorkspaceManagerForUser,

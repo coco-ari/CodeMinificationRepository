@@ -31,7 +31,7 @@ export async function readCustomerFiles(
   if (target?.kind !== "customer") throw new Error("请选择客户工作区");
   const query = new URLSearchParams({
     projectId: scope.projectId,
-    environmentId: scope.environmentId,
+    ...(scope.environmentId === null ? {} : { environmentId: scope.environmentId }),
     deviceId: target.deviceId,
     registeredWorkspaceId: target.registeredWorkspaceId,
     workspaceBindingRevision: String(target.workspaceBindingRevision),

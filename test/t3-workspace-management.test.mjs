@@ -42,9 +42,9 @@ async function fixture(t) {
   const memberships = [owner, 'second', 'reader', 'external'].map((userId) => ({
     userId,
     workspaceAccess: userId === 'external' ? 'external' : 'internal',
-    role: ['manager', 'second'].includes(userId) ? 'manager' : 'member',
+    role: ['manager', 'second'].includes(userId) ? 'project_admin' : userId === 'external' ? 'external' : 'reader',
     status: 'active',
-    environmentIds: ['env-test'],
+    environmentIds: userId === 'external' ? [] : ['env-test'],
   }))
   const catalog = {
     users: memberships.map(({ userId }) => ({
@@ -339,9 +339,11 @@ test('多仓与产品运维资料固定为真实版本，显式服务上下文�
   await f.upload('docs/运维/运行.pdf', await renderBusinessPdf('# 新运维正文不属于旧会话'))
   assert.match((await catalog.readForThread(threadId, pdfPath)).content, /发布前保留业务资料/)
   assert.doesNotMatch((await catalog.readForThread(threadId, pdfPath)).content, /新运维正文/)
-  f.memberships.find((entry) => entry.userId === owner).workspaceAccess = 'external'
+  f.memberships.find((entry) => entry.userId === owner).role = 'external'
+  f.memberships.find((entry) => entry.userId === owner).environmentIds = []
   await assert.rejects(catalog.readForThread(threadId, pdfPath))
-  f.memberships.find((entry) => entry.userId === owner).workspaceAccess = 'internal'
+  f.memberships.find((entry) => entry.userId === owner).role = 'project_admin'
+  f.memberships.find((entry) => entry.userId === owner).environmentIds = ['env-test']
   assert.equal(f.service.overview(projectId, owner).hasUnpublishedChanges, true)
   assert.equal(
     f.service.overview(projectId, owner).sourceStatus.every((entry) => entry.status === 'synced'),
@@ -533,7 +535,7 @@ test('排队快照领取时撤权会中断且不发布，恢复权限后新请�
     task = await f.service.generate(projectId, input, owner)
   assert.equal(task.status, 'queued')
   const captureId = f.authoring.captureByRequest(projectId, input.requestId, owner).id
-  f.memberships.find((entry) => entry.userId === owner).role = 'member'
+  f.memberships.find((entry) => entry.userId === owner).role = 'reader'
   release.resolve()
   const completed = await f.finish(task)
   assert.equal(completed.status, 'interrupted')
@@ -548,7 +550,7 @@ test('排队快照领取时撤权会中断且不发布，恢复权限后新请�
       .internalVersions.some((entry) => entry.source.captureId === captureId),
     false,
   )
-  f.memberships.find((entry) => entry.userId === owner).role = 'manager'
+  f.memberships.find((entry) => entry.userId === owner).role = 'project_admin'
   assert.equal(f.service.receipt(projectId, input.requestId, owner).task.status, 'interrupted')
   assert.equal(f.authoring.captureByRequest(projectId, input.requestId, owner).status, 'released')
   const next = await f.finish(await f.service.generate(projectId, f.mutation(), owner))

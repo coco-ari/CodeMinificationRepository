@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProjectCapabilities } from '../../autoops/contracts/runtime.ts';
+import type { ProjectRole, EnvironmentRole, ProjectAction, DeploymentAction } from '../../autoops/contracts/project-access.ts';
 export type { ProjectCapabilities } from '../../autoops/contracts/runtime.ts';
 import type { WorkspaceStore } from './workspaces.mjs';
 import type { ProductProfile } from './product-profile.mjs';
@@ -17,7 +18,7 @@ export interface ThreadBinding {
   readonly threadId: string;
   readonly executionBinding: ExecutionBinding;
   readonly projectId: string;
-  readonly environmentId: string;
+  readonly environmentId: string | null;
   readonly agentId: string;
   readonly ownerId: string;
   readonly visibility: 'private' | 'project';
@@ -35,7 +36,10 @@ export interface ThreadBinding {
 export interface ProjectMembership {
   userId: string;
   workspaceAccess: 'internal' | 'external';
-  role: 'manager' | 'member';
+  role: ProjectRole;
+  environmentRoles?: Record<string, EnvironmentRole>;
+  canAdjustChat?: boolean;
+  authorizationPending?: boolean;
   environmentIds: string[];
   status: 'active' | 'disabled';
 }
@@ -61,16 +65,19 @@ export interface AutoOpsAccess {
   refresh(principal: AutoOpsPrincipal): AutoOpsPrincipal;
   requireProject(principal: AutoOpsPrincipal, projectId: string): AutoOpsProject;
   requireMembership(principal: AutoOpsPrincipal, projectId: string): ProjectMembership;
+  requireProjectAction(principal: AutoOpsPrincipal, projectId: string, action: ProjectAction): ProjectMembership;
+  requireProjectActionForActor(userId: string, projectId: string, action: ProjectAction): ProjectMembership;
+  requireEnvironmentQuery(principal: AutoOpsPrincipal, projectId: string, environmentId: string): ProjectMembership;
   requireEnvironment(principal: AutoOpsPrincipal, projectId: string, environmentId: string): ProjectMembership;
-  requireWorkspace(principal: AutoOpsPrincipal, projectId: string, type: 'internal' | 'external', versionId?: string, environmentId?: string): ProjectMembership;
+  requireWorkspace(principal: AutoOpsPrincipal, projectId: string, type: 'internal' | 'external', versionId?: string, environmentId?: string | null): ProjectMembership;
   requireWorkspaceManager(principal: AutoOpsPrincipal, projectId: string): ProjectMembership;
   requireWorkspaceActor(userId: string, projectId: string): ProjectMembership;
   requireWorkspaceReader(userId: string, projectId: string): ProjectMembership;
   requireWorkspaceInputReader(userId: string, projectId: string, workspaceType: 'internal'|'external'): ProjectMembership;
   requireCredentialActor(userId: string, projectId: string, action: 'credential.use' | 'credential.manage'): ProjectMembership;
   requireDeploymentActor(userId:string, projectId:string, environmentId:string): ProjectMembership;
-  requireDeploymentActionForActor(userId:string, projectId:string, action:'read'|'configure'|'publish'|'restart'|'rollback'|'source.download'|'source.clear'|'server.create'|'server.bind'|'server.unbind'|'server.admin', environmentId?:string): ProjectMembership;
-  requireDeploymentAction(principal: AutoOpsPrincipal, projectId:string, action:'read'|'configure'|'publish'|'restart'|'rollback'|'source.download'|'source.clear'|'server.create'|'server.bind'|'server.unbind'|'server.admin', environmentId?:string): ProjectMembership;
+  requireDeploymentActionForActor(userId:string, projectId:string, action:DeploymentAction, environmentId?:string): ProjectMembership;
+  requireDeploymentAction(principal: AutoOpsPrincipal, projectId:string, action:DeploymentAction, environmentId?:string): ProjectMembership;
   projectCapabilities(principal:AutoOpsPrincipal, projectId:string): ProjectCapabilities;
   listResourceThreads(principal:AutoOpsPrincipal, projectId:string): ResourceThread[];
   listToolResourceThreads(threadId:string): ResourceThread[];
@@ -128,7 +135,7 @@ export function getThreadBinding(threadId: string): ThreadBinding | undefined;
 export function requireToolThread(threadId: string): ToolScope;
 
 export function initializeAutoOpsAccessSchema(db: DatabaseSync): void;
-export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean}): AutoOpsAccess;
+export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;kind?:'internal'|'external';status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean}): AutoOpsAccess;
 
 export function stopConfiguredAutoOpsAccess(): void;
 export function closeConfiguredAutoOpsAccess(): void;

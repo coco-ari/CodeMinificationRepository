@@ -215,7 +215,7 @@ beforeEach(() => {
         },
         environments: [{ id: 'env-test', name: '测试环境' }],
         agents: [],
-        membership: { role: 'manager', workspaceAccess: 'internal', environmentIds: ['env-test'] },
+        membership: { role: 'project_admin', workspaceAccess: 'internal', environmentIds: ['env-test'] },
       },
     ],
   })

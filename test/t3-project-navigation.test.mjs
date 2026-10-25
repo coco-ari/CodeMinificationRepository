@@ -249,7 +249,7 @@ test('工作区项目 ID 的特殊字符保持完整编码，用户键不会发�
 
 test('我的电脑是独立个人模块，入口和直链共用开关，不依赖当前项目角色', () => {
   const owner = { principal: { id: 'alice' }, customerAgentsEnabled: true, projects: [
-    { id: 'project-a', membership: { workspaceAccess: 'external', role: 'member' } },
+    { id: 'project-a', membership: { workspaceAccess: 'external', role: 'external' } },
   ] }
   assert.equal(autoOpsAreaAvailable('devices', owner, 'project-a'), true)
   assert.equal(autoOpsAreaAvailable('devices', owner, 'removed-project'), true)
@@ -257,7 +257,7 @@ test('我的电脑是独立个人模块，入口和直链共用开关，不依�
   assert.equal(autoOpsAreaAvailable('devices', { ...owner, customerAgentsEnabled: false }), false)
   assert.equal(autoOpsAreaAvailable('devices', undefined), false)
   assert.equal(autoOpsAreaAvailable('deployments', owner, 'project-a'), false)
-  assert.equal(autoOpsAreaAvailable('deployments', { ...owner, projects: [{ id: 'project-a', capabilities: { 'deployment.read': true }, membership: { workspaceAccess: 'internal', role: 'manager' } }] }, 'project-a'), true)
+  assert.equal(autoOpsAreaAvailable('deployments', { ...owner, projects: [{ id: 'project-a', capabilities: { 'deployment.read': true }, membership: { workspaceAccess: 'internal', role: 'project_admin' } }] }, 'project-a'), true)
   assert.equal(autoOpsAreaFromPath('/devices'), 'devices')
   assert.equal(normalizeAutoOpsChatHref('/devices/other'), null)
   const definition = AUTOOPS_AREAS.find(area => area.id === 'devices')
@@ -279,7 +279,7 @@ test('电脑模块切项目只更新返回上下文，不保留资源命令或�
 
 test('工作区与部署入口只使用服务端能力，角色和缺失投影不能自行放权', () => {
   const host = { principal: { id: 'alice', role: 'admin' }, projects: [
-    { id: 'project-a', membership: { workspaceAccess: 'internal', role: 'manager' } },
+    { id: 'project-a', membership: { workspaceAccess: 'internal', role: 'project_admin' } },
   ] }
   assert.equal(autoOpsAreaAvailable('workspaces', host, 'project-a'), false)
   assert.equal(autoOpsAreaAvailable('deployments', host, 'project-a'), false)

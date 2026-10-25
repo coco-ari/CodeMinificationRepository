@@ -1,5 +1,9 @@
 /** 当前工作台共享的公开 DTO；不包含身份凭据、存储句柄或服务实现。 */
 export interface ProjectCapabilities {
+  'project.manage'?: boolean
+  'chat.use'?: boolean
+  'chat.configure'?: boolean
+  'workspace.external.publish'?: boolean
   'workspace.read': boolean
   'workspace.manage': boolean
   'credential.use'?: boolean

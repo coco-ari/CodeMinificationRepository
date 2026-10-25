@@ -28,6 +28,42 @@
 
 第一切片修复现有部署 HTTP 异步读取的返回前授权缺口，验收见[部署读取撤权回归](runtime-modules.md#部署读取撤权回归2026-10-26)。该修复不迁移成员角色，不表示新权限方案已接入。后续仍依次实施：固定角色与环境覆盖及统一问答参数合同 → 项目/环境集中配置 → 助手与真实运行能力 → 当前资料生命周期及部署剩余流程 → 整页和真实业务验收。存量授权扩大前需形成明确映射，不将现有 manager/member 规则或独立后端测试当作新权限已经生效。
 
+### 完整交付实施清单
+
+本次交付覆盖已确认总体规划的完整实施与验收，批次完成后直接继续下一个依赖已满足的批次。以下按当前实际运行链路记录，状态随实现及证据更新；“待验证”不等于已验收，“已实现”也不代表整套产品已完成。独立 `autoops/server` 的测试不替代当前运行链路。起点保留 `a2b8d768`；该提交两项 [质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40222937482) 与 [运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40222937477) 通过。
+
+| 编号 | 交付项 | 状态 | 现有代码与证据、剩余验收 |
+| --- | --- | --- | --- |
+| A1 | 固定项目角色、显式环境角色覆盖及账号分类 | 已实现 | [同源合同](../autoops/contracts/project-access.ts)、[运行策略](../agent-demo/t3-adapters/project-access.mjs)、[角色回归](../test/t3-project-roles.test.mjs)、[真实 HTTP/引擎](../test/t3-deployments.test.mjs)；显式环境角色覆盖默认，项目/环境动作分离。成员持久管理与整页验收仍分别归 B1/E1 |
+| A2 | 页面、HTTP/RPC/MCP、下载与后台执行统一授权 | 待实现 | [access](../agent-demo/t3-adapters/access.mjs)、[rpc-policy](../agent-demo/t3-adapters/rpc-policy.mjs) 已有共同入口；新动作和范围仍需逐入口接入 |
+| A3 | 异步读取撤权、跨环境伪造与原地址恢复 | 已实现 | `a2b8d768`；[回归](../test/t3-deployment-response-access.test.mjs) 与[验收](runtime-modules.md#部署读取撤权回归2026-10-26)，尚未随本批发行部署 |
+| A4 | 统一问答最终参数合同、调整权及受限预设校验 | 待实现 | [会话绑定](../agent-demo/t3-adapters/access-service.mjs) 与 [RPC](../agent-demo/t3-adapters/rpc-policy.mjs) 可复用；缺助手修订、最终配置和受限参数裁决 |
+| A5 | 存量权限映射、私有内容及撤权后的历史阅读 | 待验证 | 用户已选择林晓/陈一先不启用新授权；[目录](../agent-demo/fixtures.mjs) 显式标记待分配，仅保留原使用边界，后续由管理员保存分配。外部不绑定新环境，历史自用电脑仍保留原身份/未知收据。自动负例已覆盖，服务器存量实测待最终发行 |
+| B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待实现 | 当前运行目录来自 [fixtures](../agent-demo/fixtures.mjs)；独立后端已有实现但未接入，不能直接切换服务或空库 |
+| B2 | 项目仓库连接与工作区/部署分支配置分离 | 待实现 | [workspace-authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 来源仍混合连接与使用配置；需保留现有来源/固定任务身份后拆分 |
+| B3 | 项目凭证创建、替换、撤销及受控使用 | 已实现 | [credentials](../agent-demo/t3-adapters/credentials.ts)、[回归](../test/t3-workspace-credentials.test.mjs)；集中管理页面和真实私有仓库待补 |
+| B4 | 部署服务器登记、环境绑定、观察与撤销 | 已实现 | [deployment-servers](../agent-demo/t3-adapters/deployment-servers.mjs)、[回归](../test/t3-deployment-servers.test.mjs)；需按新角色接入环境设置并重验 |
+| B5 | 环境 MCP 唯一配置入口、只读连接、测试与停用 | 待实现 | 当前工具不等于 Server/MySQL/Redis 自助配置；需真实连接、凭证引用及环境同源裁决 |
+| B6 | 环境 MCP 随问答和环境授权使用、迟到结果与撤销 | 待实现 | 复用会话真实环境和 access，不能增加逐成员逐连接权限表；真实只读与跨环境负例待验 |
+| C1 | 平台/用户助手统一目录、预设与项目分配 | 待实现 | [agents 目录](../agent-demo/fixtures.mjs) 与现行设备入口仍分离；需唯一管理和问答选择入口 |
+| C2 | 默认助手、低权限只读参数与调整权 | 待实现 | 现行 [ThreadScopeControl](../vendor/t3code/apps/web/src/autoops/ThreadScopeControl.tsx) 可自由调整，缺默认助手准入与服务端防篡改 |
+| C3 | 实际运行器模型、强度、附件及技能能力 | 已实现 | [models](../agent-demo/t3-adapters/models.mjs)、[customer-target](../agent-demo/t3-adapters/customer-target.mjs) 与[客户能力验收](runtime-modules.md#客户默认思考档位2026-10-25)；统一助手后需重验不换模型/位置 |
+| C4 | 电脑自用接入、文件、附件、可靠事件及恢复 | 已实现 | [customer-registry](../agent-demo/t3-adapters/customer-registry.mjs)、[customer-agent](../agent-demo/customer-agent)、[真实证据](runtime-modules.md#客户电脑文件引用2026-10-25)；迁入助手时保留 |
+| C5 | 提供者主动共享、管理员分配、撤回和实际调用者 | 待实现 | 当前仅所有者，缺共享/分配事实和受控用户执行合同；管理权不能代替提供者同意 |
+| C6 | 跨用户电脑会话、附件、工作目录及收据隔离 | 待验证 | 未有真实共享隔离证据；未验证前跨用户执行保持关闭，自用继续可用。若运行器无法落实隔离，只暂停该执行来源 |
+| D1 | 当前上传资料、源码同步、失败保留与每轮固定输入 | 已实现 | [workspace-current](../agent-demo/t3-adapters/workspace-current.ts)、[workspace-management](../agent-demo/t3-adapters/workspace-management.ts)、[当前资料验收](runtime-modules.md#当前资料与部署来源拆分2026-10-24)；新轮按目标改为读取已同步当前资料 |
+| D2 | 内外部各一份当前内容、手动与定期更新 | 待实现 | 手动流程已接入；缺定期更新配置/调度与完整当前外部生命周期，不能自动确认待复核文件 |
+| D3 | 活动/排队/未知输入临时保护、终态释放和自动回收 | 待实现 | [authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 有原件回收，[thread-inputs](../agent-demo/t3-adapters/thread-inputs.ts) 有绑定；历史引用仍须按新规则释放及明确清理提示 |
+| D4 | 部署独立分支、固定 Commit、完整构建上下文源码包 | 已实现 | [deployments](../agent-demo/t3-adapters/deployments.mjs)、[源码回归](../test/deployment-workspace-source.test.mjs)；仓库连接拆分后复用、真实用户仓库打包待验 |
+| D5 | 版本链、配置快照、原包恢复、失败恢复与收据 | 待验证 | [DeploymentService](../src/deployment.mjs)、[Agent](../agent/main.mjs) 已有核心；[适配记录](runtime-modules.md#main-部署核心适配2026-10-25) 尚缺新增 Java/static 隔离目标完整真实验收 |
+| D6 | 部署包按版本链/活动引用保留、临时包自动回收 | 待实现 | 复用 [SourceArchives](../src/source-archives.mjs) 引用保护；需核对中心工作区包与部署归档的生命周期和失败/仅下载回收 |
+| E1 | 集中项目配置、环境页与统一助手整页交互 | 待实现 | 复用锁定 T3 外壳、设置分组、文件工作台、菜单和 Dialog；不迁入独立模板或原型 CSS |
+| E2 | 新角色成功/拒绝/撤回、参数篡改、共享与跨环境 | 待验证 | 每批增加真实服务/接口及关键交互负例，旧角色测试不能作为新规则验收 |
+| E3 | 浅深色、桌面/窄短窗、长数据、滚动、键盘与焦点 | 待验证 | 现有公共壳有历史证据；新页面逐流程自动化及整页实测，记录前后全部操作次数 |
+| E4 | 真实只读 MCP、私有 Git、问答与共享运行器 | 待验证 | 使用隔离资料、连接与任务；凭据或执行隔离条件缺失仅阻塞相应项，继续独立工作 |
+| E5 | 隔离 Java/static 发布、重启/失败恢复/回退/断线 | 待验证 | 已授权 `192.168.31.157`；按现有运维规范核对目标、版本、数据及活动任务，不复用用户业务目标故障注入 |
+| E6 | 最终发行、健康/数据保留、完整 CI 与最终报告 | 待验证 | 每批提交、正常推送并检查 CI 后继续；全部已确认项具有相应实现和真实验收证据后才报告整体完成 |
+
 ## 第三步：工作区来源与资料维护
 
 2026-10-23 用户要求在第二步收尾后，先完善工作区。设计维护在[仓库来源与日常资料维护](../examples/project-workbench-design.md#仓库来源与日常资料维护)，不新增另一份产品规范。模块继续称“工作区”。2026-10-24 用户批准改为当前文件与源码来源，Agent 每轮自动使用最新资料、部署独立选择 Git 提交；新规则已随 `b6e1ba4e` 完整部署到测试服务器；每轮固定输入与历史出处继续受授权及引用保护，日常页面不要求手动发布整套版本。具体成功、失败恢复和未测范围见当前发行与运行验收记录。 2026-10-24 的 `90cea0a6` 已修复 Git 更新超时导致已有源码被排除的问题，并修复手机正文与输入区重叠；上线后真实超时场景仍成功读取源码。

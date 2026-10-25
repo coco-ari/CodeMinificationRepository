@@ -28,7 +28,7 @@ export function createNativeSubagentBindings(dataDirectory, access) {
         if (existing && !previous) throw new Error('原生子任务不能占用现有会话身份')
         if (!previous) {
           const at = new Date().toISOString()
-          db.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,compatibility_read_only,continuation_verified,native_thread_id,workspace_type,workspace_version_id) VALUES(?,?,?,?,?,?,?,0,1,?,?,?)').run(childThreadId,binding.projectId,binding.environmentId,binding.agentId,binding.ownerId,binding.visibility,at,nativeThreadId,binding.workspaceType??null,binding.workspaceVersionId??null)
+          db.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,compatibility_read_only,continuation_verified,native_thread_id,workspace_type,workspace_version_id) VALUES(?,?,?,?,?,?,?,0,1,?,?,?)').run(childThreadId,binding.projectId,binding.environmentId ?? '',binding.agentId,binding.ownerId,binding.visibility,at,nativeThreadId,binding.workspaceType??null,binding.workspaceVersionId??null)
           db.prepare('INSERT INTO t3_native_subagent_bindings VALUES(?,?,?,?)').run(childThreadId,parentThreadId,nativeThreadId,at)
         }
         if (inherited) db.prepare('INSERT INTO t3_thread_inputs VALUES(?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(childThreadId, parentRunId, inherited.inputId, inherited.createdAt)

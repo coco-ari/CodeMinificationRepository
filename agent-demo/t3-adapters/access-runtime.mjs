@@ -44,6 +44,9 @@ export function configuredAutoOpsAccess() {
     const workspaceStore = configuredWorkspaceStore({ authorizeTask({ actorId, projectId, type }) {
       if (!configuredAccess) fail(503, 'WORKSPACE_AUTHORIZATION_REQUIRED', '工作区授权尚未就绪')
       if (type === 'input') return configuredAccess.requireWorkspaceReader(actorId, projectId)
+      if (type === 'packages') return configuredAccess.requireProjectActionForActor(actorId, projectId, 'source.generate')
+      if (type === 'external') return configuredAccess.requireProjectActionForActor(actorId, projectId, 'workspace.external.publish')
+      if (type === 'cleanup') return configuredAccess.requireProjectActionForActor(actorId, projectId, 'workspace.cleanup')
       return configuredAccess.requireWorkspaceActor(actorId, projectId)
     } })
     configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore })

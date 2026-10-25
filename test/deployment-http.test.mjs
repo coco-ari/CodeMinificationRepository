@@ -7,7 +7,7 @@ function fixture() {
   const member = {
     userId: 'manager',
     workspaceAccess: 'internal',
-    role: 'manager',
+    role: 'project_admin',
     environmentIds: ['test'],
     status: 'active',
   }
@@ -75,6 +75,8 @@ test('项目管理者不能伪装平台管理员枚举或修改共享节点', as
   assert.deepEqual((await f.request('/servers?environmentId=test')).body.availableServers, [
     { id: 'global-server' },
   ])
+  f.user.role = 'member'
+  f.member.role = 'reader'
   await assert.rejects(f.request('/servers?environmentId=production'), {
     status: 403,
     code: 'ENVIRONMENT_FORBIDDEN',
@@ -84,6 +86,7 @@ test('项目管理者不能伪装平台管理员枚举或修改共享节点', as
 test('源码下载传输固定档案，异步读取期间撤权不返回文件或元数据', async () => {
   const f = fixture(),
     path = '/targets/target/releases/release/source'
+  f.member.role = 'release_operator'
   assert.deepEqual((await f.request(path)).file, f.file)
   assert.deepEqual((await f.request(`${path}?metadata=1`)).body, {
     name: f.file.name,
@@ -120,9 +123,9 @@ test('历史清理使用当前可信操作者与目标环境，伪造正文不�
     releaseId: 'release',
     input: { requestId: 'original-request', actor: { id: 'manager', displayName: '项目管理者' } },
   })
-  f.member.environmentIds = []
+  f.member.status = 'disabled'
   await assert.rejects(f.request(path, 'DELETE', { requestId: 'original-request' }), {
-    status: 403,
-    code: 'ENVIRONMENT_FORBIDDEN',
+    status: 404,
+    code: 'PROJECT_NOT_FOUND',
   })
 })

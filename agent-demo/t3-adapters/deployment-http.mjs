@@ -20,7 +20,7 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
   if (!match) fail(404, 'DEPLOYMENT_ROUTE_NOT_FOUND', '此部署操作不存在')
   const projectId = decodeURIComponent(match[1]),
     project = checkAccess(() => access.requireProject(principal, projectId)),
-    membership = checkAccess(() => access.requireWorkspaceManager(principal, projectId))
+    membership = checkAccess(() => access.requireDeploymentAction(principal, projectId, 'read'))
   const parts = (match[2] || '').split('/').filter(Boolean).map(decodeURIComponent)
   const body = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
   const actor = { id: principal.id, displayName: principal.displayName }
@@ -138,7 +138,7 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
     }
   }
   if (method === 'POST' && parts.length === 1 && parts[0] === 'services') {
-    authorize('configure')
+    authorize('service.configure')
     return { status: 200, body: await store.saveService(projectId, { ...body, actor }) }
   }
   if (

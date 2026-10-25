@@ -43,9 +43,9 @@ async function fixture(t) {
   const memberships = [owner, 'second', 'reader', 'external'].map((userId) => ({
     userId,
     workspaceAccess: userId === 'external' ? 'external' : 'internal',
-    role: ['manager', 'second'].includes(userId) ? 'manager' : 'member',
+    role: ['manager', 'second'].includes(userId) ? 'project_admin' : userId === 'external' ? 'external' : 'reader',
     status: 'active',
-    environmentIds: ['env-test'],
+    environmentIds: userId === 'external' ? [] : ['env-test'],
   }))
   const catalog = {
     users: memberships.map(({ userId }) => ({
@@ -436,12 +436,13 @@ test('新对话的当前资料候选包含源码和上传文件，固定引用�
       }),
     { code: 'WORKSPACE_NOT_FOUND' },
   )
-  f.memberships.find((entry) => entry.userId === principal.id).workspaceAccess = 'external'
+  f.memberships.find((entry) => entry.userId === principal.id).role = 'external'
+  f.memberships.find((entry) => entry.userId === principal.id).environmentIds = []
   assert.throws(() => catalog.search(principal, { cwd, query: './', limit: 80 }), {
-    code: 'WORKSPACE_FORBIDDEN',
+    code: 'ENVIRONMENT_FORBIDDEN',
   })
   await assert.rejects(catalog.read(principal, { cwd, relativePath: files.entries[0].path }), {
-    code: 'WORKSPACE_FORBIDDEN',
+    code: 'ENVIRONMENT_FORBIDDEN',
   })
 })
 
@@ -461,7 +462,7 @@ test('新外部对话的文件候选读取已发布资料并拒绝内部范围',
     workspaceInputs: f.service,
   })
   const principal = { id: 'external', sessionHash: 'session-external' }
-  const cwd = `autoops://projects/${projectId}/environments/env-test/threads/new-external-draft?workspaceType=external`
+  const cwd = `autoops://projects/${projectId}/environments/~/threads/new-external-draft?workspaceType=external`
   const result = await catalog.search(principal, { cwd, query: './docs/', limit: 80 })
   assert.equal(result.entries.length, 1)
   assert.equal(

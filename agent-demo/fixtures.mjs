@@ -2,7 +2,7 @@ export const users = [
   { id: 'u-admin', username: 'admin', name: '陶然', role: 'admin' },
   { id: 'u-lin', username: 'lin', name: '林晓', role: 'member' },
   { id: 'u-chen', username: 'chen', name: '陈一', role: 'member' },
-  { id: 'u-guest', username: 'guest', name: '外部协作成员', role: 'member' },
+  { id: 'u-guest', username: 'guest', name: '外部协作成员', role: 'member', kind: 'external' },
 ]
 export const projects = [
   {
@@ -10,7 +10,9 @@ export const projects = [
     name: 'AutoOps 工作台',
     memberIds: ['u-admin', 'u-lin', 'u-guest'],
     memberships: [
-      { userId: 'u-guest', workspaceAccess: 'external', role: 'member', environmentIds: ['env-test'], status: 'active' },
+      { userId: 'u-admin', workspaceAccess: 'internal', role: 'project_admin', environmentIds: [], canAdjustChat: true, status: 'active' },
+      { userId: 'u-lin', workspaceAccess: 'internal', role: 'reader', environmentIds: ['env-test', 'env-prod'], canAdjustChat: true, authorizationPending: true, status: 'active' },
+      { userId: 'u-guest', workspaceAccess: 'external', role: 'external', environmentIds: [], canAdjustChat: true, status: 'active' },
     ],
     environments: [
       { id: 'env-test', name: '测试环境' },
@@ -43,6 +45,10 @@ export const projects = [
     id: 'p-cabinet',
     name: '机柜资源平台',
     memberIds: ['u-admin', 'u-chen'],
+    memberships: [
+      { userId: 'u-admin', workspaceAccess: 'internal', role: 'project_admin', environmentIds: [], canAdjustChat: true, status: 'active' },
+      { userId: 'u-chen', workspaceAccess: 'internal', role: 'reader', environmentIds: ['env-test', 'env-prod'], canAdjustChat: true, authorizationPending: true, status: 'active' },
+    ],
     environments: [
       { id: 'env-test', name: '测试环境' },
       { id: 'env-prod', name: '生产环境' },

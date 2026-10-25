@@ -280,13 +280,13 @@ export function AutoOpsThreadScopeControl({
         )}
         <ScopeComposerChoice
           label="业务环境"
-          summary={environment?.name ?? "环境不可用"}
+          summary={scope.environmentId === null ? "无环境" : environment?.name ?? "环境不可用"}
           icon={ServerIcon}
-          value={scope.environmentId}
-          options={project.environments.map((entry) => ({ value: entry.id, label: entry.name }))}
+          value={scope.environmentId ?? "__none__"}
+          options={[{ value: "__none__", label: "无环境" }, ...project.environments.map((entry) => ({ value: entry.id, label: entry.name }))]}
           locked={locked}
           disabled={disabled}
-          onChange={(value) => void apply({ environmentId: value })}
+          onChange={(value) => void apply({ environmentId: value === "__none__" ? null : value })}
         />
         <ScopeComposerChoice
           label="会话可见范围"

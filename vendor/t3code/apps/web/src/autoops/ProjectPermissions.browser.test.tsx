@@ -49,7 +49,7 @@ const project = (id: string, name: string, capabilities = permissions()) => ({
   capabilities,
   environments: [{ id: 'env-test', name: '测试环境' }],
   agents: [],
-  membership: { role: 'manager', workspaceAccess: 'internal', environmentIds: ['env-test'] },
+  membership: { role: 'project_admin', workspaceAccess: 'internal', environmentIds: ['env-test'] },
 })
 const host = () => ({
   principal: { id: 'owner', displayName: '测试用户' },
@@ -130,7 +130,7 @@ describe('项目入口使用服务端 capabilities', () => {
 
   it('旧角色为成员但服务端允许部署时，切项目保留部署入口', async () => {
     const value = host()
-    value.projects[1]!.membership.role = 'member'
+    value.projects[1]!.membership.role = 'reader'
     mocks.readHost.mockReturnValue(value)
     await using screen = await render(
       <SidebarProvider>

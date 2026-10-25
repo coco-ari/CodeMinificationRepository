@@ -57,7 +57,7 @@ export function autoOpsResourceCwd(
   if (historicalVersionId && historicalVersionId !== scope?.workspaceVersionId) return null
   // 日常浏览跟随当前资料，只有显式历史引用才恢复原版本目录。
   return scope && scope.executionBinding?.kind !== 'customer'
-    ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}${scope.workspaceType ? `?workspaceType=${scope.workspaceType}${historicalVersionId ? `&workspaceVersionId=${encodeURIComponent(historicalVersionId)}` : ''}` : ''}`
+    ? `autoops://projects/${encodeURIComponent(projectId)}/environments/${scope.environmentId === null ? '~' : encodeURIComponent(scope.environmentId)}/threads/${encodeURIComponent(threadId)}${scope.workspaceType ? `?workspaceType=${scope.workspaceType}${historicalVersionId ? `&workspaceVersionId=${encodeURIComponent(historicalVersionId)}` : ''}` : ''}`
     : null
 }
 export function isAutoOpsResourceCwd(value: string | null): boolean {

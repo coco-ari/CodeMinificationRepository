@@ -27,7 +27,7 @@ export function autoOpsSkillContextRequestKey(
   else {
     query.set("projectId", selection.projectId);
     query.set("agentId", selection.agentId);
-    query.set("environmentId", selection.environmentId);
+    if (selection.environmentId !== null) query.set("environmentId", selection.environmentId);
     if (selection.workspaceType) query.set("workspaceType", selection.workspaceType);
     if (selection.workspaceVersionId) query.set("workspaceVersionId", selection.workspaceVersionId);
   }

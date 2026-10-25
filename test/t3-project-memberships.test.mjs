@@ -48,8 +48,8 @@ test('项目动作投影复用真实成员与环境授权，关闭部署及撤�
   let enabled = true
   const { access, admin, member, guest, catalog, call, lastTaskActor } = setup(t, { deploymentEnabled: () => enabled })
   const capabilities = (principal) => access.bootstrap(principal).projects.find((entry) => entry.id === base.projectId)?.capabilities
-  assert.deepEqual(capabilities(admin), { 'workspace.read': true, 'workspace.manage': true, 'credential.use': true, 'credential.manage': true, 'deployment.read': true, 'deployment.execute': true })
-  for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'credential.use': principal === member, 'credential.manage': false, 'deployment.read': false, 'deployment.execute': false })
+  assert.deepEqual(capabilities(admin), { 'workspace.read': true, 'workspace.manage': true, 'credential.use': true, 'credential.manage': true, 'deployment.read': true, 'deployment.execute': true, 'workspace.external.publish': true, 'project.manage': true, 'chat.use': true, 'chat.configure': true })
+  for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'credential.use': principal === member, 'credential.manage': false, 'deployment.read': false, 'deployment.execute': false, 'workspace.external.publish': false, 'project.manage': false, 'chat.use': true, 'chat.configure': true })
   access.requireCredentialActor(admin.id, base.projectId, 'credential.manage')
   access.requireCredentialActor(admin.id, base.projectId, 'credential.use')
   access.requireWorkspaceReader(member.id, base.projectId)
@@ -68,8 +68,10 @@ test('项目动作投影复用真实成员与环境授权，关闭部署及撤�
   assert.equal(lastTaskActor(), admin.id)
   enabled = true
   const project = catalog.projects.find((entry) => entry.id === base.projectId)
-  const membership = project.memberships.find((entry) => entry.userId === admin.id) || { userId: admin.id, workspaceAccess: 'internal', role: 'manager', environmentIds: [base.environmentId], status: 'active' }
+  const membership = project.memberships.find((entry) => entry.userId === admin.id) || { userId: admin.id, workspaceAccess: 'internal', role: 'project_admin', environmentIds: [base.environmentId], status: 'active' }
   if (!project.memberships.includes(membership)) project.memberships.push(membership)
+  catalog.users.find(user => user.id === admin.id).role = 'member'
+  membership.role = 'release_operator'
   membership.environmentIds = []
   assert.equal(capabilities(admin)['deployment.read'], true)
   assert.equal(capabilities(admin)['deployment.execute'], false)
@@ -82,28 +84,27 @@ test('项目动作投影复用真实成员与环境授权，关闭部署及撤�
 
 test('项目身份独立于全局角色，兼容内部成员且外部默认不授予原始权限', t => {
   const {access,admin,member,guest,catalog} = setup(t)
-  assert.equal(access.requireMembership(admin,base.projectId).role,'manager')
+  assert.equal(access.requireMembership(admin,base.projectId).role,'project_admin')
   assert.equal(access.requireMembership(member,base.projectId).workspaceAccess,'internal')
-  assert.equal(access.requireMembership(member,base.projectId).role,'member')
+  assert.equal(access.requireMembership(member,base.projectId).role,'reader')
   assert.equal(access.requireMembership(guest,base.projectId).workspaceAccess,'external')
   assert.throws(() => access.requireWorkspace(guest,base.projectId,'internal'),{code:'WORKSPACE_FORBIDDEN'})
   assert.throws(() => access.requireWorkspaceManager(member,base.projectId),{code:'WORKSPACE_MANAGEMENT_FORBIDDEN'})
   assert.throws(() => access.requireEnvironment(guest,base.projectId,'env-prod'),{code:'ENVIRONMENT_FORBIDDEN'})
-  assert.equal(access.requireWorkspace(guest,base.projectId,'external','external-v1','env-test').workspaceAccess,'external')
+  assert.equal(access.requireWorkspace(guest,base.projectId,'external','external-v1',null).workspaceAccess,'external')
   assert.throws(() => access.requireWorkspace(guest,base.projectId,'external','internal-v1'),{code:'WORKSPACE_NOT_AVAILABLE'})
   assert.throws(() => access.requireWorkspace(guest,base.projectId,'external','external-pending'),{code:'WORKSPACE_NOT_FOUND'})
   const boot=access.bootstrap(guest)
   assert.deepEqual(boot.projects.map(({id}) => id),[base.projectId])
-  assert.deepEqual(boot.projects[0].environments.map(({id}) => id),['env-test'])
+  assert.deepEqual(boot.projects[0].environments.map(({id}) => id),[])
   assert.equal(boot.projects[0].membership.workspaceAccess,'external')
-  catalog.users.find(({id})=>id==='u-guest').role='admin'
   assert.throws(() => access.requireWorkspaceManager(guest,base.projectId),{code:'WORKSPACE_FORBIDDEN'})
 })
 
 test('内部共享、私有、旧记录与环境权限全部在会话ACL生效', t => {
   const {access,admin,member,guest,bindingDb}=setup(t)
   for(const [threadId,workspaceType,workspaceVersionId,visibility,environmentId] of [
-    ['raw','internal','internal-v1','project','env-test'],['safe','external','external-v1','project','env-test'],['private','external','external-v1','private','env-test'],['production','external','external-v1','project','env-prod'],
+    ['raw','internal','internal-v1','project','env-test'],['safe','external','external-v1','project',null],['private','external','external-v1','private',null],['production','external','external-v1','project','env-prod'],
   ]) access.bindThread(admin,{...base,threadId,workspaceType,workspaceVersionId,visibility,environmentId})
   bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at) VALUES(?,?,?,?,?,?,?)').run('legacy',base.projectId,base.environmentId,base.agentId,admin.id,'project','now')
   assert.equal(access.canSeeThread(guest,'raw'),false)
@@ -114,7 +115,7 @@ test('内部共享、私有、旧记录与环境权限全部在会话ACL生效',
   assert.equal(access.canSeeThread(member,'raw'),true)
   assert.deepEqual(access.threadAudience(access.getThreadBinding('raw')).sort(),['u-admin','u-lin'])
   assert.deepEqual(access.threadAudience(access.getThreadBinding('safe')).sort(),['u-admin','u-guest','u-lin'])
-  assert.throws(()=>access.bindThread(guest,{...base,threadId:'forged',workspaceType:'internal',workspaceVersionId:'internal-v1'}),{code:'WORKSPACE_FORBIDDEN'})
+  assert.throws(()=>access.bindThread(guest,{...base,environmentId:null,threadId:'forged',workspaceType:'internal',workspaceVersionId:'internal-v1'}),{code:'WORKSPACE_FORBIDDEN'})
   assert.throws(()=>access.bindThread(guest,{...base,threadId:'forged-prod',workspaceType:'external',workspaceVersionId:'external-v1',environmentId:'env-prod'}),{code:'ENVIRONMENT_FORBIDDEN'})
   access.recordThreadAttachment(admin,'raw-file','raw')
   assert.throws(()=>access.requireAttachment(guest,'raw-file'),{code:'THREAD_NOT_FOUND'})
@@ -125,7 +126,8 @@ test('权限撤回立即阻止读取和工具，其他授权成员保留共享�
   const {access,admin,member,guest,catalog}=setup(t)
   access.bindThread(admin,{...base,threadId:'raw',workspaceType:'internal',workspaceVersionId:'internal-v1'})
   const project=catalog.projects.find(({id})=>id===base.projectId)
-  project.memberships.push({userId:admin.id,workspaceAccess:'external',role:'member',environmentIds:['env-test'],status:'active'})
+  catalog.users.find(user => user.id === admin.id).role = 'member'
+  Object.assign(project.memberships.find(member => member.userId === admin.id), { workspaceAccess:'external', role:'external', environmentIds:[] })
   assert.equal(access.canSeeThread(admin,'raw'),false)
   assert.equal(access.canSeeThread(member,'raw'),true)
   assert.throws(()=>access.requireToolThread('raw'),{code:'WORKSPACE_FORBIDDEN'})
@@ -167,7 +169,7 @@ test('直接资源、元数据与草稿@不能绕过外部资料授权', async t
   await assert.rejects(catalog.metadata(guest,[raw]),{code:'WORKSPACE_FORBIDDEN'})
   await assert.rejects(catalog.resource(guest,'autoops/p-autoops/documents/doc-design/not-real/design.md'),{code:'WORKSPACE_FORBIDDEN'})
   assert.equal(Buffer.from((await catalog.resource(guest,safe)).bytes).toString(),'脱敏内容')
-  const cwd='autoops://projects/p-autoops/environments/env-test/threads/draft?workspaceType=internal&workspaceVersionId=internal-v1'
+  const cwd='autoops://projects/p-autoops/environments/~/threads/draft?workspaceType=internal&workspaceVersionId=internal-v1'
   assert.throws(()=>catalog.search(guest,{cwd,query:'',limit:100}),{code:'WORKSPACE_FORBIDDEN'})
   assert.ok(catalog.search(guest,{cwd:cwd.replace('internal&','external&').replace('internal-v1','external-v1'),query:'',limit:100}).entries.some(({path})=>path===safe))
 })
@@ -242,6 +244,6 @@ test('外部RPC只返回虚拟项目根，技能刷新仍映射到服务端固�
     if(previous===undefined)delete process.env.AUTOOPS_T3_DATA_DIR
     else process.env.AUTOOPS_T3_DATA_DIR=previous
   }
-  access.reserveThread(guest,{...base,threadId:'external-launch',workspaceType:'external',workspaceVersionId:'external-v1'})
+  access.reserveThread(guest,{...base,environmentId:null,threadId:'external-launch',workspaceType:'external',workspaceVersionId:'external-v1'})
   authorizeAutoOpsRpc(access,guest,'orchestration.launchThread',{threadId:'external-launch',projectId:base.projectId,initialMessage:{text:'分析资料'}})
 })

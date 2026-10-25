@@ -56,7 +56,7 @@ export const layer = HttpRouter.add(
         if (!access || !hub) throw { status: 404, message: "客户文件不可用" };
         const principal = access.principalForNativeSession(native.sessionId);
         const projectId = query.get("projectId") ?? "",
-          environmentId = query.get("environmentId") ?? "";
+          environmentId = query.get("environmentId");
         const target = normalizeExecutionBinding({
           kind: "customer",
           deviceId: query.get("deviceId"),
@@ -67,9 +67,10 @@ export const layer = HttpRouter.add(
         if (target.kind !== "customer") throw { status: 400, message: "请选择客户工作区" };
         const authorize = () => {
           access.refresh(principal);
-          access.requireEnvironment(principal, projectId, environmentId);
+          access.requireMembership(principal, projectId);
           const threadId = query.get("threadId");
           const binding = threadId ? access.getThreadBinding(threadId) : undefined;
+          if (!binding && environmentId !== null) access.requireEnvironment(principal, projectId, environmentId);
           if (binding) {
             const owned = access.requireThread(principal, binding.threadId);
             const current = owned.executionBinding;

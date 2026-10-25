@@ -48,9 +48,10 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
   function scopeAtCwd(principal, cwd) {
     const match = typeof cwd === 'string' && cwd.match(/^autoops:\/\/projects\/([^/?#]+)\/environments\/([^/?#]+)\/threads\/([^/?#]+)(?:\?([^#]*))?$/)
     if (!match) fail('业务资料目录无效；不接受宿主路径')
-    const [, projectId, environmentId, threadId, query] = match
+    const [, projectId, environmentPath, threadId, query] = match
+    const environmentId = environmentPath === '~' ? null : environmentPath
     const project = access.requireProject(principal, projectId)
-    access.requireEnvironment(principal, projectId, environmentId)
+    if (environmentId !== null) access.requireEnvironment(principal, projectId, environmentId)
     let binding = access.getThreadBinding(threadId)
     const parameters = new URLSearchParams(query || '')
     const workspaceType = parameters.get('workspaceType'), workspaceVersionId = parameters.get('workspaceVersionId') ?? undefined, inputId = parameters.get('inputId')

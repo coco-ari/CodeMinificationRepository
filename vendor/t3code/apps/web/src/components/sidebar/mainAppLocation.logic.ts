@@ -1,10 +1,12 @@
 import { AUTOOPS_AREAS, normalizeAutoOpsChatHref, type AutoOpsArea } from '../../autoops/projectNavigation.logic.ts'
+import type { ProjectRole } from '../../../../../../../autoops/contracts/project-access.ts'
 
 export interface SettingsReturnProject {
   readonly id: string
+  readonly capabilities?: { readonly 'deployment.read'?: boolean }
   readonly membership?: {
     readonly workspaceAccess: 'internal' | 'external'
-    readonly role: 'manager' | 'member'
+    readonly role: ProjectRole
   }
 }
 
@@ -55,7 +57,7 @@ export function resolveAutoOpsSettingsReturnHref(input: {
   const validPrevious = previous && previous.area === input.location?.area ? previous : null
   const area = validPrevious?.area ?? 'chat'
   const allowedArea = area === 'deployments' &&
-    !(project.membership?.workspaceAccess === 'internal' && project.membership.role === 'manager')
+    project.capabilities?.['deployment.read'] !== true
     ? 'workspaces' : area
   if (validPrevious?.projectId === project.id && allowedArea === validPrevious.area &&
     (allowedArea !== 'chat' || input.chatProjectId(validPrevious.href) === project.id)) {

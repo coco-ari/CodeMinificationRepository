@@ -83,7 +83,7 @@ async function management(t, overrides = {}) {
   const credentials = createProjectCredentialService({ databasePath: path.join(directory, 'credentials.sqlite'), keyPath: path.join(directory, 'master.key'), initializeKeyIfNew: true, authorize: requireActor })
   const credential = credentials.create('owner', 'p-test', { name: '隔离凭证', username: 'fixture', password: 'fixture-secret', requestId: randomUUID() })
   state.current.credentialId = credential.id
-  const service = createWorkspaceManagement({ access: { requireWorkspaceActor: requireActor, requireWorkspaceReader: requireActor }, credentials,
+  const service = createWorkspaceManagement({ access: { requireWorkspaceActor: requireActor, requireWorkspaceReader: requireActor, requireProjectActionForActor: requireActor }, credentials,
     authoring: { overview: () => ({ sources: [state.current], entries: [], revision: 1 }), close: async () => {} },
     store: { whenIdle: async () => {} }, git: { validateRepositorySource: value => value, ...overrides } })
   t.after(() => service.close())

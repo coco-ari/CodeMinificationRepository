@@ -53,12 +53,16 @@ export async function handleWorkspaceAuthoringRequest({ access, principal, url, 
       return ok(await service.authoring.upload(projectId, body as unknown as WorkspaceUploadInput, bytes, actor))
     }
     if (action === 'cleanup') {
+      access.requireProjectAction(principal, projectId, 'workspace.cleanup')
       if (!Array.isArray(body.versionIds) || body.versionIds.some(value => typeof value !== 'string')) fail(400, 'WORKSPACE_CLEANUP_INVALID', '清理目标无效')
       return ok(body.dryRun === true ? service.planCleanupVersions(projectId, body.versionIds as string[], actor) : service.cleanupVersions(projectId, body.versionIds as string[], actor))
     }
     if (action === 'deployment-packages') return { status: 202, body: { task: service.startDeploymentPackages(projectId, body as unknown as WorkspaceDeploymentSourceInput, actor) } }
     if (action === 'sync') return { status: 202, body: { task: await service.sync(projectId, body as unknown as WorkspaceAuthoringMutation, actor) } }
-    if (action === 'external') return { status: 202, body: { task: await service.generateCurrentExternal(projectId, body as unknown as { requestId: string; rules?: Array<{ find: string; replace: string }>; expectedRevision?: number }, actor) } }
+    if (action === 'external') {
+      access.requireProjectAction(principal, projectId, 'workspace.external.publish')
+      return { status: 202, body: { task: await service.generateCurrentExternal(projectId, body as unknown as { requestId: string; rules?: Array<{ find: string; replace: string }>; expectedRevision?: number }, actor) } }
+    }
     if (action === 'versions') return { status: 202, body: { task: await service.generate(projectId, body as unknown as WorkspaceAuthoringMutation, actor) } }
     const command = object(body.input)
     if (action === 'sources') {

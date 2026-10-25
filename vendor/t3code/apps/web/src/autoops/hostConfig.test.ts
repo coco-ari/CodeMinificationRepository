@@ -198,22 +198,22 @@ describe('AutoOps host authentication boundary', () => {
           ...project,
           membership: {
             workspaceAccess: 'external',
-            role: 'member',
-            environmentIds: ['production'],
+            role: 'external',
+            environmentIds: [],
           },
         })),
       },
       'https://work.test',
     )
     expect(host.readAutoOpsThreadScope('external', 'p-autoops')).toMatchObject({
-      environmentId: 'production',
+      environmentId: null,
       workspaceType: 'external',
     })
     expect(host.readAutoOpsThreadScope('external', 'p-autoops')?.workspaceVersionId).toBeUndefined()
     expect(() =>
       host.setAutoOpsThreadScope('external', {
         projectId: 'p-autoops',
-        environmentId: 'production',
+        environmentId: null,
         agentId: 'agent',
         visibility: 'private',
         workspaceType: 'internal',

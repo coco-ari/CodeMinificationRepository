@@ -56,7 +56,7 @@ import {
 } from './rules.ts'
 
 export { WorkspaceAuthoringError } from './rules.ts'
-export type WorkspaceAuthoringAction = 'read' | 'external-read' | 'manage'
+export type WorkspaceAuthoringAction = 'read' | 'external-read' | 'manage' | 'source-manage' | 'source-generate'
 export interface WorkspaceAuthoringOptions {
   dataDir: string
   authorize: (actorId: string, projectId: string, action: WorkspaceAuthoringAction) => unknown
@@ -334,7 +334,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
     payload: unknown,
     work: () => Omit<WorkspaceAuthoringResult, 'requestId'>,
   ): WorkspaceAuthoringResult {
-    authorize(projectId, actorId, 'manage', true)
+    authorize(projectId, actorId, operation === 'save-source' || operation === 'remove-source' ? 'source-manage' : 'manage', true)
     const requestId = id(input.requestId),
       expectedRevision = revision(input.expectedRevision)
     const fingerprint = hash(JSON.stringify({ actorId, operation, expectedRevision, payload }))
@@ -1219,7 +1219,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       fingerprint: string,
       actorId: string,
     ): WorkspaceDeploymentSourceCapture | null {
-      authorize(projectId, actorId, 'manage')
+      authorize(projectId, actorId, 'source-generate')
       const row = db
         .prepare('SELECT * FROM authoring_deployment_inputs WHERE project_id=? AND request_id=?')
         .get(projectId, requestIdentifier(requestId))
@@ -1233,7 +1233,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       fingerprint: string,
       actorId: string,
     ) {
-      authorize(value.projectId, actorId, 'manage', true)
+      authorize(value.projectId, actorId, 'source-generate', true)
       const previous = api.deploymentInput(value.projectId, value.requestId, fingerprint, actorId)
       if (previous) return previous
       db.prepare('INSERT INTO authoring_deployment_inputs VALUES(?,?,?,?,?)').run(

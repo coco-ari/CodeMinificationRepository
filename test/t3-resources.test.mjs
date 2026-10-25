@@ -100,7 +100,7 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   const principal = access.authenticateCookie('demo_session=workspace-resource')
   const shared = { projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'project' }
   for (const [threadId, workspaceType, workspaceVersionId] of [['internal', 'internal', 'internal-v1'], ['external', 'external', 'external-v1'], ['next-external', 'external', 'external-v2']])
-    access.bindThread(principal, { ...shared, threadId, workspaceType, workspaceVersionId })
+    access.bindThread(principal, { ...shared, environmentId: workspaceType === 'external' ? null : shared.environmentId, threadId, workspaceType, workspaceVersionId })
   const artifacts = createBusinessArtifactStore(directory)
   t.after(() => { artifacts.close(); sessions.close(); bindings.close(); rmSync(directory, { recursive: true, force: true }) })
   const internalReport = artifacts.create({ binding: access.getThreadBinding('internal'), runId: 'r1', name: '内部报告.md', mime: 'text/markdown', bytes: Buffer.from('原始报告') })
@@ -108,7 +108,7 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   access.recordThreadAttachment(principal, 'internal-attachment', 'internal', { name: '内部附件.txt', mimeType: 'text/plain', sizeBytes: 10 })
   access.recordThreadAttachment(principal, 'external-attachment', 'external', { name: '脱敏附件.txt', mimeType: 'text/plain', sizeBytes: 12 })
   const catalog = createBusinessResourceCatalog({ access, artifactStore: artifacts, workspaceStore })
-  const cwd = 'autoops://projects/p-autoops/environments/env-test/threads/external'
+  const cwd = 'autoops://projects/p-autoops/environments/~/threads/external'
   const externalPath = 'autoops/p-autoops/workspaces/external-v1/docs/需求.md'
   const internalPath = externalPath.replace('external-v1', 'internal-v1')
   const listing = catalog.search(principal, { cwd, query: '', limit: 100 })
@@ -144,7 +144,7 @@ test('工作区@引用、读取和预览锁定版本，外部不混入原始资�
   assert.equal(Buffer.from((await catalog.resource(principal, externalPath)).bytes).toString(), '已经脱敏资料:完整文件')
   const externalReportPath = listing.entries.find(({path}) => path.includes(externalReport.id) && path.endsWith('.md')).path
   assert.equal(Buffer.from((await catalog.resource(principal, externalReportPath)).bytes).toString(), '外部报告')
-  const draft = 'autoops://projects/p-autoops/environments/env-test/threads/new-draft'
+  const draft = 'autoops://projects/p-autoops/environments/~/threads/new-draft'
   assert.throws(() => catalog.search(principal, { cwd: draft, query: '', limit: 100 }), { code: 'WORKSPACE_REQUIRED' })
   assert.ok(catalog.search(principal, { cwd: draft + '?workspaceType=external&workspaceVersionId=external-v1', query: '', limit: 100 }).entries.some(({path}) => path === externalPath))
   for (const query of ['workspaceType=internal&workspaceVersionId=external-v1', 'workspaceType=external&workspaceVersionId=external-pending', 'workspaceType=external&workspaceVersionId=missing', 'workspaceType=external&workspaceVersionId=', 'workspaceType=external&workspaceType=internal'])
@@ -183,9 +183,9 @@ test('工作区@目录导航复用直系枚举，深层关键字检索和外部�
   }
   const access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, workspaceStore })
   const principal = access.authenticateCookie('demo_session=workspace-navigation')
-  access.bindThread(principal, { threadId: 'external', projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: 'external', workspaceVersionId: 'external-v1' })
+  access.bindThread(principal, { threadId: 'external', projectId: 'p-autoops', environmentId: null, agentId: 'a-project', visibility: 'private', workspaceType: 'external', workspaceVersionId: 'external-v1' })
   const catalog = createBusinessResourceCatalog({ access, workspaceStore })
-  const cwd = 'autoops://projects/p-autoops/environments/env-test/threads/external'
+  const cwd = 'autoops://projects/p-autoops/environments/~/threads/external'
   const root = 'autoops/p-autoops/workspaces/external-v1'
   const search = (query, options = {}) => catalog.search(principal, { cwd, query, limit: 80, ...options })
   const childPaths = (result) => result.entries.map(({path}) => path).sort()
@@ -235,7 +235,7 @@ test('工作区@目录导航复用直系枚举，深层关键字检索和外部�
   assert.throws(() => search('../internal-v1/'), /资料不存在/)
   assert.throws(() => catalog.search(principal, { cwd: cwd + '?workspaceType=external&workspaceVersionId=external-v2', query: 'next-only/', limit: 80 }), /不能切换/)
   assert.throws(() => catalog.search(principal, { cwd: cwd + '?workspaceType=external&workspaceVersionId=external-v2', query: './next-only/', limit: 80 }), /不能切换/)
-  assert.throws(() => catalog.search(principal, { cwd: 'autoops://projects/p-autoops/environments/env-test/threads/draft?workspaceType=internal&workspaceVersionId=internal-v1', query: 'private/', limit: 80 }), { code: 'WORKSPACE_FORBIDDEN' })
+  assert.throws(() => catalog.search(principal, { cwd: 'autoops://projects/p-autoops/environments/~/threads/draft?workspaceType=internal&workspaceVersionId=internal-v1', query: 'private/', limit: 80 }), { code: 'WORKSPACE_FORBIDDEN' })
 })
 
 test('真实生成的脱敏快照同时驱动MCP文档与原生@读取，原始资料保持独立', async (t) => {
@@ -256,7 +256,7 @@ test('真实生成的脱敏快照同时驱动MCP文档与原生@读取，原始�
   sessions.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('real-workspace-resource').digest('hex'), 'u-admin', 'csrf', Date.now() + 100000)
   const access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, workspaceStore })
   const principal = access.authenticateCookie('demo_session=real-workspace-resource')
-  for (const version of [internal, external]) access.bindThread(principal, { threadId: version.type, projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: version.type, workspaceVersionId: version.id })
+  for (const version of [internal, external]) access.bindThread(principal, { threadId: version.type, projectId: 'p-autoops', environmentId: version.type === 'external' ? null : 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: version.type, workspaceVersionId: version.id })
   const catalog = createBusinessResourceCatalog({ access, workspaceStore })
   const tools = createAutoOpsBusinessTools({ authorizeThread: (threadId) => access.requireToolThread(threadId), loadAttachments: () => [], storeArtifact: () => { throw new Error('unexpected write') }, workspaceStore })
   const material = (await tools.listMaterials('external')).documents.find(({id}) => id === 'docs/测试资料.md')
@@ -264,7 +264,7 @@ test('真实生成的脱敏快照同时驱动MCP文档与原生@读取，原始�
   assert.match((await tools.readDocument('internal', material.id)).content, /PRIVATE-CONTENT/)
   assert.match((await tools.readDocument('external', material.id)).content, /公开项目/)
   await assert.rejects(tools.readDocument('external', 'doc-design'), { code: 'DOCUMENT_FORBIDDEN' })
-  const cwd = 'autoops://projects/p-autoops/environments/env-test/threads/external'
+  const cwd = 'autoops://projects/p-autoops/environments/~/threads/external'
   assert.match((await catalog.read(principal, { cwd, relativePath: material.path })).contents, /公开项目/)
   assert.match((await catalog.readForThread('external', material.path)).content, /公开项目/)
   const files = catalog.search(principal, { cwd, query: '', limit: 500 })

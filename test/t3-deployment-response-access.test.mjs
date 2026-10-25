@@ -13,8 +13,8 @@ function fixture(t) {
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
   initializeAutoOpsAccessSchema(bindingDb)
   sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('isolated-session').digest('hex'), 'operator', 'csrf', Date.now() + 60_000)
-  const membership = { userId: 'operator', workspaceAccess: 'internal', role: 'manager', environmentIds: ['test'], status: 'active' }
-  const user = { id: 'operator', name: '隔离管理者', role: 'admin', status: 'active' }
+  const membership = { userId: 'operator', workspaceAccess: 'internal', role: 'reader', environmentIds: ['test'], status: 'active' }
+  const user = { id: 'operator', name: '隔离管理者', role: 'member', status: 'active' }
   const project = { id: 'project', name: '隔离项目', memberIds: ['operator'], memberships: [membership], environments: [{ id: 'test', name: '同名环境' }, { id: 'production', name: '同名环境' }], documents: [], resources: [] }
   const access = createAutoOpsAccess({ sessionDb, bindingDb, catalog: { users: [user], projects: [project], agents: [] }, deploymentEnabled: () => true })
   const principal = access.authenticateCookie('demo_session=isolated-session')
@@ -46,7 +46,7 @@ for (const [name, route, operation, revoke, code] of [
   ['概览等待初始化期间撤销环境', '?environmentId=test', 'initialize', f => { f.membership.environmentIds = [] }, 'ENVIRONMENT_FORBIDDEN'],
   ['概览等待初始化期间撤销成员', '', 'initialize', f => { f.membership.status = 'disabled' }, 'PROJECT_NOT_FOUND'],
   ['日志返回前撤销环境', '/tasks/test-task', 'logs', f => { f.membership.environmentIds = [] }, 'ENVIRONMENT_FORBIDDEN'],
-  ['日志返回前撤销管理角色', '/tasks/test-task', 'logs', f => { f.membership.role = 'member' }, 'WORKSPACE_MANAGEMENT_FORBIDDEN'],
+  ['日志返回前撤销内部阅读角色', '/tasks/test-task', 'logs', f => { f.membership.role = 'external'; f.membership.environmentIds = [] }, 'DEPLOYMENT_ACTION_FORBIDDEN'],
   ['Git 分支返回前停用账号', '/repositories/repo/refs', 'refs', f => { f.user.status = 'disabled' }, 'UNAUTHENTICATED'],
   ['Git 历史返回前注销会话', '/repositories/repo/history', 'history', f => { f.sessionDb.exec('DELETE FROM sessions') }, 'UNAUTHENTICATED'],
   ['源码下载返回前撤销环境', '/targets/test-target/releases/release/source', 'source', f => { f.membership.environmentIds = [] }, 'ENVIRONMENT_FORBIDDEN'],
