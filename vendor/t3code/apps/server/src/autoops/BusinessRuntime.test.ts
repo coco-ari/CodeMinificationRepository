@@ -23,7 +23,7 @@ it('请求退出后先排空业务，消费者随后释放，身份资源最后�
         }),
       )
       return {
-        initialize() {
+        async initialize() {
           return undefined
         },
         stopAccepting() {

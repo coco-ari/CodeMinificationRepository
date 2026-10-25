@@ -1,6 +1,6 @@
 import type { AutoOpsAccess } from './access.mjs';
 export interface BusinessRuntime {
-  initialize(): AutoOpsAccess | undefined;
+  initialize(): Promise<AutoOpsAccess | undefined>;
   stopAccepting(): void;
   drain(): Promise<void>;
   close(): Promise<void>;

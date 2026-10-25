@@ -16,7 +16,7 @@ export const layer = Layer.effect(
     const runtime = createBusinessRuntime()
     // 先登记清理，保证初始化到一半失败也释放已打开的业务资源。
     yield* Effect.addFinalizer(() => Effect.promise(() => runtime.close()))
-    yield* Effect.sync(() => runtime.initialize())
+    yield* Effect.promise(() => runtime.initialize())
     return runtime
   }),
 )

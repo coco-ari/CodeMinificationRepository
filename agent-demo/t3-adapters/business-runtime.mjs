@@ -1,12 +1,12 @@
 import { configuredAutoOpsAccess, stopConfiguredAutoOpsAccess, closeConfiguredAutoOpsAccess } from './access.mjs'
 import { stopConfiguredWorkspaceStore, closeConfiguredWorkspaceStore } from './workspaces.mjs'
-import { stopConfiguredDeploymentStore, closeConfiguredDeploymentStore } from './deployments.mjs'
+import { configuredDeploymentStore, stopConfiguredDeploymentStore, closeConfiguredDeploymentStore } from './deployments.mjs'
 import { closeConfiguredPreferences } from './preferences.mjs'
 import { closeConfiguredSettingsPreferences } from './settings-preferences.mjs'
 import { closeConfiguredBusinessArtifactStore } from './business-tools.mjs'
 import { stopConfiguredWorkspaceManagement, closeConfiguredWorkspaceManagement } from './workspace-management.ts'
 
-// 宿主只协调已有模块，不拥有另一份任务状态，也不初始化尚未使用的可选存储。
+// 宿主协调已启用的服务入口；未启用模块与其他可选存储仍按需初始化。
 export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
   const configuredBudget = process.env.AUTOOPS_SHUTDOWN_DRAIN_MS
   const budget = workspaceDrainTimeoutMs ?? (configuredBudget === undefined ? 30_000 : Number(configuredBudget))
@@ -39,7 +39,11 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
     })()
   }
   return {
-    initialize() { return configuredAutoOpsAccess() },
+    async initialize() {
+      const access = configuredAutoOpsAccess()
+      if (access) await configuredDeploymentStore()?.initialize()
+      return access
+    },
     stopAccepting,
     drain,
     close() {
