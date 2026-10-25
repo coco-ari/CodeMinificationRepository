@@ -1,11 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { randomUUID, createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import { RepositoryService } from '../src/service.mjs'
 import { DeploymentService } from '../src/deployment.mjs'
 import { Store } from '../src/store.mjs'
@@ -120,9 +119,10 @@ test('旧发行真实项目模块可在扩展后数据副本上初始化，保�
   const f = await fixture(t)
   const service = await f.projects.saveService('p-one', mutation({name:'回滚保留服务',kind:'java',module:'.'}))
   await f.projects.saveServiceSource('p-one', mutation({serviceId:service.id,environmentId:'test',sources:[{sourceId:'repo-one',refKind:'tag',ref:'v1.0'}],contexts:[{service:'backend',root:'.',workingDirectory:'.'}]}))
-  const previous = '27fa5b349e9b5e0e30c105f453ffca45216f45ad'
-  const source = execFileSync('git',['show',`${previous}:src/deployment-projects.mjs`],{cwd:fileURLToPath(new URL('..',import.meta.url)),encoding:'utf8'})
-    .replace("'./security.mjs'",JSON.stringify(new URL('../src/security.mjs',import.meta.url).href))
+  // 固定旧发行真实字节随测试保存，浅克隆也执行同一份回滚兼容程序。
+  const previous = await readFile(new URL('./fixtures/deployment-projects-27fa5b34/deployment-projects.mjs', import.meta.url))
+  assert.equal(createHash('sha256').update(previous).digest('hex'), 'a462431a6b44997327aff46a94fea550b64a0345be6638c685c0d849f12c1ad3')
+  const source = previous.toString('utf8').replace("'./security.mjs'",JSON.stringify(new URL('../src/security.mjs',import.meta.url).href))
   const oldModule = path.join(f.root,'previous-deployment-projects.mjs')
   await writeFile(oldModule,source)
   const {createProjectDeployments} = await import(pathToFileURL(oldModule).href)
