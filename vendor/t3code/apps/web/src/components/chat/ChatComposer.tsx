@@ -2419,6 +2419,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isComposerScrollCollapsed,
     setIsComposerScrollCollapsed,
     restoreAfterTimelineReachedEnd,
+    requestExpandedFocus,
   } = useComposerFocusState();
   const [composerSubmissionError, setComposerSubmissionError] = useState<string | null>(null);
   const [providerInputSubmissionError, setProviderInputSubmissionError] = useState<string | null>(
@@ -4186,10 +4187,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       window.cancelAnimationFrame(mobileComposerExpandReleaseFrameRef.current);
     }
     mobileComposerExpandInFlightRef.current = true;
-    setIsComposerFocused(true);
+    requestExpandedFocus(() => composerEditorRef.current?.focusAtEnd());
     mobileComposerExpandFrameRef.current = window.requestAnimationFrame(() => {
       mobileComposerExpandFrameRef.current = null;
-      composerEditorRef.current?.focusAtEnd();
       mobileComposerExpandReleaseFrameRef.current = window.requestAnimationFrame(() => {
         mobileComposerExpandReleaseFrameRef.current = null;
         mobileComposerExpandInFlightRef.current = false;

@@ -1,4 +1,4 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { describe, expect, it } from "vite-plus/test";
 
 import { act, render } from "../../../test/render";
@@ -25,6 +25,38 @@ function ComposerProbe() {
 }
 
 describe("composer focus state", () => {
+  it("恢复输入时先展开编辑器，再执行一次聚焦", async () => {
+    let controls: ReturnType<typeof useComposerFocusState>;
+    const visibleAtFocus: boolean[] = [];
+    function CollapsedComposer() {
+      const state = useComposerFocusState();
+      const input = useRef<HTMLInputElement>(null);
+      useLayoutEffect(() => {
+        controls = state;
+      });
+      return (
+        <>
+          <input ref={input} hidden={!state.isComposerFocused} aria-label="消息" />
+          <button
+            onClick={() =>
+              state.requestExpandedFocus(() => {
+                visibleAtFocus.push(!!input.current?.getClientRects().length);
+                input.current?.focus();
+              })
+            }
+          >
+            返回输入
+          </button>
+        </>
+      );
+    }
+    await using screen = await render(<CollapsedComposer />);
+    await screen.getByRole("button", { name: "返回输入" }).click();
+    await expect.element(screen.getByRole("textbox", { name: "消息" })).toHaveFocus();
+    expect(visibleAtFocus).toEqual([true]);
+    await act(() => controls.setIsComposerScrollCollapsed(true));
+    expect(visibleAtFocus).toEqual([true]);
+  });
   it("stays expanded when the composer loses focus", async () => {
     await using _screen = await render(<ComposerProbe />);
     await act(() => composer.setIsComposerFocused(true));
