@@ -135,65 +135,66 @@ export function SkillLibraryCard({
           ) : null}
         </div>
       ) : null}
-      <div className="mt-auto space-y-1.5 border-t border-border/60 pt-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-xs text-muted-foreground">助手</span>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1" aria-label="助手分配">
-            {catalog.agents.map((agent) => target('agent', agent))}
-            {!catalog.agents.length ? (
-              <span className="text-xs text-muted-foreground">没有可用助手</span>
-            ) : null}
-          </div>
+      <div className="mt-auto grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1.5 border-t border-border/60 pt-2">
+        <span className="pt-1.5 text-xs text-muted-foreground pointer-coarse:pt-3.5">助手</span>
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-1"
+          role="group"
+          aria-label="助手分配"
+        >
+          {catalog.agents.map((agent) => target('agent', agent))}
+          {!catalog.agents.length ? (
+            <span className="text-xs text-muted-foreground">没有可用助手</span>
+          ) : null}
         </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-xs text-muted-foreground">项目</span>
-          <div
-            className="flex min-w-0 flex-1 flex-wrap items-center gap-1"
-            aria-label="项目分配摘要"
+        <span className="pt-1.5 text-xs text-muted-foreground pointer-coarse:pt-3.5">项目</span>
+        <div
+          className="flex min-w-0 flex-wrap items-center gap-1"
+          role="group"
+          aria-label="项目分配摘要"
+        >
+          {currentProject ? target('project', currentProject) : null}
+          <Popover
+            onOpenChange={(open) => {
+              onProjectOpenChange(open)
+              if (!open) setProjectQuery('')
+            }}
           >
-            {currentProject ? target('project', currentProject) : null}
-            <Popover
-              onOpenChange={(open) => {
-                onProjectOpenChange(open)
-                if (!open) setProjectQuery('')
-              }}
+            <PopoverTrigger
+              aria-label={`项目分配：${skill.displayName}`}
+              render={<Button variant="ghost" size="xs" />}
             >
-              <PopoverTrigger
-                aria-label={`项目分配：${skill.displayName}`}
-                render={<Button variant="ghost" size="xs" />}
-              >
-                <FolderIcon />
-                {currentProject ? '更多项目' : '选择项目'}
-                {otherAssignmentCount > 0 ? ` · ${otherAssignmentCount}` : ''}
-              </PopoverTrigger>
-              <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
-                <div className="space-y-2">
-                  <PopoverTitle>项目分配</PopoverTitle>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    点击分配，再点取消。未单独分配的项目沿用助手设置。
-                  </p>
-                  <Input
-                    size="sm"
-                    type="search"
-                    aria-label="搜索分配项目"
-                    placeholder="搜索项目"
-                    value={projectQuery}
-                    onChange={(event) => setProjectQuery(event.currentTarget.value)}
-                  />
-                  <ScrollArea contentSizing="viewport" className="max-h-72" radius="none">
-                    <div className="flex min-w-0 flex-col gap-1" aria-label="项目分配列表">
-                      {projects.map((project) => target('project', project, true))}
-                      {!projects.length ? (
-                        <p className="py-3 text-center text-xs text-muted-foreground">
-                          没有匹配的项目
-                        </p>
-                      ) : null}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </PopoverPopup>
-            </Popover>
-          </div>
+              <FolderIcon />
+              {currentProject ? '更多项目' : '选择项目'}
+              {otherAssignmentCount > 0 ? ` · ${otherAssignmentCount}` : ''}
+            </PopoverTrigger>
+            <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
+              <div className="space-y-2">
+                <PopoverTitle>项目分配</PopoverTitle>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  点击分配，再点取消。未单独分配的项目沿用助手设置。
+                </p>
+                <Input
+                  size="sm"
+                  type="search"
+                  aria-label="搜索分配项目"
+                  placeholder="搜索项目"
+                  value={projectQuery}
+                  onChange={(event) => setProjectQuery(event.currentTarget.value)}
+                />
+                <ScrollArea contentSizing="viewport" className="max-h-72" radius="none">
+                  <div className="flex min-w-0 flex-col gap-1" aria-label="项目分配列表">
+                    {projects.map((project) => target('project', project, true))}
+                    {!projects.length ? (
+                      <p className="py-3 text-center text-xs text-muted-foreground">
+                        没有匹配的项目
+                      </p>
+                    ) : null}
+                  </div>
+                </ScrollArea>
+              </div>
+            </PopoverPopup>
+          </Popover>
         </div>
       </div>
     </article>
@@ -274,7 +275,7 @@ function SkillTargetButton({
     <Toggle
       {...targetProps}
       size="compact"
-      variant="outline"
+      variant="ghost"
       className="min-w-0 max-w-full justify-start pointer-coarse:min-h-11 pointer-coarse:after:inset-0"
       pressed={active}
       onPressedChange={onToggle}

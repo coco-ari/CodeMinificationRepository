@@ -106,13 +106,13 @@ export function ModuleSidebarItem({
       disabled={disabled}
       aria-pressed={selected}
       title={label}
-      className="h-auto min-h-9 py-2 pointer-coarse:min-h-11"
+      size={description ? 'detail' : 'default'}
       onClick={(event) => {
         onClick(event)
         if (isMobile && closeOnSelect) setOpenMobile(false)
       }}
     >
-      {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
+      {Icon ? <Icon /> : null}
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
         {description ? (

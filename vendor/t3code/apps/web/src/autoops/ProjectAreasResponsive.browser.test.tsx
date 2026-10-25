@@ -363,9 +363,11 @@ describe('部署运行记录与所选详情分离', () => {
       { router: '/deployments?projectId=p-one' },
     )
     await expect.element(screen.getByText('运行状态待核对', { exact: true })).toBeVisible()
+    await screen.getByRole('button', { name: '运行信息', exact: true }).click()
     await expect
-      .element(screen.getByText('上次确认版本：36bccae65190', { exact: true }))
+      .element(page.getByText(data.targets[0]!.currentRelease!.revision!, { exact: true }))
       .toBeVisible()
+    await userEvent.keyboard('{Escape}')
     for (const name of ['配置', '发布记录', '任务日志']) {
       await screen.getByRole('radio', { name, exact: true }).click()
       await expect.element(screen.getByText('运行状态待核对', { exact: true })).toBeVisible()
@@ -393,9 +395,8 @@ describe('部署运行记录与所选详情分离', () => {
       ],
     })
     await screen.getByRole('button', { name: '刷新部署状态', exact: true }).click()
-    await expect
-      .element(screen.getByText('上次确认版本：recovered123', { exact: true }))
-      .toBeVisible()
+    await screen.getByRole('button', { name: '运行信息', exact: true }).click()
+    await expect.element(page.getByText('recovered1234', { exact: true })).toBeVisible()
     await expect
       .element(screen.getByText('运行状态待核对', { exact: true }))
       .not.toBeInTheDocument()
@@ -632,7 +633,9 @@ for (const width of [390, 1440]) {
       const pathBounds = path.element().getBoundingClientRect()
       const searchBounds = search.element().getBoundingClientRect()
       expect(
-        Math.abs(pathBounds.top + pathBounds.height / 2 - searchBounds.top - searchBounds.height / 2),
+        Math.abs(
+          pathBounds.top + pathBounds.height / 2 - searchBounds.top - searchBounds.height / 2,
+        ),
       ).toBeLessThanOrEqual(1)
     })
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)

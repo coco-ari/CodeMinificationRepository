@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   FileTextIcon,
   HistoryIcon,
+  InfoIcon,
   MoreHorizontalIcon,
   PackageIcon,
   PlusIcon,
@@ -22,6 +23,7 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from '~/components/u
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '~/components/ui/menu'
+import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from '~/components/ui/popover'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import { Spinner } from '~/components/ui/spinner'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
@@ -31,7 +33,6 @@ import { readAutoOpsHost } from './hostConfig'
 import type { WorkspaceRelease } from './workspaces'
 import {
   createDeploymentTarget,
-  deploymentStageLabel,
   deploymentStatusLabel,
   deploymentTaskFinished,
   DeploymentRequestError,
@@ -623,45 +624,41 @@ export function DeploymentsPanel({
                       配置
                     </Toggle>
                   </ToggleGroup>
-                  {detailTab === 'logs' && targetTasks.length ? (
-                    <div
-                      className="min-w-0 max-w-full basis-80 sm:ml-auto"
-                      data-deployment-task-picker=""
-                    >
-                      <Choice
-                        label="部署任务"
-                        value={taskId}
-                        options={targetTasks.map((task) => ({
-                          id: task.id,
-                          name: `${dateLabel(task.createdAt)} · ${task.action === 'rollback' ? '回退' : '发布'} · ${deploymentStatusLabel(task.status)}`,
-                        }))}
-                        placeholder="恢复所选任务…"
-                        onChange={(value) =>
-                          setSelection({ environmentId, targetId: target.id, taskId: value })
-                        }
-                      />
-                    </div>
-                  ) : null}
-                  <div
-                    className="flex min-w-0 basis-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
-                    aria-label="部署运行记录"
-                  >
-                    <span className="min-w-0 truncate">
-                      {server?.name ?? '服务器不可用'} · 执行器{online ? '在线' : '离线'}
-                    </span>
-                    <span className="min-w-0 truncate">
-                      上次确认版本：
-                      {runtimeStatus?.confirmedRelease?.revision?.slice(0, 12) ??
-                        runtimeStatus?.confirmedRelease?.id.slice(0, 8) ??
-                        '尚无成功记录'}
-                    </span>
-                    {activeTask ? <span>{deploymentStageLabel(activeTask.stage)}中</span> : null}
-                    {target.currentRelease?.sourceIdentity ? (
-                      <DeploymentSourceDetails
-                        source={target.currentRelease.sourceIdentity}
-                        label="查看已确认版本来源"
-                      />
-                    ) : null}
+                  <div className="ml-auto shrink-0">
+                    <Popover>
+                      <PopoverTrigger render={<Button size="sm" variant="ghost" />}>
+                        <InfoIcon />
+                        运行信息
+                      </PopoverTrigger>
+                      <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
+                        <div className="space-y-3" aria-label="部署运行记录">
+                          <PopoverTitle>运行信息</PopoverTitle>
+                          <dl className="space-y-3 text-sm">
+                            <div>
+                              <dt className="text-xs text-muted-foreground">部署服务器</dt>
+                              <dd className="break-words">{server?.name ?? '服务器不可用'}</dd>
+                              <dd className="text-xs text-muted-foreground">
+                                执行器{online ? '在线' : '离线'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-muted-foreground">上次确认版本</dt>
+                              <dd className="break-all font-mono text-xs">
+                                {runtimeStatus?.confirmedRelease?.revision ??
+                                  runtimeStatus?.confirmedRelease?.id ??
+                                  '尚无成功记录'}
+                              </dd>
+                            </div>
+                          </dl>
+                          {target.currentRelease?.sourceIdentity ? (
+                            <DeploymentSourceDetails
+                              source={target.currentRelease.sourceIdentity}
+                              label="查看已确认版本来源"
+                            />
+                          ) : null}
+                        </div>
+                      </PopoverPopup>
+                    </Popover>
                   </div>
                   {runtimeStatus?.state === 'uncertain' ? (
                     <Alert variant="warning" className="basis-full">
@@ -701,6 +698,25 @@ export function DeploymentsPanel({
                         projectId={projectId}
                         targetId={target.id}
                         taskId={taskId}
+                        taskPicker={
+                          <div
+                            className="min-w-0 max-w-full basis-72"
+                            data-deployment-task-picker=""
+                          >
+                            <Choice
+                              label="部署任务"
+                              value={taskId}
+                              options={targetTasks.map((task) => ({
+                                id: task.id,
+                                name: `${dateLabel(task.createdAt)} · ${task.action === 'rollback' ? '回退' : '发布'} · ${deploymentStatusLabel(task.status)}`,
+                              }))}
+                              placeholder="恢复所选任务…"
+                              onChange={(value) =>
+                                setSelection({ environmentId, targetId: target.id, taskId: value })
+                              }
+                            />
+                          </div>
+                        }
                         refresh={refresh}
                         onAccessDenied={revokeAccess}
                       />

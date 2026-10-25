@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
 import { ArrowDownIcon } from 'lucide-react'
@@ -30,6 +30,7 @@ type DeploymentLogsProps = {
   projectId: string
   targetId: string
   taskId: string
+  taskPicker?: ReactNode
   refresh: number
   onAccessDenied?: (cause: unknown) => void
 }
@@ -45,6 +46,7 @@ function DeploymentTaskLog({
   projectId,
   targetId,
   taskId,
+  taskPicker,
   refresh,
   onAccessDenied,
 }: DeploymentLogsProps) {
@@ -134,68 +136,78 @@ function DeploymentTaskLog({
   }
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="任务日志">
-      {task ? (
-        <div className="shrink-0 border-b border-border/60 px-3 py-2 text-xs">
+      {task || taskPicker ? (
+        <Collapsible className="shrink-0 border-b border-border/60 px-3 py-2 text-xs">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge
-              size="sm"
-              variant={
-                task.status === 'succeeded'
-                  ? 'success'
-                  : ['failed', 'rolled_back', 'interrupted'].includes(task.status)
-                    ? 'error'
-                    : 'info'
-              }
-            >
-              {deploymentStatusLabel(task.status)}
-            </Badge>
-            {!deploymentTaskFinished(task) ? (
+            {taskPicker}
+            {task ? (
               <>
-                <Spinner size="sm" />
-                <span>{deploymentStageLabel(task.stage)}</span>
-              </>
-            ) : null}
-            <span className="min-w-0 truncate text-muted-foreground">
-              {dateLabel(task.createdAt)}
-            </span>
-          </div>
-          {task.stageHistory?.length ? (
-            <Collapsible className="mt-1">
-              <CollapsibleTrigger render={<Button size="xs" variant="ghost" />}>
-                执行阶段（{task.stageHistory.length}）
-              </CollapsibleTrigger>
-              <CollapsiblePanel>
-                <ol
-                  className="flex flex-wrap gap-x-3 gap-y-1 py-1 text-muted-foreground"
-                  aria-label="执行阶段记录"
+                <Badge
+                  size="sm"
+                  variant={
+                    task.status === 'succeeded'
+                      ? 'success'
+                      : ['failed', 'rolled_back', 'interrupted'].includes(task.status)
+                        ? 'error'
+                        : 'info'
+                  }
                 >
-                  {task.stageHistory.map((entry, index) => (
-                    <li key={`${entry.stage}:${index}`}>{deploymentStageLabel(entry.stage)}</li>
-                  ))}
-                </ol>
-              </CollapsiblePanel>
-            </Collapsible>
+                  {deploymentStatusLabel(task.status)}
+                </Badge>
+                {!deploymentTaskFinished(task) ? (
+                  <>
+                    <Spinner size="sm" />
+                    <span>{deploymentStageLabel(task.stage)}</span>
+                  </>
+                ) : null}
+                {!taskPicker ? (
+                  <span className="min-w-0 truncate text-muted-foreground">
+                    {dateLabel(task.createdAt)}
+                  </span>
+                ) : null}
+                <div className="ml-auto flex flex-wrap items-center gap-1">
+                  {task.stageHistory?.length ? (
+                    <CollapsibleTrigger render={<Button size="xs" variant="ghost" />}>
+                      执行阶段（{task.stageHistory.length}）
+                    </CollapsibleTrigger>
+                  ) : null}
+                  {task.sourceIdentity?.sourceVersionId ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      render={
+                        <Link
+                          to="/workspaces"
+                          search={{
+                            projectId: ProjectId.make(projectId),
+                            versionId: task.sourceIdentity.sourceVersionId,
+                          }}
+                        />
+                      }
+                    >
+                      查看任务来源
+                    </Button>
+                  ) : null}
+                </div>
+              </>
+            ) : error ? null : (
+              <Spinner size="sm" />
+            )}
+          </div>
+          {task ? <TaskOutcome task={task} /> : null}
+          {task?.stageHistory?.length ? (
+            <CollapsiblePanel>
+              <ol
+                className="flex flex-wrap gap-x-3 gap-y-1 pt-2 text-muted-foreground"
+                aria-label="执行阶段记录"
+              >
+                {task.stageHistory.map((entry, index) => (
+                  <li key={`${entry.stage}:${index}`}>{deploymentStageLabel(entry.stage)}</li>
+                ))}
+              </ol>
+            </CollapsiblePanel>
           ) : null}
-          <TaskOutcome task={task} />
-          {task.sourceIdentity?.sourceVersionId ? (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="mt-1"
-              render={
-                <Link
-                  to="/workspaces"
-                  search={{
-                    projectId: ProjectId.make(projectId),
-                    versionId: task.sourceIdentity.sourceVersionId,
-                  }}
-                />
-              }
-            >
-              查看任务来源
-            </Button>
-          ) : null}
-        </div>
+        </Collapsible>
       ) : error ? null : (
         <div className="flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
           <Spinner size="sm" />

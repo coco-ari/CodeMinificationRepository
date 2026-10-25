@@ -117,6 +117,105 @@ describe('技能库写入后的撤权处理', () => {
   }
 })
 
+describe('技能卡片就地分配', () => {
+  for (const targetType of ['agent', 'project'] as const) {
+    it(`${targetType} 分组可直接分配与取消，状态以服务端返回为准`, async () => {
+      const initial = catalog()
+      initial.agents = [{ id: 'agent-one', name: '隔离助手', projectIds: ['p-one'] }]
+      const assigned: SkillLibrary = {
+        ...initial,
+        revision: 'revision-two',
+        assignments: [
+          {
+            id: 'assignment-one',
+            skillId: 'skill-one',
+            targetType,
+            targetId: targetType === 'agent' ? 'agent-one' : 'p-one',
+            versionId: 'version-one',
+            workspaceTypes: ['internal'],
+            enabled: true,
+          },
+        ],
+      }
+      const accepted = deferred<SkillLibrary>()
+      mocks.load.mockResolvedValue(initial)
+      mocks.change.mockReturnValueOnce(accepted.promise).mockResolvedValueOnce(initial)
+      await using screen = await render(library(), testLocation)
+      const group = page.getByRole('group', {
+        name: targetType === 'agent' ? '助手分配' : '项目分配摘要',
+        exact: true,
+      })
+      const name = targetType === 'agent' ? '隔离助手' : '隔离项目'
+      const unassigned = group.getByRole('button', {
+        name: `${name}：${targetType === 'agent' ? '尚未分配' : '沿用助手设置'}`,
+        exact: true,
+      })
+      await expect.element(unassigned).toHaveAttribute('aria-pressed', 'false')
+      await unassigned.click()
+      await expect.element(unassigned).toHaveAttribute('aria-busy', 'true')
+      await expect.element(unassigned).toHaveAttribute('aria-pressed', 'false')
+      await expect.element(unassigned).toBeDisabled()
+      expect(mocks.change).toHaveBeenNthCalledWith(1, 'revision-one', {
+        action: 'assign',
+        skillId: 'skill-one',
+        targetType,
+        targetId: targetType === 'agent' ? 'agent-one' : 'p-one',
+        versionId: 'version-one',
+        workspaceTypes: ['internal'],
+        enabled: true,
+      })
+      await act(() => accepted.resolve(assigned))
+      const selected = group.getByRole('button', { name: `${name}：内部 · version-`, exact: true })
+      await expect.element(selected).toHaveAttribute('aria-pressed', 'true')
+      await selected.click()
+      await expect.element(unassigned).toHaveAttribute('aria-pressed', 'false')
+      expect(mocks.change).toHaveBeenNthCalledWith(2, 'revision-two', {
+        action: 'unassign',
+        assignmentId: 'assignment-one',
+      })
+      expect(screen.container.querySelector('[data-skill-card]')).not.toBeNull()
+    })
+  }
+
+  it('分配失败保留未选状态、错误反馈及直接重试入口', async () => {
+    const initial = catalog()
+    mocks.load.mockResolvedValue(initial)
+    mocks.change.mockRejectedValueOnce(
+      new AutoOpsRequestError('网络中断，请重试。', 'NETWORK_ERROR', undefined),
+    )
+    await using screen = await render(library(), testLocation)
+    const target = page
+      .getByRole('group', { name: '项目分配摘要', exact: true })
+      .getByRole('button', { name: '隔离项目：沿用助手设置', exact: true })
+    await target.click()
+    await vi.waitFor(() => expect(screen.container.textContent).toContain('网络中断，请重试。'))
+    await expect.element(target).toHaveAttribute('aria-pressed', 'false')
+    await expect.element(target).not.toBeDisabled()
+    expect(mocks.change).toHaveBeenCalledTimes(1)
+    mocks.change.mockResolvedValueOnce({
+      ...initial,
+      revision: 'revision-retry',
+      assignments: [
+        {
+          id: 'assignment-retry',
+          skillId: 'skill-one',
+          targetType: 'project',
+          targetId: 'p-one',
+          versionId: 'version-one',
+          workspaceTypes: ['internal'],
+          enabled: true,
+        },
+      ],
+    } satisfies SkillLibrary)
+    await target.click()
+    await expect
+      .element(page.getByRole('button', { name: '隔离项目：内部 · version-', exact: true }))
+      .toHaveAttribute('aria-pressed', 'true')
+    expect(mocks.change).toHaveBeenCalledTimes(2)
+    expect(screen.container.textContent).not.toContain('网络中断，请重试。')
+  })
+})
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((done) => {

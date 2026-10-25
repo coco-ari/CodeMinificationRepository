@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
+import { page } from 'vite-plus/test/browser'
+import { useState } from 'react'
 import { act, render } from '../../../test/render'
 import type { DeploymentTaskDetails } from '../deployments'
 import { loadDeploymentTask } from '../deployments'
 import { DeploymentLogs } from './DeploymentLogs'
+import { Choice } from './DeploymentControls'
 import '../../index.css'
 
 vi.mock(import('../deployments'), async (original) => ({
@@ -32,6 +35,45 @@ afterEach(() => {
 })
 
 describe('部署增量日志生命周期', () => {
+  it('所选任务读取失败后仍可从摘要切换任务并读取对应日志', async () => {
+    load.mockImplementation(async (_projectId, taskId) =>
+      taskId === 'unavailable'
+        ? details('another-task', 'target-one', '不可显示的错误日志')
+        : details('available', 'target-one', '所选历史任务日志'),
+    )
+    function TaskSelection() {
+      const [taskId, setTaskId] = useState('unavailable')
+      return (
+        <DeploymentLogs
+          projectId="p-one"
+          targetId="target-one"
+          taskId={taskId}
+          refresh={0}
+          taskPicker={
+            <Choice
+              label="部署任务"
+              value={taskId}
+              options={[
+                { id: 'unavailable', name: '读取失败的任务' },
+                { id: 'available', name: '历史成功任务' },
+              ]}
+              onChange={setTaskId}
+            />
+          }
+        />
+      )
+    }
+    await using screen = await render(<TaskSelection />)
+    await expect
+      .element(screen.getByRole('alert'))
+      .toHaveTextContent('任务身份与当前选择不一致，请从任务列表重新选择。 当前任务已停止读取。')
+    await screen.getByRole('combobox', { name: '部署任务' }).click()
+    await page.getByRole('option', { name: '历史成功任务' }).click()
+    await expect.element(screen.getByText('所选历史任务日志')).toBeVisible()
+    await expect.element(screen.getByRole('alert')).not.toBeInTheDocument()
+    expect(screen.container.textContent).not.toContain('不可显示的错误日志')
+  })
+
   it('刷新沿用当前任务游标，合并增量时不重复已有日志', async () => {
     load.mockResolvedValueOnce(details('one', 'target-one', '第一段日志'))
     await using screen = await render(

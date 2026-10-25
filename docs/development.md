@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-**第二步：当前已实现模块的深度优化、部署验收与收尾已完成（2026-10-23）。** 当前发行与恢复配置统一见[当前验证发行](../examples/agent-demo-t3-deployment.md#当前验证发行)，完成依据及未测边界见[第二步最终验收](runtime-modules.md#第二步最终验收)。 第一阶段的规范基线 v1 保持有效；用户已授权实施第二步并部署预览。 当前 `feat/workspace-deployment-validation` 分支是唯一功能基线；不再对照、更新或从 main 补迁功能。
+**第二步：当前已实现模块的深度优化、部署验收与收尾已完成（2026-10-23）。** 当前发行与恢复配置统一见[当前验证发行](../examples/agent-demo-t3-deployment.md#当前验证发行)，完成依据及未测边界见[第二步最终验收](runtime-modules.md#第二步最终验收)。 第一阶段的规范基线 v1 保持有效；用户已授权实施第二步并部署预览。 当前 `feat/workspace-deployment-validation` 分支是唯一运行基线。2026-10-25 用户明确要求专项核对 main 部署核心；已按固定提交整理[完整能力与适配方案](../examples/deployment-core-adaptation-plan.md)，迁移实现等待用户确认，不合并整条 main 分支，也不补迁无关功能。
 
 | 步骤 | 当前状态与边界 |
 | --- | --- |

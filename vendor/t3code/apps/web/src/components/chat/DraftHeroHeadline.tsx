@@ -1,4 +1,5 @@
 import { autoOpsFeature } from "~/autoops/capabilities";
+import { readAutoOpsHost } from "~/autoops/hostConfig";
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
@@ -343,6 +344,9 @@ export function DraftHeroHeadline({
         {noProjectShortcut ? <TooltipPopup side="bottom">{noProjectShortcut}</TooltipPopup> : null}
       </Tooltip>
     ) : null;
+
+  // 业务项目已由公共顶栏和对话路径定位，输入区不再重复欢迎标题及项目选择。
+  if (hasResolvedProject && readAutoOpsHost()) return null;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center">

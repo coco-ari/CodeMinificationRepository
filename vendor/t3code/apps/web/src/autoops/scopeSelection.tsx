@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { ComposerControl, ComposerControlChevron } from '~/components/chat/ComposerControl'
+import {
+  ComposerControl,
+  ComposerControlChevron,
+  ComposerControlIcon,
+} from '~/components/chat/ComposerControl'
 import { ComposerContextLabel } from '~/components/ComposerContextLabel'
 import { useComposerMenuProps } from '~/components/chat/composerEventScope'
 import {
@@ -54,7 +58,7 @@ export function ScopeComposerChoice({
   const floating = useComposerMenuProps()
   const content = (
     <>
-      <Icon className="size-3 shrink-0" />
+      <ComposerControlIcon icon={Icon} size={locked ? 'xs' : 'sm'} />
       <ComposerContextLabel>{summary}</ComposerContextLabel>
     </>
   )
@@ -83,14 +87,14 @@ export function ScopeComposerChoice({
         <TooltipTrigger
           render={
             <MenuTrigger
-              render={<ComposerControl size="xs" />}
+              render={<ComposerControl />}
               aria-label={label}
               aria-description={summary}
               disabled={disabled}
               data-composer-context-control
             >
               {content}
-              <ComposerControlChevron size="xs" />
+              <ComposerControlChevron />
             </MenuTrigger>
           }
         />
