@@ -21,7 +21,6 @@ import {
   Plus,
   RefreshCw,
   ArrowRight,
-  Download,
   LoaderCircle,
   Settings2,
 } from 'lucide-react'
@@ -139,7 +138,6 @@ export default function App() {
   const [session, setSession] = useState(null),
     [error, setError] = useState(''),
     [route, setRoute] = useState(parseRoute)
-  const download = /^\/download\/([a-f0-9-]{36})$/.exec(location.pathname)
   const reloadSession = useCallback(async () => {
     try {
       const result = await readResponse(await fetch('/api/session'))
@@ -150,7 +148,7 @@ export default function App() {
     }
   }, [])
   useEffect(() => {
-    if (!download) reloadSession()
+    reloadSession()
     let accepted = location.hash
     const change = () => {
       const next = location.hash
@@ -177,7 +175,6 @@ export default function App() {
       window.removeEventListener('beforeunload', unload)
     }
   }, [])
-  if (download) return <DownloadPage id={download[1]} />
   if (!session)
     return (
       <div className="mx-auto max-w-md p-8 pt-28">
@@ -867,81 +864,5 @@ function Navigation({ route, data, session, navigate, open, request, reloadSessi
         </DropdownMenu>
       </SidebarFooter>
     </Sidebar>
-  )
-}
-function DownloadPage({ id }) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState(''),
-    [progress, setProgress] = useState('')
-  return (
-    <main id="download-view" className="grid min-h-svh place-items-center p-5">
-      <div className="w-full max-w-lg space-y-8">
-        <Brand />
-        <Card>
-          <CardHeader>
-            <CardTitle>下载交付源码</CardTitle>
-            <CardDescription>输入专属下载密码，获取仓库默认下载分支的最新源码包。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form
-              id="download-form"
-              className="space-y-5"
-              onSubmit={async (e) => {
-                e.preventDefault()
-                if (busy) return
-                const form = e.currentTarget
-                const token = new FormData(form).get('token').trim()
-                setBusy(true)
-                setError('')
-                setProgress('正在验证密码、同步最新源码并准备下载…')
-                try {
-                  const response = await fetch(`/api/projects/${id}/source/latest`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                  })
-                  if (!response.ok) throw new Error((await response.json()).error || '下载失败')
-                  const blob = await response.blob()
-                  const url = URL.createObjectURL(blob),
-                    link = document.createElement('a')
-                  link.href = url
-                  link.download = `source-${(response.headers.get('X-Source-Revision') || 'latest').slice(0, 12)}.zip`
-                  document.body.append(link)
-                  link.click()
-                  link.remove()
-                  setTimeout(() => URL.revokeObjectURL(url), 60000)
-                  setProgress(
-                    `下载完成 · ${(blob.size / 1024 / 1024).toFixed(2)} MB · SHA-256：${response.headers.get('X-Archive-SHA256')}`,
-                  )
-                  form.reset()
-                } catch (e) {
-                  setError(e.message)
-                  setProgress('未下载源码包，请修正密码或稍后重试。')
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            >
-              <Field name="token" label="下载密码" type="password" required autoComplete="off" />
-              <Button className="w-full" type="submit" disabled={busy}>
-                {busy ? <LoaderCircle className="animate-spin" /> : <Download />}下载最新源码
-              </Button>
-              {error && (
-                <p id="download-error" role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
-              )}
-              {progress && (
-                <p
-                  id="download-progress"
-                  role="status"
-                  className="break-all text-xs text-muted-foreground"
-                >
-                  {progress}
-                </p>
-              )}
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
   )
 }

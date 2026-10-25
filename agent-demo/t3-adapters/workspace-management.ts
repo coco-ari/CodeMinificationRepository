@@ -10,7 +10,7 @@ import { createCurrentWorkspace } from './workspace-current.ts'
 import { createProjectCredentialService, type GitCredential } from './credentials.ts'
 import { createWorkspaceGit } from './workspace-git.ts'
 import { extractBusinessAttachment } from './business-documents.mjs'
-import type { WorkspaceAuthoringMutation, WorkspaceAuthoringOverview, WorkspaceMaterialContent, WorkspaceRepositorySource, WorkspaceResolvedRepository } from '../../autoops/contracts/workspace-authoring.ts'
+import type { WorkspaceAuthoringMutation, WorkspaceAuthoringOverview, WorkspaceMaterialContent, WorkspaceRepositorySource, WorkspaceRepositoryRefKind, WorkspaceResolvedRepository } from '../../autoops/contracts/workspace-authoring.ts'
 import type { WorkspaceTask } from '../../autoops/contracts/workspaces.ts'
 
 type Authoring = ReturnType<typeof createWorkspaceAuthoring>
@@ -30,12 +30,45 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   const preparations = new Map<string, { revision: number; work: Promise<WorkspaceTask>; controller: AbortController }>()
   const previews = new Set<ReturnType<typeof extractBusinessAttachment>>()
   const captureReleases = new Set<Promise<void>>()
+  const repositoryQueries = new Set<{ controller: AbortController; work: Promise<unknown> }>()
   const permitRead = (projectId: string, actorId: string) => access.requireWorkspaceReader(actorId, projectId)
   const permitWrite = (projectId: string, actorId: string) => {
     if (!accepting) fail(503, 'WORKSPACE_STOPPING', '工作区正在停止接单，请稍后重试')
     return access.requireWorkspaceActor(actorId, projectId)
   }
   const published = (projectId: string) => store.overview(projectId).internalVersions.filter(version => version.status === 'published')
+  async function repositoryQuery<T>(projectId: string, sourceId: string, actorId: string, operation: (source: WorkspaceRepositorySource, secret: GitCredential | undefined, signal: AbortSignal, check: () => void) => Promise<T>): Promise<T> {
+    permitWrite(projectId, actorId)
+    if (repositoryQueries.size + preparations.size >= 2) fail(429, 'WORKSPACE_GIT_QUERY_BUSY', '已有源码正在查询，请稍后重试')
+    const source = authoring.overview(projectId, actorId).sources.find(entry => entry.id === sourceId)
+    if (!source) fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '当前项目中不存在此源码来源')
+    const hash = configurationHash(source), reference = source.credentialId ? credentials.referenceVersion(actorId, projectId, source.credentialId) : undefined
+    const controller = new AbortController()
+    const check = () => {
+      permitWrite(projectId, actorId)
+      const current = authoring.overview(projectId, actorId).sources.find(entry => entry.id === sourceId)
+      if (!current || configurationHash(current) !== hash) fail(409, 'WORKSPACE_SOURCE_CHANGED', '源码来源已经修改，请刷新后重新选择')
+      if (reference) {
+        const currentCredential = credentials.referenceVersion(actorId, projectId, reference.credentialId)
+        if (currentCredential.version !== reference.version) fail(409, 'CREDENTIAL_REVISION_CONFLICT', '源码凭证已经更新，请重新查询')
+      }
+    }
+    const work = Promise.resolve().then(async () => {
+      check()
+      const run = (secret?: GitCredential) => operation(source, secret, controller.signal, check)
+      const result = reference ? await credentials.withCredential(actorId, projectId, reference, run) : await run()
+      check()
+      return result
+    })
+    const query = { controller, work }; repositoryQueries.add(query)
+    try { return await work } finally { repositoryQueries.delete(query) }
+  }
+  function repositoryRefs(projectId: string, sourceId: string, actorId: string) {
+    return repositoryQuery(projectId, sourceId, actorId, (source, secret, signal, check) => git.repositoryRefs(source, secret, signal, check))
+  }
+  function repositoryHistory(projectId: string, sourceId: string, selection: { refKind: WorkspaceRepositoryRefKind; ref: string }, actorId: string) {
+    return repositoryQuery(projectId, sourceId, actorId, (source, secret, signal, check) => git.repositoryHistory(git.validateRepositorySource({ ...source, refKind: selection.refKind, ref: selection.ref }), secret, signal, check))
+  }
   function sourceViews(projectId: string, sources: WorkspaceRepositorySource[], currentActor: string) {
     const versions = published(projectId)
     return sources.map(source => {
@@ -207,7 +240,7 @@ export function createWorkspaceManagement({ access, store, authoring, credential
       if (existing.revision !== input.expectedRevision) fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已经用于另一项资料修订')
       return existing.work
     }
-    if (preparations.size >= 2) fail(429, 'WORKSPACE_PREPARATION_BUSY', '已有来源正在核对，请稍后重试')
+    if (preparations.size + repositoryQueries.size >= 2) fail(429, 'WORKSPACE_PREPARATION_BUSY', '已有来源正在核对，请稍后重试')
     const controller = new AbortController()
     const work = prepare(projectId, input, actorId, controller.signal)
     preparations.set(key, { revision: input.expectedRevision, work, controller })
@@ -215,7 +248,7 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     return work
   }
   return {
-    ...currentWorkspace, authoring, credentials, overview, currentFile, currentContent, receipt, generate,
+    ...currentWorkspace, authoring, credentials, overview, currentFile, currentContent, receipt, generate, repositoryRefs, repositoryHistory,
     validateSource(source: WorkspaceRepositorySource) { return git.validateRepositorySource(source) },
     tree(projectId: string, directory: string, actorId: string) {
       const prefix = directory ? directory + '/' : ''
@@ -227,11 +260,12 @@ export function createWorkspaceManagement({ access, store, authoring, credential
       const entries = currentEntries(projectId, actorId).filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
       return { entries: entries.slice(0, limit), truncated: entries.length > limit }
     },
-    stopAccepting() { accepting = false; currentWorkspace.stopAccepting(); for (const preparation of preparations.values()) preparation.controller.abort() },
+    stopAccepting() { accepting = false; currentWorkspace.stopAccepting(); for (const preparation of preparations.values()) preparation.controller.abort(); for (const query of repositoryQueries) query.controller.abort() },
     close(): Promise<void> {
       this.stopAccepting()
       closing ??= (async () => {
         await Promise.allSettled([...preparations.values()].map(entry => entry.work))
+        await Promise.allSettled([...repositoryQueries].map(entry => entry.work))
         await currentWorkspace.drain()
         const results = await Promise.allSettled([store.whenIdle(), ...previews])
         await Promise.allSettled([...captureReleases])

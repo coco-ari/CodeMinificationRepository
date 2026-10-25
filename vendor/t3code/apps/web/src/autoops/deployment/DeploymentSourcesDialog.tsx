@@ -13,25 +13,20 @@ import {
 } from '~/components/ui/dialog'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Spinner } from '~/components/ui/spinner'
 import type {
   WorkspaceDeploymentSourceInput,
-  WorkspaceRepositoryRefKind,
   WorkspaceRepositorySource,
 } from '../workspaceAuthoring'
 import type { WorkspaceBuildContext } from '../workspaces'
+import { DeploymentSourceFields } from './DeploymentSourceFields'
 
 type SourceSelection = WorkspaceDeploymentSourceInput['sources'][number]
-const referenceKinds: Array<{ value: WorkspaceRepositoryRefKind; label: string }> = [
-  { value: 'default', label: '默认分支' },
-  { value: 'branch', label: '分支' },
-  { value: 'tag', label: '标签' },
-  { value: 'commit', label: '提交 SHA' },
-]
 
 /** 部署来源在提交时固定；此处覆盖不修改工作区的日常跟踪配置。 */
 export function DeploymentSourcesDialog({
+  projectId,
+  onAccessDenied,
   open,
   onOpenChange,
   finalFocus,
@@ -43,6 +38,8 @@ export function DeploymentSourcesDialog({
   canRetryPending = false,
   onGenerate,
 }: {
+  projectId?: string | undefined
+  onAccessDenied?: ((cause: unknown) => void) | undefined
   open: boolean
   onOpenChange: (value: boolean) => void
   finalFocus: ComponentProps<typeof DialogPopup>['finalFocus']
@@ -148,67 +145,15 @@ export function DeploymentSourcesDialog({
             <DialogTitle>生成部署包</DialogTitle>
           </DialogHeader>
           <DialogPanel>
-            <fieldset className="min-w-0 space-y-3" disabled={unavailable}>
-              <legend className="mb-2 text-sm font-medium">源码仓库</legend>
-              {sources.map((source) => (
-                <div key={source.id} className="min-w-0 space-y-2">
-                  <Label className="min-w-0">
-                    <Checkbox
-                      checked={!!selection[source.id]}
-                      disabled={unavailable}
-                      onCheckedChange={(checked) => selectSource(source, checked)}
-                    />
-                    <span
-                      className="min-w-0 truncate"
-                      title={`${source.name} · ${source.mountPath}`}
-                    >
-                      {source.name} · {source.mountPath}
-                    </span>
-                  </Label>
-                  {selection[source.id] ? (
-                    <div className="flex min-w-0 flex-wrap gap-2 pl-6">
-                      <Select
-                        value={selection[source.id]!.refKind ?? 'default'}
-                        disabled={unavailable}
-                        onValueChange={(value) => {
-                          if (value)
-                            updateSource(source.id, {
-                              refKind: value as WorkspaceRepositoryRefKind,
-                              ref: '',
-                            })
-                        }}
-                      >
-                        <SelectTrigger aria-label={`${source.name}版本类型`}>
-                          <SelectValue>
-                            {
-                              referenceKinds.find(
-                                (kind) => kind.value === selection[source.id]!.refKind,
-                              )?.label
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectPopup>
-                          {referenceKinds.map((kind) => (
-                            <SelectItem key={kind.value} value={kind.value}>
-                              {kind.label}
-                            </SelectItem>
-                          ))}
-                        </SelectPopup>
-                      </Select>
-                      {selection[source.id]!.refKind !== 'default' ? (
-                        <Input
-                          className="min-w-0 flex-1 basis-40"
-                          aria-label={`${source.name}版本引用`}
-                          value={selection[source.id]!.ref ?? ''}
-                          disabled={unavailable}
-                          onChange={(event) => updateSource(source.id, { ref: event.target.value })}
-                        />
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </fieldset>
+            <DeploymentSourceFields
+              projectId={projectId}
+              onAccessDenied={onAccessDenied}
+              sources={sources}
+              selection={selection}
+              disabled={unavailable}
+              onSelect={selectSource}
+              onUpdate={updateSource}
+            />
             <fieldset className="min-w-0 space-y-3" disabled={unavailable}>
               <legend className="mb-2 text-sm font-medium">打包内容</legend>
               {(['frontend', 'backend'] as const).map((service) => {

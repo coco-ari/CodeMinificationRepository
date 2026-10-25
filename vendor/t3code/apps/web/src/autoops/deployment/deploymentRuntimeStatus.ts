@@ -87,7 +87,10 @@ export function deriveDeploymentRuntimeStatus(
   if (activeTask)
     return {
       state: 'updating',
-      message: '发布或回退任务处理中，新的运行结果尚未确认。',
+      message:
+        activeTask.action === 'restart'
+          ? '服务重启中，新的运行结果尚未确认。'
+          : '发布或回退任务处理中，新的运行结果尚未确认。',
       confirmedRelease,
       ...activity,
     }

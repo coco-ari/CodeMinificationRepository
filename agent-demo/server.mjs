@@ -8,6 +8,7 @@ import { users, projects, agents, contextFor } from './fixtures.mjs'
 import { extractAttachment } from './attachments.mjs'
 import { waitForOpenCodeHealth as waitForRuntimeHealth } from './vendor/openchamber/health-wait.mjs'
 import { createT3Gateway } from './t3-adapters/gateway.mjs'
+import { configuredDeploymentAgentGateway } from './t3-adapters/deployment-agent-gateway.mjs'
 import { resolveProductProfile } from './t3-adapters/product-profile.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
@@ -22,6 +23,7 @@ const DATA = resolve(process.env.DATA_DIR || join(ROOT, 'data'))
 const t3Mode = process.env.AGENT_DEMO_ENGINE === 't3'
 if (t3Mode) resolveProductProfile(process.env)
 const t3Gateway = t3Mode ? createT3Gateway(process.env.AUTOOPS_T3_INTERNAL_URL || 'http://127.0.0.1:8788') : null
+const deploymentAgentGateway = t3Mode ? configuredDeploymentAgentGateway(process.env) : null
 mkdirSync(DATA, { recursive: true, mode: 0o700 })
 const db = new DatabaseSync(join(DATA, 'demo.sqlite'))
 let legacyT3Map
@@ -1377,7 +1379,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'same-origin')
   try {
-    if (t3Gateway?.request(req, res)) return
+    if (deploymentAgentGateway?.request(req, res) || t3Gateway?.request(req, res)) return
     const url = new URL(req.url, 'http://localhost'),
       path = url.pathname.replace(/^\/api\/agent-demo/, '')
     const internalFile = path.match(

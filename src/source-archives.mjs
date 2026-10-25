@@ -133,11 +133,24 @@ export class SourceArchives {
     return data.targets.some(target => target.currentRelease?.id === release.id || target.rollbackBaselineId === release.id)
       || data.tasks.some(task => !terminal.has(task.status) && [task.release?.id, task.previousRelease?.id].includes(release.id));
   }
-  async clear(releaseId, applicationId) {
+  async clear(releaseId, applicationId, input, authorize) {
+    if (input && (!/^[a-f0-9-]{36}$/.test(input.requestId || '') || typeof input.actor?.id !== 'string')) throw new HttpError(400, '清理请求标识或操作人无效');
+    const fingerprint = input && createHash('sha256').update(JSON.stringify([releaseId, applicationId, input.actor.id])).digest('hex');
     return this.serial(async () => {
       let discarded;
       await this.store.change(state => {
-        const data = state.deployments, release = data.releases.find(item => item.id === releaseId && item.applicationId === applicationId);
+        const decision = authorize?.();
+        if (decision && typeof decision.then === 'function') throw new TypeError('事务授权必须同步完成');
+        const data = state.deployments;
+        if (input) {
+          data.sourceClearRequests ||= [];
+          const repeated = data.sourceClearRequests.find(item => item.requestId === input.requestId);
+          if (repeated) {
+            if (repeated.fingerprint !== fingerprint) throw new HttpError(409, '同一请求标识不能用于不同清理操作或操作人');
+            return;
+          }
+        }
+        const release = data.releases.find(item => item.id === releaseId && item.applicationId === applicationId);
         if (!release) throw new HttpError(404, '版本不存在');
         if (this.protected(data, release)) throw new HttpError(409, '当前版本、恢复基线或执行中任务引用的版本不能清理');
         const archiveId = release.sourceArchiveId;
@@ -150,6 +163,7 @@ export class SourceArchives {
           if (record && !record.deletedAt) { record.deletedAt = stamp(); discarded = { ...record }; }
         }
         state.events.unshift({ id: randomUUID(), projectId: release.sourceSnapshot?.id || null, applicationId, action: 'archive-clear', message: `已清理版本源码档案：${releaseId}`, at: stamp() });
+        if (input) data.sourceClearRequests.push({ requestId:input.requestId, fingerprint });
       });
       if (discarded) await rm(this.file(discarded), { force: true });
       this.deployment.changed('releases', releaseId, applicationId);

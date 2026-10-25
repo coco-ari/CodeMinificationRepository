@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { StringDecoder } from 'node:string_decoder'
+import { mkdtemp, mkdir, rm, writeFile, readdir, lstat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { validateBranch, validateRevision } from '../../src/archive.mjs'
@@ -111,6 +112,7 @@ export function createWorkspaceGit(options: WorkspaceGitOptions = {}) {
       try { child = spawnGit(args, { env: environment, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] }) }
       catch { reject(new WorkspaceGitError(502, 'WORKSPACE_GIT_START_FAILED', '无法启动 Git，请检查服务端安装')); return }
       let failure: unknown, outputBytes = 0, errorBytes = 0, output = '', closed = false
+      const decoder = new StringDecoder('utf8')
       let forceKill: ReturnType<typeof setTimeout> | undefined
       let budgetTimer: ReturnType<typeof setInterval> | undefined
       let checking: Promise<void> | undefined
@@ -133,7 +135,7 @@ export function createWorkspaceGit(options: WorkspaceGitOptions = {}) {
       child.stdout?.on('data', (bytes: Buffer) => {
         outputBytes += bytes.length
         if (outputBytes > maxOutput) stop(new WorkspaceGitError(502, 'WORKSPACE_GIT_OUTPUT_LIMIT', 'Git 输出超过允许大小'))
-        else output += bytes.toString('utf8')
+        else output += decoder.write(bytes)
       })
       // 错误原文可能包含远端回显的秘密，仅计数和消费，绝不拼进错误、日志或任务。
       child.stderr?.on('data', (bytes: Buffer) => { errorBytes += bytes.length; if (errorBytes > maxError) stop(new WorkspaceGitError(502, 'WORKSPACE_GIT_OUTPUT_LIMIT', 'Git 错误输出超过允许大小')) })
@@ -143,7 +145,7 @@ export function createWorkspaceGit(options: WorkspaceGitOptions = {}) {
         checking = Promise.resolve().then(budgetCheck).catch(error => stop(error)).finally(() => { checking = undefined })
       }, 200)
       child.on('close', (code) => {
-        closed = true; clearTimeout(forceKill); clearInterval(budgetTimer); signal.removeEventListener('abort', abort)
+        closed = true; output += decoder.end(); clearTimeout(forceKill); clearInterval(budgetTimer); signal.removeEventListener('abort', abort)
         // 检查和进程都已退出后才让调用方清理目录，避免取消与仍在写入的 Git 竞争。
         void Promise.resolve(checking).then(() => {
           if (failure) reject(failure)
@@ -191,29 +193,94 @@ export function createWorkspaceGit(options: WorkspaceGitOptions = {}) {
       throw error
     } finally { await rm(temporary, { recursive: true, force: true }) }
   }
+  type GitRun = (args: string[], budget?: BudgetCheck) => Promise<string>
+  async function resolveRef(git: GitRun, source: WorkspaceRepositorySource, budgetCheck?: BudgetCheck): Promise<ResolvedRepository> {
+    if (source.refKind === 'commit') return { sourceId: source.id, commit: validCommit(source.ref), refKind: 'commit', ref: source.ref, defaultRef: null }
+    const ref = source.refKind === 'default' ? 'HEAD' : `refs/${source.refKind === 'branch' ? 'heads' : 'tags'}/${source.ref}`
+    const output = await git(['ls-remote', '--symref', '--', source.url, 'HEAD', ref, ...(source.refKind === 'tag' ? [`${ref}^{}`] : [])], budgetCheck)
+    let defaultRef: string | null = null
+    const commits = new Map<string, string>()
+    for (const line of output.split('\n')) {
+      const symbolic = /^ref: refs\/heads\/(.+)\tHEAD$/.exec(line)
+      if (symbolic) { try { defaultRef = validateBranch(symbolic[1]) as string } catch { fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '仓库返回的默认分支无效') } }
+      const record = /^([a-f0-9]{40}|[a-f0-9]{64})\t(.+)$/.exec(line)
+      if (record) {
+        const name = record[2]!, commit = record[1]!
+        if (commits.has(name) && commits.get(name) !== commit) fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '仓库返回了冲突的 Git 引用')
+        commits.set(name, commit)
+      }
+    }
+    const commit = commits.get(`${ref}^{}`) ?? commits.get(ref)
+    if (!commit || (source.refKind === 'default' && !defaultRef)) return fail(404, 'WORKSPACE_GIT_REF_NOT_FOUND', '仓库中没有所选引用或可用默认分支')
+    return { sourceId: source.id, commit: validCommit(commit), refKind: source.refKind, ref: source.refKind === 'default' ? defaultRef! : source.ref, defaultRef }
+  }
   async function resolveRepositoryRef(input: WorkspaceRepositorySource, credential?: GitCredential, signal?: AbortSignal): Promise<ResolvedRepository> {
     const source = validateRepositorySource(input)
     if (signal?.aborted) throw abortError()
     if (source.refKind === 'commit') return { sourceId: source.id, commit: validCommit(source.ref), refKind: 'commit', ref: source.ref, defaultRef: null }
+    return session(source, credential, signal, resolveTimeout, git => resolveRef(git, source))
+  }
+  async function repositoryRefs(input: WorkspaceRepositorySource, credential?: GitCredential, signal?: AbortSignal, budgetCheck?: BudgetCheck) {
+    const source = validateRepositorySource(input)
     return session(source, credential, signal, resolveTimeout, async git => {
-      const ref = source.refKind === 'default' ? 'HEAD' : `refs/${source.refKind === 'branch' ? 'heads' : 'tags'}/${source.ref}`
-      const output = await git(['ls-remote', '--symref', '--', source.url, 'HEAD', ref, ...(source.refKind === 'tag' ? [`${ref}^{}`] : [])])
+      const output = await git(['ls-remote', '--symref', '--', source.url, 'HEAD', 'refs/heads/*', 'refs/tags/*'], budgetCheck)
       let defaultRef: string | null = null
-      const commits = new Map<string, string>()
+      const branches = new Map<string, string>(), tags = new Map<string, string>(), peeled = new Map<string, string>()
       for (const line of output.split('\n')) {
         const symbolic = /^ref: refs\/heads\/(.+)\tHEAD$/.exec(line)
         if (symbolic) { try { defaultRef = validateBranch(symbolic[1]) as string } catch { fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '仓库返回的默认分支无效') } }
-        const record = /^([a-f0-9]{40}|[a-f0-9]{64})\t(.+)$/.exec(line)
-        if (record) {
-          const name = record[2]!, commit = record[1]!
-          if (commits.has(name) && commits.get(name) !== commit) fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '仓库返回了冲突的 Git 引用')
-          commits.set(name, commit)
+        const record = /^([a-f0-9]{40}|[a-f0-9]{64})\trefs\/(heads|tags)\/(.+)$/.exec(line)
+        if (!record) continue
+        const isPeeled = record[2] === 'tags' && record[3]!.endsWith('^{}'), name = isPeeled ? record[3]!.slice(0, -3) : record[3]!
+        try { validateBranch(name) } catch { fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '仓库返回了无效的 Git 引用') }
+        const selected = record[2] === 'heads' ? branches : isPeeled ? peeled : tags
+        if (selected.has(name) && selected.get(name) !== record[1]) fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '仓库返回了冲突的 Git 引用')
+        selected.set(name, validCommit(record[1]))
+      }
+      for (const [name, revision] of peeled) if (tags.has(name)) tags.set(name, revision)
+      const entries = (values: Map<string, string>) => [...values].sort(([a], [b]) => a.localeCompare(b)).slice(0, 500).map(([name, commit]) => ({ name, commit }))
+      return { sourceId: source.id, defaultRef, branches: entries(branches), tags: entries(tags), truncated: branches.size > 500 || tags.size > 500 }
+    })
+  }
+  async function repositoryHistory(input: WorkspaceRepositorySource, credential?: GitCredential, signal?: AbortSignal, budgetCheck?: BudgetCheck) {
+    const source = validateRepositorySource(input), directory = await mkdtemp(path.join(tmpdir(), 'autoops-git-history-'))
+    const checkHistoryBudget = async () => {
+      if (budgetCheck) await budgetCheck()
+      const pending = [directory]
+      let bytes = 0, entries = 0
+      while (pending.length) for (const entry of await readdir(pending.pop()!, { withFileTypes: true })) {
+        if (++entries > 10000) fail(413, 'WORKSPACE_GIT_HISTORY_LIMIT', '提交历史超过查询资源限制')
+        const file = path.join(entry.parentPath, entry.name)
+        if (entry.isSymbolicLink()) fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '提交历史包含不支持的链接')
+        if (entry.isDirectory()) pending.push(file)
+        else {
+          try { bytes += (await lstat(file)).size } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+          if (bytes > 64 * 1024 * 1024) fail(413, 'WORKSPACE_GIT_HISTORY_LIMIT', '提交历史超过查询资源限制')
         }
       }
-      const commit = commits.get(`${ref}^{}`) ?? commits.get(ref)
-      if (!commit || (source.refKind === 'default' && !defaultRef)) return fail(404, 'WORKSPACE_GIT_REF_NOT_FOUND', '仓库中没有所选引用或可用默认分支')
-      return { sourceId: source.id, commit: validCommit(commit), refKind: source.refKind, ref: source.refKind === 'default' ? defaultRef! : source.ref, defaultRef }
-    })
+    }
+    try {
+      return await session(source, credential, signal, fetchTimeout, async git => {
+        const resolved = await resolveRef(git, source, checkHistoryBudget)
+        await git(['init', '--bare', `--object-format=${resolved.commit.length === 64 ? 'sha256' : 'sha1'}`, '--', directory], checkHistoryBudget)
+        // 只查询有限提交历史，不检出文件、不执行脚本，也不保留另一套仓库缓存。
+        await git(['-C', directory, 'fetch', '--depth=101', '--filter=blob:none', '--no-tags', '--no-recurse-submodules', '--', source.url, resolved.commit], checkHistoryBudget)
+        const actual = await git(['-C', directory, 'rev-parse', '--verify', 'FETCH_HEAD^{commit}'], checkHistoryBudget)
+        if (actual !== resolved.commit) fail(502, 'WORKSPACE_GIT_COMMIT_MISMATCH', '远端未返回所选提交，拒绝使用其他历史')
+        const output = await git(['-C', directory, 'log', '--max-count=101', '--encoding=UTF-8', '-z', '--format=%H%x00%s%x00%aI', resolved.commit, '--'], checkHistoryBudget)
+        const fields = output.split('\0')
+        if (fields.at(-1) === '') fields.pop()
+        if (fields.length % 3 !== 0) fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '提交历史格式无效')
+        const commits: Array<{ revision: string; subject: string; authoredAt: string }> = []
+        for (let index = 0; index < fields.length; index += 3) {
+          const revision = validCommit(fields[index]), subject = fields[index + 1]!, authoredAt = fields[index + 2]!
+          if (!Number.isFinite(Date.parse(authoredAt))) fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '提交时间格式无效')
+          commits.push({ revision, subject: subject.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 500), authoredAt })
+        }
+        if (commits[0]?.revision !== resolved.commit) fail(502, 'WORKSPACE_GIT_RESPONSE_INVALID', '提交历史与所选版本不一致')
+        return { ...resolved, commits: commits.slice(0, 100), truncated: commits.length > 100 }
+      })
+    } finally { await rm(directory, { recursive: true, force: true }) }
   }
   async function fetchRepositoryAt(input: WorkspaceRepositorySource, revision: string, destination: string, credential?: GitCredential, signal?: AbortSignal, budgetCheck?: BudgetCheck): Promise<void> {
     const source = validateRepositorySource(input), commit = validCommit(revision)
@@ -247,7 +314,7 @@ export function createWorkspaceGit(options: WorkspaceGitOptions = {}) {
       })
     } catch (error) { if (created) await rm(destination, { recursive: true, force: true }); throw error }
   }
-  return { validateRepositorySource, resolveRepositoryRef, fetchRepositoryAt }
+  return { validateRepositorySource, resolveRepositoryRef, fetchRepositoryAt, repositoryRefs, repositoryHistory }
 }
 const defaultGit = createWorkspaceGit()
 export const validateRepositorySource = defaultGit.validateRepositorySource

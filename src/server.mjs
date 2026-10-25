@@ -1,8 +1,7 @@
 import http from 'node:http';
-import { readFile, open, readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { pipeline } from 'node:stream/promises';
 import { RepositoryService } from './service.mjs';
 import { HttpError, RateLimiter, randomSecret, equal } from './security.mjs';
 import { DeploymentService } from './deployment.mjs';
@@ -52,8 +51,6 @@ export async function createApplication({ directory, service, secureCookies = tr
   let stopping = false, closePromise, resourcesPromise;
   const activeRequests = new Set();
   const loginLimiter = new RateLimiter(10, 10 * 60 * 1000);
-  const downloadFailures = new RateLimiter(30, 60 * 1000);
-  const downloadLimiter = new RateLimiter(60, 60 * 1000);
   const adminLimiter = new RateLimiter(120, 60 * 1000);
   // 仅提供构建目录内的已知静态资源，不把请求路径拼接为文件系统路径。
   const assets = new Map();
@@ -77,15 +74,14 @@ export async function createApplication({ directory, service, secureCookies = tr
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
-    let file;
     try {
       if (stopping) throw new HttpError(503, '中心正在停止，请稍后重试');
       const url = new URL(req.url, 'http://localhost');
       const route = url.pathname;
       const ip = req.socket.remoteAddress || 'unknown';
       if (await handleInstallRequest(req, res, route, { publicOrigin })) return;
-      if (req.method === 'GET' && (assets.has(route) || new RegExp(`^/download/${idPattern}$`).test(route))) {
-        const asset = assets.get(route) || assets.get('/');
+      if (req.method === 'GET' && assets.has(route)) {
+        const asset = assets.get(route);
         let content = asset.content;
         if (asset.type.startsWith('text/html')) {
           const nonce = randomSecret();
@@ -121,24 +117,6 @@ export async function createApplication({ directory, service, secureCookies = tr
         json(res, 200, { username, csrf }); return;
       }
       if (await handleAgentRequest(req, res, url, { deployment, body, json })) return;
-      const download = new RegExp(`^/api/projects/(${idPattern})/source/latest$`).exec(route);
-      if (req.method === 'GET' && download) {
-        const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || '')?.[1];
-        try { service.authorizeDownload(download[1], token); }
-        catch (error) { downloadFailures.take(ip); throw error; }
-        downloadLimiter.take(download[1]);
-        const archive = await service.sync(download[1]);
-        // 等待过程中可能被停用或换密钥，发送文件前再次验证权限。
-        service.authorizeDownload(download[1], token);
-        if (res.destroyed) return;
-        file = await open(archive.file, 'r');
-        res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': archive.size,
-          'Content-Disposition': `attachment; filename="source-${archive.revision.slice(0, 12)}.zip"`,
-          'X-Source-Revision': archive.revision, 'X-Archive-SHA256': archive.sha256,
-          'X-Archive-Cache': archive.cached ? 'hit' : 'miss' });
-        await pipeline(file.createReadStream(), res);
-        await service.recordDownload(download[1]); return;
-      }
       if (!session) throw new HttpError(401, '请先登录管理后台');
       if (!['GET', 'HEAD'].includes(req.method)) {
         if (!equal(req.headers['x-csrf-token'] || '', session.csrf)) throw new HttpError(403, '会话校验失败，请刷新页面');
@@ -168,11 +146,10 @@ export async function createApplication({ directory, service, secureCookies = tr
       if (req.method === 'POST' && route === '/api/projects') { const input = await body(req);
         if (!input.applicationId) input.applicationId = await service.store.change(state => historyWorkspace(state).id);
         json(res, 201, await service.saveProject(input)); return; }
-      const project = new RegExp(`^/api/projects/(${idPattern})(?:/(rotate-token|sync|enabled))?$`).exec(route);
+      const project = new RegExp(`^/api/projects/(${idPattern})(?:/(sync|enabled))?$`).exec(route);
       if (project) {
         const [, id, action] = project;
         if (!action && req.method === 'PUT') { json(res, 200, await service.saveProject(await body(req), id)); return; }
-        if (req.method === 'POST' && action === 'rotate-token') { json(res, 200, await service.rotateToken(id)); return; }
         if (req.method === 'POST' && action === 'enabled') { await service.setEnabled(id, (await body(req)).enabled); json(res, 200, { ok: true }); return; }
         if (req.method === 'POST' && action === 'sync') {
           const { file: privatePath, ...result } = await service.sync(id);
@@ -186,7 +163,7 @@ export async function createApplication({ directory, service, secureCookies = tr
       const status = error instanceof HttpError ? error.status : 500;
       if (status === 429 || status === 503) res.setHeader('Retry-After', '60');
       json(res, status, { error: error instanceof HttpError ? error.message : '服务处理失败，请检查磁盘和服务配置' });
-    } finally { if (file) await file.close().catch(() => {}); }
+    }
   }
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;

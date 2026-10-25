@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { zipSync } from 'fflate'
 import { verifyT3Release, verifyCustomerAgentBundle } from '../scripts/verify-t3-release.mjs'
-import { addCustomerAgentBundle, packageT3Release } from '../scripts/package-t3-release.mjs'
+import { addCustomerAgentBundle, addDeploymentAgentBundle, packageT3Release } from '../scripts/package-t3-release.mjs'
+import { deploymentAgentFiles, verifyDeploymentAgentBundle } from '../scripts/deployment-agent-bundle.mjs'
 
 const commit = 'fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92'
 const nativePath = 'vendor/t3code/apps/server/node_modules'
@@ -68,6 +70,59 @@ function recordCustomer(f, bundlePath, { metadata = true } = {}) {
   put(join(f.release, 'release-manifest.json'), JSON.stringify(f.manifest))
   return result
 }
+
+function deploymentBundle(f, names = ['install.sh', 'Dockerfile', 'main.mjs']) {
+  const source = join(f.base, 'agent-source'), archive = join(f.base, 'agent-bundle.tar.gz')
+  for (const name of ['install.sh', 'Dockerfile', 'main.mjs']) put(join(source, name), `isolated-program-${name}\n`)
+  const options = process.platform === 'darwin' ? ['--no-xattrs', '--no-mac-metadata'] : []
+  execFileSync('tar', [...options, '-czf', archive, '-C', source, ...names], { env: { ...process.env, COPYFILE_DISABLE: '1' } })
+  return { source, archive }
+}
+
+function recordDeployment(f, { source, archive }) {
+  cpSync(source, join(f.release, 'agent'), { recursive: true })
+  const metadata = addDeploymentAgentBundle(f.release, archive)
+  for (const path of [...deploymentAgentFiles(source).map((name) => `agent/${name}`), metadata.path]) {
+    const contents = readFileSync(join(f.release, path))
+    f.manifest.files.push({ path, bytes: contents.length, sha256: hash(contents) })
+  }
+  f.manifest.deploymentAgent = metadata
+  put(join(f.release, 'release-manifest.json'), JSON.stringify(f.manifest))
+  return metadata
+}
+
+test('部署 Agent 包纳入发行校验且逐文件匹配同一发行的安装程序', (t) => {
+  const f = fixture(t), bundle = deploymentBundle(f), metadata = recordDeployment(f, bundle)
+  assert.equal(metadata.files, 3)
+  assert.equal(metadata.path, 'dist/agent-bundle.tar.gz')
+  assert.deepEqual(verifyT3Release(f.release, { nativeSource: f.source }).deploymentAgent, metadata)
+  assert.deepEqual(verifyT3Release(f.release).deploymentAgent, metadata)
+  put(join(bundle.source, 'main.mjs'), '程序已修改，旧包不能发布')
+  assert.throws(() => verifyDeploymentAgentBundle(bundle.archive, bundle.source), /文件与发行不一致/)
+})
+
+test('部署 Agent 包拒绝缺失程序、额外凭据、链接和错误发行身份', (t) => {
+  const f = fixture(t)
+  let bundle = deploymentBundle(f, ['install.sh', 'Dockerfile'])
+  assert.throws(() => verifyDeploymentAgentBundle(bundle.archive, bundle.source), /程序文件不一致/)
+  put(join(bundle.source, 'registration-token'), 'isolated-token')
+  bundle = deploymentBundle(f, ['install.sh', 'Dockerfile', 'main.mjs', 'registration-token'])
+  assert.throws(() => verifyDeploymentAgentBundle(bundle.archive, bundle.source), /非程序文件/)
+  rmSync(join(bundle.source, 'registration-token'))
+  symlinkSync('main.mjs', join(bundle.source, 'linked.mjs'))
+  bundle = deploymentBundle(f, ['install.sh', 'Dockerfile', 'main.mjs', 'linked.mjs'])
+  assert.throws(() => verifyDeploymentAgentBundle(bundle.archive, bundle.source), /常规程序文件/)
+  rmSync(join(bundle.source, 'linked.mjs'))
+  bundle = deploymentBundle(f)
+  const metadata = recordDeployment(f, bundle)
+  delete f.manifest.deploymentAgent
+  put(join(f.release, 'release-manifest.json'), JSON.stringify(f.manifest))
+  assert.throws(() => verifyT3Release(f.release, { nativeSource: f.source }), /缺少模块清单/)
+  f.manifest.deploymentAgent = { ...metadata, sha256: '0'.repeat(64) }
+  put(join(f.release, 'release-manifest.json'), JSON.stringify(f.manifest))
+  assert.throws(() => verifyT3Release(f.release, { nativeSource: f.source }), /发布模块清单不符/)
+  assert.equal(existsSync(f.record), false)
+})
 
 test('records only a matching independent official tree, then verifies without rewriting the record', (t) => {
   const f = fixture(t)

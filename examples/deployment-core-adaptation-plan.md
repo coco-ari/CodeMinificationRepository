@@ -1,14 +1,14 @@
-# main 部署核心完整适配方案（待确认）
+# main 部署核心适配方案与实施记录
 
-核对日期：2026-10-25。main 固定提交：`38e20cfc417d16585965f158e0be584b6f046143`；当前功能基线：`7aea2bb65cb231afe881999b5f6d50f09f6d5baa`，分支 `feat/workspace-deployment-validation`。
+调查日期：2026-10-25。main 固定提交：`38e20cfc417d16585965f158e0be584b6f046143`；实施前功能基线：`7aea2bb65cb231afe881999b5f6d50f09f6d5baa`，分支 `feat/workspace-deployment-validation`。
 
-本方案基于固定提交的 Git 对象、实际代码、公开合同和测试定义。当前为调研与待确认阶段，尚未实施部署功能迁移。本次用户明确要求调查 main 部署能力，因此此次调查覆盖旧规范中“不再对照 main”的限制；部署迁移实现仍等待用户确认。文中的“已有”表示代码存在并被调用，不代表本轮真实运行验证通过。
+本方案基于固定提交的 Git 对象、实际代码、公开合同和测试定义。2026-10-25 用户已确认按四批推进实现，并明确要求彻底删除旧 Jenkins／脚本直取源码功能。本次迁移按下列公开合同适配，不合并整条 main 分支。第 1—9 节保留实施前调查及已确认范围，其中“当前”“待补”均对应上述调查基线，不表示实施后的状态；本批实际实现及验证进度见第 10 节。代码存在、模拟测试通过与真实发布通过分别记录。
 
-## 1. 结论
+## 1. 实施前调查结论
 
-部署核心已经在当前分支中。main 是当前 HEAD 的祖先；main 的 `agent/` 共 22 个文件与当前分支逐一 blob 相同，`src/` 的 11 个文件全部存在，其中 8 个相同，只有 `deployment.mjs`、`service.mjs`、`source-archives.mjs` 被当前分支扩展。main 原有 `test/` 15 个文件全部保留，14 个相同，[deployment.test.mjs](../test/deployment.test.mjs) 增加了回归。
+调查时部署核心已经在工作分支中。main 是调查基线的祖先；main 的 `agent/` 共 22 个文件与调查基线逐一 blob 相同，`src/` 的 11 个文件全部存在，其中 8 个相同，只有 `deployment.mjs`、`service.mjs`、`source-archives.mjs` 被工作分支扩展。main 原有 `test/` 15 个文件全部保留，14 个相同，[deployment.test.mjs](../test/deployment.test.mjs) 增加了回归。
 
-真正的缺口是当前 AutoOps 公共合同、项目/环境映射、HTTP 与 T3 页面只接通了前端静态站点发布的一部分能力。[createDeploymentStore.createTask](../agent-demo/t3-adapters/deployments.mjs) 明确限制 `action = deploy | rollback`、`service = frontend`；[createProjectDeployments.createTarget](../src/deployment-projects.mjs) 固定建立 static 服务；部署 HTTP 只注册概览、创建服务器、创建目标、提交任务、任务详情和版本列表六类路由。
+调查时的缺口是 AutoOps 公共合同、项目/环境映射、HTTP 与 T3 页面只接通了前端静态站点发布的一部分能力。当时 [createDeploymentStore.createTask](../agent-demo/t3-adapters/deployments.mjs) 限制 `action = deploy | rollback`、`service = frontend`；[createProjectDeployments.createTarget](../src/deployment-projects.mjs) 固定建立 static 服务；部署 HTTP 只注册概览、创建服务器、创建目标、提交任务、任务详情和版本列表六类路由。这些是本批实施的起点，不再作为实施后的缺口结论。
 
 因此应实施“补齐当前业务适配与 T3 入口”，继续使用当前已优化的同一个部署引擎与 Agent。不能通过合并旧 UI、重启旧中心、复制一份执行器来完成；也不能恢复 main 中被当前分支消除的内部锁穿透和 builder 方法改写。
 
@@ -23,16 +23,16 @@ main 的实际部署类型只有两类：
 
 main 没有实现：通用 Dockerfile/任意容器项目部署、Node SSR 常驻服务、Python/Go 运行服务、Kubernetes、蓝绿/金丝雀、多服务原子编排、任意远端 Shell、接管 Jenkins 容器、数据库升级/恢复、任务取消或强制杀部署、审批流。不能把这些写成“迁移既有能力”。
 
-## 3. 完整能力清单及当前适配差距
+## 3. 完整能力清单及实施前适配差距
 
-| #   | main 已实现的能力                                                                                                                     | 代码证据（main 固定提交）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 当前 AutoOps 实际状态与适配要求                                                                                                                                                                                                   |
+| #   | main 已实现的能力                                                                                                                     | 代码证据（main 固定提交）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 实施前 AutoOps 状态与已确认适配要求                                                                                                                                                                                                   |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | 项目创建/编辑，默认测试与生产环境；环境创建、改名、无引用时删除                                                                       | [项目创建与环境删除](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/workspaces.mjs#L154)；[实体保存](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/deployment.mjs#L297)；[环境页](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/service-pages.jsx#L470)                                                                                                                                                                                                                                                                                                                                                                                                                                             | 当前项目/环境属于现有 access/catalog；引擎已用 [src/deployment-projects.mjs](../src/deployment-projects.mjs) 持久映射。必须复用真实项目/环境归属，不再复制 main 的项目主数据或默认环境创建逻辑                                    |
 | 2   | 服务独立于部署位置；Java/static 服务、模块目录；同服务可在多环境、多服务器有多个部署位置                                              | [服务及目标规则](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/deployment.mjs#L297)；[服务列表](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/service-pages.jsx#L116)；[部署位置表单](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/target-form.jsx#L20)                                                                                                                                                                                                                                                                                                                                                                                                                            | 当前每次“添加前端服务”同时创建一个 service 和一个 target，没有独立服务目录及多目标配置流程。补齐服务主记录、每环境配置与部署位置；已有 target/service ID 保持不变                                                                 |
 | 3   | 项目仓库登记/编辑/停启；默认分支识别与刷新；连接失败保留记录                                                                          | [仓库保存](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/service.mjs#L145)；[分支读取](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/archive.mjs#L72)；[仓库表单](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/dialogs.jsx#L141)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 当前工作区已有多来源、默认/分支/标签/提交选择，并支持获准 HTTPS 来源。沿用该来源模块，不能恢复 main 的 Gitee-only 限制或再建一份仓库配置                                                                                          |
 | 4   | 环境 × 服务关联仓库；发布时可选其他分支及具体提交；已运行分支为合理默认；刷新最近 100 条提交                                          | [服务来源选择](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/workspaces.mjs#L140)；[环境服务来源绑定](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/workspaces.mjs#L169)；[提交历史](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/archive.mjs#L103)；[发布分支选择](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/release-workbench.jsx#L725)                                                                                                                                                                                                                                                                                          | 当前独立部署包已可选择多仓默认/分支/标签/SHA，但没有服务级默认来源配置及 main 的分支/提交选择体验。补服务来源关联与可选提交列表，提交任务时固定 SHA，不能改日常资料跟踪配置                                                       |
 | 5   | Git 凭证加密保存、替换、删除引用保护；不返回明文                                                                                      | [凭证保存与删除](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/service.mjs#L109)；[秘密解析](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/service.mjs#L211)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 当前 [credentials.ts](../agent-demo/t3-adapters/credentials.ts) 已有项目凭证、版本引用、撤销检查、use/manage 区分，能力更符合新边界。复用当前凭证模块，不复制 main 全局凭证页和全局管理员权限                                     |
-| 6   | 旧 Jenkins/浏览器源码分发：独立下载口令、重置、停用即时拒绝；每次下载检查远端并返回完整 ZIP/SHA                                       | [机器下载入口](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/server.mjs#L117)；[下载口令轮换](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/service.mjs#L185)；[下载授权](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/service.mjs#L204)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 当前有授权的固定部署包下载，旧下载引擎代码保留，但新工作台没有这套机器下载口令管理。属于需确认的兼容入口，不能顺带把任意机器凭证公开下载纳入新权限体系                                                                            |
+| 6   | 旧 Jenkins/浏览器源码分发：独立下载口令、重置、停用即时拒绝；每次下载检查远端并返回完整 ZIP/SHA                                       | [机器下载入口](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/server.mjs#L117)；[下载口令轮换](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/service.mjs#L185)；[下载授权](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/service.mjs#L204)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 用户已明确排除并要求删除：旧 latest 下载路由、独立下载口令、轮换/校验/计数、浏览器下载页及 Jenkins 示例。以版本化迁移移除专属持久字段；保留 Git 凭证、工作台固定包、历史档案和部署 Agent 任务取包                                                                            |
 | 7   | 新服务器一次性注册令牌，15 分钟过期、单次使用；安装命令、安装脚本和 Agent 包；持久身份                                                | [服务器创建](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/deployment.mjs#L206)；[注册](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/deployment.mjs#L239)；[安装资源](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/install-http.mjs#L4)；[安装脚本](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/agent/install.sh#L1)；[身份恢复](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/agent/runner.mjs#L21)                                                                                                                                                                                            | 当前有创建服务器 API，并返回一次性令牌；T3 客户端无对应管理函数/页面，返回还裁掉了 installCommand。接入专用部署服务器 UI、HTTPS 安装资源路由、注册结果核对需要补齐；不得复用“我的电脑”配对身份                                    |
 | 8   | 已有服务器绑定多个项目、项目内解绑；全局撤销接入；只有无目标/任务/历史才允许删除撤销记录                                              | [项目服务器绑定](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/workspaces.mjs#L155)；[撤销及删除](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/deployment.mjs#L219)；[服务器页](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/pages.jsx#L315)；[绑定表单](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/dialogs.jsx#L265)                                                                                                                                                                                                                                                                                               | 当前 map.servers 只记录创建服务器时的项目/环境，没有公开 bind/unbind/revoke/delete 适配。需支持一个部署节点的显式项目/环境绑定，解绑不能清目标/历史；撤销影响多个项目须呈现范围并授权                                             |
 | 9   | 主机 CPU/内存/磁盘/中心 RTT、Agent 版本/能力、在线/失联；仅采集平台目标运行与健康                                                     | [主机与目标观测](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/agent/monitor.mjs#L8)；[心跳](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/agent/runner.mjs#L52)；[中心观测更新](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/deployment.mjs#L270)；[服务器页](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/web/src/components/pages.jsx#L315)                                                                                                                                                                                                                                                                                                                   | 现引擎仍收集这些数据；`safeServer` 仅输出名称、在线、版本、能力，未输出 metrics/containers/storageStatus；目标 observation 被适配 DTO 选择，但 TS 合同/运行状态展示未完整接入。补可信观测时间与过期状态，不能把历史成功当实时健康 |
@@ -64,17 +64,17 @@ main 没有实现：通用 Dockerfile/任意容器项目部署、Node SSR 常驻
 
 main 用户端是[单管理员会话＋CSRF](https://github.com/coco-ari/CodeMinificationRepository/blob/38e20cfc417d16585965f158e0be584b6f046143/src/server.mjs#L107)，项目路由校验资源所属，但没有现有 AutoOps 的成员、内部/外部范围及环境动作授权。因此“全量适配”是功能覆盖，不是照搬这些端点和权限。不能把旧 `/api/deploy/overview` 全局结果直接返回给项目成员。
 
-### 当前已接通
+### 实施前已接通的入口
 
-[vendor/t3code/apps/server/src/autoops/http/deployments.ts](../vendor/t3code/apps/server/src/autoops/http/deployments.ts) 的 6 类路由调用 [agent-demo/t3-adapters/deployment-http.mjs](../agent-demo/t3-adapters/deployment-http.mjs)；其入口要求项目内部manager，并检查授权环境。`createDeploymentStore` 通过引擎公开 `projects` 用例完成映射，提交/领取保存并重查可信actor。前端 capabilities 仅控制可见与可点，服务端仍裁决。
+调查时 [vendor/t3code/apps/server/src/autoops/http/deployments.ts](../vendor/t3code/apps/server/src/autoops/http/deployments.ts) 的 6 类路由调用 [agent-demo/t3-adapters/deployment-http.mjs](../agent-demo/t3-adapters/deployment-http.mjs)；其入口要求项目内部 manager，并检查授权环境。`createDeploymentStore` 通过引擎公开 `projects` 用例完成映射，提交/领取保存并重查可信 actor。前端 capabilities 仅控制可见与可点，服务端仍裁决。
 
 迁移必须明确动作权限：查看目标/日志/历史、配置服务与位置、接入/绑定节点、发布、重启、回退、管理存储、下载与清理档案。当前运行权限仍粗粒度 manager；独立 `autoops/server` 的角色模型尚未接入。建议先在现有权威授权入口明确动作合同并保留当前有权用户，再按用户确认的角色范围扩展，不在部署适配器自建一套身份。新增公开API遵循现行命名规范并集中装配；既有入口若改名须同步全部调用方，不保留两套业务写实现。
 
-## 5. 推荐适配设计（待确认）
+## 5. 已确认适配设计
 
 ### 5.1 对象、配置与数据归属
 
-配置模型先确定“配置给谁、影响哪次执行”，再接表单。建议采用下列模型；这部分是阶段 A 的实际交付内容，不是仅增加 TypeScript 字段。
+配置模型先确定“配置给谁、影响哪次执行”，再接表单。确认采用下列模型；这部分是阶段 A 的实际交付内容，不是仅增加 TypeScript 字段。
 
 | 对象                     | 唯一所有者与主要内容                                                                                     | 关系和变更生效规则                                                                                                                                                    |
 | ------------------------ | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -89,7 +89,7 @@ main 用户端是[单管理员会话＋CSRF](https://github.com/coco-ari/CodeMin
 
 Java 配置包含 Maven 模块/JAR、构建镜像、运行镜像、JVM/应用参数、Profile、CPU/内存、端口、网络、平台命名卷和健康检查。静态配置包含构建目录、npm/pnpm 精确版本、锁文件、脚本、产物目录、构建限额和 HTTP 健康检查。字段由当前引擎验证，公共合同使用 `kind` 可判别结构，不把 Java 字段塞进静态配置或放开任意命令。
 
-底层 Java 执行器已经存在，[固定工作区包进入 Java 引擎的测试](../test/deployment-workspace-source.test.mjs)也已存在；待补的是上述配置/来源关系、公开用例、授权、HTTP 与 T3 交互，使用户可以通过新入口真实完成 Java 发布。阶段 A 不重新搬运或改写 Java 执行器。
+调查时底层 Java 执行器及[固定工作区包进入 Java 引擎的测试](../test/deployment-workspace-source.test.mjs)已经存在；当时待补的是上述配置/来源关系、公开用例、授权、HTTP 与 T3 交互。本批接通情况见第 10 节，真实 Java 发布须另有隔离目标验收证据。阶段 A 不重新搬运或改写 Java 执行器。
 
 存量升级必须在引擎所属存储内版本化完成：已有服务、目标、节点、绑定、请求标识、历史档案与当前指针保持身份；可重复运行且失败不留下半个映射。新表单不能靠重新创建原目标实现兼容。当前项目授权、部署引擎与工作区来源之间只通过公开合同协作，不直接改对方表、锁、缓存或 builder。
 
@@ -103,11 +103,11 @@ Java 配置包含 Maven 模块/JAR、构建镜像、运行镜像、JVM/应用参
 - Java“重启”和“回退”、历史档案下载/清理、节点存储策略放在对应对象的次级操作。常用日志检索/复制/下载直接放日志工具栏。
 - 来源原理、内部请求标识、数据库映射不默认展示给用户。异步收据自动核对，未知结果准确显示“正在确认结果”，保留一次可操作的重试/详情，不能一律假报失败或重新生成requestId执行。
 
-上述是方案，未增加新发布动作。目前UI与最终方案的操作次数应在实施前用相同起点、已配置目标和相同发布源实测记录，不能将此示意流程的文字段落当已测点击次数。
+上述为已确认的实施目标，不能据此宣称新发布动作已验证。操作次数须在相同起点、已配置目标和相同发布源条件下比较；此示意流程不作为实测点击次数，实际前后步骤及测试入口统一记录在[运行与验证记录](../docs/runtime-modules.md#main-部署核心适配2026-10-25)。
 
-### 5.3 缺失的界面与公开 API 清单
+### 5.3 实施前待补的界面与公开 API 清单
 
-下表是需要补齐或扩展的公开用例语义，不表示这些新 API 已存在，也不预先承诺具体 URL。实施时沿用现行路由/命名规范，集中装配 HTTP 与授权；每类写入均复用持久请求标识、参数冲突检查和结果核对。
+下表保留调查时确认需要补齐或扩展的公开用例语义，实际实现见第 10 节。实施沿用现行路由/命名规范，集中装配 HTTP 与授权；每类写入均复用持久请求标识、参数冲突检查和结果核对。
 
 | 功能组                   | T3 界面补齐                                                   | 公开 API/合同补齐与边界                                                                                                                  |
 | ------------------------ | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -122,18 +122,18 @@ Java 配置包含 Maven 模块/JAR、构建镜像、运行镜像、JVM/应用参
 | 历史与源码档案           | 历史分页、按版本直达、下载固定档案、受保护的清理              | 分页查询、按 ID 详情、档案下载/清理；使用 `SourceArchives` 公开方法及引用保护；不能用当前工作区包替代历史档案                            |
 | 日志操作                 | 既有增量日志之上增加阶段筛选、搜索、复制、下载                | 保留增量游标与序号；为完整下载/超出已加载区间的搜索明确服务端范围和上限，不能将本页已加载日志冒充全量                                    |
 | 动作权限与结果恢复       | 按权限显示操作；准确保留等待/失败/恢复反馈                    | 在现有权威授权入口明确查看、配置、接入、发布、重启、回退、存储与档案动作；扩展接口共用宿主 lifecycle，不引入独立身份或任务状态机         |
-| Jenkins/机器源码下载兼容 | 若确认仍需该能力，补凭据发放、轮换、停用及下载状态入口        | 第 3 节第 6 项继续列入完整清单待确认；明确调用方、项目范围、下载当前提交还是指定提交，再适配受限机器身份和即时撤销，不直接开放旧全局口令 |
+| 旧机器源码下载退役 | 删除旧下载页、下载口令及相关菜单、表单和 Jenkins 示例 | 删除专属路由与公开方法，版本化清理旧下载字段；固定包、历史档案、Agent 任务源码及 Git 凭证保持有效 |
 
-### 5.4 建议批次
+### 5.4 已确认的四个批次
 
 | 批次                       | 实际范围                                                                                                                                                           | 完成门槛                                                                                                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A：配置模型与存量保护      | 先交付 5.1 的服务/环境来源/部署位置关系及 Java/static 配置合同；明确未来配置与当前运行快照；扩展引擎公开用例、项目映射、动作权限和节点多范围绑定；实现存量兼容升级 | 已有静态服务/目标 ID、源码包、历史、收据、当前指针不变；旧静态回归通过；新增来源/服务/目标归属、撤权、幂等和升级失败/重复执行用例；不重建已有目标、不复制引擎 |
 | B：Java 与静态完整发布主链 | 服务/位置配置、来源关联、提交选择、包捕获、发布、Java 重启、健康检查、失败恢复和手动回退；前端静态复用同一操作框架                                                 | 通过新入口实测隔离 Maven 多模块与 Java 容器；静态站点同样验收；失败保护、回退、重启不重建、固定网络别名有证据；无关服务保持原版本                             |
-| C：管理闭环与兼容入口      | 完成 5.3 中服务器接入/绑定/解绑/撤销、配置编辑/模板、主机观测、版本分页/档案下载清理、存储策略、日志搜索复制下载；按确认结果完成机器下载兼容                       | 每类动作有越权/引用保护；旧 Agent 能力明确；清理核对真实回执；跨项目共享节点队列及失败隔离通过；浅深色/窄屏/短窗口/焦点/长日志交互有记录                      |
+| C：管理闭环与旧功能退役      | 完成 5.3 中服务器接入/绑定/解绑/撤销、配置编辑/模板、主机观测、版本分页/档案下载清理、存储策略、日志搜索复制下载；彻底删除旧机器直取源码能力                       | 每类动作有越权/引用保护；旧 Agent 能力明确；清理核对真实回执；跨项目共享节点队列及失败隔离通过；浅深色/窄屏/短窗口/焦点/长日志交互有记录                      |
 | D：恢复与发行验收          | 断网、中心重启、Agent 构建中与切换后重启、补日志、程序升级和恢复预检；隔离目标真实发布验收                                                                         | 原收据不重复执行；编译中断与切换后核查准确区分；备份校验、程序回滚保持发布后新数据；对应 CI 与真实发行版本一致；23 项逐项闭环或附用户明确排除决定             |
 
-建议一次确认全部核心能力的分批交付，而非只接 Java 发布按钮。批次用于控制影响和逐批验收，第 3 节 23 项始终保留在覆盖表中；第 6 项机器下载兼容须获得明确决定，不能默认丢弃。工程上只有一套部署引擎和各自唯一的数据所有者，不迁入旧 UI、旧账号和旧历史数据。
+用户已确认全部核心能力分四批交付，并明确删除第 3 节第 6 项旧机器源码下载。批次用于控制影响和逐批验收，23 项调查清单保留作为范围依据。工程上只有一套部署引擎和各自唯一的数据所有者，不迁入旧 UI、旧账号和旧历史数据。
 
 ## 6. 不应从 main 复制的设计
 
@@ -145,11 +145,11 @@ Java 配置包含 Maven 模块/JAR、构建镜像、运行镜像、JVM/应用参
 - 为迁移能力顺手重构整个旧Store或更换数据库：当前引擎格式继续由引擎拥有，先做兼容且有测试的增量扩展；不借功能迁移提前切独立后端。
 - 将主机在线、历史成功、实时健康混成一个绿色“正常”；把发布失败恢复成功标成发布成功；或把取消弹窗当任务取消。
 
-## 7. 现有测试证据与未来验收矩阵
+## 7. 实施前测试入口与已确认验收要求
 
-本轮只核对了测试代码，没有运行这些套件。以下名称证明已有可用测试入口与覆盖设计，不能据此声称本轮真机发布通过。
+调查阶段只核对了测试代码，没有运行下列套件。下表保留当时已有测试入口和确认需要补充的证据，不作为本批执行结果；本批测试进度见第 10 节，最终结果统一记录在[运行与验证记录](../docs/runtime-modules.md#main-部署核心适配2026-10-25)，真实发布另见[当前验证发行](agent-demo-t3-deployment.md#当前验证发行)。
 
-| 层次/入口                                                                                                                                                                 | 已定义的代表性覆盖                                                                                                                           | 适配后仍需补的证据                                                                                       |
+| 层次/入口                                                                                                                                                                 | 调查时已有的代表性覆盖                                                                                                                           | 已确认需要补充的证据                                                                                       |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | [test/deployment.test.mjs](../test/deployment.test.mjs)                                                                                                                   | 档案保护/去重、重建不读当前仓库、服务器注册/撤销、源码固定、同机串行、日志补报时钟、失败回退、固定网络别名                                   | 新T3入口也触发相同能力，角色/环境权限完整覆盖                                                            |
 | [test/agent.test.mjs](../test/agent.test.mjs)                                                                                                                             | Java/static 发布、重启、自动/手动恢复、归属拒绝、镜像检查、ZIP穿越/CRC/解压炸弹、缓存/链条/存储策略                                          | 保留；按新增配置/网络语义补回归。文件含 FakeDocker/mock，不能算真实Docker                                |
@@ -167,21 +167,38 @@ Java 配置包含 Maven 模块/JAR、构建镜像、运行镜像、JVM/应用参
 
 当前 `pnpm test:runtime:node` 的命令定义覆盖 `test/**/*.test.mjs`，原 main 多数逻辑回归仍纳入门禁配置。`verify:runtime` 并不自动等于 `test:docker` 或所有手工live脚本已执行。相关检查选择按影响范围执行，CI、模拟HTTP、浏览器操作、真实构建/发布分别报告。
 
-## 8. 需要用户确认的业务选择
+## 8. 已确认的业务选择与验收前提
 
-建议一次确认完整方案，并只对以下确有产品分歧的点单独选择；其余代码组织不要求用户再决策。
+2026-10-25 用户确认按建议推进四批适配，并明确“不保留旧 Jenkins／脚本下载源码，彻底删除”。
 
-1. **完整范围与机器下载兼容**：建议确认第 3 节全部核心能力分批交付，旧单管理员、旧页面和历史数据不迁入。第 6 项旧 Jenkins/机器源码下载保留为待确认兼容项：是否仍有脚本、Jenkins 或其他系统需要直接获取源码？需要时按当前项目授权适配发放、轮换、停用和下载；不需要时记录用户的明确排除决定，不能默认遗漏。
-2. **服务器共享管理**：建议节点一次登记、按项目/环境显式绑定；全局撤销和存储策略影响共享节点，默认仅平台管理员操作，项目管理员管理本项目绑定及发布。是否符合用户实际分工；当前manager模型不足处据此扩动作授权。
-3. **发布入口**：建议发布对话框内完成来源选择，确认后自动固定包→排队，独立源码包页面仍保留。这样常规用户无需手工“生成包→等完成→切回服务→选包”。任务仍固定输入，不能以一键为由省掉真实危险范围确认。
-4. **真实验收目标**：实施后需要至少一个隔离Java/Maven服务（最好含公共模块）、一个静态站点，指定允许使用的测试节点、端口/域名、Docker网络、平台命名卷及健康响应。只缺这些目标时继续无关代码/单测，不把只读浏览计作成功发布。
+1. **完整范围**：按第 3 节清单实施，明确排除并删除第 6 项旧机器源码下载。旧单管理员、旧页面和历史数据不迁入；原有固定包与 Agent 任务源码能力保留。
+2. **服务器共享管理**：节点一次登记，按项目/环境显式绑定；平台管理员控制跨项目接入授权、全局撤销和存储策略，项目管理员管理已授权范围的配置、解绑及发布。
+3. **发布入口**：发布对话框选择来源并确认，服务端持久任务自动固定包和排队；独立源码包入口保留。保存默认来源是独立可选配置，不与发布组成无法原子落盘的两次前端写入。
+4. **验收目标**：使用隔离 Java/Maven 服务和静态站点，先核对测试节点的现有端口、Docker 网络和平台命名卷，明确健康响应。缺少必要目标时继续不受影响的实现与测试，并具体列出缺口。只读浏览不能计作真实发布。
 
 任务取消、通用容器/SSR、数据库迁移、蓝绿发布等不在main既有范围；若用户额外要求，应另列新增需求和验收，不混入“完整迁移已完成”的声明。
 
 ## 9. 基线与变更范围复核
 
-调查执行过：`git merge-base --is-ancestor <mainSHA> <currentSHA>`，返回成功；`git ls-tree -r` 比较同路径blob；`git show <mainSHA>:<file>`读取固定main版本；当前代码只读读取。
+实施前调查执行过：`git merge-base --is-ancestor <mainSHA> <currentSHA>`，返回成功；`git ls-tree -r` 比较同路径 blob；`git show <mainSHA>:<file>` 读取固定 main 版本；当时对工作分支仅作只读调查。
 
-main证据链接均固定到上述SHA与文件行号，不随main后续更新漂移。当前代码链接指向本分支实际文件。正式实施前再次核对HEAD、远端及其他Agent改动，不以本方案覆盖后续新增提交。
+main 证据链接均固定到上述 SHA 与文件行号，不随 main 后续更新漂移。本地代码链接指向工作分支实际文件，会随本批实现更新。各批实施前复核 HEAD、远端及其他 Agent 改动，不以调查快照覆盖后续新增提交。
 
-优先检查的适配文件为：[autoops/contracts/deployments.ts](../autoops/contracts/deployments.ts)、[src/deployment-projects.mjs](../src/deployment-projects.mjs)、[agent-demo/t3-adapters/deployments.mjs](../agent-demo/t3-adapters/deployments.mjs)、[deployment-http.mjs](../agent-demo/t3-adapters/deployment-http.mjs)、授权公开入口及其动作策略、[vendor/t3code/apps/server/src/autoops/http/deployments.ts](../vendor/t3code/apps/server/src/autoops/http/deployments.ts)、[vendor/t3code/apps/web/src/autoops/deployments.ts](../vendor/t3code/apps/web/src/autoops/deployments.ts)、[DeploymentsPage.tsx](../vendor/t3code/apps/web/src/autoops/DeploymentsPage.tsx)、[DeploymentsPanel.tsx](../vendor/t3code/apps/web/src/autoops/DeploymentsPanel.tsx)、`deployment/`；只有实际合同缺口才扩展 [src/deployment.mjs](../src/deployment.mjs)/SourceArchives等核心。`agent/` 已完整存在，初始不应改动。
+调查确定的主要适配范围为：[autoops/contracts/deployments.ts](../autoops/contracts/deployments.ts)、[src/deployment-projects.mjs](../src/deployment-projects.mjs)、[agent-demo/t3-adapters/deployments.mjs](../agent-demo/t3-adapters/deployments.mjs)、[deployment-http.mjs](../agent-demo/t3-adapters/deployment-http.mjs)、授权公开入口及其动作策略、[vendor/t3code/apps/server/src/autoops/http/deployments.ts](../vendor/t3code/apps/server/src/autoops/http/deployments.ts)、[vendor/t3code/apps/web/src/autoops/deployments.ts](../vendor/t3code/apps/web/src/autoops/deployments.ts)、[DeploymentsPage.tsx](../vendor/t3code/apps/web/src/autoops/DeploymentsPage.tsx)、[DeploymentsPanel.tsx](../vendor/t3code/apps/web/src/autoops/DeploymentsPanel.tsx)、`deployment/`；引擎公开用例及档案边界按实际合同缺口扩展 [src/deployment.mjs](../src/deployment.mjs) 与 [SourceArchives](../src/source-archives.mjs)。`agent/` 原执行核心完整保留，不另建执行器。
+
+## 10. 本批实施记录与验收进度
+
+本批已完成上述范围的代码适配及定向本地回归，继续使用现有引擎、来源模块、项目授权和锁定 T3。四批对应关系如下；代码实施与发行验收分开，不据此宣布完整迁移验收完成。
+
+| 批次 | 本批实际实施 | 主要证据入口 |
+| --- | --- | --- |
+| A：配置模型与存量保护 | 接通独立 Java/static 服务、多部署位置、服务 × 环境默认来源、配置条件校验和动作权限；事务内及任务领取时重查当前授权。原映射 `version=1` 保留，独立 `configurationVersion=1` 扩展配置和修改收据，未知版本拒绝，原服务/目标 ID 不变 | [项目公开用例与兼容测试](../test/deployment-projects.test.mjs)、[HTTP 授权测试](../test/deployment-http.test.mjs)；使用旧发行 `27fa5b349e9b5e0e30c105f453ffca45216f45ad` 的真实项目模块，在隔离 SQLite 数据副本上验证初始化及 `ensureProject` 不丢新增配置和收据 |
+| B：Java 与静态发布主链 | 接通 Git 分支/标签/提交及最多 100 条历史；一次确认后持久任务自动固定源码包并排队。Java 发布/重启/回退与静态发布复用原执行核心；任务保存真实来源及冻结配置，原请求重试不受后续默认来源变化影响，停服排空后从原收据恢复 | [Git 选择测试](../test/t3-workspace-git-selection.test.mjs)、[工作区固定源码与恢复测试](../test/deployment-workspace-source.test.mjs)、[业务适配测试](../test/t3-deployments.test.mjs)、[发布弹窗交互](../vendor/t3code/apps/web/src/autoops/deployment/DeploymentDialogs.browser.test.tsx)；真实隔离 Java/静态发布仍须发行验收 |
+| C：管理闭环与旧功能退役 | 接通节点接入/绑定/解绑/撤销/删除、存储策略与过期观测；接通版本分页、档案下载/受保护清理及日志搜索/筛选/复制/下载。节点写入保留原请求收据，策略带版本校验。删除旧 latest 下载、下载口令、旧下载页与 Jenkins 示例，版本化清理仅涉及专属旧字段 | [节点测试](../test/t3-deployment-servers.test.mjs)、[Agent 网关测试](../test/deployment-agent-gateway.test.mjs)、[旧字段退役测试](../test/workspaces.test.mjs)、[节点界面](../vendor/t3code/apps/web/src/autoops/deployment/DeploymentServers.browser.test.tsx)、[历史界面](../vendor/t3code/apps/web/src/autoops/deployment/DeploymentHistory.browser.test.tsx)及[日志交互](../vendor/t3code/apps/web/src/autoops/deployment/DeploymentLogs.browser.test.tsx) |
+| D：恢复与发行验收 | 已准备本批完整后端、Worker 与部署 Agent 包的发行/校验/切换/程序回滚脚本，保留独立 cgroup 总内存限制、串行锁、活动任务检查、备份清单与业务数据保护；本地离线验证脚本保护和存量兼容。构建已完成；发行绑定、线上切换及真实业务验收仍在进行 | 本工作树 `.deployment/deployment-core-20261025/` 保存定向失败复现、回归与发行准备证据；正式发行身份、健康及数据保留统一写入[当前验证发行](agent-demo-t3-deployment.md#当前验证发行) |
+
+本节更新时的执行快照：后端组合 **142 项通过**，其中项目/源码/适配器相关 **41 项是该组合子集，不重复累计**；服务端 **6 项通过**。浏览器首轮 **121 项中 120 项通过**，旧标签断言修正后，Logs、RepositoryVersion、Access、Responsive 定向补跑均正常结束（退出码 0），不将补跑数量另加为新的总数。`check:runtime`、UI 构建和 Worker 构建均已正常结束（退出码 0）。服务目录与实际配置不一致的问题先以失败用例复现，修复后关联 **68 项通过**，亦不与上述组合累加。最终审查复现的配置修改收据漂移已修复，关联 5 个 Node 文件 **49 项通过**；旧下载字段在程序回滚后重新写入的问题也经真实旧模块与隔离 SQLite 复现并修复，关联 **30 项通过**，Git 凭证、部署 Agent 身份和历史保持不变。以上定向数量均不与组合结果相加，最终结果以运行记录为准。
+
+本批尚未切换线上服务，不能宣称新发行已生效、真实发布/回退已通过或线上数据保留已核实。第 7 节的模拟、真实 HTTP、浏览器与真实 Docker/业务操作边界继续适用；未执行的完整上游套件也不算通过。
+
+本节只保存实施范围及上述进度快照，不重复维护最终长验收表。后续完整命令、结果和核心操作步骤对比以[本批运行与验证记录](../docs/runtime-modules.md#main-部署核心适配2026-10-25)为准；实际提交、CI、发行校验、健康、数据保留与真实业务验收以[当前验证发行](agent-demo-t3-deployment.md#当前验证发行)为准。

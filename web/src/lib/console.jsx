@@ -140,8 +140,6 @@ export const duration = (task) => {
   )
   return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
 }
-export const downloadPage = (id) => `${location.origin}/download/${id}`
-export const downloadUrl = (id) => `${location.origin}/api/projects/${id}/source/latest`
 export async function copy(value) {
   if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(value)
   const field = document.createElement('textarea')

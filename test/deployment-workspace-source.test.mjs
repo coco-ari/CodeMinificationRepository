@@ -140,3 +140,42 @@ test('Java 工作区包也可进入原队列，不需要旧环境源码仓库关
   assert.equal(f.deployment.data.environmentSources.length, 0); assert.equal(f.repository.store.state.projects.length, 0);
   assert.equal((await f.deployment.claim(f.server.id)).id, task.id); assert.equal(f.remoteCalls(), 0);
 });
+
+test('Java 工作区版本重启使用原配置，公开档案查询与清理受目标和引用保护', async t => {
+  const f = await fixture(t, 'java'), task = await f.deployment.createTaskFromArchive(f.input, f.archive);
+  await f.deployment.claim(f.server.id);
+  await f.deployment.events(f.server.id, task.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release: { id: task.id, image: `cmr/${f.target.id}:${task.id}`, revision: task.revision, config: task.config } } });
+  const release = f.deployment.release(f.target.id, task.id);
+  assert.equal(release.current, true); assert.equal(release.archiveProtected, true);
+  const source = await f.deployment.releaseSource(f.target.id, release.id);
+  assert.deepEqual(await readFile(source.file), f.bytes);
+  await assert.rejects(f.deployment.clearReleaseSource(f.target.id, release.id), { status: 409 });
+  assert.throws(() => f.deployment.release(randomUUID(), release.id), { status: 404 });
+  await f.deployment.saveEntity('targets', { environmentId: f.environment.id, serviceId: f.service.id, serverId: f.server.id, config: { profile: 'next-deployment' } }, f.target.id);
+  const restart = await f.deployment.createTask({ targetId: f.target.id, action: 'restart', requestId: randomUUID(), configKey: f.deployment.configKey(f.target.id), actor: f.input.actor });
+  assert.equal(restart.config.profile, task.config.profile); assert.equal(restart.config.kind, 'java');
+  assert.deepEqual(restart.sourceIdentity, task.sourceIdentity);
+  assert.equal(f.deployment.releases(f.target.id).length, 1); assert.equal(f.remoteCalls(), 0);
+});
+
+
+test('历史源码清理使用原收据，重复不改时间且拒绝跨操作人复用', async t => {
+  const f = await fixture(t)
+  const published = []
+  for (let i = 0; i < 3; i++) {
+    const task = await f.deployment.createTaskFromArchive({...f.input,requestId:randomUUID()}, f.archive)
+    await f.deployment.claim(f.server.id)
+    await f.deployment.events(f.server.id, task.id, {seq:1,status:'succeeded',stage:'verifying',result:{release:successful(task)}})
+    published.push(task.id)
+  }
+  const request = {requestId:randomUUID(),actor:{id:'u-manager'}}
+  await assert.rejects(f.deployment.clearReleaseSource(f.target.id,published[2],request),{status:409})
+  await f.deployment.clearReleaseSource(f.target.id,published[0],request)
+  const saved = f.deployment.release(f.target.id,published[0]).sourceClearedAt
+  assert.equal(f.deployment.release(f.target.id,published[0]).archiveStatus,'cleared')
+  await f.deployment.clearReleaseSource(f.target.id,published[0],request)
+  assert.equal(f.deployment.release(f.target.id,published[0]).sourceClearedAt,saved)
+  await assert.rejects(f.deployment.clearReleaseSource(f.target.id,published[0],{...request,actor:{id:'u-other'}}),{status:409})
+  assert.equal((await f.deployment.releaseSource(f.target.id,published[2])).sha256,f.archive.sha256)
+  await assert.rejects(f.deployment.releaseSource(f.target.id,published[0]),{status:410})
+})

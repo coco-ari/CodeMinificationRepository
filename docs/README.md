@@ -16,7 +16,7 @@
 | [T3 UI 规范](../examples/t3-ui-standard.md) | 外壳、呈现、原生组件、密度、交互和可视验收 |
 | [当前业务需求](../examples/workbench-v2-requirements.md) | 产品要实现什么、谁可以操作什么 |
 | [工作台设计](../examples/project-workbench-design.md) | 工作区、交付物、会话与扩展的业务关系 |
-| [部署核心适配方案（待确认）](../examples/deployment-core-adaptation-plan.md) | 固定 main 提交的完整部署能力、当前接入缺口、数据归属与分批迁移建议；未确认前不实施 |
+| [部署核心适配方案（已确认）](../examples/deployment-core-adaptation-plan.md) | 固定 main 提交的完整部署能力、当前接入缺口、数据归属与分批实施范围；旧 Jenkins／脚本源码下载明确退役 |
 | [重建计划](../examples/autoops-rebuild-plan.md) | 最新三步顺序、保留的完整业务要求及早期阶段 0–7 参考 |
 | [开发与验证](development.md) | 当前可执行的启动、检查、测试命令与实现状态 |
 | [当前运行模块与检查入口](runtime-modules.md) | 实际工作台各模块的数据所有者、公开边界、依赖门禁与完整回归命令 |

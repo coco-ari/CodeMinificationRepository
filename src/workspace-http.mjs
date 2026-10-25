@@ -29,7 +29,7 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
     workspaces.owned('repositories', branches[1], applicationId);
     return respond(await service.branches(branches[1], !!branches[2]));
   }
-  const repository = new RegExp(`^/repositories(?:/${id})?(?:/(sync|rotate-token|enabled))?$`).exec(sub);
+  const repository = new RegExp(`^/repositories(?:/${id})?(?:/(sync|enabled))?$`).exec(sub);
   if (repository) {
     const [, sourceId, action] = repository;
     if (sourceId) workspaces.owned('repositories', sourceId, applicationId);
@@ -40,7 +40,6 @@ export async function handleWorkspaceRequest(req, res, url, { workspaces, deploy
     if (sourceId && req.method === 'POST') {
       let value;
       if (action === 'sync') value = await service.branches(sourceId, true);
-      else if (action === 'rotate-token') value = await service.rotateToken(sourceId);
       else if (action === 'enabled') { await service.setEnabled(sourceId, (await body(req)).enabled); value = { ok: true }; }
       if (value) { deployment.changed('repository', sourceId, applicationId); return respond(value); }
     }

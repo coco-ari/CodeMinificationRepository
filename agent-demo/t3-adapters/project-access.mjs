@@ -24,6 +24,16 @@ export function createProjectAccess({ catalog, fail, deploymentEnabled }) {
     if (!deploymentEnabled()) fail(503, 'DEPLOYMENT_DISABLED', '部署验证尚未启用')
     return membership
   }
+  function requireDeploymentAction(userId, projectId, action, environmentId) {
+    const membership = requireWorkspaceManagerForUser(userId, projectId)
+    const actions = ['read', 'configure', 'publish', 'restart', 'rollback', 'source.download', 'source.clear', 'server.create', 'server.bind', 'server.unbind', 'server.admin']
+    if (!actions.includes(action)) fail(403, 'DEPLOYMENT_ACTION_FORBIDDEN', '部署操作未授权')
+    if (environmentId !== undefined && !membership.environmentIds.includes(environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
+    if (action !== 'read' && !deploymentEnabled()) fail(503, 'DEPLOYMENT_DISABLED', '部署尚未启用')
+    if (['server.bind', 'server.admin'].includes(action) && catalog.users.find(entry => entry.id === userId)?.role !== 'admin')
+      fail(403, 'DEPLOYMENT_SERVER_ADMIN_REQUIRED', '共享服务器操作仅限平台管理员')
+    return membership
+  }
   function requireCredentialActor(userId, projectId, action) {
     if (!['credential.use', 'credential.manage'].includes(action)) fail(403, 'CREDENTIAL_ACTION_FORBIDDEN', '凭证操作未授权')
     if (action === 'credential.use') {
@@ -39,5 +49,5 @@ export function createProjectAccess({ catalog, fail, deploymentEnabled }) {
     const deployment = manage && membership.environmentIds.length > 0 && deploymentEnabled()
     return { 'workspace.read': true, 'workspace.manage': manage, 'credential.use': membership.workspaceAccess === 'internal', 'credential.manage': manage, 'deployment.read': manage, 'deployment.execute': deployment }
   }
-  return { membershipForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, projectCapabilities }
+  return { membershipForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction, projectCapabilities }
 }

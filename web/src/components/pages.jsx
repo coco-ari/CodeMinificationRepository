@@ -3,7 +3,7 @@ import { DataTable } from './data-table'
 import { HostResources } from './workspace-home'
 import { StoragePolicy } from './storage-policy'
 import { useState } from 'react'
-import { ArrowUpRight, Server, Settings2, RefreshCw, MoreHorizontal, Copy } from 'lucide-react'
+import { ArrowUpRight, Server, Settings2, RefreshCw, MoreHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -27,8 +27,6 @@ import {
   revisionOf,
   duration,
   stageLabel,
-  downloadPage,
-  copy,
 } from '@/lib/console'
 
 const grid = 'grid gap-5 lg:grid-cols-2 2xl:grid-cols-3'
@@ -118,7 +116,7 @@ function RepositoryToggle({ repo }) {
   )
 }
 function RepositoryActions({ repo }) {
-  const { open, request, endpoint, refresh, confirm, notify } = useConsole()
+  const { open, request, endpoint, refresh, notify } = useConsole()
   const [error, setError] = useState('')
   const menuAction = async (action) => {
     setError('')
@@ -162,17 +160,6 @@ function RepositoryActions({ repo }) {
               <Settings2 />
               编辑仓库
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() =>
-                menuAction(async () => {
-                  await copy(downloadPage(repo.id))
-                  notify('下载地址已复制')
-                })
-              }
-            >
-              <Copy />
-              复制下载地址
-            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() =>
@@ -185,25 +172,6 @@ function RepositoryActions({ repo }) {
               }
             >
               {repo.enabled ? '停用仓库' : '启用仓库'}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={() =>
-                confirm(
-                  '重置下载密码',
-                  `「${repo.name}」的旧下载密码会立即失效，请更新使用此地址的调用方。`,
-                  async () => {
-                    const result = await request(
-                      `${endpoint}/repositories/${repo.id}/rotate-token`,
-                      {},
-                    )
-                    open('secret', { project: repo, token: result.token })
-                  },
-                  { destructive: true },
-                )
-              }
-            >
-              重置下载密码
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -247,9 +215,6 @@ export function Repositories() {
       </div>
       {repo.enabled && repo.connectionError && (
         <p className="mt-2 break-words text-xs text-destructive">{repo.connectionError}</p>
-      )}
-      {repo.needsDownloadTokenReset && (
-        <p className="mt-1 text-xs text-muted-foreground">首次下载前请重置密码</p>
       )}
     </div>
   )
@@ -595,7 +560,6 @@ export function Activity() {
     credential: '凭证',
     sync: '同步成功',
     failure: '同步失败',
-    token: '下载密码',
     enabled: '状态',
     'server-delete': '删除服务器记录',
     environment_delete: '删除环境',

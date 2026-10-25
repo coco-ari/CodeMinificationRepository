@@ -3,6 +3,7 @@ import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, write
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { unzipSync } from 'fflate'
+import { DEPLOYMENT_AGENT_BUNDLE_PATH, verifyDeploymentAgentBundle } from './deployment-agent-bundle.mjs'
 
 const SOURCE_COMMIT = 'fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92'
 const UPSTREAM_VERSION = 'v0.1.1'
@@ -82,6 +83,18 @@ function verifyOptionalCustomerBundle(root, manifest) {
   return verified
 }
 
+function verifyOptionalDeploymentBundle(root, manifest) {
+  if (!Object.hasOwn(manifest, 'deploymentAgent')) {
+    if (existsSync(join(root, DEPLOYMENT_AGENT_BUNDLE_PATH))) fail('发布目录包含部署 Agent 安装包但缺少模块清单')
+    return undefined
+  }
+  const metadata = manifest.deploymentAgent
+  if (!metadata || metadata.path !== DEPLOYMENT_AGENT_BUNDLE_PATH) fail('部署 Agent 安装包发布路径或模块清单不符')
+  const verified = verifyDeploymentAgentBundle(regularFile(root, metadata.path), join(root, 'agent'))
+  if (Object.keys(metadata).length !== Object.keys(verified).length || Object.entries(verified).some(([key, value]) => metadata[key] !== value)) fail('部署 Agent 安装包与发布模块清单不符')
+  return verified
+}
+
 // Do not follow directory links. Record both the relative link text and its
 // resolved in-tree target, so a different link chain cannot silently pass.
 function inventory(root, excluded = new Set()) {
@@ -128,7 +141,7 @@ function verifyReleaseFiles(root, manifest) {
   if (expected.size) fail(`发布清单文件缺失：${expected.keys().next().value}`)
   const provenance = readJson(root, 'vendor/t3code/.autoops-source/manifest.json')
   if (provenance.commit !== SOURCE_COMMIT || provenance.upstreamVersion !== UPSTREAM_VERSION) fail('发布包的上游来源身份不符')
-  return { files: actual.files.length, symlinks: actual.symlinks.length, customerAgent: verifyOptionalCustomerBundle(root, manifest) }
+  return { files: actual.files.length, symlinks: actual.symlinks.length, customerAgent: verifyOptionalCustomerBundle(root, manifest), deploymentAgent: verifyOptionalDeploymentBundle(root, manifest) }
 }
 
 function packageIdentities(root, entries) {
@@ -177,7 +190,7 @@ export function verifyT3Release(releaseDirectory, { nativeSource } = {}) {
       recorded = true
     }
   }
-  return { verified: true, release: root, sourceCommit: SOURCE_COMMIT, releaseManifestSha256, releaseFiles: release.files, releaseSymlinks: release.symlinks, ...(release.customerAgent ? { customerAgent: release.customerAgent } : {}), nativeFiles: actual.files.length, nativeSymlinks: actual.symlinks.length, nativePackages: identities.length, nativeManifestSha256: sha256(readFileSync(regularFile(root, NATIVE_MANIFEST))), recorded }
+  return { verified: true, release: root, sourceCommit: SOURCE_COMMIT, releaseManifestSha256, releaseFiles: release.files, releaseSymlinks: release.symlinks, ...(release.customerAgent ? { customerAgent: release.customerAgent } : {}), ...(release.deploymentAgent ? { deploymentAgent: release.deploymentAgent } : {}), nativeFiles: actual.files.length, nativeSymlinks: actual.symlinks.length, nativePackages: identities.length, nativeManifestSha256: sha256(readFileSync(regularFile(root, NATIVE_MANIFEST))), recorded }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

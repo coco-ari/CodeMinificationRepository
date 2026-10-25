@@ -69,6 +69,8 @@ export interface AutoOpsAccess {
   requireWorkspaceInputReader(userId: string, projectId: string, workspaceType: 'internal'|'external'): ProjectMembership;
   requireCredentialActor(userId: string, projectId: string, action: 'credential.use' | 'credential.manage'): ProjectMembership;
   requireDeploymentActor(userId:string, projectId:string, environmentId:string): ProjectMembership;
+  requireDeploymentActionForActor(userId:string, projectId:string, action:'read'|'configure'|'publish'|'restart'|'rollback'|'source.download'|'source.clear'|'server.create'|'server.bind'|'server.unbind'|'server.admin', environmentId?:string): ProjectMembership;
+  requireDeploymentAction(principal: AutoOpsPrincipal, projectId:string, action:'read'|'configure'|'publish'|'restart'|'rollback'|'source.download'|'source.clear'|'server.create'|'server.bind'|'server.unbind'|'server.admin', environmentId?:string): ProjectMembership;
   projectCapabilities(principal:AutoOpsPrincipal, projectId:string): ProjectCapabilities;
   listResourceThreads(principal:AutoOpsPrincipal, projectId:string): ResourceThread[];
   listToolResourceThreads(threadId:string): ResourceThread[];

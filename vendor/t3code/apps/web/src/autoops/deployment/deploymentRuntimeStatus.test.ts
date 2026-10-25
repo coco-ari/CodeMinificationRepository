@@ -139,6 +139,18 @@ describe('部署上次确认版本与待核对状态', () => {
     })
   })
 
+  it('重启单独表达处理中，不宣称正在重新发布或已恢复', () => {
+    expect(
+      deriveDeploymentRuntimeStatus(target(), [
+        task('restart-active', 2, { action: 'restart', status: 'running', stage: 'deploying' }),
+      ]),
+    ).toMatchObject({
+      state: 'updating',
+      message: '服务重启中，新的运行结果尚未确认。',
+      confirmedRelease: { id: 'release-one' },
+    })
+  })
+
   it('新活动任务和后续构建前失败都不能抹除原有未闭环风险', () => {
     expect(
       deriveDeploymentRuntimeStatus(target(), [

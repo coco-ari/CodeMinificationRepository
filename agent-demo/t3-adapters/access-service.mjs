@@ -94,7 +94,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
   const { refresh } = identity
-  const { membershipForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
+  const { membershipForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction: deploymentActionForUser, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
   const customerRegistry = suppliedCustomerRegistry || createCustomerRegistry({
     db: bindingDb, now,
     requireOwner(userId) {
@@ -456,6 +456,8 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       bindingDb.prepare('UPDATE t3_thread_bindings SET continuation_verified=1,native_thread_id=? WHERE thread_id=?').run(targetNativeId, targetThreadId)
     },
     requireDeploymentActor,
+    requireDeploymentAction: (principal, projectId, action, environmentId) => deploymentActionForUser(refresh(principal).id, projectId, action, environmentId),
+    requireDeploymentActionForActor: deploymentActionForUser,
     requireWorkspaceActor: requireWorkspaceManagerForUser,
     requireWorkspaceReader: (userId, projectId) => workspaceForUser(userId, projectId, 'internal'),
     requireWorkspaceInputReader: (userId, projectId, workspaceType) => workspaceForUser(userId, projectId, workspaceType),

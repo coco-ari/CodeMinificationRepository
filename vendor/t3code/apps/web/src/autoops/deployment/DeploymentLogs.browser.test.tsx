@@ -35,6 +35,77 @@ afterEach(() => {
 })
 
 describe('部署增量日志生命周期', () => {
+  it('补读完成前禁止导出，不把尚未读到的搜索结果显示为空', async () => {
+    const initial = details('backfill', 'target-one', '第一批日志', 501)
+    initial.logs = Array.from({ length: 500 }, (_, index) => ({
+      seq: index + 1,
+      message: `第一批日志 ${index + 1}`,
+    }))
+    initial.nextSeq = 501
+    let finish!: (value: DeploymentTaskDetails) => void
+    load.mockResolvedValueOnce(initial).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    using copied = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    await using screen = await render(
+      <DeploymentLogs projectId="p-one" targetId="target-one" taskId="backfill" refresh={0} />,
+    )
+    await expect.poll(() => load.mock.calls.length).toBe(2)
+    expect(load.mock.calls[1]?.[2]).toBe(500)
+    await expect.element(screen.getByRole('button', { name: '复制日志' })).toBeDisabled()
+    await expect.element(screen.getByRole('button', { name: '下载日志' })).toBeDisabled()
+    await screen.getByRole('textbox', { name: '搜索部署日志' }).fill('最后一条记录')
+    await expect.element(screen.getByLabelText('部署增量日志')).toHaveTextContent('正在补读日志…')
+    await act(() => finish(details('backfill', 'target-one', '最后一条记录', 501)))
+    await expect.element(screen.getByLabelText('部署增量日志')).toHaveTextContent('最后一条记录')
+    await expect.element(screen.getByRole('button', { name: '下载日志' })).toBeEnabled()
+    await screen.getByRole('button', { name: '复制日志' }).click()
+    expect(copied).toHaveBeenCalledExactlyOnceWith('最后一条记录')
+  })
+
+  it('刷新发现任务身份不匹配后保留已读日志，但禁止继续导出', async () => {
+    load.mockResolvedValueOnce(details('one', 'target-one', '已确认任务日志'))
+    await using screen = await render(
+      <DeploymentLogs projectId="p-one" targetId="target-one" taskId="one" refresh={0} />,
+    )
+    await expect.element(screen.getByRole('button', { name: '复制日志' })).toBeEnabled()
+    load.mockResolvedValueOnce(details('wrong-task', 'target-one', '错误身份日志'))
+    await screen.rerender(
+      <DeploymentLogs projectId="p-one" targetId="target-one" taskId="one" refresh={1} />,
+    )
+    await expect.element(screen.getByRole('alert')).toMatchTextContent(/任务身份与当前选择不一致/)
+    await expect.element(screen.getByRole('button', { name: '复制日志' })).toBeDisabled()
+    await expect.element(screen.getByRole('button', { name: '下载日志' })).toBeDisabled()
+    await expect.element(screen.getByText('已确认任务日志')).toBeVisible()
+    expect(screen.container.textContent).not.toContain('错误身份日志')
+  })
+
+  it('按内容与阶段筛选日志并复制可见结果，保持原完整记录', async () => {
+    const data = details('search-task', 'target-one', '构建完成', 2)
+    data.logs = [
+      { seq: 1, stage: 'building', message: '构建完成' },
+      { seq: 2, stage: 'verifying', message: '健康检查通过' },
+    ]
+    load.mockResolvedValue(data)
+    using copied = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    await using screen = await render(
+      <DeploymentLogs projectId="p-one" targetId="target-one" taskId="search-task" refresh={0} />,
+    )
+    await expect.element(screen.getByText('健康检查通过', { exact: false })).toBeVisible()
+    await screen.getByRole('textbox', { name: '搜索部署日志' }).fill('构建')
+    await expect.element(screen.getByText('健康检查通过', { exact: false })).not.toBeInTheDocument()
+    await screen.getByRole('button', { name: '复制日志' }).click()
+    expect(copied).toHaveBeenCalledWith('[构建] 构建完成')
+    await screen.getByRole('textbox', { name: '搜索部署日志' }).fill('')
+    await expect.element(screen.getByText('健康检查通过', { exact: false })).toBeVisible()
+    await screen.getByRole('combobox', { name: '日志阶段' }).click()
+    await page.getByRole('option', { name: '验证服务' }).click()
+    await expect.element(screen.getByText('构建完成', { exact: false })).not.toBeInTheDocument()
+  })
+
   it('所选任务读取失败后仍可从摘要切换任务并读取对应日志', async () => {
     load.mockImplementation(async (_projectId, taskId) =>
       taskId === 'unavailable'

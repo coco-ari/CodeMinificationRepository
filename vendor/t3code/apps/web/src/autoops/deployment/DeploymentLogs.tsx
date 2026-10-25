@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
-import { ArrowDownIcon } from 'lucide-react'
+import { CopyIcon, DownloadIcon, ArrowDownIcon } from 'lucide-react'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '~/components/ui/collapsible'
@@ -15,6 +15,8 @@ import {
 } from '~/components/ui/dialog'
 import { ScrollArea } from '~/components/ui/scroll-area'
 import { Spinner } from '~/components/ui/spinner'
+import { Input } from '~/components/ui/input'
+import { Choice } from './DeploymentControls'
 import {
   deploymentStageLabel,
   deploymentStatusLabel,
@@ -54,6 +56,10 @@ function DeploymentTaskLog({
   const [logs, setLogs] = useState<DeploymentLog[]>([])
   const [error, setError] = useState<{ message: string; retrying: boolean } | null>(null)
   const [following, setFollowing] = useState(true)
+  const [query, setQuery] = useState('')
+  const [stage, setStage] = useState('all')
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const surface = useRef<HTMLDivElement | null>(null)
   const follow = useRef(true)
   const cursor = useRef(0)
@@ -133,6 +139,41 @@ function DeploymentTaskLog({
       '[data-slot="scroll-area-viewport"]',
     )
     if (viewport) viewport.scrollTop = viewport.scrollHeight
+  }
+  const filtered = logs.filter(
+    (entry) =>
+      (stage === 'all' || entry.stage === stage) &&
+      entry.message.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+  )
+  const backfilling = !!task && cursor.current < (task.lastSeq ?? 0)
+  const exportDisabled = !task || backfilling || !!error || !filtered.length
+  const text = filtered
+    .map(
+      (entry) =>
+        `${entry.at ? `[${entry.at}] ` : ''}${entry.stage ? `[${deploymentStageLabel(entry.stage)}] ` : ''}${entry.message}`,
+    )
+    .join('\n')
+  const exportLogs = async (download: boolean) => {
+    if (exportDisabled) return
+    setExportError(null)
+    try {
+      if (!download) {
+        await navigator.clipboard.writeText(text)
+        setCopied(true)
+        return
+      }
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+      try {
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = `deployment-${taskId}.log`
+        anchor.click()
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(url), 0)
+      }
+    } catch {
+      setExportError(download ? '日志下载失败，请重试。' : '日志复制失败，请检查剪贴板权限后重试。')
+    }
   }
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="任务日志">
@@ -223,6 +264,72 @@ function DeploymentTaskLog({
           {error.retrying ? '已保留当前日志，连接恢复后继续读取。' : '当前任务已停止读取。'}
         </p>
       ) : null}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5">
+        <Input
+          className="min-w-28 flex-1"
+          size="sm"
+          aria-label="搜索部署日志"
+          placeholder="搜索日志"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setCopied(false)
+          }}
+        />
+        <Choice
+          label="日志阶段"
+          value={stage}
+          options={[
+            { id: 'all', name: '全部阶段' },
+            ...[...new Set(logs.flatMap((entry) => (entry.stage ? [entry.stage] : [])))].map(
+              (id) => ({ id, name: deploymentStageLabel(id) }),
+            ),
+          ]}
+          onChange={(value) => {
+            setStage(value)
+            setCopied(false)
+          }}
+        />
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="复制日志"
+          title={
+            task && !deploymentTaskFinished(task)
+              ? '复制截至当前读取进度的筛选日志'
+              : '复制当前筛选日志'
+          }
+          disabled={exportDisabled}
+          onClick={() => void exportLogs(false)}
+        >
+          <CopyIcon />
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="下载日志"
+          title={
+            task && !deploymentTaskFinished(task)
+              ? '下载截至当前读取进度的筛选日志'
+              : '下载当前筛选日志'
+          }
+          disabled={exportDisabled}
+          onClick={() => void exportLogs(true)}
+        >
+          <DownloadIcon />
+        </Button>
+        {copied ? (
+          <span role="status" className="text-xs text-muted-foreground">
+            已复制
+          </span>
+        ) : null}
+        {backfilling ? <span className="text-xs text-muted-foreground">正在补读日志…</span> : null}
+      </div>
+      {exportError ? (
+        <p role="alert" className="px-3 py-2 text-xs text-destructive">
+          {exportError}
+        </p>
+      ) : null}
       <div ref={surface} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <ScrollArea
           contentSizing="viewport"
@@ -234,8 +341,8 @@ function DeploymentTaskLog({
             className="m-0 min-h-full whitespace-pre-wrap break-words px-3 py-3 font-mono text-xs leading-5"
             aria-label="部署增量日志"
           >
-            {logs.length
-              ? logs.map((entry) => (
+            {filtered.length
+              ? filtered.map((entry) => (
                   <span key={entry.seq} className="block">
                     {entry.at ? `[${new Date(entry.at).toLocaleTimeString('zh-CN')}] ` : ''}
                     {entry.stage ? `[${deploymentStageLabel(entry.stage)}] ` : ''}
@@ -244,9 +351,13 @@ function DeploymentTaskLog({
                 ))
               : error && !error.retrying
                 ? '当前任务日志不可用。'
-                : task && deploymentTaskFinished(task)
-                  ? '该任务没有执行日志。'
-                  : '等待部署执行器返回日志…'}
+                : backfilling
+                  ? '正在补读日志…'
+                  : logs.length && (query || stage !== 'all')
+                    ? '没有匹配的日志。'
+                    : task && deploymentTaskFinished(task)
+                      ? '该任务没有执行日志。'
+                      : '等待部署执行器返回日志…'}
           </pre>
         </ScrollArea>
         {!following ? (

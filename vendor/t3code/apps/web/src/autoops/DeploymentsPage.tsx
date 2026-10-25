@@ -8,7 +8,7 @@ import {
 } from './ModuleWorkspace'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDownToLineIcon,
   FileJsonIcon,
@@ -134,6 +134,12 @@ function ProjectDeployments({
   const [sources, setSources] = useState<WorkspaceRepositorySource[]>([])
   const [sourcesError, setSourcesError] = useState<string | null>(null)
   const [sourceAccessDenied, setSourceAccessDenied] = useState(false)
+  const revokeSourceAccess = useCallback((cause: unknown) => {
+    setSources([])
+    setSourcesError(cause instanceof Error ? cause.message : '项目不可用或无权访问。')
+    setSourceAccessDenied(true)
+    setDialog(null)
+  }, [])
   const [sourcesRevision, refreshSources] = useState(0)
   const [handledSource, setHandledSource] = useState<string | null | undefined>(undefined)
   const [followTaskId, setFollowTaskId] = useState<string | null>(null)
@@ -342,6 +348,8 @@ function ProjectDeployments({
           key={`${readAutoOpsHost()?.principal.id}:${projectId}`}
           projectId={projectId}
           packages={overview?.releases ?? []}
+          sources={sources}
+          sourcesError={sourcesError}
           navigation={navigation}
           packageActions={{
             generateDisabled: !canManage || !overview || busy || running || !sources.length,
@@ -378,6 +386,8 @@ function ProjectDeployments({
         />
       )}
       <DeploymentSourcesDialog
+        projectId={projectId}
+        onAccessDenied={revokeSourceAccess}
         open={dialog === 'packages'}
         onOpenChange={changeDialog}
         finalFocus={() => returnFocus.current}

@@ -72,7 +72,7 @@ test('项目部署公开用例提供独立快照，并发幂等与写入失败�
   target.target.config.artifactPath = '篡改';
   assert.equal(f.deployment.projects.target(project.id, targets[0]).target.config.artifactPath, 'dist');
   assert.equal(f.repository.store.state.deployments.services.length, 1);
-  assert.equal(f.deployment.projects.snapshot(project.id).mapping.targetRequests.length, 1);
+  assert.deepEqual(f.deployment.projects.snapshot(project.id).targets.map(item => item.id), [targets[0]]);
 });
 async function ready(f, targetId, action = 'deploy', extra = {}) {
   const task = await f.deployment.createTask({ targetId, action, ...extra });
@@ -415,8 +415,8 @@ test('启用部署平台后不同源码项目保持原并发额度，同项目�
   assert.equal((await jobs[0]).file, (await jobs[1]).file); await deployment.close();
 });
 
-test('某项目固定 ZIP 写入等待时不会阻塞其他项目的 Jenkins 同步', async t => {
-  const f = await fixture(t); const records = await targetFixture(f); const other = await f.repository.saveProject({ ...projectInput, name: '另一个 Jenkins 源码项目' });
+test('某项目固定 ZIP 写入等待时不会阻塞其他项目的源码同步', async t => {
+  const f = await fixture(t); const records = await targetFixture(f); const other = await f.repository.saveProject({ ...projectInput, name: '另一个源码项目' });
   const original = f.deployment.copyArchive.bind(f.deployment); let release, copying;
   const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { copying = resolve; });
   f.deployment.copyArchive = async (...args) => { copying(); await gate; return original(...args); };
@@ -532,7 +532,7 @@ test('固定源码失败封闭阶段并允许下一任务领取，过期源码�
   assert.equal(detail.logs.length, 3);
 });
 
-test('Agent 源码大小限制提前报错，不破坏现有 Jenkins 源码同步', async t => {
+test('Agent 源码大小限制提前报错，不破坏仓库内部源码同步', async t => {
   const root = await directory(t); const fake = builder(root); const original = fake.build.bind(fake);
   fake.build = async () => ({ ...await original(), size: 65 * 1024 * 1024 });
   const repository = new RepositoryService({ directory: root, builder: fake }); await repository.initialize(); const deployment = new DeploymentService(repository); await deployment.initialize();

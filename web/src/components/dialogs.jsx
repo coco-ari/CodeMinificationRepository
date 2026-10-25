@@ -21,8 +21,6 @@ import {
   short,
   actionNames,
   copy,
-  downloadPage,
-  downloadUrl,
   resultName,
   revisionOf,
   duration,
@@ -139,7 +137,7 @@ export function CredentialForm({ item, onClose, onSaved }) {
   )
 }
 function RepositoryForm({ item, onClose }) {
-  const { data, request, endpoint, open, refresh, notify } = useConsole()
+  const { data, request, endpoint, refresh, notify } = useConsole()
   const [credential, setCredential] = useState(item?.credentialId || ''),
     [adding, setAdding] = useState(false),
     [enabled, setEnabled] = useState(item?.enabled ?? true)
@@ -153,15 +151,14 @@ function RepositoryForm({ item, onClose }) {
         onClose={onClose}
         submitLabel="保存仓库"
         onSubmit={async (input) => {
-          const result = await request(
+          await request(
             `${endpoint}/repositories${item ? `/${item.id}` : ''}`,
             { ...input, credentialId: credential, enabled },
             item ? 'PUT' : 'POST',
           )
           onClose()
           await refresh()
-          if (result.token) open('secret', result)
-          else notify('仓库配置已保存')
+          notify('仓库配置已保存')
         }}
       >
         <Field
@@ -488,41 +485,6 @@ export function Dialogs({ value, onClose }) {
           className="font-mono"
         />
         <Notice>命令包含一次性接入令牌，仅在本次显示。请勿发送到公开渠道。</Notice>
-      </FormDialog>
-    )
-  if (kind === 'secret')
-    return (
-      <FormDialog
-        id="secret-dialog"
-        title="下载入口已就绪"
-        description={`${item.project.name} · 下载密码仅在本次显示，请妥善保存。`}
-        onClose={onClose}
-        footer={
-          <DialogFooter>
-            <Button type="button" data-close onClick={onClose}>
-              已保存
-            </Button>
-          </DialogFooter>
-        }
-      >
-        {[
-          ['secret-value', '下载密码', item.token],
-          ['secret-page', '浏览器下载页面', downloadPage(item.project.id)],
-          ['secret-url', '源码下载接口', downloadUrl(item.project.id)],
-        ].map(([id, label, value]) => (
-          <div className="space-y-2" key={id}>
-            <Field id={id} label={label} value={value} readOnly />
-            <Action
-              onClick={async () => {
-                await copy(value)
-                notify('已复制到剪贴板')
-              }}
-            >
-              <Copy />
-              复制{label}
-            </Action>
-          </div>
-        ))}
       </FormDialog>
     )
   if (kind === 'password')

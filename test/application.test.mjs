@@ -60,19 +60,69 @@ test('仓库地址与分支仅允许明确的 Gitee HTTPS 目标', () => {
   }
 });
 
-test('下载密码隔离项目，重置及停用立即阻止新请求', async t => {
+test('仓库不再发放下载凭据，停用仍阻止新的源码准备', async t => {
   const { service } = await fixture(t);
-  const a = await service.saveProject(projectInput);
-  const b = await service.saveProject({ ...projectInput, name: '客户 B' });
-  assert.equal(service.authorizeDownload(a.project.id, a.token).id, a.project.id);
-  assert.throws(() => service.authorizeDownload(b.project.id, a.token), { status: 401 });
-  const rotated = await service.rotateToken(a.project.id);
-  assert.throws(() => service.authorizeDownload(a.project.id, a.token), { status: 401 });
-  service.authorizeDownload(a.project.id, rotated.token);
-  await service.setEnabled(a.project.id, false);
-  assert.throws(() => service.authorizeDownload(a.project.id, rotated.token), { status: 401 });
-  assert.ok(!JSON.stringify(service.overview()).includes(rotated.token));
+  const created = await service.saveProject(projectInput);
+  assert.deepEqual(Object.keys(created), ['project']);
+  assert.ok(!Object.hasOwn(service.store.state.projects[0], 'tokenHash'));
   assert.ok(!JSON.stringify(service.overview()).includes('tokenHash'));
+  await service.setEnabled(created.project.id, false);
+  await assert.rejects(service.sync(created.project.id), { status: 409 });
+});
+
+test('下载凭据退役迁移幂等且保留仓库、Git 凭证、Agent 身份与历史任务', async t => {
+  const { directory, builder, service } = await fixture(t);
+  const credential = await service.saveCredential({ name: 'Git 凭证', username: 'reader', password: 'fixture-git-secret' });
+  const created = await service.saveProject({ ...projectInput, credentialId: credential.id });
+  await service.store.change(state => {
+    delete state.repositoryDownloadMigrationVersion;
+    Object.assign(state.projects[0], { tokenHash: 'retired-download-hash', needsDownloadTokenReset: true, downloads: 7, lastDownloadAt: '2026-10-01T00:00:00Z' });
+    state.deployments = { servers: [{ id: 'existing-agent', tokenHash: 'preserved-agent-hash' }], tasks: [{ id: 'existing-task', revision: 'a'.repeat(40) }] };
+  });
+  const before = structuredClone(service.store.state);
+  const restored = new RepositoryService({ directory, builder }); await restored.initialize();
+  assert.equal(restored.store.state.repositoryDownloadMigrationVersion, 1);
+  assert.deepEqual(restored.store.state.projects, [created.project]);
+  assert.deepEqual(restored.store.state.credentials, before.credentials);
+  assert.deepEqual(restored.store.state.deployments, before.deployments);
+  assert.deepEqual(restored.store.state.events, before.events);
+  const migrated = structuredClone(restored.store.state);
+  const repeated = new RepositoryService({ directory, builder }); await repeated.initialize();
+  assert.deepEqual(repeated.store.state, migrated);
+  await repeated.store.change(state => { state.repositoryDownloadMigrationVersion = 2; });
+  await assert.rejects(new RepositoryService({ directory, builder }).initialize(), /不支持的源码下载退役版本/);
+});
+
+test('已退役数据库经旧程序写回后再次升级仍清理下载字段并保留其他数据', async t => {
+  const { directory, builder, service } = await fixture(t);
+  const credential = await service.saveCredential({ name: '保留的 Git 凭证', username: 'reader', password: 'fixture-git-secret' });
+  const created = await service.saveProject({ ...projectInput, credentialId: credential.id });
+  assert.equal(service.store.state.repositoryDownloadMigrationVersion, 1);
+  await service.store.change(state => {
+    Object.assign(state.projects[0], { tokenHash: 'rollback-download-hash', needsDownloadTokenReset: true, downloads: 2, lastDownloadAt: '2026-10-25T00:00:00Z' });
+    state.deployments = { servers: [{ id: 'existing-agent', tokenHash: 'preserved-agent-hash' }], tasks: [{ id: 'existing-task', revision: 'b'.repeat(40) }] };
+  });
+  const before = structuredClone(service.store.state);
+  const upgraded = new RepositoryService({ directory, builder }); await upgraded.initialize();
+  assert.deepEqual(upgraded.store.state.projects, [created.project]);
+  assert.deepEqual(upgraded.store.state.credentials, before.credentials);
+  assert.deepEqual(upgraded.store.state.deployments, before.deployments);
+  assert.deepEqual(upgraded.store.state.events, before.events);
+  const cleaned = structuredClone(upgraded.store.state);
+  const restarted = new RepositoryService({ directory, builder }); await restarted.initialize();
+  assert.deepEqual(restarted.store.state, cleaned);
+});
+
+test('仓库公开读取与保存结果防御性排除旧下载字段', async t => {
+  const { service } = await fixture(t);
+  const created = await service.saveProject(projectInput);
+  const retired = { tokenHash: 'fixture-download-hash', needsDownloadTokenReset: true, downloads: 3, lastDownloadAt: '2026-10-25T00:00:00Z' };
+  await service.store.change(state => { Object.assign(state.projects[0], retired); });
+  assert.deepEqual(service.overview().projects, [created.project]);
+  const saved = await service.saveProject({ ...projectInput, name: '更新仓库' }, created.project.id);
+  for (const key of Object.keys(retired)) assert.equal(Object.hasOwn(saved.project, key), false, key);
+  assert.equal(saved.project.name, '更新仓库');
+  assert.equal(service.store.state.projects[0].tokenHash, retired.tokenHash, '公开投影不修改持久数据');
 });
 
 test('凭证加密存储，重启后能使用，接口不返回秘密', async t => {
@@ -81,16 +131,15 @@ test('凭证加密存储，重启后能使用，接口不返回秘密', async t 
   const credential = await service.saveCredential({ name: '只读凭证', username: 'reader', password });
   const created = await service.saveProject({ ...projectInput, credentialId: credential.id });
   const file = await readFile(path.join(directory, 'state.json'), 'utf8');
-  assert.ok(!file.includes(password)); assert.ok(!file.includes(created.token));
+  assert.ok(!file.includes(password)); assert.equal(created.token, undefined);
   const restored = new RepositoryService({ directory, builder }); await restored.initialize();
-  restored.authorizeDownload(created.project.id, created.token);
   await restored.sync(created.project.id);
   assert.deepEqual(builder.credential, { username: 'reader', password });
   assert.ok(!JSON.stringify(restored.overview()).includes(password));
   await assert.rejects(restored.deleteCredential(credential.id), { status: 409 });
 });
 
-test('并发下载共享同步，下一次下载仍重新检查远端', async t => {
+test('并发源码准备共享同步，下一次同步仍重新检查远端', async t => {
   const { service, builder } = await fixture(t);
   const created = await service.saveProject(projectInput);
   let release; builder.gate = new Promise(resolve => { release = resolve; });
@@ -126,7 +175,7 @@ test('全局队列限制并发和积压任务', async t => {
   assert.equal(builder.calls, 1); release(); await Promise.all([first, second]); assert.equal(builder.calls, 2);
 });
 
-test('HTTP 初始化、登录、CSRF、下载鉴权及响应头完整闭环', async t => {
+test('HTTP 初始化、登录、CSRF 与旧源码下载入口退役', async t => {
   const directory = await temporary(t); const builder = mockBuilder(directory);
   const app = await createApplication({ directory, builder, secureCookies: false });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
@@ -158,35 +207,30 @@ test('HTTP 初始化、登录、CSRF、下载鉴权及响应头完整闭环', as
   assert.equal((await request('/api/projects', 'POST', projectInput, { Cookie: cookie })).status, 403);
   assert.equal((await request('/api/projects', 'POST', projectInput, { ...auth, Origin: 'https://evil.invalid' })).status, 403);
   const createdResponse = await request('/api/projects', 'POST', projectInput, auth); assert.equal(createdResponse.status, 201);
-  const created = await createdResponse.json(); const endpoint = `/api/projects/${created.project.id}/source/latest`;
-  assert.equal((await request(`/download/${created.project.id}`)).status, 200);
-  assert.equal((await request(endpoint)).status, 401); assert.equal(builder.calls, 0);
-  assert.equal((await request(`${endpoint}?password=${created.token}`)).status, 401); assert.equal(builder.calls, 0);
-  const archive = await request(endpoint, 'GET', null, { Authorization: `Bearer ${created.token}` });
-  assert.equal(archive.status, 200); assert.equal(archive.headers.get('content-type'), 'application/zip');
-  assert.equal(archive.headers.get('x-source-revision'), 'a'.repeat(40));
-  assert.equal(archive.headers.get('x-archive-sha256'), createHash('sha256').update('archive-content').digest('hex'));
-  assert.equal(await archive.text(), 'archive-content');
-  builder.failure = new HttpError(502, '拉取失败');
-  assert.equal((await request(endpoint, 'GET', null, { Authorization: `Bearer ${created.token}` })).status, 502);
-  builder.failure = null;
-  await request(`/api/projects/${created.project.id}/rotate-token`, 'POST', {}, auth);
-  assert.equal((await request(endpoint, 'GET', null, { Authorization: `Bearer ${created.token}` })).status, 401);
+  const created = await createdResponse.json();
+  assert.equal(created.token, undefined);
+  const retiredRoutes = [
+    [`/download/${created.project.id}`, 'GET'],
+    [`/api/projects/${created.project.id}/source/latest`, 'GET'],
+    [`/api/projects/${created.project.id}/source/latest`, 'HEAD'],
+    [`/api/projects/${created.project.id}/rotate-token`, 'POST'],
+    [`/api/workspaces/${created.project.applicationId}/repositories/${created.project.id}/rotate-token`, 'POST'],
+  ];
+  for (const [route, method] of retiredRoutes) {
+    for (const headers of [{ Authorization: `Bearer ${'a'.repeat(43)}` }, auth]) {
+      const result = await request(route, method, method === 'POST' ? {} : null, headers);
+      assert.equal(result.status, headers === auth ? 404 : 401, route);
+      assert.notEqual(result.headers.get('content-type'), 'application/zip');
+    }
+  }
+  assert.equal(builder.calls, 0, '旧入口不能触发 Git 同步或归档');
+  const synced = await request(`/api/projects/${created.project.id}/sync`, 'POST', {}, auth);
+  assert.equal(synced.status, 200);
+  assert.equal((await synced.json()).revision, 'a'.repeat(40));
+  assert.equal(builder.calls, 1, '授权管理操作仍可准备部署源码');
   const changed = await request('/api/password', 'POST', { currentPassword: setup.password, password: 'new-safe-admin-password' }, auth);
   assert.equal(changed.status, 200); assert.equal((await request('/api/overview', 'GET', null, auth)).status, 401);
   assert.equal((await request('/api/login', 'POST', { username: 'admin', password: 'new-safe-admin-password' })).status, 200);
-});
-
-test('等待同步时密码被重置，已排队的旧密码请求也不能获取文件', async t => {
-  const directory = await temporary(t); const builder = mockBuilder(directory);
-  let release; builder.gate = new Promise(resolve => { release = resolve; });
-  const app = await createApplication({ directory, builder, secureCookies: false });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => { app.server.close(resolve); app.server.closeAllConnections(); }));
-  const created = await app.service.saveProject(projectInput);
-  const pending = fetch(`http://127.0.0.1:${app.server.address().port}/api/projects/${created.project.id}/source/latest`, { headers: { Authorization: `Bearer ${created.token}` } });
-  await waitFor(() => builder.calls === 1); await app.service.rotateToken(created.project.id); release();
-  assert.equal((await pending).status, 401);
 });
 
 async function git(directory, ...args) {
@@ -341,6 +385,6 @@ test('仓库连接状态随地址、绑定凭证和共享凭证变更失效，�
   await service.saveCredential({ name: '凭证新名称', username: 'another-reader' }, credential.id);
   assert.equal(current().connectionStatus, 'idle');
   assert.equal(current().connectionError, null);
-  assert.equal(current().branch, 'main', '连接验证不改变旧下载分支');
-  assert.equal(current().tokenHash, service.authorizeDownload(id, created.token).tokenHash);
+  assert.equal(current().branch, 'main', '连接验证不改变已有源码默认分支');
+  assert.ok(!Object.hasOwn(current(), 'tokenHash'));
 });

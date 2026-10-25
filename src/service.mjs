@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from './store.mjs';
 import { ArchiveBuilder, validateBranch, validateRepository, sourceKey, archiveKey } from './archive.mjs';
-import { HttpError, randomSecret, digest, equal, encrypt, decrypt, requireText, hashPassword, checkPassword } from './security.mjs';
+import { HttpError, randomSecret, equal, encrypt, decrypt, requireText, hashPassword, checkPassword } from './security.mjs';
 
 const timestamp = () => new Date().toISOString();
 function audit(state, projectId, action, message) {
@@ -11,7 +11,7 @@ function audit(state, projectId, action, message) {
   state.events = state.events.slice(0, 100);
 }
 function publicProject(project) {
-  const { tokenHash, ...safe } = project;
+  const { tokenHash, needsDownloadTokenReset, downloads, lastDownloadAt, ...safe } = project;
   return safe;
 }
 function publicCredential(credential) {
@@ -55,10 +55,19 @@ export class RepositoryService {
     await this.store.open();
     await this.builder.initialize();
     await this.store.change(state => {
+      if (state.repositoryDownloadMigrationVersion !== undefined && state.repositoryDownloadMigrationVersion !== 1) throw new Error('不支持的源码下载退役版本');
+      // 程序降级可能写回旧字段，每次启动幂等清理；Git 凭证、Agent 身份和历史保持不变。
+      for (const project of state.projects) {
+        delete project.tokenHash;
+        delete project.needsDownloadTokenReset;
+        delete project.downloads;
+        delete project.lastDownloadAt;
+      }
+      state.repositoryDownloadMigrationVersion = 1;
       for (const project of state.projects) {
         if (['syncing', 'queued'].includes(project.status)) {
           project.status = 'failed';
-          project.error = '服务重启中断了上次同步，下次下载会重新检查远端';
+          project.error = '服务重启中断了上次同步，下次同步会重新检查远端';
         }
       }
     });
@@ -154,7 +163,6 @@ export class RepositoryService {
     const name = requireText(input.name, '项目名称', 80);
     const repository = validateRepository(input.repository);
     const branch = input.branch ? validateBranch(input.branch) : undefined;
-    const token = id ? undefined : randomSecret();
     const saved = await this.store.change(state => {
       if (input.credentialId && !state.credentials.some(item => item.id === input.credentialId)) throw new HttpError(400, '请选择有效的 Gitee 凭证');
       let project;
@@ -164,7 +172,7 @@ export class RepositoryService {
         if ([...this.inFlight.keys()].some(key => key.startsWith(`${id}:`))) throw new HttpError(409, '该项目正在同步，请完成后再修改');
       } else {
         if (state.projects.length >= 100) throw new HttpError(400, '项目数量已达到上限');
-        project = { id: randomUUID(), createdAt: timestamp(), tokenHash: digest(token), status: 'idle', lastSuccess: null };
+        project = { id: randomUUID(), createdAt: timestamp(), status: 'idle', lastSuccess: null };
         state.projects.push(project);
       }
       if (project.repository !== repository || (branch && project.branch !== branch)) {
@@ -181,7 +189,7 @@ export class RepositoryService {
       Object.assign(project, { name, repository, ...(branch ? { branch } : {}), credentialId: input.credentialId || null,
         enabled: input.enabled !== false, updatedAt: timestamp() });
       audit(state, project.id, 'project', `已保存项目：${name}`);
-      return { project: publicProject(project), ...(token ? { token } : {}) };
+      return { project: publicProject(project) };
     });
     // 旧调用明确传入分支时保持原接口行为；新表单保存后查询远端，失败也保留接入记录。
     if (!branch && this.builder.branches) {
@@ -189,16 +197,6 @@ export class RepositoryService {
       saved.project = publicProject(this.store.state.projects.find(item => item.id === saved.project.id));
     }
     return saved;
-  }
-  async rotateToken(id) {
-    const token = randomSecret();
-    await this.store.change(state => {
-      const project = state.projects.find(item => item.id === id);
-      if (!project) throw new HttpError(404, '项目不存在');
-      project.tokenHash = digest(token); delete project.needsDownloadTokenReset;
-      audit(state, id, 'token', `已重置下载密码：${project.name}`);
-    });
-    return { token };
   }
   async setEnabled(id, enabled) {
     if (typeof enabled !== 'boolean') throw new HttpError(400, '启用状态无效');
@@ -208,13 +206,6 @@ export class RepositoryService {
       project.enabled = enabled;
       audit(state, id, 'enabled', `${enabled ? '启用' : '停用'}项目：${project.name}`);
     });
-  }
-  authorizeDownload(id, token) {
-    const project = this.store.state.projects.find(item => item.id === id);
-    if (!project || !project.enabled || !token || !equal(digest(token), project.tokenHash)) {
-      throw new HttpError(401, '项目下载密码无效，或项目已停用');
-    }
-    return project;
   }
   credential(project) {
     const record = this.store.state.credentials.find(item => item.id === project.credentialId);
@@ -269,7 +260,7 @@ export class RepositoryService {
         const current = state.projects.find(item => item.id === id);
         if (!unchanged(current)) throw new HttpError(409, '仓库配置已变化，请重新刷新');
         Object.assign(current, { branchInfo: info, defaultBranch: info.defaultBranch, connectionStatus: info.branches.length ? 'ready' : 'empty', connectionError: null });
-        // 已有下载地址仍使用原分支，新仓库才自动初始化兼容下载分支。
+        // 已有源码配置保留原分支，新仓库才自动初始化默认分支。
         if (!current.branch && info.defaultBranch) current.branch = info.defaultBranch;
       });
       return info;
@@ -358,11 +349,5 @@ export class RepositoryService {
       });
       throw safe;
     }
-  }
-  async recordDownload(id) {
-    await this.store.change(state => {
-      const project = state.projects.find(item => item.id === id);
-      if (project) { project.lastDownloadAt = timestamp(); project.downloads = (project.downloads || 0) + 1; }
-    });
   }
 }

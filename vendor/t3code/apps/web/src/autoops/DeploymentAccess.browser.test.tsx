@@ -28,6 +28,10 @@ vi.mock(import('./projectNavigation'), async (original) => ({
   ...(await original()),
   useAutoOpsProjectId: () => 'p-one',
 }))
+vi.mock(import('./apiClient'), async original => ({
+  ...(await original()),
+  autoOpsRequest: vi.fn(async () => { const value = await mocks.releases(); return {...value,total:value.releases.length,nextOffset:null} }),
+}))
 vi.mock(import('./deployments'), async (original) => ({
   ...(await original()),
   loadDeployments: mocks.load,
@@ -55,6 +59,7 @@ const config: StaticDeploymentConfig = {
 }
 const overview = (): DeploymentOverview => ({
   enabled: true,
+  services: [{id:'service-one',name:'撤权服务',kind:'static',module:config.module,configKey:'service-config'}],
   environments: [{ id: 'env-one', name: '隔离环境' }],
   servers: [
     {
@@ -68,6 +73,7 @@ const overview = (): DeploymentOverview => ({
   targets: [
     {
       id: 'target-one',
+      serviceId: 'service-one',
       name: '撤权服务',
       environmentId: 'env-one',
       serverId: 'server-one',
@@ -122,6 +128,8 @@ const view = (width = 1000, height = 600) => (
         <DeploymentsPanel
           projectId="p-one"
           packages={packages}
+          sources={[]}
+          sourcesError={null}
           navigation={null}
           packageActions={null}
           onRefreshPackages={() => {}}
@@ -146,7 +154,7 @@ async function cleared() {
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   await expect.element(page.getByRole('button', { name: '发布', exact: true })).toBeDisabled()
   await expect
-    .element(page.getByRole('button', { name: '添加前端服务', exact: true }))
+    .element(page.getByRole('button', { name: '添加服务', exact: true }))
     .toBeDisabled()
 }
 beforeEach(() => {

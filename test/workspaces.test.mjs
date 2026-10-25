@@ -63,7 +63,7 @@ test('仓库默认分支自动识别，失败保留记录，空仓库与无默�
   assert.equal((await f.service.saveProject(input)).project.connectionStatus, 'empty');
   f.builder.branches = async () => { throw new Error('模拟认证失败'); };
   const failed = await f.service.saveProject(input);
-  assert.equal(failed.project.connectionStatus, 'failed'); assert.ok(failed.project.id); assert.ok(failed.token);
+  assert.equal(failed.project.connectionStatus, 'failed'); assert.ok(failed.project.id); assert.equal(failed.token, undefined);
   assert.equal(f.service.store.state.projects.length, 4);
 });
 
@@ -108,7 +108,7 @@ test('共享服务器的项目归属、环境源码、目标、日志与版本�
   const base = `/api/workspaces/${a.app.id}`;
   for (const route of [`/tasks/${(await ready(f, b.targets[0])).id}`, `/targets/${b.targets[0].id}/releases`]) assert.equal((await f.request(base + route)).status, 404);
   for (const [route, method, body] of [
-    [`/repositories/${b.source.project.id}/sync`, 'POST', {}], [`/repositories/${b.source.project.id}/rotate-token`, 'POST', {}],
+    [`/repositories/${b.source.project.id}/sync`, 'POST', {}],
     [`/repositories/${b.source.project.id}`, 'PUT', repositoryInput], ['/tasks', 'POST', { targetId: b.targets[0].id, action: 'deploy' }],
     ['/environment-sources', 'PUT', { environmentId: a.environments[0].id, serviceId: a.service.id, sourceProjectId: b.source.project.id, branch: 'main' }],
     ['/targets', 'POST', { environmentId: b.environments[0].id, serviceId: a.service.id, serverId: a.server.id, mode: 'managed' }],
@@ -159,11 +159,11 @@ test('同服务器跨项目串行，另一个服务不随单服务发布而更�
   assert.equal(f.workspaces.overview(b.app.id).tasks.length, 200);
 });
 
-test('旧共享仓库迁移保留下载、身份、目标、未完成快照，重复启动不复制数据', async t => {
+test('旧共享仓库迁移保留源码、身份、目标与未完成快照且不再创建下载口令', async t => {
   const f = await fixture(t);
   const solo = await f.service.saveProject({ ...repositoryInput, name: '独占' });
   const shared = await f.service.saveProject({ ...repositoryInput, name: '共用' });
-  const orphan = await f.service.saveProject({ ...repositoryInput, name: '独立下载' });
+  const orphan = await f.service.saveProject({ ...repositoryInput, name: '待整理源码' });
   const a = randomUUID(), b = randomUUID(), serverId = randomUUID(), serviceId = randomUUID(), targetId = randomUUID(), taskId = randomUUID();
   await f.service.store.change(state => {
     const d = state.deployments; d.version = 1; delete d.workspaceVersion;
@@ -176,16 +176,26 @@ test('旧共享仓库迁移保留下载、身份、目标、未完成快照，�
   });
   await migrateWorkspaces(f.service.store, f.directory);
   const d = f.deployment.data;
-  assert.equal(f.service.authorizeDownload(shared.project.id, shared.token).id, shared.project.id);
-  assert.equal(f.service.authorizeDownload(orphan.project.id, orphan.token).id, orphan.project.id);
-  assert.equal(f.service.authorizeDownload(solo.project.id, solo.token).applicationId, a);
+  assert.ok(f.service.store.state.projects.some(item => item.id === shared.project.id));
+  assert.ok(f.service.store.state.projects.some(item => item.id === orphan.project.id));
+  assert.equal(f.service.store.state.projects.find(item => item.id === solo.project.id).applicationId, a);
   assert.equal(d.tasks[0].sourceSnapshot.id, shared.project.id); assert.equal(d.tasks[0].lastSeq, 1);
   assert.equal(d.targets[0].id, targetId); assert.equal(d.servers[0].tokenHash, 'original-agent-hash');
-  const copied = f.service.store.state.projects.filter(item => item.needsDownloadTokenReset);
-  assert.equal(copied.length, 2); assert.notEqual(copied[0].tokenHash, copied[1].tokenHash);
+  const copied = f.service.store.state.projects.filter(item => item.name === '共用' && item.id !== shared.project.id);
+  assert.equal(copied.length, 2); assert.notEqual(copied[0].id, copied[1].id);
+  assert.ok(f.service.store.state.projects.every(item => !Object.hasOwn(item, 'tokenHash') && !Object.hasOwn(item, 'needsDownloadTokenReset')));
   assert.ok(d.environmentSources.every(item => f.service.store.state.projects.find(source => source.id === item.sourceProjectId).applicationId === item.applicationId));
   const before = JSON.stringify(f.service.store.state); await migrateWorkspaces(f.service.store, f.directory); assert.equal(JSON.stringify(f.service.store.state), before);
   assert.equal((await readdir(f.directory)).filter(item => item.startsWith('workspace-backup-')).length, 1);
+});
+
+test('工作区仓库投影排除旧下载字段且不改变源码与部署身份', async t => {
+  const f = await fixture(t), a = await project(f, '退役字段隔离');
+  const retired = { tokenHash: 'fixture-download-hash', needsDownloadTokenReset: true, downloads: 4, lastDownloadAt: '2026-10-25T00:00:00Z' };
+  const before = structuredClone(f.workspaces.overview(a.app.id));
+  await f.service.store.change(state => { Object.assign(state.projects.find(item => item.id === a.source.project.id), retired); });
+  assert.deepEqual(f.workspaces.overview(a.app.id), before);
+  assert.equal(f.service.store.state.projects.find(item => item.id === a.source.project.id).tokenHash, retired.tokenHash, '公开投影不修改持久数据');
 });
 
 test('真实 Git 的不同分支拥有独立缓存，并发打包不污染默认分支', async t => {
@@ -250,7 +260,7 @@ test('迁移引用损坏时事务回滚；未知迁移版本和缺失集合拒�
   await assert.rejects(migrateWorkspaces(f.service.store, f.directory), /数据损坏/);
 });
 
-test('真实 Git 提交刷新、指定历史提交、并发快照与旧下载分支互不污染', async t => {
+test('真实 Git 提交刷新、指定历史提交、并发快照与默认分支互不污染', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cmr-commits-'));
   const gitRoot = path.join(directory, 'git');
   const { mkdir } = await import('node:fs/promises'); await mkdir(gitRoot);

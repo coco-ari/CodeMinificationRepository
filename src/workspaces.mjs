@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
-import { HttpError, randomSecret, digest } from './security.mjs';
+import { HttpError } from './security.mjs';
 import { validateBranch, sourceKey } from './archive.mjs';
 
 const now = () => new Date().toISOString();
@@ -11,11 +11,11 @@ const required = (items, id, label) => {
   if (!item) throw new HttpError(404, `${label}不存在`);
   return item;
 };
-const safeRepository = ({ tokenHash, ...item }) => item;
+const safeRepository = ({ tokenHash, needsDownloadTokenReset, downloads, lastDownloadAt, ...item }) => item;
 export function historyWorkspace(state) {
   let item = state.deployments.applications.find(item => item.legacySources);
   if (!item) {
-    item = { id: randomUUID(), name: '历史源码', description: '保留旧下载入口和待整理的源码配置', legacySources: true, createdAt: now() };
+    item = { id: randomUUID(), name: '历史源码', description: '保留待整理的源码配置', legacySources: true, createdAt: now() };
     state.deployments.applications.push(item);
   }
   return item;
@@ -49,8 +49,8 @@ export async function migrateWorkspaces(store, directory) {
       for (const applicationId of owners) {
         let selected = source;
         if (owners.length > 1) {
-          selected = { ...structuredClone(source), id: randomUUID(), applicationId, tokenHash: digest(randomSecret()),
-            status: 'idle', lastSuccess: null, error: null, downloads: 0, lastDownloadAt: null, needsDownloadTokenReset: true, createdAt: now() };
+          selected = { ...structuredClone(source), id: randomUUID(), applicationId,
+            status: 'idle', lastSuccess: null, error: null, createdAt: now() };
           state.projects.push(selected); copied++;
         }
         mapping.set(`${applicationId}:${source.id}`, selected.id);

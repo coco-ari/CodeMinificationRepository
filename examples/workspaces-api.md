@@ -2,7 +2,7 @@
 
 所有接口沿用管理员会话；写操作使用 `X-CSRF-Token`。当前没有项目成员账号，项目范围检查用于保证资源归属和避免误操作。系统级管理员仍可以访问全局接口。
 
-`workspaceId` 复用原 `deployments.applications[].id`。旧 `/api/projects/{id}/source/latest` 和 `/download/{id}` 继续表示仓库下载，不表示项目工作空间。
+`workspaceId` 复用原 `deployments.applications[].id`。旧 Jenkins/脚本源码下载和独立下载口令已移除；仅保留登录后的固定版本档案下载及部署 Agent 的任务取包。当前工作台接口仍按项目授权，见[运行模块说明](../docs/runtime-modules.md)。
 
 | 方法与路径 | 行为 |
 | --- | --- |
@@ -15,8 +15,7 @@
 | `POST /api/workspaces/{workspaceId}/repositories/{id}/sync` | 兼容入口：刷新仓库分支信息，不生成源码包 |
 | `GET /api/workspaces/{workspaceId}/repositories/{id}/branches` | 已保存的分支列表、远端默认分支和刷新时间；无缓存时查询远端 |
 | `POST /api/workspaces/{workspaceId}/repositories/{id}/branches/refresh` | 重新查询远端 HEAD 和分支 |
-| `POST /api/workspaces/{workspaceId}/repositories/{id}/rotate-token` | 重置并返回独立下载密码 |
-| `POST /api/workspaces/{workspaceId}/repositories/{id}/enabled` | `{enabled}`；停用或启用源码交付 |
+| `POST /api/workspaces/{workspaceId}/repositories/{id}/enabled` | `{enabled}`；停用或启用仓库源码准备 |
 | `GET /api/workspaces/{workspaceId}/server-candidates` | 可绑定服务器的 ID、名称、模式和在线状态，不包含其他项目容器或任务 |
 | `POST /api/workspaces/{workspaceId}/servers` | `{name, mode}`；创建服务器接入记录并自动绑定项目，返回一次性安装命令 |
 | `PUT /api/workspaces/{workspaceId}/servers/{serverId}` | 绑定已接入服务器，重复调用不增加重复记录 |
@@ -43,7 +42,7 @@
 
 系统级 `DELETE /api/deploy/servers/{serverId}` 删除已撤销且无部署目标、发布历史的服务器记录，同时清理空项目绑定并记录审计。仍沿用管理员会话和 CSRF。
 
-仓库字段为 `{name, repository, credentialId?, enabled?}`。旧 `branch` 仅保留下载兼容。环境关联键为 `(environmentId, serviceId)`，同环境同服务共用仓库关联；每次任务独立选择分支和提交，不改写其他部署位置。
+仓库字段为 `{name, repository, credentialId?, enabled?}`。`branch` 保留已有源码默认分支，任务仍独立固定所选分支及提交。环境关联键为 `(environmentId, serviceId)`，同环境同服务共用仓库关联；每次任务独立选择分支和提交，不改写其他部署位置。
 
 项目详情中的服务器容器列表按项目过滤，指标仍是整台机器的指标。其他项目资源通过项目范围的详情/写接口访问时返回 404；未绑定服务器或缺少源码选择返回 400。原有观察权限、撤销状态及目标忙碌校验继续执行。
 
@@ -58,7 +57,7 @@ Agent 注册和心跳可附带 `capabilities` 字符串数组。前端任务要�
 ## 发布工作台源码选择
 
 - `GET /api/workspaces/:project/targets/:target/source`：返回当前环境仓库分支的缓存提交（最多 100 条）、刷新时间和 `sourceKey`。
-- `POST /api/workspaces/:project/targets/:target/source/refresh`：刷新远端记录，不创建部署任务、不修改默认下载分支。
+- `POST /api/workspaces/:project/targets/:target/source/refresh`：刷新远端记录，不创建部署任务、不修改源码默认分支。
 - 创建发布任务可以传 `revision`（完整 SHA）和 `sourceKey`。后端验证记录归属与当前配置，固定指定提交；不传 `revision` 时仍发布分支最新代码。
 - 项目列表新增 `dashboard`，只包含各项目自己的环境、服务、源码选择、绑定服务器指标及简化目标、活动任务。不含凭证或完整运行参数。
 - 任务阶段增加中心 `source_fetch`、`source_resolve`、`source_archive` 和新 Agent 的 `image`；旧 Agent、旧任务继续有效。

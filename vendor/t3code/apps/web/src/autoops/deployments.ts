@@ -1,6 +1,50 @@
 import { autoOpsRequest, AutoOpsRequestError } from './apiClient'
-import type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../../../../../autoops/contracts/deployments.ts'
-export type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../../../../../autoops/contracts/deployments.ts'
+import type {
+  DeploymentRepositoryRefs,
+  DeploymentRepositoryHistory,
+  StaticDeploymentConfig,
+  JavaDeploymentConfig,
+  DeploymentConfig,
+  DeploymentKind,
+  DeploymentService,
+  DeploymentServiceSubmission,
+  DeploymentServiceSource,
+  DeploymentServiceSourceSubmission,
+  DeploymentTargetUpdate,
+  DeploymentRelease,
+  DeploymentTarget,
+  DeploymentTask,
+  DeploymentLog,
+  DeploymentTaskDetails,
+  DeploymentOverview,
+  DeploymentSubmission,
+  DeploymentTargetSubmission,
+  DeploymentServer,
+  DeploymentSourceIdentity,
+} from '../../../../../../autoops/contracts/deployments.ts'
+export type {
+  DeploymentRepositoryRefs,
+  DeploymentRepositoryHistory,
+  StaticDeploymentConfig,
+  JavaDeploymentConfig,
+  DeploymentConfig,
+  DeploymentKind,
+  DeploymentService,
+  DeploymentServiceSubmission,
+  DeploymentServiceSource,
+  DeploymentServiceSourceSubmission,
+  DeploymentTargetUpdate,
+  DeploymentRelease,
+  DeploymentTarget,
+  DeploymentTask,
+  DeploymentLog,
+  DeploymentTaskDetails,
+  DeploymentOverview,
+  DeploymentSubmission,
+  DeploymentTargetSubmission,
+  DeploymentServer,
+  DeploymentSourceIdentity,
+} from '../../../../../../autoops/contracts/deployments.ts'
 
 /** 中断的写请求保留待核查状态，界面不能自行推断成功或失败。 */
 export class DeploymentRequestError extends Error {
@@ -14,16 +58,30 @@ export class DeploymentRequestError extends Error {
   }
 }
 
-export const isDeploymentAccessError = (error: unknown) => error instanceof DeploymentRequestError &&
+export const isDeploymentAccessError = (error: unknown) =>
+  error instanceof DeploymentRequestError &&
   (error.status === 401 || error.status === 403 || error.status === 404)
 
-async function request<T>(projectId: string, suffix: string, body?: object, signal?: AbortSignal): Promise<T> {
+async function request<T>(
+  projectId: string,
+  suffix: string,
+  body?: object,
+  signal?: AbortSignal,
+  method?: 'POST' | 'PUT' | 'PATCH',
+): Promise<T> {
   try {
-    return await autoOpsRequest<T>(`/autoops/projects/${encodeURIComponent(projectId)}/deployments${suffix}`, {
-      label: '部署', ...(body === undefined ? {} : { body }), ...(signal ? { signal } : {}),
-    })
+    return await autoOpsRequest<T>(
+      `/autoops/projects/${encodeURIComponent(projectId)}/deployments${suffix}`,
+      {
+        label: '部署',
+        ...(method ? { method } : {}),
+        ...(body === undefined ? {} : { body }),
+        ...(signal ? { signal } : {}),
+      },
+    )
   } catch (cause) {
-    if (cause instanceof AutoOpsRequestError) throw new DeploymentRequestError(cause.message, cause.uncertain, cause.status, cause.code)
+    if (cause instanceof AutoOpsRequestError)
+      throw new DeploymentRequestError(cause.message, cause.uncertain, cause.status, cause.code)
     throw cause
   }
 }
@@ -37,6 +95,73 @@ export const loadDeployments = (projectId: string, environmentId?: string, signa
   )
 export const createDeploymentTarget = (projectId: string, input: DeploymentTargetSubmission) =>
   request<{ target: DeploymentTarget }>(projectId, '/targets', input)
+export const loadDeploymentRepositoryRefs = (
+  projectId: string,
+  sourceId: string,
+  signal?: AbortSignal,
+) =>
+  request<DeploymentRepositoryRefs>(
+    projectId,
+    `/repositories/${encodeURIComponent(sourceId)}/refs`,
+    undefined,
+    signal,
+  )
+export const loadDeploymentRepositoryHistory = (
+  projectId: string,
+  sourceId: string,
+  selection: { refKind?: 'default' | 'branch' | 'tag' | 'commit'; ref?: string },
+  signal?: AbortSignal,
+) => {
+  const query = new URLSearchParams({
+    refKind: selection.refKind ?? 'default',
+    ref: selection.ref ?? '',
+  })
+  return request<DeploymentRepositoryHistory>(
+    projectId,
+    `/repositories/${encodeURIComponent(sourceId)}/history?${query}`,
+    undefined,
+    signal,
+  )
+}
+export const saveDeploymentService = (projectId: string, input: DeploymentServiceSubmission) =>
+  request<{ service: DeploymentService }>(projectId, '/services', input)
+export const updateDeploymentTarget = (
+  projectId: string,
+  targetId: string,
+  input: DeploymentTargetUpdate,
+) =>
+  request<{ target: DeploymentTarget }>(
+    projectId,
+    `/targets/${encodeURIComponent(targetId)}`,
+    input,
+    undefined,
+    'PATCH',
+  )
+export const loadDeploymentServiceSource = (
+  projectId: string,
+  serviceId: string,
+  environmentId: string,
+  signal?: AbortSignal,
+) =>
+  request<{ source: DeploymentServiceSource | null }>(
+    projectId,
+    `/services/${encodeURIComponent(serviceId)}/sources/${encodeURIComponent(environmentId)}`,
+    undefined,
+    signal,
+  )
+export const saveDeploymentServiceSource = (
+  projectId: string,
+  serviceId: string,
+  environmentId: string,
+  input: DeploymentServiceSourceSubmission,
+) =>
+  request<{ source: DeploymentServiceSource }>(
+    projectId,
+    `/services/${encodeURIComponent(serviceId)}/sources/${encodeURIComponent(environmentId)}`,
+    input,
+    undefined,
+    'PUT',
+  )
 export const submitDeployment = (projectId: string, input: DeploymentSubmission) =>
   request<{ task: DeploymentTask }>(projectId, '/tasks', input)
 export const loadDeploymentTask = (
@@ -51,10 +176,15 @@ export const loadDeploymentTask = (
     undefined,
     signal,
   )
-export const loadDeploymentReleases = (projectId: string, targetId: string, signal?: AbortSignal) =>
+export const loadDeploymentReleases = (
+  projectId: string,
+  targetId: string,
+  signal?: AbortSignal,
+  page?: { offset: number; limit: number },
+) =>
   request<{ releases: DeploymentRelease[] }>(
     projectId,
-    `/targets/${encodeURIComponent(targetId)}/releases`,
+    `/targets/${encodeURIComponent(targetId)}/releases${page ? `?offset=${page.offset}&limit=${page.limit}` : ''}`,
     undefined,
     signal,
   )
@@ -79,15 +209,15 @@ const stageLabels: Record<string, string> = {
   downloading: '下载校验',
   extract: '解压',
   extracting: '解压',
-  build: '构建前端',
-  building: '构建前端',
+  build: '构建',
+  building: '构建',
   image: '准备镜像',
-  deploy: '切换站点',
-  deploying: '切换站点',
+  deploy: '切换服务',
+  deploying: '切换服务',
   health: '健康检查',
   healthcheck: '健康检查',
   checking: '健康检查',
-  verifying: '验证站点',
+  verifying: '验证服务',
   rollback: '恢复版本',
   rolling_back: '恢复版本',
   completed: '完成',

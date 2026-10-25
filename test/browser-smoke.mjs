@@ -257,12 +257,10 @@ try {
     '项目内新建凭证',
   )
   await click('#project-form [type=submit]')
-  await visible('#secret-dialog')
-  const secret = await evaluate('document.querySelector("#secret-value").value')
-  assert.equal(secret.length, 43)
-  const publicUrl = await evaluate('document.querySelector("#secret-page").value')
-  await click('#secret-dialog [data-close]')
-  await until(() => evaluate('!document.querySelector("#secret-value")'), '关闭弹窗后清除密码')
+  await until(() => evaluate('!document.querySelector("#project-dialog")'), '保存仓库返回列表')
+  await visible('#project-list [data-repository-menu]')
+  assert.equal(await evaluate('Boolean(document.querySelector("#secret-dialog"))'), false)
+  assert.equal(service.store.state.projects[0].tokenHash, undefined)
   await click('[aria-label="刷新仓库信息"]')
   await until(
     () => evaluate('document.querySelector(".project-card .badge").textContent === "已连接"'),
@@ -307,28 +305,22 @@ try {
   await until(() => evaluate('!document.querySelector("#project-dialog")'), '返回仓库列表')
   await mouseClick('[data-repository-menu]')
   await visible('[role=menu]')
-  await evaluate(
-    'Array.from(document.querySelectorAll("[role=menuitem]")).find(b=>b.textContent === "重置下载密码").click()',
+  assert.equal(
+    await evaluate(
+      'Array.from(document.querySelectorAll("[role=menuitem]")).some(item => /下载地址|下载密码/.test(item.textContent))',
+    ),
+    false,
   )
-  await visible('[role=alertdialog]')
-  await evaluate(
-    'Array.from(document.querySelector("[role=alertdialog]").querySelectorAll("button")).find(b=>b.textContent === "取消").click()',
-  )
-  await until(() => evaluate('!document.querySelector("[role=alertdialog]")'), '取消重置密码')
-  await until(
-    () => evaluate('getComputedStyle(document.body).pointerEvents !== "none"'),
-    '关闭确认后恢复页面交互',
-  )
-  service.authorizeDownload(service.store.state.projects[0].id, secret)
+  await key('Escape', 27)
+  await until(() => evaluate('!document.querySelector("[role=menu]")'), '关闭仓库菜单')
   await mouseClick('#project-list table [role=switch]')
-  await until(() => !service.store.state.projects[0].enabled, '停用源码下载')
+  await until(() => !service.store.state.projects[0].enabled, '停用源码仓库')
   await until(
     () => evaluate('!document.querySelector("#project-list table [role=switch]").disabled'),
     '停用完成',
   )
   await mouseClick('#project-list table [role=switch]')
-  await until(() => service.store.state.projects[0].enabled, '恢复源码下载')
-  service.authorizeDownload(service.store.state.projects[0].id, secret)
+  await until(() => service.store.state.projects[0].enabled, '恢复源码仓库')
   await mouseClick('[data-slot=dropdown-menu-trigger]')
   await visible('[role=menu]')
   await evaluate(
@@ -372,14 +364,10 @@ try {
     await evaluate('Boolean(document.querySelector("#project-form [name=branch]"))'),
     false,
   )
-  await command('Page.navigate', { url: publicUrl })
-  await visible('#download-view')
-  assert.equal(await evaluate('!document.querySelector("#app-view")'), true)
-  await fill('#download-form [name=token]', 'invalid')
-  await click('#download-form [type=submit]')
+  await click('#project-dialog [data-slot=dialog-close]')
   await until(
-    () => evaluate('document.querySelector("#download-error").textContent.includes("密码无效")'),
-    '无效下载密码',
+    () => evaluate('!document.querySelector("#project-dialog")'),
+    '手机编辑后返回仓库列表',
   )
   assert.deepEqual(errors, [])
   assert.ok(
@@ -387,7 +375,7 @@ try {
     warnings.join('\n'),
   )
   console.log(
-    '浏览器验证通过：初始化、凭证配置、新增项目、密码显示与清理、手动同步、桌面与手机布局、下载页鉴权。',
+    '浏览器验证通过：初始化、凭证配置、新增项目、仓库保存直接返回列表、手动同步、桌面与手机布局、旧下载操作已移除。',
   )
   console.log(`截图目录：${artifactDirectory}`)
 } finally {

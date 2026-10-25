@@ -79,6 +79,10 @@ vi.mock(import('./workspaceAuthoring'), async (original) => ({
   })),
   searchAuthoringFiles: vi.fn(async () => ({ entries: [], truncated: false })),
 }))
+vi.mock(import('./apiClient'), async original => ({
+  ...(await original()),
+  autoOpsRequest: vi.fn(async () => { const value = await mocks.releases(); return {...value,total:value.releases.length,nextOffset:null} }),
+}))
 vi.mock(import('./deployments'), async (original) => ({
   ...(await original()),
   loadDeployments: mocks.deployment,
@@ -136,6 +140,7 @@ const workspace = (): WorkspaceOverview => ({
 })
 const deployment = (): DeploymentOverview => ({
   enabled: true,
+  services: [{id:'service-one',name:'前端部署验证',kind:'static',module:config.module,configKey:'service-config'}],
   environments: [{ id: 'env-test', name: '测试环境' }],
   servers: [
     {
@@ -149,6 +154,7 @@ const deployment = (): DeploymentOverview => ({
   targets: [
     {
       id: 'target-one',
+      serviceId: 'service-one',
       name: '前端部署验证',
       environmentId: 'env-test',
       serverId: 'server-one',
@@ -465,7 +471,7 @@ describe('部署与源码包分别使用服务端写权限', () => {
       if (capability === 'deployment.execute') {
         await expect.element(release).toBeDisabled()
         await expect
-          .element(page.getByRole('button', { name: '添加前端服务', exact: true }))
+          .element(page.getByRole('button', { name: '添加服务', exact: true }))
           .toBeDisabled()
         await expect.element(packages).toBeEnabled()
       } else {
