@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import {
   customerFileReference,
   customerFilePathForTarget,
@@ -22,19 +22,45 @@ import type { AutoOpsThreadScope } from './hostConfig'
 import { customerFilesCwd, readCustomerFiles } from './customerFiles'
 
 export function CustomerFileAttachMenu(props: { onUpload: () => void; onBrowse: () => void }) {
+  const trigger = useRef<HTMLButtonElement>(null)
+  const browsePending = useRef(false)
   return (
     <Menu>
       <MenuTrigger
-        render={<Button type="button" variant="ghost" size="icon-sm" aria-label="添加文件" />}
+        render={
+          <Button
+            ref={trigger}
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="添加文件"
+          />
+        }
       >
         <PaperclipIcon />
       </MenuTrigger>
-      <MenuPopup align="end" side="top">
+      <MenuPopup
+        align="end"
+        side="top"
+        finalFocus={() => {
+          // 等菜单归还焦点后再打开文件侧栏，确保关闭侧栏能返回附件入口。
+          if (browsePending.current) {
+            browsePending.current = false
+            trigger.current?.focus()
+            props.onBrowse()
+          }
+          return trigger.current
+        }}
+      >
         <MenuItem onClick={props.onUpload}>
           <UploadIcon />
           上传文件
         </MenuItem>
-        <MenuItem onClick={props.onBrowse}>
+        <MenuItem
+          onClick={() => {
+            browsePending.current = true
+          }}
+        >
           <FolderOpenIcon />
           引用电脑文件
         </MenuItem>

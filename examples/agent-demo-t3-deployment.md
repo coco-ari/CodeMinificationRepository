@@ -10,6 +10,25 @@
 
 本节是当前程序、网页、客户包及恢复配置的唯一现行记录。正式入口为 `https://auto.996788.xyz/`；`192.168.31.157:28887` 保留为后端地址，日常访问使用 HTTPS 域名。公网配置见[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)，模块归属及验收分层见[部署核心适配运行记录](../docs/runtime-modules.md#main-部署核心适配2026-10-25)。历史记录不代表旧发行仍可执行恢复。
 
+2026-10-25，本批应用提交为 `82b4264c9673adcc11db104c55579ad446662073`，完整发行目录为 `/home/tao/autoops-agent-demo/releases/t3-deployment-ui-82b4264c`，数据继续使用 `/home/tao/autoops-deployment-validation/data`。客户电脑文件的查看、目录浏览和引用已统一到问答原生侧栏；窄屏沿用原生侧面板。正文、目录、错误和引用边界保持原合同，不需升级现有 0.3.0 客户连接程序。具体操作步骤、原因与本机测试见[客户文件面板验收](../docs/runtime-modules.md#客户电脑文件面板统一2026-10-25)。
+
+| 本批发行证据 | 已核实结果 |
+| --- | --- |
+| 归档 SHA-256 | `8ebd24f15371297e3ec5b99ad4c51f7ff5435c342d89ad07fa202c4584b077e4` |
+| 完整清单 SHA-256 | `8192354350dd4fedd2a70154d128d4cee46f53d857f109b56b45db4ea05e2ae3` |
+| 原生依赖清单 SHA-256 | `b0676cc6faeade7ca33a3c691f1661096e273d9e4492aa2563c1a68fe8a3093b` |
+| 来源与发行 | 29329 个跟踪文件核对无差异；10587 个发行文件、61 个相对链接；保留 6363 个旧静态资源 |
+| 运行包 | 32 个 Worker 文件、客户 ZIP 0.3.0 与部署 Agent 包均与前一发行 80e 逐字节一致；具体包摘要沿用下方历史表 |
+| Linux 发行校验 | 实际 Worker 冷启动、隔离资料生成及原请求恢复、安装资源 GET/HEAD 通过；独立 cgroup 总内存 512 MiB、swap 0，实际存活阶段峰值 436809728 字节、OOM 0 |
+
+实际网关 PID 245224、Worker PID 245223 的目录及有效配置已核实；公网网页 HTML SHA-256 为 `d337be3fff3b1876782ee207add8bc463b3cb3f264735b3cfde81251174d7b1f`，网页和安装资源 GET/HEAD 均 200、字节一致，应用与 Worker 健康。348 个资料/技能文件、175 条消息、57 轮运行、531 条轮次条目、29 个会话绑定、8 项附件授权、1 台客户设备与工作区、35 条客户命令和全部部署配置/历史保留，无关服务 PID 不变。恢复备份为 `/home/tao/autoops-agent-demo/backups/t3-deployment-ui-82b4264c-20261025`，程序回滚预检通过，未执行真实降级。
+
+应用 `82b4264c` 的[运行链路 40177562191](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40177562191)及[AutoOps 质量 40177562222](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40177562222)均成功。前一 `80e3860c` 的运行链路曾因旧 Markdown 客户引用用例未挂载侧栏失败，补齐真实预览容器后通过；未删除或放宽原正文和范围断言。
+
+本批发行准备、预验、切换和恢复预检沿用同一文件锁串行执行；69 项离线运维脚本用例通过。程序恢复目标为前一完整发行 `t3-deployment-ui-80e3860c`，继续使用回滚时的数据，不覆盖新增业务记录。本批不执行 Java/static 业务发布，部署核心的真实写入验收边界仍见下方记录。
+
+### 历史批次：部署日志工具栏（2026-10-25）
+
 2026-10-25，本批应用提交为 `cb2cda6a75bff612b3874445e806d2158a09cdd2`，完整发行目录为 `/home/tao/autoops-agent-demo/releases/t3-deployment-ui-cb2cda6a`，继续使用 `/home/tao/autoops-deployment-validation/data`。已成功切换；网关 PID 236561、Worker PID 236560 的实际工作目录与配置均指向本发行。
 
 已确认方案中的服务与位置、Java/static 配置及发布入口、Git 来源、节点管理、历史档案与日志适配已实施，旧 Jenkins／脚本直取源码能力已退役；沿用原引擎、Agent、身份及业务存储。本次后续修正仅涉及日志工具栏布局和专有测试。完整发行中 32 个 Worker 文件、客户 ZIP 和部署 Agent 包均与已上线 8c 逐字节一致，不仅替换网页静态目录。

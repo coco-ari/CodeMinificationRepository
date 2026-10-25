@@ -11,6 +11,7 @@ export function RightPanelSheet(props: {
   restoreFocus?: boolean;
 }) {
   const opener = useRef<HTMLElement | null>(null);
+  const panel = useRef<HTMLDivElement | null>(null);
   return (
     <Sheet
       open={props.open}
@@ -21,6 +22,7 @@ export function RightPanelSheet(props: {
       }}
     >
       <SheetPopup
+        ref={panel}
         transitionDurationMs={props.animationDurationMs}
         side="right"
         showCloseButton={false}
@@ -30,7 +32,7 @@ export function RightPanelSheet(props: {
             ? () => {
                 opener.current =
                   document.activeElement instanceof HTMLElement ? document.activeElement : null;
-                return undefined;
+                return panel.current;
               }
             : undefined
         }

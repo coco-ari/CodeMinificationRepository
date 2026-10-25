@@ -245,7 +245,9 @@ describe('客户文件的原生选择与范围隔离', () => {
           selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).isOpen,
       )
       .toBe(false)
-    await expect.element(page.getByRole('button', { name: '预览 client.ts', exact: true })).toHaveFocus()
+    await expect
+      .element(page.getByRole('button', { name: '预览 client.ts', exact: true }))
+      .toHaveFocus()
     await page.getByRole('button', { name: '预览 client.ts', exact: true }).click()
     await page.getByRole('button', { name: '添加到对话', exact: true }).click()
     await expect.element(page.getByRole('textbox')).toHaveFocus()
@@ -256,6 +258,17 @@ describe('客户文件的原生选择与范围隔离', () => {
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).isOpen,
     ).toBe(false)
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390)
+  })
+  it('窄屏从附件菜单进入目录，取消后返回附件按钮', async () => {
+    await page.viewport(390, 500)
+    const { scope } = setup()
+    await using screen = await render(<Workbench scope={scope} />)
+    await page.getByRole('button', { name: '添加文件', exact: true }).click()
+    await page.getByRole('menuitem', { name: '引用电脑文件', exact: true }).click()
+    await expect.element(page.getByRole('searchbox')).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('button', { name: '添加文件', exact: true })).toHaveFocus()
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   })
   it('旧搜索取消后迟到结果不能覆盖新目录，新范围不复用旧结果', async () => {
     const { scope } = setup()
