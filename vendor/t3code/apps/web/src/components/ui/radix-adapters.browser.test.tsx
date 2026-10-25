@@ -1,5 +1,5 @@
 import '../../index.css'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { act, render } from '../../../test/render'
 import { Button } from './button'
@@ -85,6 +85,30 @@ describe('T3 Radix interaction adapters', () => {
     await act(() => key(document.activeElement!, 'Escape'))
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
     expect(document.activeElement).toBe(trigger)
+  })
+  it('关闭回调主动恢复输入焦点时，不再执行默认焦点恢复', async () => {
+    function Example() {
+      const input = useRef<HTMLInputElement>(null)
+      return (
+        <>
+          <input aria-label="返回输入框" ref={input} />
+          <Dialog>
+            <DialogTrigger render={<Button />}>查看文件</DialogTrigger>
+            <DialogPopup finalFocus={() => {
+              input.current?.focus()
+              return false
+            }}>
+              <DialogTitle>电脑文件</DialogTitle>
+            </DialogPopup>
+          </Dialog>
+        </>
+      )
+    }
+    await using screen = await render(<Example />)
+    await screen.getByRole('button', { name: '查看文件', exact: true }).click()
+    await act(() => key(document.activeElement!, 'Escape'))
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+    await expect.element(screen.getByRole('textbox', { name: '返回输入框', exact: true })).toHaveFocus()
   })
   it('retains non-string select values across the Radix string value boundary', async () => {
     const a = { id: 'a' },

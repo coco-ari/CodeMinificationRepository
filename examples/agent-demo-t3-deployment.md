@@ -10,22 +10,22 @@
 
 本节是当前程序、网页、客户包及恢复配置的唯一现行记录。正式入口为 `https://auto.996788.xyz/`；`192.168.31.157:28887` 保留为后端地址，日常访问使用 HTTPS 域名。公网配置见[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)，模块归属及验收分层见[部署核心适配运行记录](../docs/runtime-modules.md#main-部署核心适配2026-10-25)。历史记录不代表旧发行仍可执行恢复。
 
-2026-10-25，本批应用提交为 `6be58fa5309908b43ea0b6c8bcb7833c51443817`，完整发行目录为 `/home/tao/autoops-agent-demo/releases/t3-deployment-ui-6be58fa5`，数据继续使用 `/home/tao/autoops-deployment-validation/data`。客户电脑文件的查看、目录浏览和引用已统一到问答原生侧栏；窄屏沿用原生侧面板。正文、目录、错误和引用边界保持原合同，不需升级现有 0.3.0 客户连接程序。具体操作步骤、原因与本机测试见[客户文件面板验收](../docs/runtime-modules.md#客户电脑文件面板统一2026-10-25)。
+2026-10-25，本批应用提交为 `c341fe1f05df0d5fc5302d54536f5ae257d25719`，完整发行目录为 `/home/tao/autoops-agent-demo/releases/t3-deployment-ui-c341fe1f`，数据继续使用 `/home/tao/autoops-deployment-validation/data`。客户电脑文件的查看、目录浏览和引用已统一到问答原生侧栏；窄屏沿用原生侧面板。正文、目录、错误和引用边界保持原合同，不需升级现有 0.3.0 客户连接程序。具体操作步骤、原因与本机测试见[客户文件面板验收](../docs/runtime-modules.md#客户电脑文件面板统一2026-10-25)。
 
 | 本批发行证据 | 已核实结果 |
 | --- | --- |
-| 归档 SHA-256 | `97f99a197b459e24a32cd0b9dc0c36ba51520b6927b57e7a891929cd33c4f8fc` |
-| 完整清单 SHA-256 | `df3920b53d561a28818cc56cea771a27fbb906a416fdbc3c933e024c9c1c5ecd` |
-| 原生依赖清单 SHA-256 | `d40d932624d9b0558d8cb8a56048511a6a633a8ae0b767b72ba695432b210899` |
-| 来源与发行 | 29329 个跟踪文件核对无差异；10746 个发行文件、61 个相对链接；保留 6522 个旧静态资源 |
-| 运行包 | 32 个 Worker 文件、客户 ZIP 0.3.0 与部署 Agent 包均与前一发行 82b 逐字节一致；具体包摘要沿用下方历史表 |
-| Linux 发行校验 | 实际 Worker 冷启动、隔离资料生成及原请求恢复、安装资源 GET/HEAD 通过；独立 cgroup 总内存 512 MiB、swap 0，实际存活阶段峰值 536899584 字节、内存限制触发 3477 次、OOM 0 |
+| 归档 SHA-256 | `491b04e7a10e2af20457a4b5559567b5acd769c960a4d63502ac99b4ec4ca795` |
+| 完整清单 SHA-256 | `a7ecfa0d493fb2db55290b2400027a61af7f46af12c22a8c5c17ba14fbe15a62` |
+| 原生依赖清单 SHA-256 | `97b61c47fb91a99ba011c8180e86a4afdcbf9db65f9c3d9113a3bb94f4f82e2c` |
+| 来源与发行 | 29329 个跟踪文件核对无差异；10905 个发行文件、61 个相对链接；保留 6681 个旧静态资源 |
+| 运行包 | 32 个 Worker 文件、客户 ZIP 0.3.0 与部署 Agent 包均与前一发行 6be 逐字节一致；具体包摘要沿用下方历史表 |
+| Linux 发行校验 | 实际 Worker 冷启动、隔离资料生成及原请求恢复、安装资源 GET/HEAD 通过；独立 cgroup 总内存 512 MiB、swap 0，实际存活阶段峰值 513687552 字节、内存限制触发 0 次、OOM 0 |
 
-实际网关 PID 246859、Worker PID 246858 的目录及有效配置已核实；公网网页 HTML SHA-256 为 `10cdbb56080e323ed1b4a3e3e7fd5909177c44d76a232cc96213a531094be5c6`，网页和安装资源 GET/HEAD 均 200、字节一致，应用与 Worker 健康。348 个资料/技能文件、175 条消息、57 轮运行、531 条轮次条目、29 个会话绑定、8 项附件授权、1 台客户设备与工作区、35 条客户命令和全部部署配置/历史保留，无关服务 PID 不变。恢复备份为 `/home/tao/autoops-agent-demo/backups/t3-deployment-ui-6be58fa5-20261025`，程序回滚预检通过，未执行真实降级。
+实际网关 PID 248293、Worker PID 248292 的目录及有效配置已核实；公网网页 HTML SHA-256 为 `b64f6c38b8a4264be7be30f19caf002e3f27ab2ecc52db24d2b035711ef6b0ee`，网页和安装资源 GET/HEAD 均 200、字节一致，应用与 Worker 健康。348 个资料/技能文件、175 条消息、57 轮运行、531 条轮次条目、29 个会话绑定、8 项附件授权、1 台客户设备与工作区、35 条客户命令和全部部署配置/历史保留，无关服务 PID 不变。恢复备份为 `/home/tao/autoops-agent-demo/backups/t3-deployment-ui-c341fe1f-20261025`，程序回滚预检通过，未执行真实降级。
 
-前一应用 `82b4264c` 的[运行链路 40177562191](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40177562191)及[AutoOps 质量 40177562222](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40177562222)均成功。前一 `80e3860c` 的运行链路曾因旧 Markdown 客户引用用例未挂载侧栏失败，补齐真实预览容器后通过；未删除或放宽原正文和范围断言。
+应用 `c341fe1f` 的[运行链路 40179487762](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40179487762)及[AutoOps 质量 40179487740](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40179487740)均成功。前一 `80e3860c` 的运行链路曾因旧 Markdown 客户引用用例未挂载侧栏失败，补齐真实预览容器后通过；未删除或放宽原正文和范围断言。
 
-本批发行准备、预验、切换和恢复预检沿用同一文件锁串行执行；69 项离线运维脚本用例通过。程序恢复目标为前一完整发行 `t3-deployment-ui-82b4264c`，继续使用回滚时的数据，不覆盖新增业务记录。本批不执行 Java/static 业务发布，部署核心的真实写入验收边界仍见下方记录。
+本批发行准备、预验、切换和恢复预检沿用同一文件锁串行执行；69 项离线运维脚本用例通过。程序恢复目标为前一完整发行 `t3-deployment-ui-6be58fa5`，继续使用回滚时的数据，不覆盖新增业务记录。本批不执行 Java/static 业务发布，部署核心的真实写入验收边界仍见下方记录。
 
 ### 历史批次：部署日志工具栏（2026-10-25）
 

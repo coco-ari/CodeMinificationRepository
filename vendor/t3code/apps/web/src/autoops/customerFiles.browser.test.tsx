@@ -7,6 +7,7 @@ import { ComposerHandleContext } from '~/composerHandleContext'
 import type { ChatComposerHandle } from '~/components/chat/ChatComposer'
 import type { FilePreviewPanelProps } from '~/components/files/FilePreviewPanel'
 import { RightPanelSheet } from '~/components/RightPanelSheet'
+import { ComposerPromptEditor, type ComposerPromptEditorHandle } from '~/components/ComposerPromptEditor'
 import { useMediaQuery } from '~/hooks/useMediaQuery'
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from '~/rightPanelLayout'
 import { useRightPanelStore, selectThreadRightPanelState } from '~/rightPanelStore'
@@ -95,8 +96,9 @@ function panelProps(relativePath: string | null): FilePreviewPanelProps {
     workspaceMutationId: null,
   }
 }
-function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
+function Workbench({ scope, realEditor = false }: { scope: AutoOpsThreadScope; realEditor?: boolean }) {
   const input = useRef<HTMLInputElement>(null)
+  const editor = useRef<ComposerPromptEditorHandle>(null)
   const [draft, setDraft] = useState('')
   const [composerExpanded, setComposerExpanded] = useState(false)
   const handle = useRef({
@@ -106,7 +108,7 @@ function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
     },
     focusAtEnd: () => {
       setComposerExpanded(true)
-      requestAnimationFrame(() => input.current?.focus())
+      requestAnimationFrame(() => realEditor ? editor.current?.focusAtEnd() : input.current?.focus())
     },
   } as ChatComposerHandle)
   const state = useRightPanelStore((value) =>
@@ -130,13 +132,28 @@ function Workbench({ scope }: { scope: AutoOpsThreadScope }) {
     <ComposerHandleContext value={handle}>
       <div style={{ display: 'flex', height: 420 }}>
         <main>
-          <input
+          {realEditor ? (
+            <div hidden={sheet && !draft && !composerExpanded}>
+              <ComposerPromptEditor
+                editorRef={editor}
+                value={draft}
+                cursor={draft.length}
+                richTextEnabled={false}
+                skills={[]}
+                contextRecords={new Map()}
+                disabled={false}
+                placeholder="测试消息"
+                onChange={(value) => setDraft(value)}
+                onPaste={() => {}}
+              />
+            </div>
+          ) : <input
             aria-label="测试消息"
             ref={input}
             value={draft}
             hidden={sheet && !draft && !composerExpanded}
             onChange={(event) => setDraft(event.target.value)}
-          />
+          />}
           {(!sheet || !state.isOpen) && (
             <CustomerFileAttachMenu
               onUpload={() => {}}
@@ -275,6 +292,17 @@ describe('客户文件的原生选择与范围隔离', () => {
     await expect.element(page.getByRole('searchbox')).toBeVisible()
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('textbox', { name: '测试消息', exact: true })).toHaveFocus()
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  })
+  it('窄屏关闭客户目录后恢复真实编辑器焦点', async () => {
+    await page.viewport(390, 500)
+    const { scope } = setup()
+    await using screen = await render(<Workbench scope={scope} realEditor />)
+    await page.getByRole('button', { name: '添加文件', exact: true }).click()
+    await page.getByRole('menuitem', { name: '引用电脑文件', exact: true }).click()
+    await expect.element(page.getByRole('searchbox')).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(page.getByRole('textbox')).toHaveFocus()
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   })
   it('旧搜索取消后迟到结果不能覆盖新目录，新范围不复用旧结果', async () => {

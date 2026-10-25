@@ -261,11 +261,11 @@ function makeOverlay(native: Props, kind: 'dialog' | 'alert' | 'popover' | 'prev
     const position = React.use(Position)
     const state = { open: context.open }
     const focus = (target: unknown, event: Event) => {
-      if (target === false) {
+      const value = typeof target === 'function' ? target() : target
+      if (value === false) {
         event.preventDefault()
         return
       }
-      const value = typeof target === 'function' ? target() : target
       const element =
         value && typeof value === 'object' && 'current' in value ? value.current : value
       if (element instanceof HTMLElement) {
