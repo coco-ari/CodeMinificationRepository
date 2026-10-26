@@ -1,4 +1,5 @@
 import * as S from 'effect/Schema'
+import * as Exit from 'effect/Exit'
 import { DirectoryId } from './project-directory.ts'
 import { AssistantModel } from './assistants.ts'
 import { CustomerAssistantSource, RunnerReferenceId } from './customer-source.ts'
@@ -35,6 +36,14 @@ export const SharedExecutionScope = S.Struct({
   skillIds: S.Array(RunnerReferenceId).check(S.isMaxLength(32)),
 })
 export type SharedExecutionScope = typeof SharedExecutionScope.Type
+
+const decodeSharedExecutionScope = S.decodeUnknownExit(SharedExecutionScope, {
+  onExcessProperty: 'error',
+})
+/** 不向其他依赖实例传递内部 schema，由合同所属实例完整校验隔离范围。 */
+export function isSharedExecutionScope(input: unknown): input is SharedExecutionScope {
+  return Exit.isSuccess(decodeSharedExecutionScope(input))
+}
 
 /** 同一原生会话可开始下一轮，但其调用者、资料来源及隔离边界不可更换。 */
 export function sharedSessionIdentity(scope?: SharedExecutionScope): string | undefined {

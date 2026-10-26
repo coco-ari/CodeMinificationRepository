@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { CustomerAttachmentManifest } from "./customerAttachments.ts";
 import { CustomerFileInput, CustomerFileResult } from "./customerFiles.ts";
-import { SharedExecutionScope } from "../../../../../autoops/contracts/shared-execution.ts";
+import { isSharedExecutionScope, type SharedExecutionScope } from "../../../../../autoops/contracts/shared-execution.ts";
 
 /** Device transport only. Browser chat and Provider events retain their T3 contracts. */
 export const CUSTOMER_AGENT_PROTOCOL_VERSION = 1;
@@ -9,6 +9,8 @@ export const CUSTOMER_AGENT_MAX_FRAME_BYTES = 1024 * 1024;
 const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
 const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+// 业务合同由其所属依赖实例验证，避免跨实例解释内部 schema 状态。
+const CustomerSharedExecutionScope = Schema.declare<SharedExecutionScope>(isSharedExecutionScope);
 export const CustomerAgentTarget = Schema.Struct({
   registeredWorkspaceId: Id,
   workspaceBindingRevision: Revision,
@@ -24,7 +26,7 @@ export const CustomerAgentCommand = Schema.Struct({
   type: Schema.Literal("command"), commandId: Id, sessionId: Id,
   target: CustomerAgentTarget, method: CustomerAgentMethod,
   runtimeEpoch: Schema.optional(Id), input: Schema.Unknown,
-  executionScope: Schema.optional(SharedExecutionScope),
+  executionScope: Schema.optional(CustomerSharedExecutionScope),
   attachments: Schema.optional(Schema.Array(CustomerAttachmentManifest)),
   skillBindings: Schema.optional(Schema.Array(Schema.Struct({ id: Id, name: Id }))),
 });
