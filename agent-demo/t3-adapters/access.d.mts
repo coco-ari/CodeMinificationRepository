@@ -1,3 +1,4 @@
+import type { AssistantSelection } from '../../autoops/contracts/assistants.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProjectCapabilities, ProjectMembership, RuntimeProject as AutoOpsProject, RuntimeAgent as AutoOpsAgent } from '../../autoops/contracts/runtime.ts';
 export type { ProjectMembership, RuntimeProject as AutoOpsProject, RuntimeAgent as AutoOpsAgent } from '../../autoops/contracts/runtime.ts';
@@ -17,6 +18,7 @@ export interface AutoOpsPrincipal {
 }
 export interface ThreadBinding {
   readonly threadId: string;
+  readonly question?: AssistantSelection;
   readonly executionBinding: ExecutionBinding;
   readonly projectId: string;
   readonly environmentId: string | null;
@@ -37,12 +39,14 @@ export interface ThreadBinding {
 export interface ToolScope { actorId: string; binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
 export interface ThreadInputBinding { readonly threadId: string; readonly runId: string; readonly inputId: string; readonly actorId: string; readonly inputOwnerId: string; readonly actorVerified: boolean; readonly createdAt: string }
 export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
-export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding};
+export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding;question?: AssistantSelection};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
 export interface AutoOpsAccess {
   assertAccepting(): void;
   stopAccepting(): void;
   readonly customerRegistry: CustomerRegistry;
+  questionInstructions(actorId:string, threadId:string, modelSelection?:unknown):string;
+  requireQuestionForActor(actorId:string, threadId:string, modelSelection?: unknown): AssistantSelection | undefined;
   requireThreadExecution(principal: AutoOpsPrincipal, threadId: string, options?: {requireOnline?: boolean}): ThreadBinding;
   authenticateCookie(cookie?: string): AutoOpsPrincipal;
   refresh(principal: AutoOpsPrincipal): AutoOpsPrincipal;
@@ -109,7 +113,8 @@ export interface AutoOpsAccess {
     canCreateProject:boolean;
     modelSelectionEnabled:boolean;
     customerAgentsEnabled:boolean;
-    projects: (Pick<AutoOpsProject, 'id'|'name'|'environments'> & {agents: {id:string; name:string}[];membership:ProjectMembership;capabilities:ProjectCapabilities})[];
+    assistantDirectoryEnabled?:boolean;
+    projects: (Pick<AutoOpsProject, 'id'|'name'|'environments'> & {agents: {id:string; name:string}[];membership:ProjectMembership;capabilities:ProjectCapabilities;assistants?: import('../../autoops/contracts/assistants.ts').AssistantDirectory})[];
     agents: AutoOpsAgent[];
     productProfile: {id: ProductProfile['id']};
     capabilities: ProductProfile['capabilities'];
@@ -125,7 +130,7 @@ export function getThreadBinding(threadId: string): ThreadBinding | undefined;
 export function requireToolThread(threadId: string, actorId?: string): ToolScope;
 
 export function initializeAutoOpsAccessSchema(db: DatabaseSync): void;
-export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;kind?:'internal'|'external';status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean}): AutoOpsAccess;
+export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;kind?:'internal'|'external';status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean;questions?: () => import("./assistants/index.ts").AssistantDirectoryService}): AutoOpsAccess;
 
 export function stopConfiguredAutoOpsAccess(): void;
 export function closeConfiguredAutoOpsAccess(): void;

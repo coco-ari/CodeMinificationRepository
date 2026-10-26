@@ -139,8 +139,11 @@ export const resolveCustomerSkillMentions = Effect.fn("HeadlessCodexRunner.resol
     client: CodexClient.CodexAppServerClient["Service"],
     cwd: string | null,
     text: string,
+    selected?: readonly string[],
   ) {
-    const names = [...new Set([...text.matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!))];
+    const names = [
+      ...new Set(selected ?? [...text.matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!)),
+    ];
     if (names.length === 0) return [];
     const response = yield* client.request("skills/list", { cwds: cwd === null ? [] : [cwd] });
     const available = parseCodexSkillsListResponse(response, cwd ?? "");
@@ -219,7 +222,9 @@ export function customerRuntimePolicy(
   };
 }
 
-export function makeCustomerCodexHost(resolveAttachmentPath: (attachment: C.ChatAttachment) => string | null = () => null): CodexExecutionHost {
+export function makeCustomerCodexHost(
+  resolveAttachmentPath: (attachment: C.ChatAttachment) => string | null = () => null,
+): CodexExecutionHost {
   return {
     additionalContext: () => ({}),
     mcpSessions: { read: () => Effect.succeed(undefined) },
@@ -227,7 +232,7 @@ export function makeCustomerCodexHost(resolveAttachmentPath: (attachment: C.Chat
     interactionMode: () => "default",
     threadParameters: () => ({ config: CUSTOMER_THREAD_CONFIG }),
     mcpApprovals: {},
-    resolveSkillMentions: resolveCustomerSkillMentions,
+    resolveSkillMentions: (client, cwd, text) => resolveCustomerSkillMentions(client, cwd, text),
     resolveAttachmentPath,
     resolveAttachmentPathById: () => null,
     snapshotMcpApp: () => Effect.succeed(undefined),
@@ -283,7 +288,14 @@ export async function createHeadlessCodexRunner(
   let nativeThreadId: string | undefined;
   let client: CodexClient.CodexAppServerClient["Service"] | undefined;
   let clientInitialized = false;
+  let selectedSkillNames: readonly string[] | undefined;
   const host = makeCustomerCodexHost(options.resolveAttachmentPath);
+  const resolveSelectedSkills: typeof host.resolveSkillMentions = (active, cwd, text) => {
+    const mentioned = [...text.matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!);
+    if (selectedSkillNames && mentioned.some((name) => !selectedSkillNames!.includes(name)))
+      return Effect.die(new Error("此技能不在当前助手配置中"));
+    return resolveCustomerSkillMentions(active, cwd, text, selectedSkillNames);
+  };
   const adapter = await manager.runPromise(
     Effect.gen(function* () {
       const context = yield* Layer.build(Core.makeLayerAppServerClientFactory());
@@ -315,6 +327,7 @@ export async function createHeadlessCodexRunner(
         }),
         host: {
           ...host,
+          resolveSkillMentions: resolveSelectedSkills,
           settleBackgroundBeforeTerminal: true,
           onUncertainExecution: (cause) =>
             Effect.promise(() => Promise.resolve(options.onError?.(cause))),
@@ -388,8 +401,9 @@ export async function createHeadlessCodexRunner(
     }
   };
   const assertMessage = (message: Adapter.ProviderAdapterV2TurnMessage) => {
-    if (/^\s*\/goal\b/iu.test(message.text)) throw new Error("Persistent goals are unavailable on this customer runtime.");
-    if (message.attachments.some(attachment => !host.resolveAttachmentPath(attachment)))
+    if (/^\s*\/goal\b/iu.test(message.text))
+      throw new Error("Persistent goals are unavailable on this customer runtime.");
+    if (message.attachments.some((attachment) => !host.resolveAttachmentPath(attachment)))
       throw new Error("附件未能传到这台电脑，请重新发送");
   };
   const encodeThread = Schema.encodeSync(C.OrchestrationV2ProviderThreadJson);
@@ -453,12 +467,22 @@ export async function createHeadlessCodexRunner(
               throw new Error("The conversation binding is immutable.");
             if (value.appContext?.length)
               throw new Error("Platform context bridging is unavailable on this customer runtime.");
+            selectedSkillNames = value.assistantConfiguration?.skillNames;
             await validateSelection(value.modelSelection);
             if (client !== undefined)
-              await run(host.resolveSkillMentions(client, options.cwd, value.message.text, value.threadId));
+              await run(
+                resolveSelectedSkills(client, options.cwd, value.message.text, value.threadId),
+              );
             return value;
           });
-          await run(session.startTurn({ ...decoded, runtimePolicy }));
+          const instructions = decoded.assistantConfiguration?.instructions;
+          await run(
+            session.startTurn({
+              ...decoded,
+              runtimePolicy,
+              appContext: instructions ? [{ key: "autoops_assistant", text: instructions }] : [],
+            }),
+          );
           return null;
         }
         case "steerTurn": {
@@ -469,7 +493,9 @@ export async function createHeadlessCodexRunner(
             if (value.threadId !== threadId)
               throw new Error("The conversation binding is immutable.");
             if (client !== undefined)
-              await run(host.resolveSkillMentions(client, options.cwd, value.message.text, value.threadId));
+              await run(
+                resolveSelectedSkills(client, options.cwd, value.message.text, value.threadId),
+              );
             return value;
           });
           await run(session.steerTurn(decoded));

@@ -58,6 +58,7 @@ export interface CustomerSkill {
 }
 export interface CustomerCapabilityInput {
   workspaceFiles?: boolean
+  assistantConfiguration?: boolean
   registeredWorkspaceId: string
   workspaceBindingRevision: number
   runtimeId: 'codex'

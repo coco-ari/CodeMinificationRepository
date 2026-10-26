@@ -1,3 +1,7 @@
+import * as ByteSize from 'effect/ByteSize'
+import * as HttpIncomingMessage from 'effect/http/HttpIncomingMessage'
+import * as S from 'effect/Schema'
+import { ThreadBindingRequest } from '../../../../../../../autoops/contracts/assistants.ts'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
@@ -7,7 +11,6 @@ import { ThreadId } from '@t3tools/contracts'
 import * as ThreadManagement from '../../orchestration-v2/ThreadManagementService.ts'
 import { hasAcceptedUserMessage, isThreadSubmissionActive, getThreadSubmissionGeneration } from '../threadReservations.ts'
 import { readImportedDrafts } from '../../../../../../../agent-demo/t3-adapters/legacy-drafts.mjs'
-import type { ThreadBinding } from '../../../../../../../agent-demo/t3-adapters/access.mjs'
 
 export function conversationsRoutes({ access, principal }: BusinessHttpContext) {
 const nativeSubmissionState = (threadId: string) => Effect.gen(function* () {
@@ -49,11 +52,11 @@ HttpRouter.add("POST", "/autoops/thread-bindings", Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const current = yield* principal;
       yield* Effect.try(() => access.requireCsrf(current, request.headers["x-demo-csrf"]));
-      const input = yield* request.json;
+      const input = yield* request.json.pipe(Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.kibibytes(64)), Effect.mapError(() => ({ status: 400, code: 'INVALID_BINDING', message: '会话参数正文无效或超过大小限制' })));
       if (typeof input !== "object" || input === null || Array.isArray(input)) {
         return HttpServerResponse.jsonUnsafe({ code: "INVALID_BINDING", error: "会话绑定格式无效" }, { status: 400 });
       }
-      const binding = input as Omit<ThreadBinding, "ownerId" | "createdAt">;
+      const binding = yield* S.decodeUnknownEffect(ThreadBindingRequest, { onExcessProperty: 'error' })(input).pipe(Effect.mapError(() => ({ status: 400, code: 'INVALID_BINDING', message: '会话参数字段、格式或长度无效' })));
       // 未完成业务绑定的原生会话不能由当前用户自行认领。
       if (typeof binding.threadId === "string") {
         const existing = access.getThreadBinding(binding.threadId);

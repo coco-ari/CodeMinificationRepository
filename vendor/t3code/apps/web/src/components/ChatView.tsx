@@ -1,3 +1,4 @@
+import { questionSendDisabledReason } from '~/autoops/questionConfiguration';
 import { customerFilesCwd } from "~/autoops/customerFiles";
 import {
   useCustomerRuntime,
@@ -8693,7 +8694,7 @@ export default function ChatView(props: ChatViewProps) {
                               canResume={resumableRunId !== null || hasHeldQueuedRuns}
                               isRevertingCheckpoint={isRevertingCheckpoint}
                               sendDisabledReason={
-                                customerSendBlock ??
+                                questionSendDisabledReason(businessScope) ?? customerSendBlock ??
                                 (!canOperateThread
                                   ? "当前连接不能修改对话。"
                                   : isEnvironmentChanging

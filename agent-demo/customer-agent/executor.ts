@@ -171,7 +171,11 @@ export class CustomerAgentExecutor {
           if (input.message) input.message = await resolveCustomerFileReferences(this.store, this.deviceId, command.target, input.message, this.shutdown.signal);
           if (this.attachments) await this.attachments.prepare(command, this.shutdown.signal, () => { this.store.resolveWorkspace(command.target); });
           else if (input.message?.attachments?.length || command.attachments?.length) throw new ConnectorError("attachment_unavailable", "请更新连接程序后再发送附件");
-          const names = [...new Set([...String(input.message?.text ?? "").matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!))];
+          const requestedNames = input.assistantConfiguration?.skillNames ?? [];
+          if (!Array.isArray(requestedNames) || requestedNames.length > 32 || requestedNames.some((name: unknown) => typeof name !== "string")) throw new ConnectorError("invalid_input", "助手技能选择无效");
+          const mentions = [...String(input.message?.text ?? "").matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!);
+          if (input.assistantConfiguration && mentions.some(name => !requestedNames.includes(name))) throw new ConnectorError("skill_not_selected", "该技能不在本次助手配置中");
+          const names = [...new Set([...requestedNames, ...mentions])];
           if (names.length) {
             const { skills } = await runner.catalog();
             for (const name of names) {
@@ -248,7 +252,7 @@ export class CustomerAgentExecutor {
     return {
       registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
       runtimeId: "codex", protocolVersion: 1,
-      workspaceFiles: true,
+      workspaceFiles: true, assistantConfiguration: true,
       ...(this.attachments ? {attachments: CUSTOMER_ATTACHMENT_LIMITS} : {}),
       revision: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
       models: catalog.models.map((model) => {

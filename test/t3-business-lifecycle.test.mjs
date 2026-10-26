@@ -176,6 +176,8 @@ for (const force of [false,true]) test(`真实配置宿主${force?'排空预算�
   const script=`
     import assert from 'node:assert/strict';
     import { DatabaseSync } from 'node:sqlite';
+    import { mkdirSync, writeFileSync } from 'node:fs';
+    import { configuredAutoOpsAssistantDirectory } from './agent-demo/t3-adapters/access-runtime.mjs';
     import { join } from 'node:path';
     import { createHash } from 'node:crypto';
     import { createBusinessRuntime } from './agent-demo/t3-adapters/business-runtime.mjs';
@@ -195,7 +197,12 @@ for (const force of [false,true]) test(`真实配置宿主${force?'排空预算�
     await workspaces.ensureProject(project);
     const version=workspaces.overview(project.id).internalVersions[0];
     workspaces.startPackages(project.id,{sourceVersionId:version.id,services:['frontend'],requestId:'drain-fixture'},principal.id);
-    access.bindThread(principal,{threadId:'fixture-thread',projectId:project.id,environmentId:'env-test',agentId:'a-project',visibility:'private',workspaceType:'internal',workspaceVersionId:version.id});
+    process.env.AUTOOPS_T3_MODEL='fixture-model';
+    mkdirSync(join(process.env.AUTOOPS_T3_DATA_DIR,'t3'),{recursive:true});
+    writeFileSync(join(process.env.AUTOOPS_T3_DATA_DIR,'t3/models-catalog.json'),JSON.stringify({version:1,source:'https://fixture.invalid/v1',models:[{id:'fixture-model',reasoningLevels:[],defaultReasoning:null,inputModalities:['text']}]}));
+    const config={agentId:'a-project',executionBinding:{kind:'platform'},environmentId:'env-test',workspaceType:'internal',visibility:'private',skillIds:[],model:{instanceId:'codex',model:'fixture-model',reasoningEffort:null}};
+    const preset=configuredAutoOpsAssistantDirectory().save(principal.id,project.id,null,{requestId:'lifecycle-preset',expectedRevision:0,value:{name:'生命周期测试',description:'',instructions:'',enabled:true,configuration:config}});
+    access.bindThread(principal,{threadId:'fixture-thread',projectId:project.id,environmentId:'env-test',agentId:'a-project',visibility:'private',workspaceType:'internal',question:{assistantId:preset.id,presetRevision:preset.revision,configuration:config}});
     runtime.stopAccepting();runtime.stopAccepting();
     assert.throws(()=>access.bootstrap(principal),{code:'AUTOOPS_STOPPING'});
     assert.throws(()=>access.requireToolThread('fixture-thread'),{code:'AUTOOPS_STOPPING'});

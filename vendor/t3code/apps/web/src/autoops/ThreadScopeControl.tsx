@@ -1,3 +1,7 @@
+import { QuestionSkillsControl } from "./QuestionSkillsControl";
+import { questionCanAdjust, questionModelSelection } from "./questionConfiguration";
+import { refreshProjectHost } from "./projectDirectory";
+import { Button } from "~/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { ScopeReadError } from "./ScopeReadError";
 import { BotIcon, EyeIcon, ServerIcon } from "lucide-react";
@@ -19,7 +23,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { toastManager } from "~/components/ui/toast";
 import { ConversationWorkspaceControl } from "./ConversationWorkspaceControl";
 import { CustomerExecutionStatus } from "./CustomerExecutionStatus";
-import { customerInstanceId, loadCustomerCapabilities } from "./customerAgents";
+import { customerInstanceId } from "./customerAgents";
 import { WorkspaceScopeControl, ScopeComposerChoice } from "./WorkspaceScopeControl";
 import { useAutoOpsThreadScope } from "./useThreadScope";
 import {
@@ -31,6 +35,7 @@ import {
   sameAutoOpsThreadScope,
   setAutoOpsThreadScope,
   type AutoOpsThreadScope,
+  scopeFromAssistant,
 } from "./hostConfig";
 
 export function AutoOpsThreadScopeControl({
@@ -63,6 +68,44 @@ export function AutoOpsThreadScopeControl({
   const [pendingAttempt, setPendingAttempt] = useState(0);
   const [readAttempt, setReadAttempt] = useState(0);
   const wasSubmitting = useRef(false);
+  useEffect(() => {
+    if (!isDraft || !scope?.question) return;
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(draftTarget, questionModelSelection(scope.question), {
+      replaceOptions: true,
+    });
+    return useComposerDraftStore.subscribe(() => {
+      const current = readAutoOpsThreadScope(threadId, projectId);
+      if (!current?.question || current.scopeState === "locked" || !questionCanAdjust(current))
+        return;
+      const saved = useComposerDraftStore.getState().getComposerDraft(draftTarget)
+        ?.modelSelectionByProvider?.[
+        ProviderInstanceId.make(current.question.configuration.model.instanceId)
+      ];
+      if (!saved) return;
+      const model = {
+        instanceId: saved.instanceId,
+        model: saved.model,
+        reasoningEffort: (saved.options?.find((option) => option.id === "reasoningEffort")?.value ??
+          null) as typeof current.question.configuration.model.reasoningEffort,
+      };
+      if (JSON.stringify(model) !== JSON.stringify(current.question.configuration.model))
+        setAutoOpsThreadScope(threadId, {
+          ...current,
+          question: {
+            ...current.question,
+            configuration: { ...current.question.configuration, model },
+          },
+        });
+    });
+  }, [
+    threadId,
+    projectId,
+    isDraft,
+    scope?.question?.assistantId,
+    scope?.question?.presetRevision,
+    draftTarget,
+  ]);
   useEffect(() => {
     if (!host) return;
     if (
@@ -143,12 +186,17 @@ export function AutoOpsThreadScopeControl({
     if (error) toastManager.add({ type: "error", title: "无法更新对话范围", description: error });
   }, [error]);
   if (!host) return null;
-  if (!scope) return error ? (
-    <ComposerSurface.ContextStrip>
-      <ScopeReadError label="对话范围读取失败" error={error} busy={loading}
-        onRetry={() => setReadAttempt((value) => value + 1)} />
-    </ComposerSurface.ContextStrip>
-  ) : null;
+  if (!scope)
+    return error ? (
+      <ComposerSurface.ContextStrip>
+        <ScopeReadError
+          label="对话范围读取失败"
+          error={error}
+          busy={loading}
+          onRetry={() => setReadAttempt((value) => value + 1)}
+        />
+      </ComposerSurface.ContextStrip>
+    ) : null;
   const project = host.projects.find((entry) => entry.id === projectId);
   if (!project) return null;
   const locked =
@@ -163,23 +211,65 @@ export function AutoOpsThreadScopeControl({
     changing ||
     scope.scopeState === "submitting" ||
     (!isDraft && error !== null);
-  const apply = async (patch: Partial<AutoOpsThreadScope>) => {
-    if (locked || disabled) return;
+  const canAdjust = questionCanAdjust(scope);
+  const configLocked = locked || !canAdjust;
+  const apply = async (patch: Partial<AutoOpsThreadScope>, loadPresetModel = false) => {
+    if (locked || disabled || (!canAdjust && !patch.question)) return;
     const next = { ...scope, ...patch, scopeState: "draft" as const, scopeLocked: false };
+    if (next.question)
+      next.question = {
+        ...next.question,
+        configuration: {
+          ...next.question.configuration,
+          agentId: next.agentId,
+          executionBinding: next.executionBinding ?? { kind: "platform" },
+          environmentId: next.environmentId,
+          workspaceType: next.workspaceType ?? null,
+          visibility: next.visibility,
+        },
+      };
+    if (
+      next.question &&
+      !loadPresetModel &&
+      JSON.stringify(next.executionBinding) === JSON.stringify(scope.executionBinding)
+    ) {
+      const selected = useComposerDraftStore.getState().getComposerDraft(draftTarget)
+        ?.modelSelectionByProvider?.[
+        ProviderInstanceId.make(next.question.configuration.model.instanceId)
+      ];
+      if (selected)
+        next.question = {
+          ...next.question,
+          configuration: {
+            ...next.question.configuration,
+            model: {
+              instanceId: selected.instanceId,
+              model: selected.model,
+              reasoningEffort: (selected.options?.find((option) => option.id === "reasoningEffort")
+                ?.value ?? null) as typeof next.question.configuration.model.reasoningEffort,
+            },
+          },
+        };
+    }
     const executionChanged =
       JSON.stringify(next.executionBinding ?? { kind: "platform" }) !==
       JSON.stringify(scope.executionBinding ?? { kind: "platform" });
     if (
+      patch.question === undefined &&
       !executionChanged &&
       next.workspaceVersionId === scope.workspaceVersionId &&
       next.workspaceType === scope.workspaceType &&
       next.environmentId === scope.environmentId &&
       next.agentId === scope.agentId &&
-      next.visibility === scope.visibility
+      next.visibility === scope.visibility &&
+      JSON.stringify(next.question) === JSON.stringify(scope.question)
     )
       return;
     const boundaryChanged =
       executionChanged ||
+      next.agentId !== scope.agentId ||
+      JSON.stringify(next.question?.configuration.skillIds) !==
+        JSON.stringify(scope.question?.configuration.skillIds) ||
       next.workspaceVersionId !== scope.workspaceVersionId ||
       next.workspaceType !== scope.workspaceType ||
       next.environmentId !== scope.environmentId;
@@ -187,30 +277,31 @@ export function AutoOpsThreadScopeControl({
     setError(null);
     try {
       const store = useComposerDraftStore.getState();
-      const updateModel = async (target: ComposerThreadTarget, targetThreadId: string) => {
+      const updateModel = async (
+        target: ComposerThreadTarget,
+        targetThreadId: string,
+        initialize = false,
+      ) => {
+        if (!executionChanged && !loadPresetModel && !initialize) return;
+        if (next.question) {
+          store.setModelSelection(target, questionModelSelection(next.question), {
+            replaceOptions: true,
+          });
+          return;
+        }
         if (!executionChanged) return;
-        if (next.executionBinding?.kind === "customer") {
-          const catalog = await loadCustomerCapabilities(next.executionBinding);
-          const latest = readAutoOpsThreadScope(targetThreadId, projectId);
-          if (!latest || !sameAutoOpsThreadScope(latest, next)) return;
-          if (catalog?.models[0])
-            store.setModelSelection(
-              target,
-              {
-                instanceId: customerInstanceId(next.executionBinding),
-                model: catalog.models[0].id,
+        const latest = readAutoOpsThreadScope(targetThreadId, projectId);
+        if (!latest || !sameAutoOpsThreadScope(latest, next)) return;
+        store.setModelSelection(
+          target,
+          next.executionBinding?.kind === "customer"
+            ? { instanceId: customerInstanceId(next.executionBinding), model: "" }
+            : {
+                instanceId: ProviderInstanceId.make(host.fixedModel.instanceId),
+                model: host.fixedModel.model,
               },
-              { replaceOptions: true },
-            );
-        } else
-          store.setModelSelection(
-            target,
-            {
-              instanceId: ProviderInstanceId.make(host.fixedModel.instanceId),
-              model: host.fixedModel.model,
-            },
-            { replaceOptions: true },
-          );
+          { replaceOptions: true },
+        );
       };
       const threadRef = scopeThreadRef(runtimeEnvironmentId, ThreadId.make(threadId));
       const hasPreview =
@@ -227,13 +318,14 @@ export function AutoOpsThreadScopeControl({
         if (created) {
           setAutoOpsThreadScope(created.threadId, {
             ...(next.executionBinding ? { executionBinding: next.executionBinding } : {}),
+            ...(next.question ? { question: next.question } : {}),
             projectId: next.projectId,
             environmentId: next.environmentId,
             agentId: next.agentId,
             visibility: next.visibility,
             ...(next.workspaceType ? { workspaceType: next.workspaceType } : {}),
           });
-          await updateModel(created.draftId, created.threadId);
+          await updateModel(created.draftId, created.threadId, true);
           toastManager.add({
             type: "info",
             title: "已新建干净草稿",
@@ -261,30 +353,106 @@ export function AutoOpsThreadScopeControl({
       data-scope-state={locked ? "locked" : disabled ? "submitting" : "draft"}
     >
       <div className="flex min-w-0 flex-initial items-center gap-1">
-        {host.customerAgentsEnabled || scope.executionBinding?.kind === "customer" ? (
-          <ConversationWorkspaceControl
-            projectId={projectId}
-            scope={scope}
-            locked={locked}
+        {host.assistantDirectoryEnabled ? (
+          <ScopeComposerChoice
+            label="助手"
+            summary={
+              project.assistants?.items.find(
+                (item) => item.preset.id === scope.question?.assistantId,
+              )?.preset.name ?? (locked ? "既有助手" : "请选择助手")
+            }
+            icon={BotIcon}
+            value={scope.question?.assistantId ?? ""}
+            options={
+              project.assistants?.items
+                .filter((item) => item.available)
+                .map((item) => ({ value: item.preset.id, label: item.preset.name })) ?? []
+            }
+            locked={
+              locked ||
+              (!canAdjust &&
+                !!scope.question &&
+                (project.assistants?.items.filter((item) => item.available).length ?? 0) <= 1)
+            }
+            lockReason={!canAdjust && !locked ? "由项目管理员分配" : undefined}
             disabled={disabled}
-            onChange={(patch) => void apply(patch)}
+            onChange={(id) => {
+              const preset = project.assistants?.items.find(
+                (item) => item.preset.id === id && item.available,
+              )?.preset;
+              if (preset) void apply(scopeFromAssistant(preset), true);
+            }}
+          />
+        ) : null}
+        {host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
+          <ScopeComposerChoice
+            label="资料范围"
+            summary={scope.workspaceType === "external" ? "外部当前资料" : "内部当前资料"}
+            icon={EyeIcon}
+            value={scope.workspaceType ?? "internal"}
+            options={
+              project.membership?.workspaceAccess === "external"
+                ? [{ value: "external", label: "外部当前资料" }]
+                : [
+                    { value: "internal", label: "内部当前资料" },
+                    { value: "external", label: "外部当前资料" },
+                  ]
+            }
+            locked={configLocked}
+            lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
+            disabled={disabled}
+            onChange={(value) =>
+              void apply({
+                workspaceType: value as "internal" | "external",
+                workspaceVersionId: undefined,
+              })
+            }
+          />
+        ) : host.assistantDirectoryEnabled && scope.executionBinding?.kind === "customer" ? (
+          <ScopeComposerChoice
+            label="运行位置"
+            summary="已登记电脑目录"
+            icon={EyeIcon}
+            value="customer"
+            options={[]}
+            locked
+            disabled={disabled}
+            onChange={() => {}}
           />
         ) : (
-          <WorkspaceScopeControl
-            projectId={projectId}
-            scope={scope}
-            locked={locked}
-            disabled={disabled}
-            onChange={(type) => void apply({ workspaceType: type, workspaceVersionId: undefined })}
-          />
+          <>
+            {host.customerAgentsEnabled || scope.executionBinding?.kind === "customer" ? (
+              <ConversationWorkspaceControl
+                projectId={projectId}
+                scope={scope}
+                locked={locked}
+                disabled={disabled}
+                onChange={(patch) => void apply(patch)}
+              />
+            ) : (
+              <WorkspaceScopeControl
+                projectId={projectId}
+                scope={scope}
+                locked={locked}
+                disabled={disabled}
+                onChange={(type) =>
+                  void apply({ workspaceType: type, workspaceVersionId: undefined })
+                }
+              />
+            )}
+          </>
         )}
         <ScopeComposerChoice
           label="业务环境"
-          summary={scope.environmentId === null ? "无环境" : environment?.name ?? "环境不可用"}
+          summary={scope.environmentId === null ? "无环境" : (environment?.name ?? "环境不可用")}
           icon={ServerIcon}
           value={scope.environmentId ?? "__none__"}
-          options={[{ value: "__none__", label: "无环境" }, ...project.environments.map((entry) => ({ value: entry.id, label: entry.name }))]}
-          locked={locked}
+          options={[
+            { value: "__none__", label: "无环境" },
+            ...project.environments.map((entry) => ({ value: entry.id, label: entry.name })),
+          ]}
+          locked={configLocked || scope.executionBinding?.kind === "customer"}
+          lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
           disabled={disabled}
           onChange={(value) => void apply({ environmentId: value === "__none__" ? null : value })}
         />
@@ -301,13 +469,30 @@ export function AutoOpsThreadScopeControl({
                   { value: "project", label: "项目共享" },
                 ]
           }
-          locked={locked}
+          locked={configLocked || scope.executionBinding?.kind === "customer"}
+          lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
           disabled={disabled}
           onChange={(value) => {
             if (value === "private" || value === "project") void apply({ visibility: value });
           }}
         />
-        {scope.executionBinding?.kind !== "customer" ? (
+        {host.assistantDirectoryEnabled ? (
+          <QuestionSkillsControl
+            scope={scope}
+            locked={configLocked}
+            disabled={disabled}
+            onChange={(skillIds) => {
+              if (scope.question)
+                void apply({
+                  question: {
+                    ...scope.question,
+                    configuration: { ...scope.question.configuration, skillIds },
+                  },
+                });
+            }}
+          />
+        ) : null}
+        {!host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
           <ScopeComposerChoice
             label="项目助手"
             summary={agent?.name ?? "助手不可用"}
@@ -331,11 +516,30 @@ export function AutoOpsThreadScopeControl({
           className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
         />
       ) : null}
+      {host.assistantDirectoryEnabled &&
+      (!project.assistants?.ready || !scope.question) &&
+      !locked ? (
+        <div role="status" className="flex items-center gap-2 text-xs">
+          <span>{project.assistants?.reason?.message ?? "请选择助手"}</span>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => void refreshProjectHost().catch((cause) => setError(cause.message))}
+          >
+            刷新助手
+          </Button>
+        </div>
+      ) : null}
       {error ? (
-        <ScopeReadError label="对话范围读取失败" error={error} busy={loading} onRetry={() => {
-          if (scope.scopeState === "submitting") setPendingAttempt((value) => value + 1);
-          else setReadAttempt((value) => value + 1);
-        }} />
+        <ScopeReadError
+          label="对话范围读取失败"
+          error={error}
+          busy={loading}
+          onRetry={() => {
+            if (scope.scopeState === "submitting") setPendingAttempt((value) => value + 1);
+            else setReadAttempt((value) => value + 1);
+          }}
+        />
       ) : null}
     </ComposerSurface.ContextStrip>
   );

@@ -128,6 +128,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if (binding.nativeParentThreadId) denied('原生子任务由父会话控制，仅供查看')
     if (binding.compatibilityReadOnly) denied('兼容历史仅供查看，不能继续执行')
     if (binding.projectId !== payload.projectId) denied('会话项目与已确认的授权绑定不一致')
+    access.requireQuestionForActor(principal.id, binding.threadId, payload.modelSelection)
     checkRuntime(payload, access, binding)
     checkReferences(access, principal, payload.initialMessage, binding.threadId)
     if (!customer) configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.initialMessage?.context,principal.id)
@@ -164,6 +165,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if (payload.projectId !== undefined && payload.projectId !== binding.projectId) denied()
     if (payload.type === 'thread.metadata.update' &&
       ['projectId', 'worktreePath', 'branch', 'linkedPullRequest', 'branchPullRequest'].some((key) => key in payload)) denied()
+    if (['message.dispatch','thread.model-selection.set'].includes(payload.type) && payload.modelSelection !== undefined) access.requireQuestionForActor(principal.id, binding.threadId, payload.modelSelection)
     checkRuntime(payload, access, binding)
     checkReferences(access, principal, payload, binding.threadId)
     if (payload.type === 'message.dispatch' || payload.type === 'queued-run.edit') {

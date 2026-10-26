@@ -1,3 +1,8 @@
+import type {
+  AssistantSelection,
+  AssistantPreset,
+} from '../../../../../../autoops/contracts/assistants.ts'
+import type { ModelSelection } from '@t3tools/contracts'
 import { autoOpsRequest, AutoOpsRequestError } from './apiClient'
 import { autoOpsStorage, readAutoOpsHost, type AutoOpsT3Bootstrap } from './hostSnapshot'
 
@@ -11,6 +16,7 @@ export type AutoOpsExecutionBinding =
       runtimeId: 'codex'
     }
 export interface AutoOpsThreadScope {
+  question?: AssistantSelection
   executionBinding?: AutoOpsExecutionBinding
   projectId: string
   environmentId: string | null
@@ -60,6 +66,7 @@ function sameExecutionBinding(
 }
 export function sameAutoOpsThreadScope(left: AutoOpsThreadScope, right: AutoOpsThreadScope) {
   return (
+    JSON.stringify(left.question) === JSON.stringify(right.question) &&
     left.projectId === right.projectId &&
     left.environmentId === right.environmentId &&
     left.agentId === right.agentId &&
@@ -70,11 +77,17 @@ export function sameAutoOpsThreadScope(left: AutoOpsThreadScope, right: AutoOpsT
   )
 }
 function scopeAllowed(scope: AutoOpsThreadScope, project: AutoOpsT3Bootstrap['projects'][number]) {
-  const savedCustomer = scope.executionBinding?.kind === 'customer' && scope.scopeState !== undefined
+  const savedCustomer =
+    scope.executionBinding?.kind === 'customer' && scope.scopeState !== undefined
   return (
-    (savedCustomer || scope.environmentId === null || project.environments.some((entry) => entry.id === scope.environmentId)) &&
+    (savedCustomer ||
+      scope.environmentId === null ||
+      project.environments.some((entry) => entry.id === scope.environmentId)) &&
     project.agents.some((entry) => entry.id === scope.agentId) &&
-    (savedCustomer || scope.environmentId === null || !project.membership || project.membership.environmentIds.includes(scope.environmentId)) &&
+    (savedCustomer ||
+      scope.environmentId === null ||
+      !project.membership ||
+      project.membership.environmentIds.includes(scope.environmentId)) &&
     (scope.executionBinding?.kind === 'customer'
       ? scope.visibility === 'private' &&
         scope.agentId === 'a-project' &&
@@ -107,6 +120,19 @@ export function readAutoOpsThreadScope(
     (entry) => !project.membership || project.membership.environmentIds.includes(entry.id),
   )
   if (!project || !project.agents[0]) return undefined
+  if (readAutoOpsHost()?.assistantDirectoryEnabled) {
+    const preset = project.assistants?.items.find(
+      (item) => item.preset.id === project.assistants?.defaultAssistantId && item.available,
+    )?.preset
+    if (preset) return scopeFromAssistant(preset)
+    return {
+      projectId,
+      environmentId: null,
+      agentId: 'a-project',
+      visibility: 'private',
+      workspaceType: project.membership?.workspaceAccess === 'external' ? 'external' : 'internal',
+    }
+  }
   return {
     projectId,
     environmentId: environment?.id ?? null,
@@ -155,15 +181,39 @@ export async function inheritAutoOpsThreadScope(
 export async function authorizeThreadLaunch({
   threadId,
   projectId,
+  modelSelection,
 }: {
   threadId: string
   projectId: string
+  modelSelection?: ModelSelection
 }): Promise<void> {
   const host = readAutoOpsHost()
   if (!host) return
   const scope = readAutoOpsThreadScope(threadId, projectId)
   if (!scope) throw new Error('请先选择有权使用的项目、环境和助手。')
-  await reserveAutoOpsThreadScope(threadId, scope)
+  if (host.assistantDirectoryEnabled && !scope.question)
+    throw new Error('请选择当前项目已配置的可用助手。')
+  const actual =
+    scope.question && modelSelection
+      ? {
+          ...scope,
+          question: {
+            ...scope.question,
+            configuration: {
+              ...scope.question.configuration,
+              model: {
+                instanceId: modelSelection.instanceId,
+                model: modelSelection.model,
+                reasoningEffort: (modelSelection.options?.find(
+                  (option) => option.id === 'reasoningEffort',
+                )?.value ??
+                  null) as AssistantSelection['configuration']['model']['reasoningEffort'],
+              },
+            },
+          },
+        }
+      : scope
+  await reserveAutoOpsThreadScope(threadId, actual)
 }
 
 export async function reserveAutoOpsThreadScope(
@@ -194,6 +244,7 @@ export async function reserveAutoOpsThreadScope(
       projectId: desired.projectId,
       environmentId: desired.environmentId,
       agentId: desired.agentId,
+      ...(desired.question ? { question: desired.question } : {}),
       visibility: desired.visibility,
       ...(desired.executionBinding ? { executionBinding: desired.executionBinding } : {}),
       ...(desired.workspaceType
@@ -225,7 +276,8 @@ function requireThreadBinding(
     !binding ||
     typeof binding.projectId !== 'string' ||
     !binding.projectId ||
-    (binding.environmentId !== null && (typeof binding.environmentId !== 'string' || !binding.environmentId)) ||
+    (binding.environmentId !== null &&
+      (typeof binding.environmentId !== 'string' || !binding.environmentId)) ||
     typeof binding.agentId !== 'string' ||
     !binding.agentId ||
     (binding.visibility !== 'private' && binding.visibility !== 'project')
@@ -273,4 +325,18 @@ export async function findAutoOpsThreadScope(
   }
   publishThreadScope(threadId, binding)
   return binding
+}
+
+/** 助手选择整体替换上次未提交配置，实际来源和模型不从平台默认补齐。 */
+export function scopeFromAssistant(preset: AssistantPreset): AutoOpsThreadScope {
+  const config = preset.configuration
+  return {
+    projectId: preset.projectId,
+    agentId: config.agentId,
+    executionBinding: config.executionBinding,
+    environmentId: config.environmentId,
+    visibility: config.visibility,
+    ...(config.workspaceType === null ? {} : { workspaceType: config.workspaceType }),
+    question: { assistantId: preset.id, presetRevision: preset.revision, configuration: config },
+  }
 }

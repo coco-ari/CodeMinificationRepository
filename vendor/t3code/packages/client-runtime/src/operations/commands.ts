@@ -630,6 +630,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     yield* Effect.tryPromise(() => prepareHostThreadLaunch({
       threadId: input.threadId,
       projectId: input.bootstrap!.createThread!.projectId,
+      ...(input.modelSelection === undefined ? {} : {modelSelection:input.modelSelection}),
     }));
   }
   const attachments = yield* persistAttachments(

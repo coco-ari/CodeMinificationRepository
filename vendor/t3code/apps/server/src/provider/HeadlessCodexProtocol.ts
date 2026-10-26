@@ -42,6 +42,14 @@ export const HeadlessCodexInputs = {
     message: Adapter.ProviderAdapterV2TurnMessage,
     modelSelection: C.ModelSelection,
     runtimePolicy: Adapter.ProviderAdapterV2RuntimePolicy,
+    assistantConfiguration: Schema.optionalKey(
+      Schema.Struct({
+        instructions: Schema.String.check(Schema.isMaxLength(16000)),
+        skillNames: Schema.Array(
+          Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160)),
+        ).check(Schema.isMaxLength(32)),
+      }),
+    ),
     appContext: Schema.optionalKey(
       Schema.Array(Schema.Struct({ key: Schema.String, text: Schema.String })),
     ),

@@ -83,7 +83,7 @@ export function configuredAutoOpsAccess() {
       if (type === 'cleanup') return configuredAccess.requireProjectActionForActor(actorId, projectId, 'workspace.cleanup')
       return configuredAccess.requireWorkspaceActor(actorId, projectId)
     } })
-    configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore, catalog: configuredAutoOpsProjectDirectory().catalog })
+    configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore, catalog: configuredAutoOpsProjectDirectory().catalog, questions: configuredAutoOpsAssistantDirectory })
     ownedDatabases = { sessionDb, bindingDb }
     return configuredAccess
   } catch (error) {

@@ -76,6 +76,11 @@ export function questionConfigurationChoices(
         message: value.message ?? '电脑当前不可用',
       }
     }
+    if (!unavailable && capabilities?.assistantConfiguration !== true)
+      unavailable = {
+        code: 'CUSTOMER_CONNECTOR_UPDATE_REQUIRED',
+        message: '请更新电脑连接程序后使用助手预设',
+      }
     sources.push({
       id: `${target.deviceId}/${target.registeredWorkspaceId}/${target.workspaceBindingRevision}`,
       name: `${devices.find((device) => device.id === target.deviceId)?.label ?? '自己的电脑'} · ${workspace.label}`,
@@ -97,14 +102,12 @@ export function questionConfigurationChoices(
     sources,
     platformSkills: agents.flatMap((agent) =>
       (['internal', 'external'] as const).flatMap((workspaceType) =>
-        ports
-          .skills(projectId, agent.id, workspaceType)
-          .map((skill) => ({
-            id: skill.id,
-            name: skill.displayName ?? skill.name ?? skill.id,
-            agentId: agent.id,
-            workspaceType,
-          })),
+        ports.skills(projectId, agent.id, workspaceType).map((skill) => ({
+          id: skill.id,
+          name: skill.displayName ?? skill.name ?? skill.id,
+          agentId: agent.id,
+          workspaceType,
+        })),
       ),
     ),
   }
@@ -120,6 +123,7 @@ export function questionConfigurationPolicy(ports: Ports) {
     projectId: string,
     value: QuestionConfiguration,
     member: ProjectMembership,
+    accepted = false,
   ) => {
     const project = ports.projects().find((project) => project.id === projectId)
     if (!project || member.status !== 'active')
@@ -163,6 +167,11 @@ export function questionConfigurationPolicy(ports: Ports) {
           : { reasoningEffort: value.model.reasoningEffort }),
         skillIds: [...value.skillIds],
       })
+      if (capabilities.assistantConfiguration !== true)
+        return fail(
+          'CUSTOMER_CONNECTOR_UPDATE_REQUIRED',
+          '请更新电脑连接程序后使用助手预设；既有自用对话可继续',
+        )
       const model = capabilities.models.find((model) => model.id === value.model.model)
       if (value.model.reasoningEffort === null && model?.supportedReasoningEfforts.length)
         return fail('ASSISTANT_REASONING_REQUIRED', '请明确选择此运行器支持的思考强度')
@@ -186,7 +195,7 @@ export function questionConfigurationPolicy(ports: Ports) {
     )
       return fail('ASSISTANT_REASONING_FORBIDDEN', '请明确选择此模型支持的思考强度')
     const skills = ports.skills(projectId, value.agentId, value.workspaceType)
-    if (value.skillIds.some((id) => !skills.some((skill) => skill.id === id)))
+    if (!accepted && value.skillIds.some((id) => !skills.some((skill) => skill.id === id)))
       return fail('ASSISTANT_SKILL_FORBIDDEN', '所选技能已停用或不属于当前项目和资料范围')
   }
 }

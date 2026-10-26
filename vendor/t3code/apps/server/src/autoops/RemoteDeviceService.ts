@@ -23,7 +23,7 @@ import { customerProviderInstanceId,customerWorkspaceKey } from '../../../../../
 import { createCustomerTransportJournal, customerCommandId, CustomerTransportError, type CustomerTransportJournal, type TransportSession, type TransportReceipt } from '../../../../../../agent-demo/t3-adapters/customer-transport.mjs';
 
 type Send = (frame: CustomerAgentServerFrame) => Promise<void>;
-type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
+type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
 type Delivery = {sessionId:string;epoch:string;seq:number};
 const error = (code:string,message:string) => new CustomerTransportError(code,message);
 export class RemoteDeviceHub {
@@ -172,6 +172,7 @@ export class RemoteDeviceHub {
           // HTTP registration is authoritative; a hello cannot register a directory.
           connection.attachmentTransfers = frame.attachmentTransfers === true;
           connection.workspaceFiles = frame.workspaceFiles === true;
+          connection.assistantConfiguration = frame.assistantConfiguration === true;
           const registered=this.access.customerRegistry.listWorkspaces(principal.ownerId);
           for(const workspace of frame.workspaces)if(!registered.some(item=>item.deviceId===principal.deviceId&&item.projectId===workspace.projectId&&item.registeredWorkspaceId===workspace.registeredWorkspaceId&&item.workspaceBindingRevision===workspace.workspaceBindingRevision&&item.runtimeId===workspace.runtimeId))throw error('WORKSPACE_SCOPE','客户设备声明了未登记的工作区');
           connection.hello=true;
@@ -299,13 +300,14 @@ export class RemoteDeviceHub {
     if(method!=='readThreadSnapshot')this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,target,{requireOnline:!control});
     const commandId=customerCommandId(sessionId,method,key);
     const prior=this.journal.command(commandId);
+    if (method === 'startTurn' && (input as {assistantConfiguration?:unknown})?.assistantConfiguration && !connection?.assistantConfiguration) throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED', '请更新这台电脑的连接程序后使用助手预设'), {outcome:'not_started'});
     const requestedAttachments=['startTurn','steerTurn'].includes(method)?customerMessageAttachments(input):[];
     const fileMentions = ['startTurn', 'steerTurn'].includes(method) && collectComposerInlineTokens(String((input as { message?: { text?: string } })?.message?.text ?? '') + '\n').some(token => token.type === 'mention' && token.value.startsWith('autoops-customer/'));
     if (fileMentions && !connection?.workspaceFiles) throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED', '请更新这台电脑的连接程序后引用文件'), { outcome: 'not_started' });
     if(requestedAttachments.length && (!this.attachments || !connection?.attachmentTransfers))throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED','请更新这台电脑的连接程序后发送附件'),{outcome:'not_started'});
     const attachments=!prior && requestedAttachments.length?await this.attachments!.prepare(session,input):undefined;
     if(signal?.aborted)throw Object.assign(error('WAIT_CANCELLED','已取消发送附件'),{outcome:'not_started'});
-    const names=['startTurn','steerTurn'].includes(method)?[...new Set([...String((input as {message?:{text?:string}})?.message?.text??'').matchAll(SKILL_MENTION_PATTERN)].map(match=>match[2]!))]:[];
+    const names=['startTurn','steerTurn'].includes(method)?[...new Set([...(method === 'startTurn' ? (input as {assistantConfiguration?:{skillNames:readonly string[]}})?.assistantConfiguration?.skillNames ?? [] : []), ...[...String((input as {message?:{text?:string}})?.message?.text??'').matchAll(SKILL_MENTION_PATTERN)].map(match=>match[2]!)])]:[];
     const catalog=names.length?this.access.customerRegistry.getCapabilities(session.ownerId,target):undefined;
     const skillBindings=names.map(name=>{const matches=catalog?.skills.filter(skill=>skill.name===name)??[];if(matches.length!==1)throw error('CUSTOMER_SKILL_UNAVAILABLE','所选本机技能已变更或有重名，请刷新后重选');return {id:matches[0]!.id,name};});
     const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method,...(method!=='openSession'&&session.runtimeEpoch?{runtimeEpoch:session.runtimeEpoch}:{}),...(skillBindings.length?{skillBindings}:{}),...(attachments?.length?{attachments}:{}),input};

@@ -17,6 +17,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
       signal?: AbortSignal,
       messageId?: string,
       editCommandId?: string,
+      modelSelection?: unknown,
     ) {
       const existing = access.getRunInput(threadId, runId)
       if (existing && !existing.actorVerified)
@@ -27,6 +28,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
         )
       if (existing) {
         const scope = access.requireToolThread(threadId, existing.actorId)
+        access.requireQuestionForActor(existing.actorId, threadId, modelSelection)
         if (messageId) {
           try {
             if (
@@ -76,6 +78,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
         actorId = original.actorId
       }
       const { binding } = access.requireToolThread(threadId, actorId)
+      access.requireQuestionForActor(actorId, threadId, modelSelection)
       if (original) {
         const captured = workspace.readInput(
           binding.projectId,
@@ -97,6 +100,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
         signal,
       )
       access.requireToolThread(threadId, actorId)
+      access.requireQuestionForActor(actorId, threadId, modelSelection)
       access.bindRunInput(threadId, runId, captured.id, actorId)
       return captured
     },
@@ -126,6 +130,7 @@ export async function prepareBusinessRunContext(
   signal?: AbortSignal,
   messageId?: string,
   editCommandId?: string,
+  modelSelection?: unknown,
 ) {
   const access = configuredAutoOpsAccess()
   if (!access) return undefined
@@ -134,10 +139,12 @@ export async function prepareBusinessRunContext(
   const capture = await createBusinessRunInputs(
     access,
     configuredWorkspaceManagement(access),
-  ).prepare(threadId, runId, inheritedRunId, signal, messageId, editCommandId)
+  ).prepare(threadId, runId, inheritedRunId, signal, messageId, editCommandId, modelSelection)
+  const run = access.getRunInput(threadId, runId)!
+  const instructions = access.questionInstructions(run.actorId, threadId, modelSelection)
   return {
     key: 'autoops_turn_input',
-    text: `本轮任务已自动固定当前可用资料。后续同步或编辑不改变本轮输入，下一轮重新获取。业务工具的 inputId 参数必须使用下列标识。用户明确引用的文件路径保持原样，用 read_project_material 读取所选内容；引用路径中的输入标识可以与工具 inputId 参数不同。源码同步失败不代表已授权引用不可读，先读取所选文件再判断。sourceWarnings 表示更新失败但所列源码仍可读取，按 repositories 中的真实提交分析，不得声称已确认远端最新状态；sourceErrors 才表示对应仓库不可读取。历史资料只表示当时事实，不得冒充当前最新状态。\n${JSON.stringify(
+    text: `${instructions ? `本次助手角色指令（不扩大既有权限）：\n${instructions}\n\n` : ''}本轮任务已自动固定当前可用资料。后续同步或编辑不改变本轮输入，下一轮重新获取。业务工具的 inputId 参数必须使用下列标识。用户明确引用的文件路径保持原样，用 read_project_material 读取所选内容；引用路径中的输入标识可以与工具 inputId 参数不同。源码同步失败不代表已授权引用不可读，先读取所选文件再判断。sourceWarnings 表示更新失败但所列源码仍可读取，按 repositories 中的真实提交分析，不得声称已确认远端最新状态；sourceErrors 才表示对应仓库不可读取。历史资料只表示当时事实，不得冒充当前最新状态。\n${JSON.stringify(
       {
         inputId: capture.id,
         runId,

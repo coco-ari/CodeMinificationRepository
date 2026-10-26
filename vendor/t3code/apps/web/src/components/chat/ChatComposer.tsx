@@ -1,3 +1,4 @@
+import { questionCanAdjust, questionSendDisabledReason } from '~/autoops/questionConfiguration';
 import { customerInstanceId, customerProviderAvailability } from "~/autoops/customerAgents";
 import { customerComposerText } from "~/autoops/customerComposerText";
 import { customerFilesKey, useCustomerFileSearch } from "~/autoops/customerFiles";
@@ -2027,6 +2028,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const previewFile = composerFiles.find((file) => file.id === previewFileId);
   const autoOpsThreadScope = useAutoOpsThreadScope(activeThreadId ?? "");
+  const canAdjustQuestion = questionCanAdjust(autoOpsThreadScope);
   const customerTarget =
     autoOpsThreadScope?.executionBinding?.kind === "customer"
       ? autoOpsThreadScope.executionBinding
@@ -2285,7 +2287,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedModel,
   );
   const sendDisabledReason =
-    externalSendDisabledReason ??
+    questionSendDisabledReason(autoOpsThreadScope) ?? externalSendDisabledReason ??
     (multipleModelSelections?.length === 0 ? "请至少选择一个模型。" : null) ??
     (activePendingProgress
       ? attachmentBlockReason
@@ -2936,7 +2938,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planModeEnabled: settings.planModeEnabled && autoOpsFeature("planMode"),
     isComposerOwned: true,
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
-  const providerTraitsPicker = autoOpsFeature("modelSelection")
+  const providerTraitsPicker = canAdjustQuestion && autoOpsFeature("modelSelection")
     ? renderProviderTraitsPicker(providerTraitsPickerInput)
     : null;
   const [inlineRestingControlsHost, setInlineRestingControlsHost] = useState<HTMLDivElement | null>(
@@ -3884,7 +3886,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (item.type === "slash-command") {
       if (item.command === "model") {
-        if (!autoOpsFeature("modelSelection")) return;
+        if (!canAdjustQuestion || !autoOpsFeature("modelSelection")) return;
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
           focusEditorAfterReplace: false,
@@ -5373,7 +5375,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data-resting-controls-separator="true"
         />
       ) : null}
-      {isAutoOpsHosted() && !customerScope && !readAutoOpsHost()?.modelSelectionEnabled ? (
+      {!canAdjustQuestion ? <span className="flex shrink-0 gap-2 px-2 text-xs text-muted-foreground" data-autoops-model-readonly><span aria-label="模型">{selectedModel}</span><span aria-label="思考强度">{selectedModelSelection.options?.find(option=>option.id==='reasoningEffort')?.value ?? autoOpsThreadScope?.question?.configuration.model.reasoningEffort ?? '运行器默认'}</span></span> : isAutoOpsHosted() && !customerScope && !readAutoOpsHost()?.modelSelectionEnabled && !readAutoOpsHost()?.assistantDirectoryEnabled ? (
         <span className="shrink-0 px-2 text-xs text-muted-foreground" data-autoops-model>
           {readAutoOpsHost()?.fixedModel.model || selectedModel || "项目 Agent"}
         </span>
@@ -6435,6 +6437,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ),
       openModelPicker: openModelPickerStable,
       stepReasoningEffort: (direction) => {
+        if (!canAdjustQuestion) return;
         if (
           noProviderAvailable ||
           isComposerApprovalState ||
@@ -6607,6 +6610,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       },
     }),
     [
+      canAdjustQuestion,
       stashCurrentPromptStable,
       restoreStashEntryStable,
       activeThread,

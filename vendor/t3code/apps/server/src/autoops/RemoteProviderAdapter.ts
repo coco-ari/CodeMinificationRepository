@@ -44,8 +44,14 @@ export function makeRemoteProviderAdapter(
         yield* Effect.try({
           try: () => {
             hub.bind(binding, input.providerSessionId);
-            if (!input.resumeFromSession)
+            if (!input.resumeFromSession) {
+              hub.access.requireQuestionForActor(
+                binding.ownerId,
+                binding.threadId,
+                input.modelSelection,
+              );
               authorizeCustomerModel(hub.access, binding, input.modelSelection);
+            }
           },
           catch: protocolError,
         });
@@ -172,6 +178,15 @@ export function makeRemoteProviderAdapter(
             ),
           startTurn: (value) =>
             Effect.gen(function* () {
+              yield* Effect.try({
+                try: () =>
+                  hub.access.requireQuestionForActor(
+                    binding.ownerId,
+                    binding.threadId,
+                    value.modelSelection,
+                  ),
+                catch: protocolError,
+              });
               const reopened = yield* ensureProcessReady();
               // The manager's logical session can survive a customer process
               // restart. Its thread-loaded cache does not imply that this new
@@ -195,6 +210,11 @@ export function makeRemoteProviderAdapter(
               }
               yield* Effect.try({
                 try: () => {
+                  hub.access.requireQuestionForActor(
+                    binding.ownerId,
+                    binding.threadId,
+                    value.modelSelection,
+                  );
                   authorizeCustomerModel(hub.access, binding, value.modelSelection);
                   assertCustomerInput(value.message, customerTarget);
                   const session = hub.session(input.providerSessionId)!;
@@ -219,9 +239,43 @@ export function makeRemoteProviderAdapter(
                 },
                 catch: protocolError,
               });
+              const assistantConfiguration = yield* Effect.try({
+                try: () => {
+                  const selected = hub.access.requireQuestionForActor(
+                    binding.ownerId,
+                    binding.threadId,
+                    value.modelSelection,
+                  );
+                  if (!selected) return undefined;
+                  const catalog = hub.access.customerRegistry.getCapabilities(
+                    binding.ownerId,
+                    customerTarget,
+                  );
+                  if (catalog?.assistantConfiguration !== true)
+                    throw new Error("请更新电脑连接程序后使用助手预设");
+                  return {
+                    instructions: hub.access.questionInstructions(
+                      binding.ownerId,
+                      binding.threadId,
+                      value.modelSelection,
+                    ),
+                    skillNames: selected.configuration.skillIds.map((id) => {
+                      const skill = catalog.skills.find((skill) => skill.id === id);
+                      if (!skill) throw new Error("所选电脑技能已变更，请重新选择");
+                      return skill.name;
+                    }),
+                  };
+                },
+                catch: protocolError,
+              });
               yield* command(
                 "startTurn",
-                { ...value, appContext: [], runtimePolicy: { ...value.runtimePolicy, cwd: null } },
+                {
+                  ...value,
+                  ...(assistantConfiguration ? { assistantConfiguration } : {}),
+                  appContext: [],
+                  runtimePolicy: { ...value.runtimePolicy, cwd: null },
+                },
                 [value.runId, value.attemptId],
                 Schema.Unknown,
               );

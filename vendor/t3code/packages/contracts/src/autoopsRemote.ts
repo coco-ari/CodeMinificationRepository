@@ -50,6 +50,7 @@ export const CustomerAgentClientFrame = Schema.Union([
     connectorVersion: Id, connectorEpoch: Id,
     attachmentTransfers: Schema.optional(Schema.Boolean),
     workspaceFiles: Schema.optional(Schema.Boolean),
+    assistantConfiguration: Schema.optional(Schema.Boolean),
     workspaces: Schema.Array(Schema.Struct({
       ...CustomerAgentTarget.fields, projectId: Id, label: Schema.String,
     })),

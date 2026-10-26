@@ -1,3 +1,4 @@
+import { assertQuestionBinding, nativeQuestionModel } from './assistants/index.ts'
 import { createProjectAccess } from './project-access.mjs'
 import { createCustomerRegistry, normalizeExecutionBinding, requireCustomerAgentsEnabled } from './customer-registry.mjs'
 import { createAccessIdentity, initializeAccessIdentitySchema } from './access-identity.mjs'
@@ -38,6 +39,7 @@ const fromRow = (row) => row && ({
   visibility: row.visibility,
   createdAt: row.created_at,
   executionBinding: normalizeExecutionBinding(row.execution_binding_json ? JSON.parse(row.execution_binding_json) : undefined),
+  ...(row.question_json ? { question: JSON.parse(row.question_json) } : {}),
   scopeState: row.scope_state || 'locked',
   scopeLocked: (row.scope_state || 'locked') === 'locked',
   ...(row.workspace_type ? { workspaceType: row.workspace_type, ...(row.workspace_version_id ? { workspaceVersionId: row.workspace_version_id } : {}) } : {}),
@@ -90,7 +92,7 @@ export function initializeAutoOpsAccessSchema(db) {
   `)
   if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === 'revoked_at'))
     db.exec('ALTER TABLE t3_thread_bindings ADD COLUMN revoked_at TEXT')
-  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT'],['scope_state',"TEXT NOT NULL DEFAULT 'locked'"],['submission_command_id','TEXT'],['execution_binding_json','TEXT']]) {
+  for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT'],['scope_state',"TEXT NOT NULL DEFAULT 'locked'"],['submission_command_id','TEXT'],['execution_binding_json','TEXT'],['question_json','TEXT']]) {
     if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === name)) db.exec(`ALTER TABLE t3_thread_bindings ADD COLUMN ${name} ${type}`)
   }
   db.exec('SAVEPOINT autoops_actor_upgrade')
@@ -107,7 +109,7 @@ export function initializeAutoOpsAccessSchema(db) {
     db.exec('ALTER TABLE t3_attachment_access ADD COLUMN metadata_json TEXT')
 }
 
-export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry, deploymentEnabled, configuration }) {
+export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry, deploymentEnabled, configuration, questions }) {
   let accepting = true
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
@@ -228,10 +230,17 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     if (binding.workspaceVersionId) workspaceForUser(current.id, binding.projectId, binding.workspaceType, binding.workspaceVersionId, binding.environmentId)
     validateBinding(binding)
     if (binding.executionBinding.kind === 'customer') { requireCustomerAgentsEnabled(); customerRegistry.validateTarget(current.id, binding.projectId, binding.executionBinding) }
+    if (questions && input.question === undefined && !getThreadBinding(binding.threadId)) fail(409, 'QUESTION_ASSISTANT_REQUIRED', '请选择当前项目已配置的可用助手')
+    if (input.question !== undefined) {
+      if (!questions) fail(503, 'QUESTIONS_NOT_CONFIGURED', '助手授权尚未就绪')
+      const previous = getThreadBinding(binding.threadId)
+      binding.question = questions().validateSelection(current.id, binding.projectId, input.question, previous?.ownerId === current.id && previous.scopeState !== 'draft')
+      assertQuestionBinding(binding.question, binding)
+    }
     return binding
   }
   const bindingKeys = ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId']
-  const bindingChanged = (left, right) => !sameExecutionBinding(left, right) || bindingKeys.some((key) => left[key] !== right[key])
+  const bindingChanged = (left, right) => !sameExecutionBinding(left, right) || JSON.stringify(left.question) !== JSON.stringify(right.question) || bindingKeys.some((key) => left[key] !== right[key])
   const bindThread = (principal, input) => {
     const current = refresh(principal)
     const binding = bindingInput(current, input)
@@ -241,9 +250,9 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
         fail(409, 'THREAD_BINDING_CONFLICT', '会话身份已绑定，不能改投其他项目或环境')
       return existing
     }
-    bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
+    bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json,question_json) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO NOTHING').run(
       binding.threadId, binding.projectId, binding.environmentId ?? '', binding.agentId,
-      binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding),
+      binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding), binding.question ? JSON.stringify(binding.question) : null,
     )
     const stored = getThreadBinding(binding.threadId)
     if (bindingChanged(stored, binding))
@@ -259,9 +268,9 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
         if (existing.ownerId !== current.id || existing.nativeParentThreadId || existing.revokedAt) fail(409, 'THREAD_BINDING_CONFLICT', '无法修改此会话的范围')
         const changed = bindingChanged(existing, binding)
         if (changed && existing.scopeState !== 'draft') fail(409, 'THREAD_SCOPE_LOCKED', '消息提交中或已被接受，请新建对话以切换范围')
-        if (changed) bindingDb.prepare('UPDATE t3_thread_bindings SET project_id=?,environment_id=?,agent_id=?,visibility=?,workspace_type=?,workspace_version_id=?,execution_binding_json=? WHERE thread_id=? AND scope_state=\'draft\'').run(binding.projectId, binding.environmentId ?? '', binding.agentId, binding.visibility, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding), binding.threadId)
+        if (changed) bindingDb.prepare('UPDATE t3_thread_bindings SET project_id=?,environment_id=?,agent_id=?,visibility=?,workspace_type=?,workspace_version_id=?,execution_binding_json=?,question_json=? WHERE thread_id=? AND scope_state=\'draft\'').run(binding.projectId, binding.environmentId ?? '', binding.agentId, binding.visibility, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding), binding.question ? JSON.stringify(binding.question) : null, binding.threadId)
       } else {
-        bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json,scope_state) VALUES(?,?,?,?,?,?,?,?,?,?,\'draft\')').run(binding.threadId, binding.projectId, binding.environmentId ?? '', binding.agentId, binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding))
+        bindingDb.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,workspace_type,workspace_version_id,execution_binding_json,question_json,scope_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,\'draft\')').run(binding.threadId, binding.projectId, binding.environmentId ?? '', binding.agentId, binding.ownerId, binding.visibility, binding.createdAt, binding.workspaceType ?? null, binding.workspaceVersionId ?? null, JSON.stringify(binding.executionBinding), binding.question ? JSON.stringify(binding.question) : null)
       }
       bindingDb.exec('COMMIT')
       return getThreadBinding(binding.threadId)
@@ -341,6 +350,26 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     refresh,
     customerRegistry,
     requireThreadExecution,
+    questionInstructions(actorId, threadId, modelSelection) {
+      const selected = this.requireQuestionForActor(actorId, threadId, modelSelection)
+      return selected ? questions().instructions(actorId, getThreadBinding(threadId).projectId, selected) : ''
+    },
+    requireQuestionForActor(actorId, threadId, modelSelection) {
+      const binding = getThreadBinding(threadId)
+      if (!binding) fail(404, 'THREAD_NOT_FOUND', '会话不存在或无权访问')
+      validateBinding(binding)
+      bindingAudienceForUser(actorId, binding)
+      if (binding.visibility === 'private' && binding.ownerId !== actorId) fail(404, 'THREAD_NOT_FOUND', '会话不存在或无权访问')
+      if (!binding.question) {
+        const member = membershipForUser(actorId, binding.projectId)
+        if (questions && binding.executionBinding.kind !== 'customer' && member.role !== 'project_admin' && !member.canAdjustChat) fail(409, 'QUESTION_MIGRATION_REQUIRED', '原对话尚未核验受限预设，可查看历史；请使用已分配助手新建对话')
+        return undefined
+      }
+      if (!questions) fail(503, 'QUESTIONS_NOT_CONFIGURED', '助手授权尚未就绪')
+      assertQuestionBinding(binding.question, binding)
+      const selection = modelSelection === undefined ? binding.question : { ...binding.question, configuration: { ...binding.question.configuration, model: nativeQuestionModel(modelSelection) } }
+      return questions().validateSelection(actorId, binding.projectId, selection, binding.scopeState !== 'draft')
+    },
     requireProject: projectFor,
     requireMembership,
     requireEnvironment,
@@ -561,7 +590,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     principalForNativeSession: identity.principalForNativeSession,
     bootstrap(principal) {
       const current = refresh(principal)
-      return projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration: configuration() })
+      return projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration: configuration(), ...(questions ? { assistantCatalog: (actor, project) => questions().catalog(actor, project) } : {}) })
     },
   }
 }

@@ -12,7 +12,7 @@ const fail = (message='技能不存在或不属于当前授权范围', code='SKI
 const digest = value => createHash('sha256').update(typeof value==='string'||Buffer.isBuffer(value)?value:JSON.stringify(value)).digest('hex')
 const contextRoot = directory => join(resolve(directory),'t3','skill-contexts')
 const idPattern = /^[a-f0-9]{64}$/
-const scopeOf = value => ({projectId:value.projectId,agentId:value.agentId,workspaceType:value.workspaceType||'internal',...(value.workspaceVersionId?{workspaceVersionId:value.workspaceVersionId}:{}),...(value.environmentId?{environmentId:value.environmentId}:{})})
+const scopeOf = value => ({projectId:value.projectId,agentId:value.agentId,workspaceType:value.workspaceType||'internal',...(value.workspaceVersionId?{workspaceVersionId:value.workspaceVersionId}:{}),...(value.environmentId?{environmentId:value.environmentId}:{}),...((value.skillIds ?? value.question?.configuration.skillIds) !== undefined ? {skillIds:[...(value.skillIds ?? value.question.configuration.skillIds)].sort()} : {})})
 const scopeEqual = (a,b) => JSON.stringify(scopeOf(a))===JSON.stringify(scopeOf(b))
 const safeFile = (root,path) => {
   if(typeof path!=='string'||path.includes('\\')||path.startsWith('/')||path.includes('\0')||path.split('/').some(p=>!p||p==='.'||p==='..'))fail()
@@ -40,6 +40,7 @@ function publishThreadBinding(path,value) {
 function authorizeScope(access,principal,input) {
   if(!access||!principal)fail()
   if(input.threadId) return access.requireThread(principal,input.threadId)
+  if(input.skillIds!==undefined&&(!Array.isArray(input.skillIds)||input.skillIds.length>32||input.skillIds.some(id=>typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(id))))fail('技能选择格式无效')
   const scope=scopeOf(input)
   if(!['internal','external'].includes(scope.workspaceType)||!scope.projectId||!scope.agentId)fail('请先选择项目、助手和工作区')
   const bootstrap=access.bootstrap(principal)

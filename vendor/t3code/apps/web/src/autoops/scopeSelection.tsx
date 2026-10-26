@@ -44,6 +44,7 @@ export function ScopeComposerChoice({
   disabled,
   onChange,
   footer,
+  lockReason,
 }: {
   label: string
   summary: string
@@ -54,6 +55,7 @@ export function ScopeComposerChoice({
   disabled: boolean
   onChange: (value: string) => void
   footer?: ReactNode
+  lockReason?: string | undefined
 }) {
   const floating = useComposerMenuProps()
   const content = (
@@ -78,7 +80,9 @@ export function ScopeComposerChoice({
             </span>
           }
         />
-        <TooltipPopup>{summary} · 首条消息已接受，切换范围请新建对话。</TooltipPopup>
+        <TooltipPopup>
+          {summary} · {lockReason ?? '首条消息已接受，切换范围请新建对话。'}
+        </TooltipPopup>
       </Tooltip>
     )
   return (

@@ -13,12 +13,12 @@ export function createNativeSubagentBindings(dataDirectory, access) {
   return {
     register(parentThreadId, childThreadId, nativeThreadId, parentRunId) {
       // 只接受原生提供商事件中的父任务身份，浏览器不能指定继承关系。
-      const { binding } = access.requireToolThread(parentThreadId)
+      const inherited = parentRunId ? access.getRunInput(parentThreadId, parentRunId) : undefined
+      const { binding } = access.requireToolThread(parentThreadId, inherited?.actorId)
       for (const id of [parentThreadId, childThreadId, nativeThreadId])
         if (typeof id !== 'string' || !id || id.length > 512 || /[\u0000-\u001f]/u.test(id))
           throw new Error('原生子任务身份无效')
       if (parentThreadId === childThreadId) throw new Error('原生子任务不能以自身为父会话')
-      const inherited = parentRunId ? access.getRunInput(parentThreadId, parentRunId) : undefined
       if (parentRunId && !inherited) throw new Error('父任务资料输入尚未固定')
       db.exec('BEGIN IMMEDIATE')
       try {
@@ -28,7 +28,7 @@ export function createNativeSubagentBindings(dataDirectory, access) {
         if (existing && !previous) throw new Error('原生子任务不能占用现有会话身份')
         if (!previous) {
           const at = new Date().toISOString()
-          db.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,compatibility_read_only,continuation_verified,native_thread_id,workspace_type,workspace_version_id) VALUES(?,?,?,?,?,?,?,0,1,?,?,?)').run(childThreadId,binding.projectId,binding.environmentId ?? '',binding.agentId,binding.ownerId,binding.visibility,at,nativeThreadId,binding.workspaceType??null,binding.workspaceVersionId??null)
+          db.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,compatibility_read_only,continuation_verified,native_thread_id,workspace_type,workspace_version_id,question_json) VALUES(?,?,?,?,?,?,?,0,1,?,?,?,?)').run(childThreadId,binding.projectId,binding.environmentId ?? '',binding.agentId,binding.ownerId,binding.visibility,at,nativeThreadId,binding.workspaceType??null,binding.workspaceVersionId??null,binding.question ? JSON.stringify(binding.question) : null)
           db.prepare('INSERT INTO t3_native_subagent_bindings VALUES(?,?,?,?)').run(childThreadId,parentThreadId,nativeThreadId,at)
         }
         if (inherited) db.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at,actor_id,input_owner_id,actor_verified) VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(childThreadId, parentRunId, inherited.inputId, inherited.createdAt, inherited.actorId, inherited.inputOwnerId, Number(inherited.actorVerified))

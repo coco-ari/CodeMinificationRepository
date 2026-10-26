@@ -1,5 +1,5 @@
 // 启动数据只投影已经裁决的范围，不读取会话表或打开宿主资源。
-export function projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration }) {
+export function projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration, assistantCatalog }) {
   const { profile, model, modelSelectionEnabled, customerAgentsEnabled } = configuration
   const visibleProjects = catalog.projects.filter((entry) => { try { membershipForUser(current.id, entry.id); return true } catch { return false } })
   return {
@@ -11,7 +11,9 @@ export function projectAccessBootstrap({ current, catalog, membershipForUser, pr
     modelSelectionEnabled,
     runtimeMode: 'approval-required',
     customerAgentsEnabled,
+    ...(assistantCatalog ? { assistantDirectoryEnabled: true } : {}),
     projects: visibleProjects.map(({ id, name, environments }) => ({
+      ...(assistantCatalog ? { assistants: assistantCatalog(current.id, id) } : {}),
       id, name, capabilities: projectCapabilities(current.id, id), environments: environments.filter((entry) => membershipForUser(current.id, id).environmentIds.includes(entry.id)), membership: membershipForUser(current.id, id),
       agents: catalog.agents.filter((agent) => agent.projectIds.includes(id)).map(({ id, name }) => ({ id, name })),
     })),

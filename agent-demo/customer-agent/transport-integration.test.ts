@@ -189,7 +189,7 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
         runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null, activeProviderThreadId: providerThread.id,
         lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId }, forkedFrom: null,
         createdAt: now, updatedAt: now, archivedAt: null, settledOverride: null, settledAt: null, lastVisitedAt: null, deletedAt: null },
-      message: { createdBy: "user", creationSource: "web", messageId: "message-customer", text: "fixture simple ok", attachments }, modelSelection, runtimePolicy };
+      message: { createdBy: "user", creationSource: "web", messageId: "message-customer", text: "fixture simple ok", attachments }, modelSelection, runtimePolicy, assistantConfiguration: {instructions: "按实际附件回答", skillNames: []} };
     const { customerCommandId } = await import("../t3-adapters/customer-transport.mjs");
     startCommandId = customerCommandId(sessionId, "startTurn", "start");
     await hub.acquireWorkspace(threadId, "run-customer");
@@ -200,6 +200,7 @@ test("真实WS和本机fixture进程：丢启动回执、断线重连、可靠�
     const nativeRequests=readFileSync(requestLog,"utf8").trim().split("\n").map(line=>JSON.parse(line));
     const nativeTurn=nativeRequests.find(entry=>entry.method==="turn/start").params;
     assert.equal(nativeTurn.effort, "high");
+    assert.deepEqual(nativeTurn.additionalContext.autoops_assistant,{kind:"untrusted",value:"按实际附件回答"});
     const nativeInput=nativeTurn.input;
     assert.ok(nativeInput.some((entry:any)=>entry.type==="image" && entry.url===`data:image/png;base64,${imageBytes.toString("base64")}`));
     const text=JSON.stringify(nativeInput);

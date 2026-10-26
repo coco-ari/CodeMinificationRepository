@@ -3,6 +3,7 @@ import type { ModelSelection, RuntimeMode } from '@t3tools/contracts'
 export interface HostThreadLaunch {
   readonly threadId: string
   readonly projectId: string
+  readonly modelSelection?: ModelSelection
 }
 export interface HostTurnConfiguration {
   readonly modelSelection?: ModelSelection

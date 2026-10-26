@@ -59,7 +59,10 @@ it.each(["restart", "preflight-failure", "dispatch-unknown", "same-file", "other
     const commands: Array<{ method: string; input: any }> = [];
     const hub = {
       access: {
+        requireQuestionForActor: () => ({ configuration: { skillIds: ["local-skill"] } }),
+        questionInstructions: () => "按现场真实资料回答",
         getThreadBinding: () => ({
+          threadId: "thread",
           ownerId: "owner",
           projectId: "project",
           executionBinding: {
@@ -70,7 +73,13 @@ it.each(["restart", "preflight-failure", "dispatch-unknown", "same-file", "other
             workspaceBindingRevision: 1,
           },
         }),
-        customerRegistry: { validateSelection: () => {} },
+        customerRegistry: {
+          validateSelection: () => {},
+          getCapabilities: () => ({
+            assistantConfiguration: true,
+            skills: [{ id: "local-skill", name: "local-build" }],
+          }),
+        },
       },
       bind: () => {},
       session: () => saved,
@@ -199,7 +208,13 @@ it.each(["restart", "preflight-failure", "dispatch-unknown", "same-file", "other
     expect(commands[1]!.input.providerThread.nativeThreadRef.nativeId).toBe(
       "original-native-thread",
     );
-    if (scenario !== "preflight-failure" && scenario !== "other-file")
+    if (scenario !== "preflight-failure" && scenario !== "other-file") {
       expect(commands[2]!.input.runId).toBe("run-two");
+      expect(commands[2]!.input.assistantConfiguration).toEqual({
+        instructions: "按现场真实资料回答",
+        skillNames: ["local-build"],
+      });
+      expect(commands[2]!.input.appContext).toEqual([]);
+    }
   },
 );

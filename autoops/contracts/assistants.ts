@@ -107,3 +107,15 @@ export interface AssistantChoices {
     workspaceType: 'internal' | 'external'
   }>
 }
+
+export const ThreadBindingRequest = S.Struct({
+  threadId: S.String.check(S.isMinLength(1), S.isMaxLength(512)),
+  projectId: DirectoryId,
+  environmentId: S.NullOr(DirectoryId),
+  agentId: DirectoryId,
+  visibility: S.Literals(['private', 'project']),
+  executionBinding: S.optionalKey(AssistantSource),
+  workspaceType: S.optionalKey(S.Literals(['internal', 'external'])),
+  workspaceVersionId: S.optionalKey(DirectoryId),
+  question: S.optionalKey(AssistantSelection),
+})

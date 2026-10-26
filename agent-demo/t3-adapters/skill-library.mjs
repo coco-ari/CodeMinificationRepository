@@ -257,8 +257,9 @@ export function resolveSkillLibrary(dataDirectory, scope) {
   if (!scope || !scope.projectId || !scope.agentId || !['internal', 'external'].includes(scope.workspaceType)) return []
   const root = libraryRoot(dataDirectory), state = loadState(root)
   const result = []
+  const selected = scope.skillIds ?? scope.question?.configuration.skillIds
   for (const skill of state.skills) {
-    if (!skill.enabled || skill.deletedAt) continue
+    if (!skill.enabled || skill.deletedAt || (selected !== undefined && !selected.includes(skill.id))) continue
     // Project assignment wins even when disabled or excluding this workspace.
     const assignment = state.assignments.find(entry => entry.skillId === skill.id && entry.targetType === 'project' && entry.targetId === scope.projectId)
       ?? state.assignments.find(entry => entry.skillId === skill.id && entry.targetType === 'agent' && entry.targetId === scope.agentId)

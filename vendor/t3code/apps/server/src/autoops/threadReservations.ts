@@ -12,6 +12,7 @@ const advanceSubmissionGeneration = (threadId: string) => submissionGenerations.
 const scopeKeys = ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId'] as const;
 const scopeFingerprint = (binding: ThreadBinding) => JSON.stringify([
   ...scopeKeys.map((key) => binding[key] ?? null),
+  binding.question ?? null,
   binding.executionBinding?.kind !== 'customer' ? ['platform'] : [
     'customer', binding.executionBinding.deviceId, binding.executionBinding.registeredWorkspaceId,
     binding.executionBinding.workspaceBindingRevision, binding.executionBinding.runtimeId,

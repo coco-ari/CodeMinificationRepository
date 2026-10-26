@@ -57,6 +57,8 @@ const current = (inputId: string) => Effect.gen(function* () {
     historyProjection = yield* threads.getThreadProjection(ThreadId.make(parentThreadId)).pipe(Effect.mapError(unavailable));
   }
   const historyRun = historyProjection.runs.find((run) => run.id === runId);
+  if (authorized.binding.question && !historyRun) return yield* unavailable();
+  yield* Effect.try({ try: () => access.requireQuestionForActor(authorized.actorId, caller.thread.threadId, historyRun?.modelSelection), catch: toolFailure });
   const ordinal = historyRun?.ordinal;
   const knownRuns = new Set(historyProjection.runs.filter((run) => ordinal !== undefined && run.ordinal <= ordinal).map((run) => run.id));
   // 迟到调用不能看到下一轮的新附件，子任务使用已验证的原父轮历史。

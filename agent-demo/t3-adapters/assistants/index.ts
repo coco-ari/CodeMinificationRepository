@@ -10,6 +10,7 @@ import type { ProjectMembership } from '../../../autoops/contracts/runtime.ts'
 import { openDatabase } from '../../../autoops/server/platform/database.ts'
 import { migrations } from './schema.ts'
 export { questionConfigurationPolicy, questionConfigurationChoices } from './policy.ts'
+export { assertQuestionBinding, nativeQuestionModel } from './question.ts'
 
 type Options = {
   dataDir: string
@@ -21,6 +22,7 @@ type Options = {
     project: string,
     value: C.QuestionConfiguration,
     membership: ProjectMembership,
+    accepted?: boolean,
   ): void
   validateTarget(project: string, target: C.AssistantTarget): void
   choices?: (actor: string, project: string) => C.AssistantChoices
@@ -304,6 +306,14 @@ export function createAssistantDirectory(options: Options) {
           '受限成员需要先分配有效默认助手，且预设须符合新的资料和环境范围',
         )
     },
+    instructions(actor: string, project: string, input: C.AssistantSelection): string {
+      const selected = this.validateSelection(actor, project, input, true)
+      const row = db
+        .prepare('SELECT value_json FROM assistant_versions WHERE assistant_id=? AND revision=?')
+        .get(selected.assistantId, selected.presetRevision)
+      if (!row) return fail(409, 'ASSISTANT_PRESET_CHANGED', '原助手修订不存在')
+      return decode(C.AssistantDetails, JSON.parse(String(row.value_json))).instructions
+    },
     validateSelection(
       actor: string,
       project: string,
@@ -340,7 +350,7 @@ export function createAssistantDirectory(options: Options) {
         fail(403, 'ASSISTANT_SOURCE_FIXED', '不能改变助手的运行来源或业务身份')
       if (!adjustable(member) && stable(configuration) !== stable(original.configuration))
         fail(403, 'ASSISTANT_PARAMETERS_FIXED', '当前成员只能使用已分配预设的参数')
-      options.validate(actor, project, configuration, member)
+      options.validate(actor, project, configuration, member, accepted)
       return {
         assistantId: item.preset.id,
         presetRevision: selection.presetRevision,

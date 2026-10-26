@@ -330,7 +330,7 @@ describe("customer Codex execution", () => {
             createdBy: "user",
             creationSource: "web",
             messageId: "message-customer",
-            text: "$local-build Respond with the following text: fixture simple ok",
+            text: "Respond with the following text: fixture simple ok",
             attachments: [],
           },
           modelSelection,
@@ -348,7 +348,17 @@ describe("customer Codex execution", () => {
             message: { ...turn.message, text: "$removed-skill" },
           }),
         ).rejects.toThrow();
-        await runner.dispatch("startTurn", turn);
+        await expect(
+          runner.dispatch("startTurn", {
+            ...turn,
+            message: { ...turn.message, text: "$local-build" },
+            assistantConfiguration: { instructions: "", skillNames: [] },
+          }),
+        ).rejects.toThrow();
+        await runner.dispatch("startTurn", {
+          ...turn,
+          assistantConfiguration: { instructions: "只描述实际结果", skillNames: ["local-build"] },
+        });
         const requestId = await approval.promise;
         if (mode === "approval-stop" || mode === "stop-unconfirmed") {
           const providerTurn = events.find(
@@ -430,6 +440,10 @@ describe("customer Codex execution", () => {
           requests.filter((request) => request.method === "thread/backgroundTerminals/terminate"),
         ).toHaveLength(mode === "background" ? 1 : 0);
         const start = requests.find((request) => request.method === "turn/start").params;
+        expect(start.additionalContext?.autoops_assistant).toEqual({
+          kind: "untrusted",
+          value: "只描述实际结果",
+        });
         expect(start.cwd).toBe(directory);
         expect(start.approvalPolicy).toBe("on-request");
         expect(start.approvalsReviewer).toBe("user");

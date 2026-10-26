@@ -1,3 +1,4 @@
+import type { AssistantDirectory } from '../../../../../../autoops/contracts/assistants.ts'
 import type { ProjectCapabilities } from '../../../../../../autoops/contracts/runtime.ts'
 import type { ProjectRole } from '../../../../../../autoops/contracts/project-access.ts'
 import { ClientSettingsPatch, type ClientSettings } from '@t3tools/contracts/settings'
@@ -12,6 +13,7 @@ export interface AutoOpsT3Bootstrap {
   readonly canCreateProject?: boolean
   readonly modelSelectionEnabled?: boolean
   readonly customerAgentsEnabled?: boolean
+  readonly assistantDirectoryEnabled?: boolean
   readonly runtimeMode: 'approval-required'
   readonly productProfile?: { readonly id: 't3-demo-full-v1' | 'project-assistant-lite-v1' }
   readonly clientSettingsOverrides?: Readonly<Partial<ClientSettings>>
@@ -19,6 +21,7 @@ export interface AutoOpsT3Bootstrap {
     readonly id: string
     readonly name: string
     readonly environments: ReadonlyArray<{ readonly id: string; readonly name: string }>
+    readonly assistants?: AssistantDirectory
     readonly agents: ReadonlyArray<{ readonly id: string; readonly name: string }>
     readonly capabilities?: Readonly<ProjectCapabilities>
     readonly membership?: {
@@ -40,7 +43,12 @@ export interface AutoOpsHost extends AutoOpsT3Bootstrap {
 
 let activeHost: AutoOpsHost | undefined
 const hostListeners = new Set<() => void>()
-export const subscribeAutoOpsHost = (listener: () => void) => { hostListeners.add(listener); return () => { hostListeners.delete(listener) } }
+export const subscribeAutoOpsHost = (listener: () => void) => {
+  hostListeners.add(listener)
+  return () => {
+    hostListeners.delete(listener)
+  }
+}
 
 export function installAutoOpsHostSnapshot(input: AutoOpsT3Bootstrap, origin: string): AutoOpsHost {
   if (!input.principal?.id || typeof input.principal.id !== 'string') {

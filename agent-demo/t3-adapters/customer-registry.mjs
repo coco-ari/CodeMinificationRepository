@@ -164,7 +164,8 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       return publicWorkspace(workspaceRow(device.id, workspaceId))
     },
     updateCapabilities(principal, input) {
-      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments', 'workspaceFiles'])
+      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments', 'workspaceFiles', 'assistantConfiguration'])
+      if (input.assistantConfiguration !== undefined && typeof input.assistantConfiguration !== 'boolean') fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '助手配置能力无效')
       if (input.workspaceFiles !== undefined && typeof input.workspaceFiles !== 'boolean') fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '文件浏览能力无效')
       const device = activeDevice(principal), workspace = workspaceRow(device.id, input.registeredWorkspaceId)
       if (!workspace) fail(404, 'CUSTOMER_WORKSPACE_NOT_FOUND', '请先在本机登记工作区')
@@ -189,6 +190,7 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
         return {...input.attachments}
       })()
       const snapshot = {...(attachments ? {attachments} : {}),deviceId:device.id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:workspace.binding_revision,runtimeId:workspace.runtime_id,revision:text(input.revision,'能力版本'),protocolVersion:1,...(input.runtimeVersion ? {runtimeVersion:text(input.runtimeVersion,'运行器版本',100)} : {}),...(input.configRevision ? {configRevision:text(input.configRevision,'配置版本')} : {}),models,skills,...(permissions ? {permissions} : {})}
+      if (input.assistantConfiguration === true) snapshot.assistantConfiguration = true
       if (input.workspaceFiles === true) snapshot.workspaceFiles = true
       const encoded = JSON.stringify(snapshot)
       if (Buffer.byteLength(encoded) > 1024 * 1024) fail(413, 'CUSTOMER_CAPABILITIES_LIMIT', '能力目录超过大小限制')

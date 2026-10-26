@@ -1,3 +1,5 @@
+import * as S from 'effect/Schema'
+import { QuestionConfiguration } from '../../../../../../../autoops/contracts/assistants.ts'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
@@ -43,11 +45,14 @@ HttpRouter.add('GET', '/autoops/skill-library/context', Effect.gen(function* () 
       const url = new URL(request.url, 'http://localhost');
       const query = Object.fromEntries(url.searchParams);
       if (query.workspaceType && query.workspaceType !== 'internal' && query.workspaceType !== 'external') return HttpServerResponse.jsonUnsafe({error:'工作区类型无效'}, {status:400});
+      if (query.skillIds && query.skillIds.length > 8192) return HttpServerResponse.jsonUnsafe({code:'SKILL_INPUT_INVALID',error:'技能选择超过大小限制'}, {status:400});
+      const skillIds = query.skillIds === undefined ? undefined : yield* S.decodeUnknownEffect(S.fromJsonString(QuestionConfiguration.fields.skillIds))(query.skillIds).pipe(Effect.mapError(() => ({status:400,code:'SKILL_INPUT_INVALID',message:'技能选择格式无效'})));
       const input = query.threadId ? {threadId:query.threadId} : {
         ...(query.projectId ? {projectId:query.projectId} : {}), ...(query.agentId ? {agentId:query.agentId} : {}),
         ...(query.environmentId ? {environmentId:query.environmentId} : {}),
         ...(query.workspaceType ? {workspaceType:query.workspaceType as 'internal' | 'external'} : {}),
         ...(query.workspaceVersionId ? {workspaceVersionId:query.workspaceVersionId} : {}),
+        ...(skillIds === undefined ? {} : {skillIds}),
       };
       const value = yield* Effect.try(() => resolveBusinessSkillContext(process.env.AUTOOPS_T3_DATA_DIR!, input, {access,principal:current}));
       return HttpServerResponse.jsonUnsafe(value, {headers:{'cache-control':'private, no-store'}});

@@ -12,6 +12,7 @@ export {
   subscribeAutoOpsThreadScopes,
   readKnownAutoOpsThreadScope,
   sameAutoOpsThreadScope,
+  scopeFromAssistant,
   readAutoOpsThreadScope,
   setAutoOpsThreadScope,
   inheritAutoOpsThreadScope,
@@ -27,7 +28,8 @@ export function installAutoOpsHost(input: AutoOpsT3Bootstrap, origin: string) {
   installClientHostIntegration({
     beforeThreadLaunch: authorizeThreadLaunch,
     turnConfiguration: (context) => ({
-      ...(host.modelSelectionEnabled ||
+      ...(host.assistantDirectoryEnabled ||
+      host.modelSelectionEnabled ||
       (context &&
         readKnownAutoOpsThreadScope(context.threadId)?.executionBinding?.kind === 'customer')
         ? {}
@@ -43,4 +45,5 @@ export function installAutoOpsHost(input: AutoOpsT3Bootstrap, origin: string) {
   return host
 }
 
-export const useAutoOpsHost = () => useSyncExternalStore(subscribeAutoOpsHost, readAutoOpsHost, () => undefined)
+export const useAutoOpsHost = () =>
+  useSyncExternalStore(subscribeAutoOpsHost, readAutoOpsHost, () => undefined)

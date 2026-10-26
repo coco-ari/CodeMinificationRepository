@@ -8,7 +8,7 @@ import { ConnectorError } from "./store.ts";
 import { CUSTOMER_FILE_LIMITS } from "../../vendor/t3code/packages/contracts/src/customerFiles.ts";
 
 export interface DeviceCredentials { deviceId: string; token: string; baseUrl: string; allowInsecure?: boolean; }
-export const CONNECTOR_VERSION = "0.3.0";
+export const CONNECTOR_VERSION = "0.4.0";
 export function validateBaseUrl(value: string, allowInsecure = false): string {
   const url = new URL(value);
   if (url.username || url.password || url.hash || url.search) throw new Error("中心地址不能包含账号、密码、查询参数或片段");
@@ -107,7 +107,7 @@ export class CustomerAgentConnection {
       if (this.socket !== socket || this.stopped) return;
       this.lastReceived = Date.now(); this.sent.clear();
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: this.credentials.deviceId,
-        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true, workspaceFiles: true,
+        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true, workspaceFiles: true, assistantConfiguration: true,
         workspaces: this.store.workspaces().filter((workspace) => !workspace.revoked && workspace.published).map((workspace) => ({
           registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
           runtimeId: workspace.runtimeId, projectId: workspace.projectId, label: workspace.label,

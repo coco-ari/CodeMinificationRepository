@@ -39,7 +39,7 @@ test('模型与思考选项双层校验；原生请求保留所选值、拒绝�
  assert.throws(()=>assertBusinessModelSelection({...selection,options:[{id:'reasoningEffort',value:'xhigh'}]},env),/思考/)
  assert.throws(()=>assertBusinessModelSelection({...selection,model:'grok-imagine-video-1.5'},env),/模型/)
  assert.throws(()=>assertBusinessModelSelection({...selection,options:[{id:'serviceTier',value:'priority'}]},env),/思考/)
- const binding={threadId:'t',projectId:'p',compatibilityReadOnly:false},access={refresh(){},requireThread(){return binding},requireReference(){}}
+ const binding={threadId:'t',projectId:'p',compatibilityReadOnly:false},access={refresh(){},requireThread(){return binding},requireReference(){},requireQuestionForActor(){}}
  assert.doesNotThrow(()=>authorizeAutoOpsRpc(access,{},'orchestration.dispatchCommand',{type:'thread.model-selection.set',threadId:'t',modelSelection:selection}))
  assert.throws(()=>authorizeAutoOpsRpc(access,{},'orchestration.dispatchCommand',{type:'thread.model-selection.set',threadId:'t',modelSelection:{...selection,model:'unregistered'}}),/模型/)
  const cwd=prepareScopedBusinessSkills(data,{threadId:'models',projectId:'p-autoops',agentId:'a-project',workspaceType:'internal'}).physicalCwd
