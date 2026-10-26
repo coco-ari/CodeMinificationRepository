@@ -134,6 +134,9 @@ export function decodeContract<T extends S.ConstraintDecoder<unknown>>(
 }
 
 /** 宿主只传 JSON 文本；解析与严格字段裁决使用合同所有者同一份 Schema。 */
-export function decodeContractJson<T extends S.ConstraintDecoder<unknown>>(schema:T,input:string):T['Type'] {
-  return decodeContract(schema,S.decodeUnknownSync(S.fromJsonString(S.Unknown))(input))
+export function decodeContractJson<T extends S.ConstraintDecoder<unknown>>(
+  schema: T,
+  input: string,
+): T['Type'] {
+  return decodeContract(schema, S.decodeUnknownSync(S.fromJsonString(S.Unknown))(input))
 }
