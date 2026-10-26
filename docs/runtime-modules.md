@@ -31,6 +31,8 @@
 
 已通过完整 Node 回归 613 通过/1 条平台条件跳过、服务合同 14 项、原生参数 6 项、原生服务回归 148 通过/2 条平台条件跳过、当前技能 2 项及原生队列 1 项、Web 单测 137 项、客户进程/适配定向 11 项、连接程序 31 项、真实 WS 丢回执重连的指令透传 2 项、类型与边界；Web/Worker 构建及含 0.4.0 连接程序的独立发行目录冒烟通过。浏览器新流程、整页主题/响应式、真实模型和客户运行器业务验收待 CI 及最终发行，不使用 fixture 进程代替真实模型。旧受限平台会话缺预设证据时暂时仅可看历史；管理员既有平台会话和既有电脑自用保留，旧会话映射与历史技能范围尚需完成后再部署本批。
 
+`f503eeeb` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40258838160) 通过，[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40258838301) 的 Node/原生测试通过，浏览器 367 通过/2 失败。历史引用用例出现 React 最大更新深度：可能一是新 host 订阅实际不断更新，实际 hostSnapshot 保存稳定对象且其他页面通过；可能二是该夹具 readAutoOpsHost 每次构造新对象，代码与 useSyncExternalStore 的栈证实。夹具改为返回稳定已认证快照，不删除目录慢刷新和历史阅读断言。新低权限用例的不可见标签由紧凑布局的原生 opacity/max-width 规则导致，范围状态和其余 3 个助手交互已成功；仅扩大窗口会漏掉键盘访问缺口，因此给只读 Tooltip 触发点增加可见焦点和键盘停靠，保留紧凑布局并补窄窗 Tab 查看实际资料范围的交互。核心任务仍为助手展开→选择→输入→发送 4 步；只读参数紧凑时新增 Tab 聚焦→读取提示，1 个操作，鼠标悬停亦可查看。修改限于共用只读参数触发点和相关夹具/交互，类型及 Web 单测复核后由 CI 重跑，不以尚未通过的用例宣称完成。
+
 前批 `9dc39661` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40253068405) 与[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40253068408) 已通过，覆盖 6 项助手/成员表单、原项目目录以及客户窄屏 Esc/焦点恢复；下文前批“待 CI”记录据此更新为已验证，真实服务器仍未发行。
 
 ## 已实现模块

@@ -134,6 +134,7 @@ function setup(adjust: boolean, threadId: string, missingDefault = false) {
 }
 
 it('受限成员自动载入默认助手，参数可见但没有范围调整入口，仍能切换已分配助手', async () => {
+  await page.viewport(1280, 800)
   const id = 'limited-assistant-draft',
     f = setup(false, id)
   await using screen = await render(f.ui)
@@ -146,7 +147,11 @@ it('受限成员自动载入默认助手，参数可见但没有范围调整入�
     .not.toBeInTheDocument()
   await screen.getByRole('button', { name: '助手', exact: true }).click()
   await page.getByRole('menuitemradio', { name: '外部资料', exact: true }).click()
-  await expect.element(screen.getByText('外部当前资料', { exact: true })).toBeVisible()
+  await page.viewport(390, 500)
+  await expect.element(screen.getByRole('button', { name: '助手', exact: true })).toHaveFocus()
+  await userEvent.tab()
+  await expect.element(screen.getByLabelText('资料范围', { exact: true })).toHaveFocus()
+  await expect.element(page.getByRole('tooltip')).toHaveTextContent('外部当前资料')
   const scope = readAutoOpsThreadScope(id, 'assistant-project')!
   expect(scope.question?.assistantId).toBe('second')
   expect(scope.environmentId).toBeNull()
@@ -159,17 +164,15 @@ it('有调整权者更改范围后，重新选择助手整体重载原预设并�
   const id = 'adjustable-assistant-draft',
     f = setup(true, id)
   await using screen = await render(f.ui)
-  useComposerDraftStore
-    .getState()
-    .setModelSelection(
-      DraftId.make(id),
-      {
-        instanceId: ProviderInstanceId.make('codex'),
-        model: 'first-model',
-        options: [{ id: 'reasoningEffort', value: 'low' }],
-      },
-      { replaceOptions: true },
-    )
+  useComposerDraftStore.getState().setModelSelection(
+    DraftId.make(id),
+    {
+      instanceId: ProviderInstanceId.make('codex'),
+      model: 'first-model',
+      options: [{ id: 'reasoningEffort', value: 'low' }],
+    },
+    { replaceOptions: true },
+  )
   await screen.getByRole('button', { name: '业务环境', exact: true }).click()
   await page.getByRole('menuitemradio', { name: '无环境', exact: true }).click()
   expect(

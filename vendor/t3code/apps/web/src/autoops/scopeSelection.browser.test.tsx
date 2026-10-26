@@ -49,3 +49,18 @@ it('已锁定范围保留名称和当前值，提交中保留禁用状态且不�
   await expect.element(screen.getByRole('button', { name: '业务环境', exact: true })).toBeDisabled()
   expect(onChange).not.toHaveBeenCalled()
 })
+
+it('紧凑布局的只读参数可用键盘查看实际值，不产生调整菜单', async () => {
+  const onChange = vi.fn()
+  await using screen = await render(
+    <div className="group/composer-context" data-compact="">
+      <ScopeComposerChoice {...choice} locked onChange={onChange} lockReason="由项目管理员设置" />
+    </div>,
+  )
+  await userEvent.tab()
+  await expect.element(screen.getByLabelText('业务环境', { exact: true })).toHaveFocus()
+  await expect.element(page.getByRole('tooltip')).toHaveTextContent('测试环境')
+  await userEvent.keyboard('{Enter}')
+  await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
+  expect(onChange).not.toHaveBeenCalled()
+})

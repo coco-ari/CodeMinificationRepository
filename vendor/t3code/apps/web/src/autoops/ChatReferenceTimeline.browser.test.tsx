@@ -13,9 +13,8 @@ import type { AutoOpsThreadScope } from "./hostConfig";
 import { useAutoOpsSkillContext } from "./useSkillContext";
 import "../index.css";
 
-vi.mock(import("./hostSnapshot"), async (original) => ({
-  ...(await original()),
-  readAutoOpsHost: () => ({
+vi.mock(import("./hostSnapshot"), async (original) => {
+  const host = {
     principal: { id: "isolated-reference-reader", displayName: "隔离引用用户" },
     csrfToken: "isolated-reference-csrf",
     httpBaseUrl: `${location.origin}/api/agent-demo/t3`,
@@ -25,8 +24,9 @@ vi.mock(import("./hostSnapshot"), async (original) => ({
     runtimeMode: "approval-required" as const,
     capabilities: {},
     projects: [],
-  }),
-}));
+  };
+  return { ...(await original()), readAutoOpsHost: () => host };
+});
 
 // 保留真正的查询注册表，仅隔离不属于本用例的原生服务配置读取。
 vi.mock(import("../state/server"), async (original) => {
