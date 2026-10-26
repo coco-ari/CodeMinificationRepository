@@ -140,7 +140,7 @@ export async function retireSharedContainer(cidFile:string,run:DockerRun,name:st
 }
 
 export interface SharedDockerRuntime {
-  readonly options:Pick<HeadlessCodexRunnerOptions,'homePath'|'environment'|'agentScope'|'externalSandbox'>
+  readonly options:Pick<HeadlessCodexRunnerOptions,'homePath'|'environment'|'agentScope'|'externalSandbox'|'openCatalogProcess'>
   updateScope(scope:SharedExecutionScope):Promise<void>
   assertCurrent():Promise<void>
   close():Promise<void>
@@ -199,15 +199,43 @@ export async function createSharedDockerRuntime(input:{directory:string;workspac
     authorize:async(current:SharedExecutionScope,signal:AbortSignal)=>{if(input.discovery)return fail('shared_discovery_only','能力发现不能发起模型执行');await assertCurrent(signal);await input.authorize(current,signal)},
     expectedReasoningEffort:current=>current.model.reasoningEffort??modelDefaults.get(current.model.model)??null,
   })
-  let launched=false,skillsReadonly=false
-  const agentScope:AgentScopeShape={wrap:({command,args})=>Effect.promise(async()=>{
-    await assertCurrent()
-    // 旧 cid 必须经 Docker 核对结束，不能仅凭客户端进程消失认定已停止。
+  type CatalogLease={token:symbol;closing:boolean;result?:Promise<void>}
+  let launched=false,skillsReadonly=false,launchPending=false,launchOwner:symbol|undefined,catalogLease:CatalogLease|undefined
+  const stopCurrentContainer=async()=>{
+    const original=await inspectSharedContainer(cidFile,run,name)
+    if(!original)return fail('shared_execution_unknown','本次隔离容器身份待核实，保留原任务状态')
+    if(original.running)await run(['stop','--time','5',original.id])
     await retireSharedContainer(cidFile,run,name)
-    const launch=sharedDockerCommand(profile);launched=true
-    return {command:launch.command,args:[...launch.prefix,...sharedContainerArguments({profile,workspace:input.workspace,name,cidFile,home,configuration,attachments,gateway:gatewayDirectory,entry:fileURLToPath(new URL('./shared-container-entry.mjs',import.meta.url)),uid,gid,command,args,skillsReadonly})]}
-  }),oomKilled:()=>Effect.succeed(false),clear:()=>Effect.void}
-  return {options:{homePath:'/home/autoops/.codex',environment:{PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/home/autoops',LANG:'C.UTF-8'},agentScope,externalSandbox:true},
+    launched=false;launchOwner=undefined
+  }
+  const scopeFor=(lease?:CatalogLease):AgentScopeShape=>({wrap:({command,args})=>Effect.promise(async()=>{
+    if(launchPending || (catalogLease && catalogLease!==lease))return fail('shared_catalog_busy','隔离目录进程尚在使用，不能并发切换原生进程')
+    if(lease && (catalogLease!==lease || lease.closing))return fail('shared_catalog_closed','本次目录进程已结束')
+    launchPending=true
+    try {
+      await assertCurrent()
+      // 普通启动仍只回收已证实停止的旧 cid；不能在 wrap 中终止旧任务。
+      await retireSharedContainer(cidFile,run,name)
+      if(!accepting || (lease && (catalogLease!==lease || lease.closing)))return fail('shared_catalog_closed','本次目录进程已结束')
+      const launch=sharedDockerCommand(profile);launched=true;launchOwner=lease?.token??Symbol('native-process')
+      return {command:launch.command,args:[...launch.prefix,...sharedContainerArguments({profile,workspace:input.workspace,name,cidFile,home,configuration,attachments,gateway:gatewayDirectory,entry:fileURLToPath(new URL('./shared-container-entry.mjs',import.meta.url)),uid,gid,command,args,skillsReadonly})]}
+    } finally {launchPending=false}
+  }),oomKilled:()=>Effect.succeed(false),clear:()=>Effect.void})
+  const agentScope=scopeFor()
+  const openCatalogProcess=async()=>{
+    await assertCurrent()
+    if(catalogLease || launchPending)return fail('shared_catalog_busy','隔离目录进程尚未结束')
+    const lease:CatalogLease={token:Symbol('catalog-process'),closing:false};catalogLease=lease
+    return {agentScope:scopeFor(lease),close:()=>lease.result??=(async()=>{
+      lease.closing=true
+      try {
+        // 仅收束由该 lease 实际启动的进程；未启动、旧进程拒绝及迟到回调不能停别的任务。
+        if(launchOwner===lease.token)await stopCurrentContainer()
+      } catch {accepting=false;return fail('shared_execution_unknown','本次目录容器停止结果待核实，保留原任务状态')}
+      finally {if(catalogLease===lease)catalogLease=undefined}
+    })()}
+  }
+  return {options:{homePath:'/home/autoops/.codex',environment:{PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/home/autoops',LANG:'C.UTF-8'},agentScope,externalSandbox:true,openCatalogProcess},
     attachmentDirectory:attachments,attachmentPath:path=>{if(dirname(path)!==attachments)return fail('shared_attachment_scope','附件不属于此隔离会话');return `/autoops/attachments/${basename(path)}`},
     setModelDefaults:models=>{modelDefaults.clear();for(const model of models)modelDefaults.set(model.id,model.effort)},
     configureSkillCatalog:async skills=>{
@@ -223,8 +251,7 @@ export async function createSharedDockerRuntime(input:{directory:string;workspac
     },
     assertCurrent,updateScope:async next=>{if(sharedSessionIdentity(next)!==identity)return fail('shared_session_changed','共享会话不能更换身份及资料范围');await input.authorize(next);scope=next;await assertCurrent()},
     close:()=>closeResult??=(async()=>{accepting=false;gateway.stopAccepting();let stopped=false
-      try {if(launched){const original=await inspectSharedContainer(cidFile,run,name);if(!original)throw new Error();if(original.running)await run(['stop','--time','5',original.id]);
-          await retireSharedContainer(cidFile,run,name);stopped=true}else stopped=true
+      try {if(launched)await stopCurrentContainer();stopped=true
       }catch{throw new ConnectorError('shared_stop_unknown','隔离容器停止结果待核实；原任务不能自动重做')}
       finally {await gateway.close();closed=true;const current=await lstat(gatewayDirectory);if(current.ino===gatewayIdentity.ino&&current.dev===gatewayIdentity.dev&&(await readdir(gatewayDirectory)).length===0)await rmdir(gatewayDirectory)}
       if(!stopped)return fail('shared_stop_unknown','隔离容器尚未确认停止')

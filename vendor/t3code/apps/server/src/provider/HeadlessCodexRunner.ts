@@ -41,6 +41,12 @@ export interface CustomerCodexLocalPolicy {
   readonly networkAccess: boolean;
 }
 
+export interface HeadlessCodexCatalogProcess {
+  readonly agentScope: AgentScopeShape;
+  /** 临时目录进程的原生 scope 已释放后，核实并收束本次外层容器。 */
+  readonly close: () => Promise<void>;
+}
+
 export interface HeadlessCodexRunnerOptions {
   readonly instanceId: string;
   /** Already canonicalized and registered by the local connector. */
@@ -52,6 +58,8 @@ export interface HeadlessCodexRunnerOptions {
   readonly agentScope?: AgentScopeShape;
   /** 仅本机已创建的外层隔离边界可使用；远端运行参数不能设置。 */
   readonly externalSandbox?: boolean;
+  /** 本机隔离所有者签发目录进程 lease，不由远端问答参数提供。 */
+  readonly openCatalogProcess?: () => Promise<HeadlessCodexCatalogProcess>;
   readonly resolveAttachmentPath?: (attachment: C.ChatAttachment) => string | null;
   readonly onEvent: (event: unknown) => void | Promise<void>;
   readonly onError?: (error: unknown) => void | Promise<void>;
@@ -372,9 +380,11 @@ export async function createHeadlessCodexRunner(
     });
   const catalog = async () => {
     assertOpen();
-    return client !== undefined && clientInitialized
-      ? run(catalogEffect(client))
-      : manager.runPromise(
+    if (client !== undefined && clientInitialized) return run(catalogEffect(client));
+    const processScope = await options.openCatalogProcess?.();
+    let result: Awaited<ReturnType<HeadlessCodexRunner['catalog']>>;
+    try {
+      result = await manager.runPromise(
           Effect.scoped(
             Effect.gen(function* () {
               const opened = yield* withCodexAppServerClient({
@@ -383,12 +393,19 @@ export async function createHeadlessCodexRunner(
                 launchArgs: settings.launchArgs,
                 cwd: options.cwd,
                 environment,
-                ...(options.agentScope ? {agentScope:options.agentScope} : {}),
+                ...(processScope ? {agentScope:processScope.agentScope} : options.agentScope ? {agentScope:options.agentScope} : {}),
               });
               return yield* catalogEffect(opened.client);
             }),
           ),
         );
+    } catch (error) {
+      try {await processScope?.close();}
+      catch (cleanup) {throw new AggregateError([error, cleanup], '临时目录进程失败且外层停止结果待核实');}
+      throw error;
+    }
+    await processScope?.close();
+    return result;
   };
   const validateSelection = async (selection: C.ModelSelection) => {
     if (selection.instanceId !== instanceId)

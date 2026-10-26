@@ -111,3 +111,90 @@ test('本机进程端口停止结果不明时重复close仍返回原失败，不
     assert.equal(await readFile(cidFile,'utf8'),cid)
   } finally {Object.defineProperty(process,'platform',original)}
 })
+test('临时native目录进程结束后收束其已核对容器，两次目录启动不能把attach退出当停止',async t=>{
+  const f=await fixture(t),source=join(f.root,'source'),state=join(f.root,'state')
+  await mkdir(source);await mkdir(state)
+  const original=Object.getOwnPropertyDescriptor(process,'platform')!
+  Object.defineProperty(process,'platform',{value:'linux'})
+  const profile=(await loadSharedDockerProfile(f.file)).descriptor,target={kind:'customer' as const,deviceId:'device',registeredWorkspaceId:'source',workspaceBindingRevision:1,runtimeId:'codex' as const}
+  const scope:SharedExecutionScope={grantId:'catalog-lifecycle-fixture',actorId:'caller',providerId:'provider',projectId:'project',sourceProjectId:'source',threadId:'thread',runId:'run',assistantId:'assistant',presetRevision:1,shareRevision:1,allocation:{kind:'member',id:'caller',revision:1},capabilityRevision:'fixture-only',profile,target,model:{instanceId:'customer-device-codex',model:'no-model-call',reasoningEffort:null},skillIds:[]}
+  let name='',running=false,stops=0,removes=0
+  const cid='d'.repeat(64),run=async(args:ReadonlyArray<string>)=>{
+    if(args[0]==='info')return 'linux'
+    if(args[0]==='image')return JSON.stringify([{Id:profile.imageDigest}])
+    if(args[0]==='inspect')return JSON.stringify([{Id:cid,Name:`/${name}`,State:{Running:running}}])
+    if(args[0]==='stop'){stops++;running=false;return cid}
+    if(args[0]==='rm'){assert.equal(running,false);removes++;return cid}
+    throw new Error('未预期的Docker端口调用')
+  }
+  let runtime:Awaited<ReturnType<typeof createSharedDockerRuntime>>|undefined
+  try {
+    runtime=await createSharedDockerRuntime({directory:state,workspace:{...target,projectId:'source',label:'本次目录生命周期夹具',realPath:source,identity:'fixture',revoked:false,sharedProfilePath:f.file,policy:{approvalPolicy:'on-request',sandboxMode:'read-only',networkAccess:false}},sessionId:'session',scope,discovery:true,authorize:async()=>{},run})
+    const firstCatalog=await runtime.options.openCatalogProcess!()
+    const launch=await Effect.runPromise(firstCatalog.agentScope.wrap({command:'codex',args:['app-server'],name:'codex-catalog'}))
+    name=launch.args[launch.args.indexOf('--name')+1]!
+    const cidFile=launch.args[launch.args.indexOf('--cidfile')+1]!
+    await writeFile(cidFile,cid);running=true
+    // attach进程退出不改变Docker事实；普通wrap必须继续拒绝，不隐式杀旧进程。
+    await assert.rejects(Effect.runPromise(runtime.options.agentScope!.wrap({command:'codex',args:['app-server'],name:'codex-catalog'})),{code:'shared_catalog_busy'})
+    await assert.rejects(runtime.options.openCatalogProcess!(),{code:'shared_catalog_busy'})
+    assert.equal(stops,0)
+    await runtime.configureSkillCatalog([])
+    await firstCatalog.close()
+    const secondCatalog=await runtime.options.openCatalogProcess!()
+    await Effect.runPromise(secondCatalog.agentScope.wrap({command:'codex',args:['app-server'],name:'codex-catalog'}))
+    assert.equal(stops,1,'只有已完成目录进程的回调能按已确认CID停止容器')
+    assert.equal(removes,1)
+    await writeFile(cidFile,cid);running=true
+    await secondCatalog.close()
+    assert.equal(stops,2);assert.equal(removes,2)
+    await assert.rejects(readFile(cidFile),{code:'ENOENT'})
+    const neverLaunched=await runtime.options.openCatalogProcess!()
+    await neverLaunched.close()
+    // 上一目录以及从未启动目录的重复、迟到回调不能终止随后真正启动的主 app-server。
+    await Effect.runPromise(runtime.options.agentScope!.wrap({command:'codex',args:['app-server'],name:'codex'}))
+    await writeFile(cidFile,cid);running=true
+    await firstCatalog.close();await secondCatalog.close();await neverLaunched.close()
+    assert.equal(stops,2);assert.equal(running,true)
+    const rejectedCatalog=await runtime.options.openCatalogProcess!()
+    await assert.rejects(Effect.runPromise(rejectedCatalog.agentScope.wrap({command:'codex',args:['app-server'],name:'codex-catalog'})),{code:'shared_execution_unknown'})
+    await rejectedCatalog.close()
+    assert.equal(stops,2,'未成功取得launch归属的目录回调不能终止正在运行的主进程')
+    assert.equal(await readFile(cidFile,'utf8'),cid)
+    await runtime.close();runtime=undefined
+    assert.equal(stops,3);assert.equal(removes,3)
+  } finally {try {if(runtime)await runtime.close()} finally {Object.defineProperty(process,'platform',original)}}
+})
+test('目录lease停止未知时保留原CID与同一失败，并阻止随后新启动',async t=>{
+  const f=await fixture(t),source=join(f.root,'source'),state=join(f.root,'state')
+  await mkdir(source);await mkdir(state)
+  const original=Object.getOwnPropertyDescriptor(process,'platform')!
+  Object.defineProperty(process,'platform',{value:'linux'})
+  const profile=(await loadSharedDockerProfile(f.file)).descriptor,target={kind:'customer' as const,deviceId:'device',registeredWorkspaceId:'source',workspaceBindingRevision:1,runtimeId:'codex' as const}
+  const scope:SharedExecutionScope={grantId:'catalog-stop-fixture',actorId:'caller',providerId:'provider',projectId:'project',sourceProjectId:'source',threadId:'thread',runId:'run',assistantId:'assistant',presetRevision:1,shareRevision:1,allocation:{kind:'member',id:'caller',revision:1},capabilityRevision:'fixture-only',profile,target,model:{instanceId:'customer-device-codex',model:'no-model-call',reasoningEffort:null},skillIds:[]}
+  let name='',stops=0
+  const cid='e'.repeat(64),run=async(args:ReadonlyArray<string>)=>{
+    if(args[0]==='info')return 'linux'
+    if(args[0]==='image')return JSON.stringify([{Id:profile.imageDigest}])
+    if(args[0]==='inspect')return JSON.stringify([{Id:cid,Name:`/${name}`,State:{Running:true}}])
+    if(args[0]==='stop'){stops++;throw new Error('停止结果待核实的本次夹具')}
+    throw new Error('不能移除未知运行')
+  }
+  let runtime:Awaited<ReturnType<typeof createSharedDockerRuntime>>|undefined
+  try {
+    runtime=await createSharedDockerRuntime({directory:state,workspace:{...target,projectId:'source',label:'目录停止未知夹具',realPath:source,identity:'fixture',revoked:false,sharedProfilePath:f.file,policy:{approvalPolicy:'on-request',sandboxMode:'read-only',networkAccess:false}},sessionId:'session',scope,discovery:true,authorize:async()=>{},run})
+    const lease=await runtime.options.openCatalogProcess!()
+    const launch=await Effect.runPromise(lease.agentScope.wrap({command:'codex',args:['app-server'],name:'codex-catalog'}))
+    name=launch.args[launch.args.indexOf('--name')+1]!
+    const cidFile=launch.args[launch.args.indexOf('--cidfile')+1]!
+    await writeFile(cidFile,cid)
+    const first=lease.close(),repeat=lease.close()
+    assert.equal(first,repeat)
+    await assert.rejects(first,{code:'shared_execution_unknown'})
+    await assert.rejects(repeat,{code:'shared_execution_unknown'})
+    assert.equal(stops,1)
+    assert.equal(await readFile(cidFile,'utf8'),cid)
+    await assert.rejects(runtime.options.openCatalogProcess!(),{code:'shared_profile_closed'})
+    await assert.rejects(Effect.runPromise(runtime.options.agentScope!.wrap({command:'codex',args:['app-server'],name:'codex'})),{code:'shared_profile_closed'})
+  } finally {try {if(runtime)await assert.rejects(runtime.close(),{code:'shared_stop_unknown'})} finally {Object.defineProperty(process,'platform',original)}}
+})

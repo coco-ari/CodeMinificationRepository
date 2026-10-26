@@ -166,12 +166,14 @@ describe("customer Codex execution", () => {
       if (backgroundItem) notifications.splice(notifications.length - 1, 0, backgroundItem);
       const approval = Promise.withResolvers<string>();
       const logPath = join(directory, "requests.jsonl");
+      const pidPath = join(directory, "processes.jsonl");
       const binaryPath = writeFakeCli({
         directory,
         name: "codex",
         source: `
       import { createInterface } from 'node:readline';
       import { appendFileSync } from 'node:fs';
+      appendFileSync(${JSON.stringify(pidPath)}, process.pid + '\\n');
       const responses = ${JSON.stringify(responses)};
       const notifications = ${JSON.stringify(notifications)};
       const approvalStart = ${JSON.stringify(beforeApproval)};
@@ -246,6 +248,7 @@ describe("customer Codex execution", () => {
         approvalPolicy: "never",
         sandboxPolicy: { type: "dangerFullAccess" },
       };
+      let closedCatalogs = 0;
       const runner = await createHeadlessCodexRunner({
         instanceId,
         cwd: directory,
@@ -258,11 +261,20 @@ describe("customer Codex execution", () => {
           if (value.type === "turn.terminal") completed.resolve();
         },
         onError: completed.reject,
+        openCatalogProcess: async () => ({
+          agentScope: {wrap: input => Effect.succeed(input), oomKilled: () => Effect.succeed(false), clear: () => Effect.void},
+          close: async () => {
+            const pids = (await readFile(pidPath, 'utf8')).trim().split('\n').map(Number);
+            expect(() => process.kill(pids.at(-1)!, 0)).toThrow();
+            closedCatalogs++;
+          },
+        }),
       });
       try {
         const catalog = await runner.catalog();
         expect(catalog.skills.map((skill) => skill.name)).toEqual(["local-build"]);
         expect(catalog.models[0]?.slug).toBe("gpt-6-luna");
+        expect(closedCatalogs).toBe(1);
         const opened = (await runner.dispatch("openSession", {
           threadId: "thread-customer",
           providerSessionId: "session-customer",
@@ -273,6 +285,7 @@ describe("customer Codex execution", () => {
           cwd: "customer://fixture/workspace",
         });
         expect(opened.providerInstanceId).toBe(instanceId);
+        expect(closedCatalogs).toBe(2);
         expect(opened.capabilities.subagents.supportsSubagents).toBe(false);
         const providerThread = (await runner.dispatch("ensureThread", {
           threadId: "thread-customer",
@@ -283,6 +296,9 @@ describe("customer Codex execution", () => {
           validateCustomerResult(transportSession, "ensureThread", providerThread),
         ).not.toThrow();
         transportSession.providerThreadId = providerThread.id;
+        const beforeActiveCatalog = closedCatalogs;
+        await runner.catalog();
+        expect(closedCatalogs).toBe(beforeActiveCatalog);
         await expect(
           runner.dispatch("ensureThread", {
             threadId: "thread-other",

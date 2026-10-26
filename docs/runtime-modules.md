@@ -1048,3 +1048,11 @@ macOS 定向 Node 22 项、Web 8 项、独立 ZIP 分发及真实本地 WebSocke
 先复现并验证的根因包括：共享 fork 误用来源 owner 导致原件 404；已拒绝命令没有 run 事件使引用长期不释放；复用 child 混入后来父输入；旧 picker 替换未归还；同步释放回调丢失 thenable 导致事务未回滚。对应原失败与修后证据在 `.deployment/workspace-{input-fork,native-claim,child-reuse,picker-retention,version-release-async}-before.log`，未通过放宽越权、超时推断终态或切最新输入修复。
 
 独立 C6 v2+D3 候选的 owner/SQLite/临时磁盘及受控 Git 125 项、MCP/运行资源 24 项、原生持久生命周期与索引升级 41 项通过；集合重叠不累加。适配器、原生、Web、客户四类严格类型通过，286 个源文件边界 0 错误，Worker 32 文件重建及 diff 检查通过。日志 `.deployment/d3-c6-{owner,mcp,native}-final.log`、`d3-c6-*-types.log` 与 `d3-c6-worker-build.log`；真实 EXPLAIN 与 67→68 原数据保留回归位于 [068 索引测试](../vendor/t3code/apps/server/src/persistence/Migrations/068_NativeResourceUpdateIndex.test.ts)。独立完整 Node 803 项中 800 通过、3 项按环境跳过；真实发行清单 10467 文件、97 条内部链接全部摘要校验通过，源码 ZIP 冒烟保持原输入、重复请求和定期设置（`.deployment/final-current-inputs-evidence.json`）。该候选尚未附加 Linux 官方原生依赖或启动服务。3 处旧 actor 夹具补齐实际 `retainInputForNativeBinding` 公开口，并强化原调用者和排队编辑者断言，原文件 14 项通过。本批没有用户界面操作变化，完整 CI、Linux 发行及真实服务原请求/问答/回收仍待验，以上不代表整体工作区或部署业务已完成。
+
+### 原生目录进程真实回归
+
+真实原生探测先后暴露两处与模拟端口不同的条件。其一，锁定 Linux spawner 默认 detached：同一次终端 sudo 授权下普通子进程读取 Docker 版本成功，detached 子进程明确要求密码；原容器名及 cid 均不存在。验收随后只对该同 UID 的测试进程授予临时 Docker 组，profile 改为显式直接 Docker；没有改全局用户组或免密规则。新 revision 2/profile digest `e817767b7734261d45033133a4425a5c516bccf2cf8a3b02ed13aca253f21f9e` 再做真实 OS 10 项和停止核查均通过。
+
+其二，真实第一次原生目录已读到技能，但 SDK 的临时进程 scope 结束只停止 Docker attach，容器仍运行，第二次启动按原保护规则拒绝。保留 `native-catalog-AVA9hm` 原失败现场后，复核普通 wrap 仍须拒绝运行旧容器，排除把新配置/身份误用当根因；修复仅为临时原生目录提供本机 bound lease，在 scope 真实释放后按该 lease 的固定 CID/名称停止并再核对。未启动、被旧进程拒绝、并发、重复及迟到回调均不能停止后来主进程；未知继续保留。未把 AgentScope.clear 或客户端退出当停止证明。
+
+v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3` 对应真实新探测通过，生产 owner 9 项、Headless 6 项、客户完整 64 项及类型检查通过。测试机原生 `model/list` 返回 8 个实际模型及各自默认/合法思考档位；首次 5 个内置技能经过生产配置再发现后全部禁用，最后启用数 0，容器停止已核对。`.deployment/shared-native-catalog-v3-result.json` 明确 `nativeCatalogPassed:true`、`noInference:true`、`curatedSkillsAccepted:false`、`sharedBusinessAccepted:false`；该结果证明真实目录与收束流程，不代替选定技能、模型推理、双用户执行或原收据恢复验收。两次失败目录和原 JSON 均保留，没有重做原任务伪装恢复。
