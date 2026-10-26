@@ -1424,3 +1424,29 @@ D2 撤权阶段已沿原 core state 正常完成：同 manager 正常启用新�
 缺陷先比较两个可验证原因：① RunExecutionService准备先调用personalSettings.forThread，它把binding.ownerId=实际recipient与目标项目直接传给设备registry.validateTarget；设备本属provider，真实共享fixture精确复现CUSTOMER_DEVICE_NOT_FOUND；②后续Adapter取技能的scope若丢失也可能错用recipient，但该处已取scope.providerId且执行在个人设置之后，独立settings红测即可复现，排除此原因。最小改动仅personalSettings一个调用，改用已有公开access.customerExecutionSource(threadId,binding.ownerId)，复核当前实际调用者的共享/分配/profile及提供者设备和原目录。个人偏好仍读取recipient，平台四个后台开关仍禁用，不放宽registry设备归属或继承provider权限。
 
 复用真实共享/独立管理员/recipient fixture新增回归，原红2失败/6通过保留；修复后关联Native五文件145项、Node四文件35项、server类型通过，根独立Registry12项通过。未分配/撤回、profile、成员身份、设备/目录、模型失效分别拒绝，自用离线个人设置保留。冻结 `.deployment/c6-preparation-owner-20261027-v1/freeze-v1/manifest.json` SHA256 `a9c33a7fc0151c0cf952d25b87416f8180b9958b4087f36186c958ef0c687861`。两文件完整格式检查在HEAD基线本已失败，证据另存；本批未全文件格式化，diff检查通过。此修复代码和相关自动检查完成，完整CI、发行生效及新真实模型复验待完成；原eeac问题和全部收据保留，未重发或替换成成功。
+
+## 整页 v11 原矩阵、定向复验与资料保留（2026-10-27）
+
+实际固定955、Web433679与HTML4fdc991c进行三角色桌面/窄短窗、浅深色只读矩阵。原50场景为48通过、2失败，989实际操作，零业务写；新独占输出只复验manager窄浅当前资料、admin桌深项目焦点两项，另一个manager桌深资料正对照，全部通过，84与48操作分别记账。原50不改成全绿，逐case最新来源索引 `.deployment/e1e3-v11-final-evidence-955-v1/index.json` SHA256 `acc71b3fcf48ff799576299e7a31ac7eae3db326bcd13f05618b8c0e38399ddb`。原v5/v6及更早选择器/路径失败保留。
+
+失败先核真实时序：manager最早样本返回目录/显示浏览器/搜索都未出现，129ms后返回目录可见，正常点击后210ms搜索可见；新工具仅有界等真实控件，不强制点击。129行/24576B真实正文全匹配，窄屏32个窗口、31次实际内部滚动，页面根未跟滚。admin沿原trigger正常Escape，9ms自然回焦，未手动focus。核心任务与逐步次数在manager-selected-complete-steps.json、admin-selected-complete-steps.json；本轮产品未改，步骤前后相同，不以工具等待修正虚构减少用户操作。正常MCP核心仍10步、失败恢复11步；用户得到正常入口/失败反馈，开发复用真实DTO和时序回归，Agent按role/路径/revision/原收据判断。
+
+真实夹具正常改名UUID0673f64d-2dc2-48d1-99bf-3e76660cada5使项目r1→r2，单次上传UUID62dc7150-7efe-46eb-abfb-387f4c360c2e使authoring8→9。旧辅助器误按flat解析公开GET实际result包络，原失败及红测保留，修正后仅GET同原UUID恢复，未再上传/改名。显式恢复UUIDfa85bb53-4abf-46e8-820f-ee69c81a732c使项目r2→r3，原名与说明恢复，长文件按原revision保留。原三个写均各一次正常POST，未知不重发。
+
+根独立正常管理员GET三个原UUID、当前r3/authoring9、成员/环境/助手/来源/仓库五关系hash、原24576B及原内部source a0f31f96/c825摘要全部通过，零业务写，证据 `.deployment/e1e3-v11-final-evidence-955-v1/root-readonly-preservation-v1.json` SHA256 `1042a7198be1b4a38f4ff2424001d7350fe6f8b3b67d3aefec29b6d17bcdd844`。历史改名已恢复原名后current-native可unverified，保留当时完成事实，不借此重POST。自有10个父/Node进程与浏览器均结束、九类原生活动/更新/计划/lease/events全0，after SHA256 `8e1ea52075d6a7b0647d2569532c8c322c0d0f666f069806e3d8fb2fcb06631d`。
+
+四状态分别为产品代码已完成、相关自动及955完整CI通过、955实际生效、本轮选定只读矩阵及两定向项真实通过；E1/E3整项仍待完成，非空部署/D5、其余E2角色/环境、真实触屏、当前不溢出的长列表未验，不以本矩阵或截图代替。
+
+## 固定54准备归属修复的发行与保留核对（2026-10-27）
+
+应用固定`54def345c8b4112f7e55dae71b65cb75632d71c7`，tree45c9ace98d73777b1d0d232132f54c024d792012；[质量CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40415106249)及[运行CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40415106330)全部通过。运行CI浏览器安装实际耗时10分39秒，未取消或跳过。冻结源29502份、601依赖、8SPDX，四产物8步构建全0，19张map/43关键源50份正文与固定Git逐字一致；根重跑完整验证8f1d1d8b及全29502 Git blob通过。上传139294720B SHA256 `0e798d455a1d2c836520a40cfaa5ddf747800d9e08902f467df0da78454fddc4`，release manifest1fd85888、正式CLI c0c6a80b、ops6c116bb0。远端官方原生2038文件/21包校验及独立第二次验证通过，native manifest6e674b33；准备时原955进程保持。
+
+旧连接器434151在终态/空闲且原收据完成后正常SIGTERM退出，未发送额外stop RPC、resolve或删除数据。本机8张全表、三原命令收据及idle历史保持，本批容器/网关退出，完整停止证明SHA256 `38e2565dfc471f6f64cdc0dcd350130acc6eb9f8a1399e8c2f868d96b7b20353`。正常新连接须保留并精确比对该after，不能删历史凑零行。原f59和eeac均不重发。
+
+切换辅助v3针对stop后纯诊断读/写异常补6项回归，原switch/strict compare保持；正常stop返回原逻辑，真实数据差异仍拒绝并恢复旧程序。独立审查发现complete报告会误称不一致读取为完整，保留v6后仅v7改名postStopCapturesSucceeded。v7默认三种故障断言均零文件读/外部命令/helper导入，13个原helper逐SHA核对、6项复跑通过，审查885ce2c9。辅助测试不算实际故障业务验收。
+
+原955到54切换使用新鲜基线52885b26、public-before ce545fc4；全部计划停用、九类全局原生活动全0、原Agent新鲜维护终态，无historical unknown例外。原严格停止/启动及两完整owner通过，post-worker8841407f、post-web7750e560均allowed/proofPersisted。35份真实诊断全部读与snapshot匹配、原compare未变、postStopErrors空。收据 `.deployment/switch-54def345-stable1-evidence/switch-54def345-stable1.json` SHA256 `19177e49b9f79720ae9d95e4f0b3117df7fa91bd6cad26bb87f372b5bed0f673`。
+
+根独立现场 `.deployment/switch-54def345-stable1-evidence/live-54def345-independent-v1.json` SHA256 `33b6e1d3aebc873255d32f261c873339af0bfa3280bc0ae44a8b94615544a978`：Web439660、launcher439504、native439516实际cwd、Node24.22.0和原DATA_DIR正确，start ticks分别33944480/33943297/33943389。公开HTML4fdc991c及两Worker字节匹配，公开及回环健康正常。当前全部档案、密钥、账号五表、完整resource-release表、原12任务/9版本摘要保持，原Agent59368及Mac自用不变，九类原生活动全0。没有数据库替换、空库、备份或账号重接管。
+
+四状态为准备归属修复代码完成、固定54完整自动检查通过、严格发行已生效、真实新共享模型仍待复验。正常凭据配置仅改实际Web PID/release，新配置bf4b11c7，原账号ID、namespace和权限保持。下一步沿同一设备/state/profile但新casePrefix做正例；955失败不能被发行成功替代，其余未完成项继续，不报告整体完成。
