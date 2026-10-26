@@ -1,5 +1,5 @@
 import { createReadStream, lstatSync } from 'node:fs';
-import { mkdir, copyFile, rename, rm, open } from 'node:fs/promises';
+import { mkdir, copyFile, rename, rm, open, readdir, lstat } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { HttpError } from './security.mjs';
@@ -158,6 +158,7 @@ export class SourceArchives {
         if (this.protected(data, release)) throw new HttpError(409, '当前版本、恢复基线或执行中任务引用的版本不能清理');
         const archiveId = release.sourceArchiveId;
         if (data.tasks.some(task => !terminal.has(task.status) && [task.sourceArchiveId, task.baselineSource?.archiveId].includes(archiveId))) throw new HttpError(409, '执行中任务正在使用此源码档案');
+        if (data.tasks.some(task => !terminal.has(task.status) && task.applicationId === applicationId && !task.sourceArchiveId)) throw new HttpError(409, '此项目仍有未完成的源码登记，暂时不能清理档案');
         release.sourceClearedAt = stamp(); release.available = false;
         const references = data.releases.some(item => item.sourceArchiveId === archiveId && !item.sourceClearedAt);
         const recentFailure = data.tasks.some(task => task.sourceArchiveId === archiveId && !data.releases.some(item => item.id === task.id) && (!terminal.has(task.status) || Date.now() - Date.parse(task.finishedAt || task.createdAt) < 7 * 86400000));
@@ -188,6 +189,50 @@ export class SourceArchives {
     });
     if (errors.length) throw new AggregateError(errors, '部分源码档案清理未完成，将在下次维护时重试');
   }
+  #unregisteredProtection(data) {
+    const protectedApplications = new Set(), registered = new Set(data.sourceArchives.map(record => `${record.applicationId}/${record.sha256}`));
+    for (const task of data.tasks) {
+      const finishedAt = Date.parse(task.finishedAt || task.createdAt);
+      if (!terminal.has(task.status) || !Number.isFinite(finishedAt) || Date.now() - finishedAt < 7 * 86400000) protectedApplications.add(task.applicationId);
+    }
+    for (const release of data.releases) if (!release.sourceClearedAt) {
+      const record = data.sourceArchives.find(record => record.id === release.sourceArchiveId && !record.deletedAt);
+      if (this.present(record)) continue;
+      const applicationId = release.applicationId || record?.applicationId || data.tasks.find(task => task.id === release.id)?.applicationId;
+      if (!applicationId) return null;
+      protectedApplications.add(applicationId);
+    }
+    return { protectedApplications, registered };
+  }
+  async #cleanupUnregistered() {
+    const protection = this.#unregisteredProtection(this.store.state.deployments);
+    if (!protection) return;
+    let applications;
+    try { applications = await readdir(this.root, { withFileTypes: true }); }
+    catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    const errors = [];
+    for (const application of applications) {
+      if (!application.isDirectory() || !/^[a-f0-9-]{36}$/.test(application.name) || protection.protectedApplications.has(application.name)) continue;
+      try {
+        const directory = path.join(this.root, application.name);
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          const matched = /^([a-f0-9]{64})\.zip(?:\.([a-f0-9-]{36})\.tmp)?$/.exec(entry.name);
+          if (!entry.isFile() || !matched || (!matched[2] && protection.registered.has(`${application.name}/${matched[1]}`))) continue;
+          try {
+            const file = path.join(directory, entry.name), info = await lstat(file);
+            // 只清理本模块命名且到期的普通文件；未知任务或缺失版本档案时整项目保留。
+            if (info.isFile() && !info.isSymbolicLink() && Date.now() - info.mtimeMs >= 7 * 86400000) await this.store.change(async state => {
+              // 等待目录读取期间可能接收新任务；删除前在同一存储事务内重查，不能沿用旧快照。
+              const current = this.#unregisteredProtection(state.deployments);
+              if (!current || current.protectedApplications.has(application.name) || (!matched[2] && current.registered.has(`${application.name}/${matched[1]}`))) return;
+              await rm(file, { force: true });
+            });
+          } catch (error) { if (error.code !== 'ENOENT') errors.push(error); }
+        }
+      } catch (error) { if (error.code !== 'ENOENT') errors.push(error); }
+    }
+    if (errors.length) throw new AggregateError(errors, '未登记源码临时文件清理延后');
+  }
   async cleanup() {
     return this.serial(async () => {
       const discarded = [];
@@ -196,14 +241,26 @@ export class SourceArchives {
         for (const task of data.tasks) if (!terminal.has(task.status) || Date.now() - Date.parse(task.finishedAt || task.createdAt) < 7 * 86400000) {
           keep.add(task.sourceArchiveId); keep.add(task.baselineSource?.archiveId);
         }
+        const protection = this.#unregisteredProtection(data);
+        const unresolvedApplications = new Set(data.tasks.filter(task => !terminal.has(task.status) && !task.sourceArchiveId).map(task => task.applicationId));
         for (const record of data.sourceArchives) {
-          if (keep.has(record.id) || record.purgedAt) continue;
+          // 登记失败的任务尚无档案标识，不能据此删除同内容的既有档案。
+          if (keep.has(record.id) || unresolvedApplications.has(record.applicationId)) continue;
+          if (record.purgedAt) {
+            if (!protection || protection.protectedApplications.has(record.applicationId)) continue;
+            let info;
+            try { info = lstatSync(this.file(record)); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+            if (!info.isFile() || info.isSymbolicLink() || Date.now() - info.mtimeMs < 7 * 86400000) continue;
+            // 同内容重导入可能在文件复制后登记失败，旧物理完成收据不能让残件永久逃过维护。
+            record.purgedAt = null;
+          }
           if (!record.deletedAt && Date.now() - Date.parse(record.createdAt) >= 7 * 86400000) record.deletedAt = stamp();
           // 包含旧发行留下的删除标记，进程重启后仍能补完物理回收。
           if (record.deletedAt) discarded.push({ ...record });
         }
       });
       await this.#purge(discarded);
+      await this.#cleanupUnregistered();
     });
   }
 }

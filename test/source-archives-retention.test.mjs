@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, utimes, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/store.mjs';
 import { SourceArchives } from '../src/source-archives.mjs';
 
@@ -118,4 +119,71 @@ test('已标记清理的同内容档案被新任务重新登记后不能被清�
   assert.equal(recovered.archiveId, item.source.archiveId);
   await f.archives.cleanup();
   assert.deepEqual(await readFile(f.archives.resolve(recovered).file), item.bytes);
+});
+
+test('源码复制成功但登记事务失败后，未知任务保护原件，确定失败到期后回收未登记文件', async t => {
+  const f = await fixture(t), bytes = Buffer.from('登记事务失败的隔离源码'), inputFile = path.join(f.root, 'unregistered-input.zip');
+  await writeFile(inputFile, bytes);
+  const task = { id: randomUUID(), applicationId: randomUUID(), sourceKind: 'workspace-package', status: 'unknown', createdAt: expiredAt };
+  await f.store.change(state => { state.deployments.tasks.push(task); });
+  const archive = { file: inputFile, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, revision: 'b'.repeat(40) };
+  const db = new DatabaseSync(f.store.databaseFile);
+  try {
+    // 用真实 SQLite 事务拒绝登记，文件复制与 fsync 仍执行原实现。
+    db.exec("CREATE TRIGGER reject_archive_registration BEFORE UPDATE ON application_state BEGIN SELECT RAISE(ABORT,'隔离登记故障'); END");
+    await assert.rejects(f.archives.import(task, archive), /隔离登记故障/);
+  } finally { db.exec('DROP TRIGGER IF EXISTS reject_archive_registration'); db.close(); }
+  assert.equal(f.store.state.deployments.sourceArchives.length, 0);
+  const orphan = f.archives.file({ ...archive, applicationId: task.applicationId });
+  assert.deepEqual(await readFile(orphan), bytes);
+  await utimes(orphan, new Date(expiredAt), new Date(expiredAt));
+  await f.archives.cleanup();
+  assert.deepEqual(await readFile(orphan), bytes);
+  await f.store.change(state => { Object.assign(state.deployments.tasks[0], { status: 'failed', finishedAt: expiredAt }); });
+  await f.archives.cleanup();
+  await assert.rejects(readFile(orphan), { code: 'ENOENT' });
+  assert.equal(f.store.state.deployments.tasks.length, 1);
+});
+
+test('未登记回收只处理到期的受控普通文件，保留新文件、非档案路径和符号链接目标', async t => {
+  const f = await fixture(t), applicationId = randomUUID(), directory = path.join(f.archives.root, applicationId);
+  await mkdir(directory, { recursive: true });
+  const old = path.join(directory, `${'a'.repeat(64)}.zip`), fresh = path.join(directory, `${'b'.repeat(64)}.zip`);
+  const temporary = path.join(directory, `${'c'.repeat(64)}.zip.${randomUUID()}.tmp`), unrelated = path.join(directory, 'manual.zip');
+  const outside = path.join(f.root, 'outside.zip'), linked = path.join(directory, `${'d'.repeat(64)}.zip`);
+  for (const file of [old, fresh, temporary, unrelated, outside]) await writeFile(file, '隔离文件');
+  for (const file of [old, temporary, unrelated, outside]) await utimes(file, new Date(expiredAt), new Date(expiredAt));
+  if (process.platform !== 'win32') await symlink(outside, linked);
+  await f.archives.cleanup();
+  for (const file of [old, temporary]) await assert.rejects(readFile(file), { code: 'ENOENT' });
+  for (const file of [fresh, unrelated, outside]) assert.equal(await readFile(file, 'utf8'), '隔离文件');
+  if (process.platform !== 'win32') assert.equal(await readFile(linked, 'utf8'), '隔离文件');
+});
+
+for (const cleared of [false, true]) test(`同内容登记失败保留未知任务，终态后继续回收：先前${cleared ? '已清理' : '仍存在'}`, async t => {
+  const f = await fixture(t), item = await f.archivedTask();
+  if (cleared) await f.archives.cleanup();
+  const task = { id: randomUUID(), applicationId: item.task.applicationId, sourceKind: 'workspace-package', status: 'unknown', createdAt: expiredAt };
+  await f.store.change(state => { state.deployments.tasks.push(task); });
+  const db = new DatabaseSync(f.store.databaseFile);
+  try {
+    db.exec("CREATE TRIGGER reject_archive_registration BEFORE UPDATE ON application_state BEGIN SELECT RAISE(ABORT,'隔离重复登记故障'); END");
+    await assert.rejects(f.archives.import(task, { ...item.source, file: item.inputFile }), /隔离重复登记故障/);
+  } finally { db.exec('DROP TRIGGER IF EXISTS reject_archive_registration'); db.close(); }
+  await utimes(item.file, new Date(expiredAt), new Date(expiredAt));
+  await f.archives.cleanup();
+  assert.deepEqual(await readFile(item.file), item.bytes);
+  await f.store.change(state => { Object.assign(state.deployments.tasks.find(value => value.id === task.id), { status: 'failed', finishedAt: expiredAt }); });
+  await f.archives.cleanup();
+  await assert.rejects(readFile(item.file), { code: 'ENOENT' });
+});
+
+test('手动清理不能越过同项目尚未完成档案登记的未知任务', async t => {
+  const f = await fixture(t), item = await f.archivedTask('succeeded');
+  await f.store.change(state => {
+    state.deployments.releases.push({ id: item.task.id, applicationId: item.task.applicationId, sourceArchiveId: item.source.archiveId });
+    state.deployments.tasks.push({ id: randomUUID(), applicationId: item.task.applicationId, status: 'preparing', createdAt: expiredAt, sourceKind: 'workspace-package' });
+  });
+  await assert.rejects(f.archives.clear(item.task.id, item.task.applicationId, { requestId: randomUUID(), actor: { id: 'manager' } }), { status: 409 });
+  assert.deepEqual(await readFile(item.file), item.bytes);
 });
