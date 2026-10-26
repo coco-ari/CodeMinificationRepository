@@ -26,6 +26,10 @@ export const withCommandPrincipal = <A, E, R>(
   return Effect.sync(() => {
     const principal = access.principalForNativeSession(sessionId);
     authorizeAutoOpsRpc(access, principal, method, payload);
+    const command = payload as { threadId?: string; commandId?: string; messageId?: string; runId?: string; initialMessage?: { messageId?: string }; type?: string };
+    const messageId = method === 'orchestration.launchThread' ? command.initialMessage?.messageId : method === 'orchestration.dispatchCommand' && command.type === 'message.dispatch' ? command.messageId : undefined;
+    if (method === 'orchestration.dispatchCommand' && command.type === 'queued-run.edit' && command.threadId && command.commandId && command.runId) access.recordQueuedEditActor(principal, command.threadId, command.commandId, command.runId);
+    if (messageId && command.threadId && command.commandId) access.recordMessageActor(principal, command.threadId, command.commandId, messageId);
     return principal;
   }).pipe(Effect.flatMap((principal) => Effect.provideService(effect, CurrentAutoOpsPrincipal, principal)));
 });

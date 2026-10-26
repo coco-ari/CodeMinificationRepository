@@ -31,7 +31,7 @@ export function createNativeSubagentBindings(dataDirectory, access) {
           db.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,compatibility_read_only,continuation_verified,native_thread_id,workspace_type,workspace_version_id) VALUES(?,?,?,?,?,?,?,0,1,?,?,?)').run(childThreadId,binding.projectId,binding.environmentId ?? '',binding.agentId,binding.ownerId,binding.visibility,at,nativeThreadId,binding.workspaceType??null,binding.workspaceVersionId??null)
           db.prepare('INSERT INTO t3_native_subagent_bindings VALUES(?,?,?,?)').run(childThreadId,parentThreadId,nativeThreadId,at)
         }
-        if (inherited) db.prepare('INSERT INTO t3_thread_inputs VALUES(?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(childThreadId, parentRunId, inherited.inputId, inherited.createdAt)
+        if (inherited) db.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at,actor_id,input_owner_id,actor_verified) VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(childThreadId, parentRunId, inherited.inputId, inherited.createdAt, inherited.actorId, inherited.inputOwnerId, Number(inherited.actorVerified))
         for (const reference of access.inputReferences(parentThreadId)) db.prepare('INSERT INTO t3_thread_input_references VALUES(?,?,?,?) ON CONFLICT(thread_id,input_id) DO NOTHING').run(childThreadId, reference.inputId, reference.actorId, new Date().toISOString())
         db.exec('COMMIT')
       } catch (error) { db.exec('ROLLBACK'); throw error }

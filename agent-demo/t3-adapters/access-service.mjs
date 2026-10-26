@@ -75,6 +75,14 @@ export function initializeAutoOpsAccessSchema(db) {
       created_at TEXT NOT NULL, PRIMARY KEY(thread_id, run_id)
     );
     CREATE INDEX IF NOT EXISTS t3_thread_inputs_identity ON t3_thread_inputs(input_id);
+    CREATE TABLE IF NOT EXISTS t3_request_actors (
+      command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, kind TEXT NOT NULL,
+      target_id TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS t3_message_actors (
+      thread_id TEXT NOT NULL, message_id TEXT NOT NULL, command_id TEXT NOT NULL UNIQUE,
+      actor_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(thread_id,message_id)
+    );
     CREATE TABLE IF NOT EXISTS t3_thread_input_references (
       thread_id TEXT NOT NULL, input_id TEXT NOT NULL, actor_id TEXT NOT NULL,
       created_at TEXT NOT NULL, PRIMARY KEY(thread_id,input_id)
@@ -85,6 +93,16 @@ export function initializeAutoOpsAccessSchema(db) {
   for (const [name, type] of [['compatibility_read_only','INTEGER NOT NULL DEFAULT 0'],['continuation_verified','INTEGER NOT NULL DEFAULT 0'],['native_thread_id','TEXT'],['workspace_type','TEXT'],['workspace_version_id','TEXT'],['scope_state',"TEXT NOT NULL DEFAULT 'locked'"],['submission_command_id','TEXT'],['execution_binding_json','TEXT']]) {
     if (!db.prepare('PRAGMA table_info(t3_thread_bindings)').all().some((column) => column.name === name)) db.exec(`ALTER TABLE t3_thread_bindings ADD COLUMN ${name} ${type}`)
   }
+  db.exec('SAVEPOINT autoops_actor_upgrade')
+  try {
+    for (const name of ['actor_id', 'input_owner_id']) {
+      if (!db.prepare('PRAGMA table_info(t3_thread_inputs)').all().some(column => column.name === name)) db.exec(`ALTER TABLE t3_thread_inputs ADD COLUMN ${name} TEXT`)
+      db.exec(`UPDATE t3_thread_inputs SET ${name}=(SELECT owner_id FROM t3_thread_bindings WHERE thread_id=t3_thread_inputs.thread_id) WHERE ${name} IS NULL`)
+    }
+    if (!db.prepare('PRAGMA table_info(t3_thread_inputs)').all().some(column => column.name === 'actor_verified')) db.exec('ALTER TABLE t3_thread_inputs ADD COLUMN actor_verified INTEGER NOT NULL DEFAULT 0')
+    db.exec("UPDATE t3_thread_inputs SET actor_verified=1 WHERE actor_id=(SELECT owner_id FROM t3_thread_bindings WHERE thread_id=t3_thread_inputs.thread_id AND visibility='private')")
+    db.exec('RELEASE autoops_actor_upgrade')
+  } catch (error) { db.exec('ROLLBACK TO autoops_actor_upgrade; RELEASE autoops_actor_upgrade'); throw error }
   if (!db.prepare('PRAGMA table_info(t3_attachment_access)').all().some((column) => column.name === 'metadata_json'))
     db.exec('ALTER TABLE t3_attachment_access ADD COLUMN metadata_json TEXT')
 }
@@ -330,39 +348,74 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     requireWorkspaceManager,
     threadAudience,
     getThreadBinding,
+    recordQueuedEditActor(principal, threadId, commandId, runId) {
+      const current = refresh(principal)
+      requireThread(current, threadId)
+      identifier(commandId, '命令ID'); identifier(runId, '任务ID')
+      bindingDb.prepare("INSERT INTO t3_request_actors VALUES(?,?,'queued-run.edit',?,?,?) ON CONFLICT(command_id) DO NOTHING").run(commandId, threadId, runId, current.id, new Date(now()).toISOString())
+      const stored = this.getQueuedEditActor(threadId, commandId, runId)
+      if (!stored || stored.actorId !== current.id) fail(409, 'MESSAGE_ACTOR_CONFLICT', '原编辑请求已属于其他调用者或任务')
+    },
+    getQueuedEditActor(threadId, commandId, runId) {
+      const row = bindingDb.prepare("SELECT actor_id FROM t3_request_actors WHERE command_id=? AND thread_id=? AND target_id=? AND kind='queued-run.edit'").get(identifier(commandId, '命令ID'), identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
+      return row ? { actorId: row.actor_id } : undefined
+    },
+    requireQueuedEditActor(threadId, commandId, runId) {
+      const record = this.getQueuedEditActor(threadId, commandId, runId)
+      if (!record) fail(409, 'MESSAGE_ACTOR_MISSING', '原生编辑缺少可信调用者记录')
+      return this.requireToolThread(threadId, record.actorId)
+    },
+    recordMessageActor(principal, threadId, commandId, messageId) {
+      const current = refresh(principal)
+      requireThread(current, threadId)
+      identifier(commandId, '命令ID'); identifier(messageId, '消息ID')
+      bindingDb.exec('BEGIN IMMEDIATE')
+      try {
+        requireThread(current, threadId)
+        const previous = bindingDb.prepare('SELECT * FROM t3_message_actors WHERE command_id=? OR (thread_id=? AND message_id=?)').all(commandId, threadId, messageId)
+        if (previous.some(row => row.thread_id !== threadId || row.message_id !== messageId || row.command_id !== commandId || row.actor_id !== current.id)) fail(409, 'MESSAGE_ACTOR_CONFLICT', '消息已固定其他调用者或原请求')
+        bindingDb.prepare('INSERT INTO t3_message_actors VALUES(?,?,?,?,?) ON CONFLICT(thread_id,message_id) DO NOTHING').run(threadId, messageId, commandId, current.id, new Date(now()).toISOString())
+        bindingDb.exec('COMMIT')
+      } catch (error) { bindingDb.exec('ROLLBACK'); throw error }
+    },
+    requireMessageActor(threadId, messageId) {
+      const row = bindingDb.prepare('SELECT actor_id FROM t3_message_actors WHERE thread_id=? AND message_id=?').get(identifier(threadId, '会话ID'), identifier(messageId, '消息ID'))
+      if (!row) fail(409, 'MESSAGE_ACTOR_MISSING', '消息缺少可信调用者记录，不能继承会话创建者身份')
+      return this.requireToolThread(threadId, row.actor_id)
+    },
     getRunInput(threadId, runId) {
       const row = bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND run_id=?').get(identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
-      return row ? { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, createdAt: row.created_at } : undefined
+      return row ? { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at } : undefined
     },
-    bindRunInput(threadId, runId, inputId) {
-      this.requireToolThread(threadId)
+    bindRunInput(threadId, runId, inputId, actorId = getThreadBinding(threadId)?.ownerId, inputOwnerId = actorId) {
+      this.requireToolThread(threadId, actorId)
       for (const [value, label] of [[runId, '任务ID'], [inputId, '资料输入ID']]) identifier(value, label)
-      bindingDb.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at) VALUES(?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(threadId, runId, inputId, new Date(now()).toISOString())
+      bindingDb.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at,actor_id,input_owner_id,actor_verified) VALUES(?,?,?,?,?,?,1) ON CONFLICT(thread_id,run_id) DO NOTHING').run(threadId, runId, inputId, new Date(now()).toISOString(), identifier(actorId, '调用者ID'), identifier(inputOwnerId, '资料所有者ID'))
       const stored = this.getRunInput(threadId, runId)
-      if (stored.inputId !== inputId) fail(409, 'THREAD_INPUT_CONFLICT', '此任务已经固定另一份资料输入')
+      if (stored.inputId !== inputId || stored.actorId !== actorId || stored.inputOwnerId !== inputOwnerId) fail(409, 'THREAD_INPUT_CONFLICT', '此任务已经固定另一份资料输入')
       return stored
     },
     listThreadInputs(threadId) {
       return bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? ORDER BY rowid').all(identifier(threadId, '会话ID'))
-        .map(row => ({ threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, createdAt: row.created_at }))
+        .map(row => ({ threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at }))
     },
     workspaceVersionReferences(projectId) {
       return bindingDb.prepare('SELECT DISTINCT workspace_version_id AS id FROM t3_thread_bindings WHERE project_id=? AND workspace_version_id IS NOT NULL').all(identifier(projectId, '项目ID')).map(row => row.id)
     },
-    retainInputReference(threadId, inputId, actorId) {
-      this.requireToolThread(threadId)
+    retainInputReference(threadId, inputId, actorId, callerId) {
+      this.requireToolThread(threadId, callerId)
       identifier(inputId, '资料输入ID'); identifier(actorId, '用户ID')
       bindingDb.prepare('INSERT INTO t3_thread_input_references VALUES(?,?,?,?) ON CONFLICT(thread_id,input_id) DO NOTHING').run(threadId, inputId, actorId, new Date(now()).toISOString())
     },
     inputReferences(threadId) {
       return bindingDb.prepare('SELECT input_id,actor_id FROM t3_thread_input_references WHERE thread_id=?').all(identifier(threadId, '会话ID')).map(row => ({ inputId: row.input_id, actorId: row.actor_id }))
     },
-    requireRunInput(threadId, inputId) {
-      this.requireToolThread(threadId)
+    requireRunInput(threadId, inputId, runId) {
       identifier(inputId, '资料输入ID')
-      const row = bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND input_id=? ORDER BY rowid LIMIT 1').get(threadId, inputId)
+      const row = runId ? bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND input_id=? AND run_id=?').get(threadId, inputId, identifier(runId, '任务ID')) : bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND input_id=? ORDER BY rowid LIMIT 1').get(threadId, inputId)
       if (!row) fail(403, 'THREAD_INPUT_FORBIDDEN', '资料输入不属于此会话任务，请使用本轮输入标识')
-      return { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, createdAt: row.created_at }
+      this.requireToolThread(threadId, row.actor_id)
+      return { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at }
     },
     nativeSubagentParent,
     canSeeThread,
@@ -472,24 +525,26 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       projectFor(principal, projectId)
       return resourceThreads(projectId, (binding) => canSeeThread(principal, binding.threadId))
     },
-    listToolResourceThreads(threadId) {
-      const { binding } = this.requireToolThread(threadId)
+    listToolResourceThreads(threadId, actorId) {
+      const { binding } = this.requireToolThread(threadId, actorId)
       const targetAudience = threadAudience(binding)
       return resourceThreads(binding.projectId, (source) => {
         const audience = threadAudience(source)
         return targetAudience.length > 0 && targetAudience.every((id) => audience.includes(id))
       })
     },
-    requireToolThread(threadId) {
+    requireToolThread(threadId, actorId) {
       assertAccepting()
       const binding = getThreadBinding(threadId)
       if (!binding) fail(403, 'THREAD_NOT_BOUND', '工具调用没有获授权的业务会话')
       if (binding.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_BUSINESS_TOOLS_DISABLED', '客户工作区首版未开放平台资料、报告和附件工具')
       if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史会话缺少可验证的原生续接记录，仅供查看')
       const scope = validateBinding(binding)
-      try { workspaceForUser(binding.ownerId, binding.projectId, binding.workspaceType || 'internal', undefined, binding.environmentId) }
-      catch (error) { if (error?.code === 'PROJECT_NOT_FOUND') fail(403, 'THREAD_SCOPE_REVOKED', '会话所属用户的项目授权已失效'); throw error }
-      return scope
+      const caller = actorId === undefined ? binding.ownerId : identifier(actorId, '调用者ID')
+      if (binding.visibility === 'private' && caller !== binding.ownerId) fail(404, 'THREAD_NOT_FOUND', '会话不存在或无权访问')
+      try { workspaceForUser(caller, binding.projectId, binding.workspaceType || 'internal', undefined, binding.environmentId) }
+      catch (error) { if (error?.code === 'PROJECT_NOT_FOUND') fail(403, 'THREAD_SCOPE_REVOKED', '本次调用者的项目授权已失效'); throw error }
+      return { ...scope, actorId: caller }
     },
     requireReference(principal, sourceThreadId, targetThreadId) {
       const source = requireThread(principal, sourceThreadId)

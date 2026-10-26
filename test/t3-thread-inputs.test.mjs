@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema, AutoOpsAccessError } from '../agent-demo/t3-adapters/access.mjs'
-import { createBusinessRunInputs } from '../agent-demo/t3-adapters/thread-inputs.ts'
+import { createBusinessRunInputs as createInputs } from '../agent-demo/t3-adapters/thread-inputs.ts'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
 import { createBusinessArtifactStore } from '../agent-demo/t3-adapters/business-tools.mjs'
 import { createWorkspaceStore } from '../agent-demo/t3-adapters/workspaces.mjs'
@@ -14,6 +14,14 @@ import { createWorkspaceAuthoring } from '../agent-demo/t3-adapters/workspace-au
 import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-management.ts'
 import { createProjectCredentialService } from '../agent-demo/t3-adapters/credentials.ts'
 import { createNativeSubagentBindings } from '../agent-demo/t3-adapters/subagents.mjs'
+
+function createBusinessRunInputs(access, workspace) {
+  const inputs = createInputs(access, workspace)
+  return { ...inputs, prepare(thread, run, inherited, signal) {
+    access.recordMessageActor(access.authenticateCookie('demo_session=u-admin'), thread, run, run)
+    return inputs.prepare(thread, run, inherited, signal, run)
+  } }
+}
 
 function fixture(t, workspaceStore) {
   const directory = mkdtempSync(join(tmpdir(), 't3-turn-input-'))

@@ -35,11 +35,11 @@
 | 编号 | 交付项 | 状态 | 现有代码与证据、剩余验收 |
 | --- | --- | --- | --- |
 | A1 | 固定项目角色、显式环境角色覆盖及账号分类 | 已实现 | [同源合同](../autoops/contracts/project-access.ts)、[运行策略](../agent-demo/t3-adapters/project-access.mjs)、[角色回归](../test/t3-project-roles.test.mjs)、[真实 HTTP/引擎](../test/t3-deployments.test.mjs)；显式环境角色覆盖默认，项目/环境动作分离。成员持久管理与整页验收仍分别归 B1/E1 |
-| A2 | 页面、HTTP/RPC/MCP、下载与后台执行统一授权 | 待实现 | [access](../agent-demo/t3-adapters/access.mjs)、[rpc-policy](../agent-demo/t3-adapters/rpc-policy.mjs) 已有共同入口；新动作和范围仍需逐入口接入 |
+| A2 | 页面、HTTP/RPC/MCP、下载与后台执行统一授权 | 待验证 | [access](../agent-demo/t3-adapters/access.mjs)、[消息/轮次身份回归](../test/t3-request-actors.test.mjs) 及原生 RPC/MCP 已接入实际调用者，排队编辑按 T3 已提交事件裁决，下载/后台角色边界复用已闭环入口；完整问答参数和环境 MCP 仍分别随 A3/A4/B5/B6 验收 |
 | A3 | 异步读取撤权、跨环境伪造与原地址恢复 | 已实现 | `a2b8d768`；[回归](../test/t3-deployment-response-access.test.mjs) 与[验收](runtime-modules.md#部署读取撤权回归2026-10-26)，尚未随本批发行部署 |
 | A4 | 统一问答最终参数合同、调整权及受限预设校验 | 待实现 | [会话绑定](../agent-demo/t3-adapters/access-service.mjs) 与 [RPC](../agent-demo/t3-adapters/rpc-policy.mjs) 可复用；缺助手修订、最终配置和受限参数裁决 |
 | A5 | 存量权限映射、私有内容及撤权后的历史阅读 | 待验证 | 用户已选择林晓/陈一先不启用新授权；[目录](../agent-demo/fixtures.mjs) 显式标记待分配，仅保留原使用边界，后续由管理员保存分配。外部不绑定新环境，历史自用电脑仍保留原身份/未知收据。自动负例已覆盖，服务器存量实测待最终发行 |
-| B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待实现 | [项目目录](../agent-demo/t3-adapters/project-directory/index.ts) 已将存量项目/环境/成员一次导入自有版本化数据库，授权读取当前事实；[页面](../vendor/t3code/apps/web/src/autoops/ProjectsPage.tsx) 已接入创建、基本信息、环境添加/编辑和成员状态。SQLite/HTTP 正反例已过，浏览器待 CI；成员分配表单须与默认助手准入一并补齐，删除与引用处理、完整配置及真实发行待验。不切换独立后端或清空业务库 |
+| B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待实现 | [项目目录](../agent-demo/t3-adapters/project-directory/index.ts) 已将存量项目/环境/成员一次导入自有版本化数据库，授权读取当前事实；[页面](../vendor/t3code/apps/web/src/autoops/ProjectsPage.tsx) 已接入创建、基本信息、环境添加/编辑和成员状态。SQLite/HTTP 正反例已过，浏览器在 `23003b65` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40249611790) 通过；成员分配表单须与默认助手准入一并补齐，删除与引用处理、完整配置及真实发行待验。不切换独立后端或清空业务库 |
 | B2 | 项目仓库连接与工作区/部署分支配置分离 | 待实现 | [workspace-authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 来源仍混合连接与使用配置；需保留现有来源/固定任务身份后拆分 |
 | B3 | 项目凭证创建、替换、撤销及受控使用 | 已实现 | [credentials](../agent-demo/t3-adapters/credentials.ts)、[回归](../test/t3-workspace-credentials.test.mjs)；集中管理页面和真实私有仓库待补 |
 | B4 | 部署服务器登记、环境绑定、观察与撤销 | 已实现 | [deployment-servers](../agent-demo/t3-adapters/deployment-servers.mjs)、[回归](../test/t3-deployment-servers.test.mjs)；需按新角色接入环境设置并重验 |

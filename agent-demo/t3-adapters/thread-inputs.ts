@@ -3,49 +3,159 @@ import { createHash } from 'node:crypto'
 import { AutoOpsAccessError, configuredAutoOpsAccess, type AutoOpsAccess } from './access.mjs'
 import { configuredWorkspaceManagement, type WorkspaceManagement } from './workspace-management.ts'
 
-type WorkspaceInputs = Pick<WorkspaceManagement, 'captureAgentInput' | 'readInput' | 'inputFiles' | 'readInputFile' | 'readInputContent'>
+type WorkspaceInputs = Pick<
+  WorkspaceManagement,
+  'captureAgentInput' | 'readInput' | 'inputFiles' | 'readInputFile' | 'readInputContent'
+>
 
 export function createBusinessRunInputs(access: AutoOpsAccess, workspace: WorkspaceInputs) {
   return {
-    async prepare(threadId: string, runId: string, inheritedRunId?: string, signal?: AbortSignal) {
-      const { binding } = access.requireToolThread(threadId)
+    async prepare(
+      threadId: string,
+      runId: string,
+      inheritedRunId?: string,
+      signal?: AbortSignal,
+      messageId?: string,
+      editCommandId?: string,
+    ) {
       const existing = access.getRunInput(threadId, runId)
-      if (existing) return workspace.readInput(binding.projectId, existing.inputId, binding.ownerId)
-      if (inheritedRunId) {
-        const original = access.getRunInput(threadId, inheritedRunId)
-        if (!original) throw new AutoOpsAccessError(409, 'THREAD_INPUT_MISSING', '恢复任务的原资料输入不存在，不能改读最新内容')
-        const captured = workspace.readInput(binding.projectId, original.inputId, binding.ownerId)
-        access.bindRunInput(threadId, runId, captured.id)
+      if (existing && !existing.actorVerified)
+        throw new AutoOpsAccessError(
+          409,
+          'THREAD_ACTOR_UNVERIFIED',
+          '旧共享任务缺少可核验的实际调用者，不能继承创建者执行权限',
+        )
+      if (existing) {
+        const scope = access.requireToolThread(threadId, existing.actorId)
+        if (messageId) {
+          try {
+            if (
+              (editCommandId
+                ? access.requireQueuedEditActor(threadId, editCommandId, runId)
+                : access.requireMessageActor(threadId, messageId)
+              ).actorId !== existing.actorId
+            )
+              throw new AutoOpsAccessError(409, 'THREAD_INPUT_CONFLICT', '任务已固定其他调用者')
+          } catch (error) {
+            if (!(error instanceof AutoOpsAccessError) || error.code !== 'MESSAGE_ACTOR_MISSING')
+              throw error
+          }
+        }
+        return workspace.readInput(scope.binding.projectId, existing.inputId, existing.inputOwnerId)
+      }
+      const original = inheritedRunId ? access.getRunInput(threadId, inheritedRunId) : undefined
+      if (original && !original.actorVerified)
+        throw new AutoOpsAccessError(
+          409,
+          'THREAD_ACTOR_UNVERIFIED',
+          '原共享任务缺少可核验的实际调用者，不能生成恢复执行身份',
+        )
+      if (inheritedRunId && !original)
+        throw new AutoOpsAccessError(
+          409,
+          'THREAD_INPUT_MISSING',
+          '恢复任务的原资料输入不存在，不能改读最新内容',
+        )
+      let actorId: string
+      try {
+        if (!messageId)
+          throw new AutoOpsAccessError(409, 'MESSAGE_ACTOR_MISSING', '消息缺少可信调用者记录')
+        actorId = (
+          editCommandId
+            ? access.requireQueuedEditActor(threadId, editCommandId, runId)
+            : access.requireMessageActor(threadId, messageId)
+        ).actorId
+      } catch (error) {
+        // 既有已接受任务只能按其持久收据恢复；新任务没有调用者记录时拒绝继承创建者身份。
+        if (
+          !(error instanceof AutoOpsAccessError) ||
+          error.code !== 'MESSAGE_ACTOR_MISSING' ||
+          !original
+        )
+          throw error
+        actorId = original.actorId
+      }
+      const { binding } = access.requireToolThread(threadId, actorId)
+      if (original) {
+        const captured = workspace.readInput(
+          binding.projectId,
+          original.inputId,
+          original.inputOwnerId,
+        )
+        access.bindRunInput(threadId, runId, captured.id, actorId, original.inputOwnerId)
         return captured
       }
-      const requestId = 'agent-run-' + createHash('sha256').update(JSON.stringify([threadId, runId])).digest('hex')
-      const captured = await workspace.captureAgentInput(binding.projectId, { requestId, workspaceType: binding.workspaceType ?? 'internal' }, binding.ownerId, signal)
-      access.requireToolThread(threadId)
-      access.bindRunInput(threadId, runId, captured.id)
+      const requestId =
+        'agent-run-' +
+        createHash('sha256')
+          .update(JSON.stringify([threadId, runId, actorId]))
+          .digest('hex')
+      const captured = await workspace.captureAgentInput(
+        binding.projectId,
+        { requestId, workspaceType: binding.workspaceType ?? 'internal' },
+        actorId,
+        signal,
+      )
+      access.requireToolThread(threadId, actorId)
+      access.bindRunInput(threadId, runId, captured.id, actorId)
       return captured
     },
-    require(threadId: string, inputId: string) {
-      const scope = access.requireToolThread(threadId)
-      const input = access.requireRunInput(threadId, inputId)
-      const capture = workspace.readInput(scope.binding.projectId, input.inputId, scope.binding.ownerId)
-      if (capture.workspaceType !== (scope.binding.workspaceType ?? 'internal')) throw new AutoOpsAccessError(403, 'THREAD_INPUT_FORBIDDEN', '资料输入不属于当前内部或外部范围')
+    require(threadId: string, inputId: string, runId?: string) {
+      const input = access.requireRunInput(threadId, inputId, runId)
+      const scope = access.requireToolThread(threadId, input.actorId)
+      const capture = workspace.readInput(
+        scope.binding.projectId,
+        input.inputId,
+        input.inputOwnerId,
+      )
+      if (capture.workspaceType !== (scope.binding.workspaceType ?? 'internal'))
+        throw new AutoOpsAccessError(
+          403,
+          'THREAD_INPUT_FORBIDDEN',
+          '资料输入不属于当前内部或外部范围',
+        )
       return { ...scope, input, capture }
     },
   }
 }
 
-export async function prepareBusinessRunContext(threadId: string, runId: string, inheritedRunId?: string, signal?: AbortSignal) {
+export async function prepareBusinessRunContext(
+  threadId: string,
+  runId: string,
+  inheritedRunId?: string,
+  signal?: AbortSignal,
+  messageId?: string,
+  editCommandId?: string,
+) {
   const access = configuredAutoOpsAccess()
   if (!access) return undefined
   const binding = access.getThreadBinding(threadId)
   if (binding?.executionBinding.kind === 'customer') return undefined
-  const capture = await createBusinessRunInputs(access, configuredWorkspaceManagement(access)).prepare(threadId, runId, inheritedRunId, signal)
+  const capture = await createBusinessRunInputs(
+    access,
+    configuredWorkspaceManagement(access),
+  ).prepare(threadId, runId, inheritedRunId, signal, messageId, editCommandId)
   return {
     key: 'autoops_turn_input',
-    text: `本轮任务已自动固定当前可用资料。后续同步或编辑不改变本轮输入，下一轮重新获取。业务工具的 inputId 参数必须使用下列标识。用户明确引用的文件路径保持原样，用 read_project_material 读取所选内容；引用路径中的输入标识可以与工具 inputId 参数不同。源码同步失败不代表已授权引用不可读，先读取所选文件再判断。sourceWarnings 表示更新失败但所列源码仍可读取，按 repositories 中的真实提交分析，不得声称已确认远端最新状态；sourceErrors 才表示对应仓库不可读取。历史资料只表示当时事实，不得冒充当前最新状态。\n${JSON.stringify({
-      inputId: capture.id, runId, projectId: capture.projectId, workspaceType: capture.workspaceType,
-      capturedAt: capture.createdAt, revision: capture.revision, sourceErrors: capture.sourceErrors ?? [], sourceWarnings: capture.sourceWarnings ?? [], root: `autoops/${capture.projectId}/inputs/${capture.id}`,
-      repositories: capture.workspaceType === 'external' ? [] : capture.repositories.map(repository => ({ path: repository.source.mountPath, commit: repository.commit })),
-    })}`,
+    text: `本轮任务已自动固定当前可用资料。后续同步或编辑不改变本轮输入，下一轮重新获取。业务工具的 inputId 参数必须使用下列标识。用户明确引用的文件路径保持原样，用 read_project_material 读取所选内容；引用路径中的输入标识可以与工具 inputId 参数不同。源码同步失败不代表已授权引用不可读，先读取所选文件再判断。sourceWarnings 表示更新失败但所列源码仍可读取，按 repositories 中的真实提交分析，不得声称已确认远端最新状态；sourceErrors 才表示对应仓库不可读取。历史资料只表示当时事实，不得冒充当前最新状态。\n${JSON.stringify(
+      {
+        inputId: capture.id,
+        runId,
+        projectId: capture.projectId,
+        workspaceType: capture.workspaceType,
+        capturedAt: capture.createdAt,
+        revision: capture.revision,
+        sourceErrors: capture.sourceErrors ?? [],
+        sourceWarnings: capture.sourceWarnings ?? [],
+        root: `autoops/${capture.projectId}/inputs/${capture.id}`,
+        repositories:
+          capture.workspaceType === 'external'
+            ? []
+            : capture.repositories.map((repository) => ({
+                path: repository.source.mountPath,
+                commit: repository.commit,
+              })),
+      },
+    )}`,
   }
 }

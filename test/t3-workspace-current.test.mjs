@@ -843,7 +843,8 @@ test('已选源码引用在新轮Git失败时仍能按所选原件读取，未�
   catalog.requireContext('selected', { records: [{ kind: 'mention', path }] })
   f.control.failResolve = true
   const inputs = createBusinessRunInputs(f.access, f.service)
-  const current = await inputs.prepare('selected', 'current')
+  f.access.recordMessageActor(principal, 'selected', 'current-command', 'current-message')
+  const current = await inputs.prepare('selected', 'current', undefined, undefined, 'current-message')
   assert.equal(current.repositories.length, 1)
   assert.equal(current.sourceErrors, undefined)
   assert.equal(current.sourceWarnings[0].code, 'WORKSPACE_GIT_FAILED')
@@ -853,7 +854,8 @@ test('已选源码引用在新轮Git失败时仍能按所选原件读取，未�
     (await catalog.readForThread('selected', path, current.id, [selectedInputId])).content,
     /frontend 固定源码/,
   )
-  const other = await inputs.prepare('unselected', 'other')
+  f.access.recordMessageActor(principal, 'unselected', 'other-command', 'other-message')
+  const other = await inputs.prepare('unselected', 'other', undefined, undefined, 'other-message')
   await assert.rejects(catalog.readForThread('unselected', path, other.id, [selectedInputId]))
   f.memberships.find((member) => member.userId === 'reader').status = 'disabled'
   await assert.rejects(catalog.readForThread('selected', path, current.id, [selectedInputId]))

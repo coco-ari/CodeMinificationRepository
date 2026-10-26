@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off -- 缺省消息身份按原命令确定，授权与原生持久化使用同一身份。
+import { createHash } from 'node:crypto'
 import { OrchestrationMessageContext } from '@t3tools/contracts'
 import { collectComposerInlineTokens } from '@t3tools/shared/composerInlineTokens'
 import {
@@ -18,7 +20,7 @@ export function prepareBusinessMessagePayload(
   method: string,
   payload: unknown,
 ): unknown {
-  const command = object(payload)
+  let command = object(payload)
   if (!command || typeof command.threadId !== 'string') return payload
   const launch = method === 'orchestration.launchThread'
   if (
@@ -29,7 +31,23 @@ export function prepareBusinessMessagePayload(
     )
   )
     return payload
-  if (access.getThreadBinding(command.threadId)?.executionBinding?.kind === 'customer')
+  if (
+    launch &&
+    object(command.initialMessage)?.messageId === undefined &&
+    typeof command.commandId === 'string' &&
+    object(command.initialMessage)
+  ) {
+    command = {
+      ...command,
+      initialMessage: {
+        ...object(command.initialMessage),
+        messageId:
+          'autoops-message-' + createHash('sha256').update(command.commandId).digest('hex'),
+      },
+    }
+    payload = command
+  }
+  if (access.getThreadBinding(String(command.threadId))?.executionBinding?.kind === 'customer')
     return payload
   const message = launch ? object(command.initialMessage) : command
   if (!message || typeof message.text !== 'string') return payload

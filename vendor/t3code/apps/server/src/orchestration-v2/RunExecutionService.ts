@@ -1,4 +1,8 @@
 import { isCustomerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
+import { configuredAutoOpsAccess } from "../../../../../../agent-demo/t3-adapters/access.mjs";
+import { queuedRunActorCommand } from "../autoops/runActors.ts";
+import * as BusinessEventStore from "./EventStore.ts";
+import * as BusinessOption from "effect/Option";
 import { prepareBusinessRunContext } from "../../../../../../agent-demo/t3-adapters/thread-inputs.ts";
 import {
   forThread as autoOpsThreadSettings,
@@ -612,6 +616,7 @@ export const layer: Layer.Layer<
     const scope = yield* Effect.scope;
     const checkpointService = yield* CheckpointService.CheckpointServiceV2;
     const eventSink = yield* EventSink.EventSinkV2;
+    const businessEvents = yield* Effect.serviceOption(BusinessEventStore.EventStoreV2);
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -1595,12 +1600,19 @@ export const layer: Layer.Layer<
           input.message.attachments.length === 0 &&
           input.message.text.trim().toLowerCase() === "/compact";
         // 输入身份属于原生任务；失败重试与恢复复用原收据，不改写线程上的全局资料指针。
-        const startTurn = (customer ? Effect.succeed(undefined) : Effect.tryPromise({
-          try: (signal) => prepareBusinessRunContext(input.run.threadId, input.run.id, input.run.restartContinuationOfRunId, signal),
-          catch: (cause) => new ProviderAdapter.ProviderAdapterTurnStartError({
-            driver: input.session.driver, threadId: input.run.threadId,
-            providerThreadId: input.providerThread.id, runId: input.run.id, cause,
-          }),
+        const turnStartFailure = (cause: unknown) => new ProviderAdapter.ProviderAdapterTurnStartError({
+          driver: input.session.driver, threadId: input.run.threadId,
+          providerThreadId: input.providerThread.id, runId: input.run.id, cause,
+        });
+        const startTurn = (customer ? Effect.succeed(undefined) : Effect.gen(function* () {
+          const access = configuredAutoOpsAccess();
+          const editCommandId = access ? yield* (BusinessOption.isSome(businessEvents)
+            ? queuedRunActorCommand(access, businessEvents.value.read, input.run.threadId, input.run.id, input.run.userMessageId).pipe(Effect.mapError(turnStartFailure))
+            : Effect.fail(turnStartFailure('业务运行缺少原生事件读取能力'))) : undefined;
+          return yield* Effect.tryPromise({
+            try: (signal) => prepareBusinessRunContext(input.run.threadId, input.run.id, input.run.restartContinuationOfRunId, signal, input.run.userMessageId, editCommandId),
+            catch: turnStartFailure,
+          });
         })).pipe(Effect.flatMap((businessContext) => Effect.gen(function* () {
           // 捕获可能等待源码同步，取消或队列归属变化后不得继续启动模型。
           if (input.shouldStartProviderTurn && !(yield* input.shouldStartProviderTurn())) {

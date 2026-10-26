@@ -130,7 +130,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if (binding.projectId !== payload.projectId) denied('会话项目与已确认的授权绑定不一致')
     checkRuntime(payload, access, binding)
     checkReferences(access, principal, payload.initialMessage, binding.threadId)
-    if (!customer) configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.initialMessage?.context)
+    if (!customer) configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.initialMessage?.context,principal.id)
     return
   }
   if (method === 'orchestration.dispatchCommand') {
@@ -169,7 +169,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if (payload.type === 'message.dispatch' || payload.type === 'queued-run.edit') {
       if (!customer) {
         resolveBusinessSkillMentions(payload.text,process.env,binding)
-        configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context)
+        configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context,principal.id)
       }
     }
     return

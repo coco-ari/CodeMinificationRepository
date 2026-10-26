@@ -5,8 +5,8 @@ import { AutoOpsAccessError } from './access-service.mjs'
 import { configuredAutoOpsAccess } from './access-runtime.mjs'
 
 export function getThreadBinding(threadId) { return configuredAutoOpsAccess()?.getThreadBinding(threadId) }
-export function requireToolThread(threadId) {
+export function requireToolThread(threadId, actorId) {
   const access = configuredAutoOpsAccess()
   if (!access) throw new AutoOpsAccessError(503, 'AUTOOPS_NOT_CONFIGURED', 'AutoOps 业务授权尚未配置')
-  return access.requireToolThread(threadId)
+  return access.requireToolThread(threadId, actorId)
 }

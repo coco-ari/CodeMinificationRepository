@@ -34,8 +34,8 @@ export interface ThreadBinding {
   readonly nativeThreadId?: string;
   readonly nativeParentThreadId?: string;
 }
-export interface ToolScope { binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
-export interface ThreadInputBinding { readonly threadId: string; readonly runId: string; readonly inputId: string; readonly createdAt: string }
+export interface ToolScope { actorId: string; binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
+export interface ThreadInputBinding { readonly threadId: string; readonly runId: string; readonly inputId: string; readonly actorId: string; readonly inputOwnerId: string; readonly actorVerified: boolean; readonly createdAt: string }
 export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
 export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
@@ -63,16 +63,21 @@ export interface AutoOpsAccess {
   requireDeploymentAction(principal: AutoOpsPrincipal, projectId:string, action:DeploymentAction, environmentId?:string): ProjectMembership;
   projectCapabilities(principal:AutoOpsPrincipal, projectId:string): ProjectCapabilities;
   listResourceThreads(principal:AutoOpsPrincipal, projectId:string): ResourceThread[];
-  listToolResourceThreads(threadId:string): ResourceThread[];
+  listToolResourceThreads(threadId:string,actorId?:string): ResourceThread[];
   threadAudience(binding: ThreadBinding): string[];
   getThreadBinding(threadId: string): ThreadBinding | undefined;
+  recordQueuedEditActor(principal: AutoOpsPrincipal, threadId: string, commandId: string, runId: string): void;
+  getQueuedEditActor(threadId: string, commandId: string, runId: string): {actorId:string} | undefined;
+  requireQueuedEditActor(threadId: string, commandId: string, runId: string): ToolScope;
+  recordMessageActor(principal: AutoOpsPrincipal, threadId: string, commandId: string, messageId: string): void;
+  requireMessageActor(threadId: string, messageId: string): ToolScope;
   getRunInput(threadId: string, runId: string): ThreadInputBinding | undefined;
-  bindRunInput(threadId: string, runId: string, inputId: string): ThreadInputBinding;
+  bindRunInput(threadId: string, runId: string, inputId: string, actorId?: string, inputOwnerId?: string): ThreadInputBinding;
   listThreadInputs(threadId: string): ThreadInputBinding[];
   workspaceVersionReferences(projectId: string): string[];
-  retainInputReference(threadId: string, inputId: string, actorId: string): void;
+  retainInputReference(threadId: string, inputId: string, actorId: string, callerId?:string): void;
   inputReferences(threadId: string): Array<{inputId:string;actorId:string}>;
-  requireRunInput(threadId: string, inputId: string): ThreadInputBinding;
+  requireRunInput(threadId: string, inputId: string, runId?: string): ThreadInputBinding;
   nativeSubagentParent(threadId: string): string | undefined;
   canSeeThread(principal: AutoOpsPrincipal, threadId: string, includeDeleted?: boolean): boolean;
   visibleThreadIds(principal: AutoOpsPrincipal): string[];
@@ -93,7 +98,7 @@ export interface AutoOpsAccess {
   recordGeneratedAttachment(threadId: string, attachmentId: string, metadata: {name:string;mimeType:string;sizeBytes:number}): void;
   forkBinding(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;
   recordLegacyNativeFork(sourceThreadId: string, targetThreadId: string, sourceNativeId: string, targetNativeId: string): void;
-  requireToolThread(threadId: string): ToolScope;
+  requireToolThread(threadId: string, actorId?: string): ToolScope;
   requireReference(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;
   requireCsrf(principal: AutoOpsPrincipal, presented: unknown): void;
   recordNativeSession(principal: AutoOpsPrincipal, nativeSessionId: string): void;
@@ -117,7 +122,7 @@ export function configuredAutoOpsProjects(): AutoOpsProject[];
 export function configuredAutoOpsProjectDirectory(): import('./project-directory/index.ts').ProjectDirectory;
 export function configuredAutoOpsAccess(): AutoOpsAccess | undefined;
 export function getThreadBinding(threadId: string): ThreadBinding | undefined;
-export function requireToolThread(threadId: string): ToolScope;
+export function requireToolThread(threadId: string, actorId?: string): ToolScope;
 
 export function initializeAutoOpsAccessSchema(db: DatabaseSync): void;
 export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;kind?:'internal'|'external';status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean}): AutoOpsAccess;

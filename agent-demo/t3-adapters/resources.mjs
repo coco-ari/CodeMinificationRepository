@@ -115,7 +115,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     access.requireProject(principal, identity.projectId)
     const actors = [principal.id]
     for (const { binding } of access.listResourceThreads(principal, identity.projectId)) {
-      if (access.listThreadInputs(binding.threadId).some(value => value.inputId === identity.inputId)) actors.push(binding.ownerId)
+      for (const value of access.listThreadInputs(binding.threadId)) if (value.inputId === identity.inputId) actors.push(value.inputOwnerId)
       for (const reference of access.inputReferences(binding.threadId)) if (reference.inputId === identity.inputId) actors.push(reference.actorId)
     }
     for (const actor of new Set(actors)) {
@@ -127,13 +127,13 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     }
     fail()
   }
-  function threadInput(threadId, inputId, reference = false) {
-    const { binding } = access.requireToolThread(threadId)
-    const own = access.listThreadInputs(threadId).some(value => value.inputId === inputId)
+  function threadInput(threadId, inputId, reference = false, actorId) {
+    const own = access.listThreadInputs(threadId).find(value => value.inputId === inputId)
+    const { binding, actorId: caller } = access.requireToolThread(threadId, actorId ?? own?.actorId)
     const retained = reference ? access.inputReferences(threadId).find(value => value.inputId === inputId) : undefined
     if (!own && !retained) fail('资料输入不属于此会话任务或已验证引用')
-    access.requireWorkspaceInputReader(binding.ownerId, binding.projectId, binding.workspaceType || 'internal')
-    return inputCatalog(binding.projectId, inputId, retained?.actorId ?? binding.ownerId, binding.workspaceType || 'internal')
+    access.requireWorkspaceInputReader(caller, binding.projectId, binding.workspaceType || 'internal')
+    return inputCatalog(binding.projectId, inputId, retained?.actorId ?? own?.inputOwnerId ?? binding.ownerId, binding.workspaceType || 'internal')
   }
   async function scopedInput(principal, scope, path) {
     const identity = path ? inputIdentity(path) : undefined
@@ -217,9 +217,9 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     const content = requireExtractedText(extracted, '该资料的正文不可提取，请查看原件')
     return { contents: content, byteLength: Buffer.byteLength(content), truncated: false }
   }
-  function forThread(threadId, currentInput = false) {
-    const target = access.requireToolThread(threadId)
-    return catalog(target.project, access.listToolResourceThreads(threadId), target.binding, currentInput).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
+  function forThread(threadId, currentInput = false, actorId) {
+    const target = access.requireToolThread(threadId, actorId)
+    return catalog(target.project, access.listToolResourceThreads(threadId, actorId), target.binding, currentInput).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
   }
 
   return {
@@ -319,18 +319,18 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       }
       return {entries}
     },
-    requireContext(threadId, context) {
+    requireContext(threadId, context, actorId) {
       let allowed
       for (const record of context?.records || []) if (record.kind === 'mention') {
         assertPath(record.path)
         const identity = inputIdentity(record.path)
         if (identity) {
-          const { binding } = access.requireToolThread(threadId)
+          const { binding } = access.requireToolThread(threadId, actorId)
           if (identity.projectId !== binding.projectId) fail()
-          const actors = [binding.ownerId]
-          for (const source of access.listToolResourceThreads(threadId)) {
+          const actors = [actorId ?? binding.ownerId]
+          for (const source of access.listToolResourceThreads(threadId, actorId)) {
             if (source.binding.workspaceType !== binding.workspaceType) continue
-            if (access.listThreadInputs(source.binding.threadId).some(value => value.inputId === identity.inputId)) actors.push(source.binding.ownerId)
+            for (const value of access.listThreadInputs(source.binding.threadId)) if (value.inputId === identity.inputId) actors.push(value.inputOwnerId)
           }
           let selected
           for (const actor of new Set(actors)) {
@@ -338,39 +338,40 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
             catch (error) { if (error.code !== 'WORKSPACE_INPUT_NOT_FOUND') throw error }
           }
           if (!selected || !(record.path === selected.root || entriesWithFolders(selected.files).some(entry => entry.path === record.path))) fail()
-          access.retainInputReference(threadId, identity.inputId, selected.actorId)
+          access.retainInputReference(threadId, identity.inputId, selected.actorId, actorId)
           continue
         }
-        allowed ??= entriesWithFolders(forThread(threadId))
+        allowed ??= entriesWithFolders(forThread(threadId, false, actorId))
         if (!allowed.some((entry) => entry.path === record.path)) fail('引用不属于当前环境或授权受众，或其资料版本已改变')
       }
     },
     async readForThread(threadId, path, inputId, referenceInputIds = [], history) {
       assertPath(path)
-      if (inputId) access.requireRunInput(threadId, inputId)
+      const run = inputId ? access.requireRunInput(threadId, inputId, history?.runId) : undefined
+      const actorId = run?.actorId
       const identity = inputIdentity(path)
       if (identity) {
         if (!inputId) fail('读取本轮资料必须提供任务输入身份')
-        threadInput(threadId, inputId)
+        threadInput(threadId, inputId, false, actorId)
         const history = access.listThreadInputs(threadId)
         const currentIndex = history.findIndex(value => value.inputId === inputId), targetIndex = history.findIndex(value => value.inputId === identity.inputId)
         if (identity.inputId !== inputId && !(targetIndex >= 0 && targetIndex < currentIndex) && !referenceInputIds.includes(identity.inputId)) fail('不能读取后来轮次或不在本轮上下文中的资料输入')
-        const selected = threadInput(threadId, identity.inputId, true)
+        const selected = threadInput(threadId, identity.inputId, true, actorId)
         if (identity.projectId !== selected.capture.projectId) fail()
         const unavailable = selected.capture.sourceErrors?.find(source => identity.relativePath === source.mountPath || identity.relativePath.startsWith(source.mountPath + '/'))
         if (unavailable) throw new AutoOpsAccessError(503, 'WORKSPACE_INPUT_SOURCE_UNAVAILABLE', unavailable.message)
         const file = selected.files.find(file => file.path === path && file.type !== 'directory')
         if (file) {
           const content = await contents(file)
-          threadInput(threadId, inputId); threadInput(threadId, identity.inputId, true)
+          threadInput(threadId, inputId, false, actorId); threadInput(threadId, identity.inputId, true, actorId)
           return { path, name: file.name, mime: file.mime, content, source: 'workspace_input', inputId: identity.inputId, capturedAt: selected.capture.createdAt, sourceUrl: file.sourceUrl }
         }
         if (path !== selected.root && !entriesWithFolders(selected.files).some(entry => entry.path === path && entry.kind === 'directory')) fail()
         return { path, kind: 'directory', sourceErrors: selected.capture.sourceErrors ?? [], sourceWarnings: selected.capture.sourceWarnings ?? [], entries: selected.files.filter(file => file.type !== 'directory' && file.path.startsWith(path + '/')).map(({ path, name, mime }) => ({ path, name, mime })) }
       }
       if(path.startsWith('autoops/skills/'))return readScopedSkillResourceForThread(process.env.AUTOOPS_T3_DATA_DIR,threadId,path,access)
-      const historical = path.startsWith(`autoops/${access.requireToolThread(threadId).binding.projectId}/workspaces/`)
-      const resources = forThread(threadId, Boolean(inputId) && !historical).filter(resource => {
+      const historical = path.startsWith(`autoops/${access.requireToolThread(threadId, actorId).binding.projectId}/workspaces/`)
+      const resources = forThread(threadId, Boolean(inputId) && !historical, actorId).filter(resource => {
         if (!inputId || !['attachment', 'report'].includes(resource.type)) return true
         const mentioned = history?.referencePaths?.some(path => resource.path === path || resource.path.startsWith(path + '/'))
         if (mentioned && typeof resource.createdAt === 'string' && resource.createdAt <= history.acceptedAt) return true
@@ -384,7 +385,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       if (resource) {
         const read = resource.type === 'workspace' ? await workspaceContents(resource) : null
         const content = read ? read.contents : await contents(resource)
-        if (!forThread(threadId, Boolean(inputId) && !historical).some((entry) => entry.path === path)) fail()
+        if (!forThread(threadId, Boolean(inputId) && !historical, actorId).some((entry) => entry.path === path)) fail()
         return { path, name: resource.name, mime: resource.mime, content, ...(read ? { source: 'workspace_snapshot', workspaceVersionId: resource.workspaceVersionId, byteLength: read.byteLength, truncated: read.truncated } : {}), sourceUrl: resource.sourceUrl || `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(path)}` }
       }
       const folder = entriesWithFolders(resources).find((entry) => entry.path === path && entry.kind === 'directory')

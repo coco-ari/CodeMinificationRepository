@@ -29,12 +29,12 @@ export function createBusinessArtifactStore(dataDir) {
     );
     CREATE INDEX IF NOT EXISTS business_artifacts_thread ON business_artifacts(thread_id);`) } catch (error) { db.close(); throw error }
   return {
-    create({ binding, runId, name, mime, bytes }) {
+    create({ binding, actorId = binding.ownerId, runId, name, mime, bytes }) {
       // Identical retries in one run reuse the same artifact; different bytes or
       // a later run never overwrite an already delivered file.
       const digest = createHash('sha256').update(JSON.stringify([binding.threadId, runId, name, mime])).update(bytes).digest('hex')
       const id = `report-${digest}`
-      db.prepare('INSERT OR IGNORE INTO business_artifacts VALUES(?,?,?,?,?,?,?,?,?,?)').run(id, binding.threadId, runId, binding.projectId, binding.ownerId, Number(binding.visibility === 'project'), name, mime, bytes, new Date().toISOString())
+      db.prepare('INSERT OR IGNORE INTO business_artifacts VALUES(?,?,?,?,?,?,?,?,?,?)').run(id, binding.threadId, runId, binding.projectId, actorId, Number(binding.visibility === 'project'), name, mime, bytes, new Date().toISOString())
       return { id, name, mime, size: bytes.byteLength, sourceUrl: `/api/agent-demo/t3/autoops/files/${encodeURIComponent(id)}` }
     },
     read(id) {
@@ -140,7 +140,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
       return { environmentId, environmentName: project.environments.find((environment) => environment.id === environmentId)?.name, source: 'demo_fixture_snapshot', observedAt: context.resourceSnapshot.collectedAt, resources: context.resources, resourceSnapshot: context.resourceSnapshot, notice: '这是测试主服务提供的演示夹具，不是生产环境实时观测。' }
     },
     async createReport(threadId, runId, input) {
-      const { binding } = await authorize(threadId)
+      const { binding, actorId } = await authorize(threadId)
       const name = bounded(input.name, '报告名称', 160)
       if (/[\\/\r\n\u0000]/.test(name) || name === '.' || name === '..') fail('INVALID_TOOL_INPUT', '报告名称不能包含路径')
       const content = bounded(input.content, '报告正文')
@@ -148,7 +148,7 @@ export function createAutoOpsBusinessTools({ authorizeThread, loadAttachments, l
       if (input.mime === 'application/pdf' && !renderPdf) fail('PDF_UNAVAILABLE', 'PDF 生成尚未就绪，可生成 Markdown 或 CSV')
       const bytes = input.mime === 'application/pdf' ? await renderPdf(content) : Buffer.from(content, 'utf8')
       await authorize(threadId)
-      return { ...await storeArtifact({ binding, runId, name, mime: input.mime, bytes }), status: 'saved', published: binding.visibility === 'project' }
+      return { ...await storeArtifact({ binding, actorId, runId, name, mime: input.mime, bytes }), status: 'saved', published: binding.visibility === 'project' }
     },
   }
 }

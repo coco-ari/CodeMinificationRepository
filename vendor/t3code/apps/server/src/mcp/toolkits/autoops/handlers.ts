@@ -16,6 +16,7 @@ import { createAutoOpsBusinessTools, configuredBusinessArtifactStore } from "../
 import { renderBusinessPdf } from "../../../../../../../../agent-demo/t3-adapters/business-documents.mjs";
 import { configuredHostResourceCatalog as configuredBusinessResourceCatalog } from "../../../autoops/resourceCatalog.ts";
 
+import { businessToolRun } from "../../../autoops/businessToolScope.ts";
 import { createBusinessRunInputs } from "../../../../../../../../agent-demo/t3-adapters/thread-inputs.ts";
 import { configuredWorkspaceManagement } from "../../../../../../../../agent-demo/t3-adapters/workspace-management.ts";
 
@@ -36,19 +37,23 @@ const current = (inputId: string) => Effect.gen(function* () {
   if (!access) return yield* unavailable();
   const workspace = configuredWorkspaceManagement(access);
   const inputs = createBusinessRunInputs(access, workspace);
-  const authorized = yield* Effect.try({ try: () => inputs.require(caller.thread.threadId, inputId), catch: toolFailure });
   const threads = yield* Threads.ThreadManagementService;
   const config = yield* Config.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const projection = yield* threads.getThreadProjection(caller.thread.threadId).pipe(Effect.mapError(unavailable));
   if (projection.thread.deletedAt !== null) return yield* unavailable();
-  const runId = authorized.input.runId;
+  const active = Threads.latestActiveRun(projection);
+  const nativeThread = projection.providerThreads.find(thread => thread.providerSessionId === caller.thread.providerSessionId && (active === undefined || thread.id === active.providerThreadId));
+  if (!nativeThread || (active && active.providerInstanceId !== caller.thread.providerInstanceId)) return yield* unavailable();
+  const run = yield* Effect.try({ try: () => businessToolRun(access, caller.thread.threadId, inputId, active?.id), catch: toolFailure });
+  const authorized = yield* Effect.try({ try: () => inputs.require(caller.thread.threadId, inputId, run.runId), catch: toolFailure });
+  const runId = run.runId;
   let historyProjection = projection;
   let historyBinding = authorized.binding;
   // 原生子任务继承创建事件所属父轮的历史，不能借用父会话后来的轮次。
   for (let depth = 0; depth < 64 && !historyProjection.runs.some((run) => run.id === runId) && historyBinding.nativeParentThreadId; depth++) {
     const parentThreadId = historyBinding.nativeParentThreadId;
-    historyBinding = yield* Effect.try({ try: () => access.requireToolThread(parentThreadId).binding, catch: toolFailure });
+    historyBinding = yield* Effect.try({ try: () => access.requireToolThread(parentThreadId, authorized.actorId).binding, catch: toolFailure });
     historyProjection = yield* threads.getThreadProjection(ThreadId.make(parentThreadId)).pipe(Effect.mapError(unavailable));
   }
   const historyRun = historyProjection.runs.find((run) => run.id === runId);
@@ -60,9 +65,9 @@ const current = (inputId: string) => Effect.gen(function* () {
   const referenceInputIds = referencePaths.flatMap((path) => path.match(/^autoops\/[^/]+\/inputs\/([^/]+)(?:\/|$)/)?.[1] ?? []);
   const files = [...new Map(history.flatMap((message) => message.attachments).map((file) => [file.id, file] as const)).values()];
   const capture = authorized.capture;
-  const inputFiles = yield* Effect.try({ try: () => workspace.inputFiles(capture.projectId, capture.id, authorized.binding.ownerId), catch: toolFailure });
+  const inputFiles = yield* Effect.try({ try: () => workspace.inputFiles(capture.projectId, capture.id, authorized.input.inputOwnerId), catch: toolFailure });
   const tools = createAutoOpsBusinessTools({
-    authorizeThread: (threadId) => inputs.require(threadId, inputId),
+    authorizeThread: (threadId) => inputs.require(threadId, inputId, runId),
     materialInput: {
       id: capture.id, workspaceType: capture.workspaceType, createdAt: capture.createdAt, revision: capture.revision,
       sourceErrors: capture.sourceErrors ?? [],
@@ -70,8 +75,8 @@ const current = (inputId: string) => Effect.gen(function* () {
       repositories: capture.repositories.map((repository) => ({ path: repository.source.mountPath, commit: repository.commit })),
       files: inputFiles.map((file) => ({ ...file, name: file.path.split("/").at(-1)! })),
       read: async (path) => {
-        const file = await workspace.readInputContent(capture.projectId, capture.id, path, authorized.binding.ownerId);
-        inputs.require(caller.thread.threadId, inputId);
+        const file = await workspace.readInputContent(capture.projectId, capture.id, path, authorized.input.inputOwnerId);
+        inputs.require(caller.thread.threadId, inputId, runId);
         if (typeof file.contents !== "string") {
           const code = file.extraction.code ?? "RESOURCE_NOT_TEXT";
           const retryable = ["DOCUMENT_BUSY", "DOCUMENT_WORKER_ERROR", "DOCUMENT_WORKER_EXIT", "DOCUMENT_RESOURCE_LIMIT"].includes(code);
@@ -92,11 +97,13 @@ const current = (inputId: string) => Effect.gen(function* () {
     renderPdf: renderBusinessPdf,
   });
   const catalog = configuredBusinessResourceCatalog({ attachmentsDir: config.attachmentsDir, readFile: (path) => Effect.runPromise(fs.readFile(path)) });
-  const resourceHistory = { referencePaths, attachmentIds: files.map((file) => file.id), acceptedAt: historyRun ? DateTime.formatIso(historyRun.requestedAt) : "" };
+  const resourceHistory = { runId, actorId: authorized.actorId, referencePaths, attachmentIds: files.map((file) => file.id), acceptedAt: historyRun ? DateTime.formatIso(historyRun.requestedAt) : "" };
   return { caller, authorized, runId, tools, catalog, referenceInputIds, resourceHistory };
 });
 const invoke = (inputId: string, operation: (context: Effect.Success<ReturnType<typeof current>>) => Promise<Record<string, unknown>>) => current(inputId).pipe(
-  Effect.flatMap((context) => Effect.tryPromise({ try: () => operation(context), catch: toolFailure })),
+  Effect.flatMap((context) => Effect.tryPromise({ try: () => operation(context), catch: toolFailure }).pipe(
+    Effect.tap(() => current(inputId).pipe(Effect.flatMap(latest => latest.runId === context.runId && latest.authorized.actorId === context.authorized.actorId ? Effect.void : unavailable()))),
+  )),
 );
 
 export const layer = Access.toLayer(AutoOpsToolkit, {
@@ -126,6 +133,7 @@ export const layer = Access.toLayer(AutoOpsToolkit, {
           Effect.andThen(new OrchestratorMcpFailure({ code: "orchestration_error", message: "交互表单未能送达用户；这不是用户取消，请说明暂时无法确认，不要使用默认答案。" })),
         );
       }),
+      Effect.tap(() => current(input.inputId)),
     );
   })))),
 });
