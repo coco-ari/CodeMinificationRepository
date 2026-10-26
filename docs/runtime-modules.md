@@ -1174,3 +1174,15 @@ v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3`
 新增 6/6、原关联 5/5 通过，根代理另独立复跑 6/6；独立原生生命周期 7/7、嵌套事务回归 2/2 通过。证据 `.deployment/workspace-release-receipt-{red,green}.log` 与 `.deployment/current-release-switch/stable3-workspace-resource-{readonly,hash-reconstruction}.json`。此改动没有页面操作变化；用户保留原资料与任务恢复，开发只在已有所有者修复写入语义，Agent 沿原收据/来源判断结果。代码完成，自动检查部分通过，新固定候选 CI、部署生效及真实保留复验仍待完成。
 
 资料释放修复另固定并正常推送为 `3e496ce7`；[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40347117268)通过，[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40347117336)进行中。从该提交独占 Git 归档复跑新 6 项及原 5 项均通过，账号工作树改动未进入该候选；新发行构建和保留部署继续进行。
+
+`3e496ce7` 后续两项完整 CI 均成功：Node 817 通过/2 条件跳过，原生 242 通过/2 跳过及过滤回归 2/1 项通过，Web 612/612、客户 76/76，类型、边界、构建、语言和 Markdown 全过。日志 `.deployment/ci-3e496ce7.log` SHA256 `76ccc5de86c4b28ea975bba56ce6052fcefafacbdf4eb6040bf94fbc6b4bf513`。该提交的独占构建、源码正文与映射、发行包和 Linux 官方原生依赖验证均通过。
+
+实际 `3e496ce7-stable1` 仍未闭环：Worker 两轮完整 owner 及最终保护复核通过；Web 阶段初次 owner 读取正遇 `customer_devices` 变化，严格拒绝并自动恢复旧程序/当前数据。随后只读确认原电脑真实版本已由 0.1.0 更新为 0.3.0，当前连接代次 63；不能将这一后续事实当作失败时已完整验证。证据 `.deployment/current-release-switch/*3e496ce7-stable1*`。下一窗口须证明同版本重连的当前代次、原能力目录仅更新时间刷新及完整原行保留，旧规则/旧失败不覆盖。
+
+B4 准备真实项目管理员/只读身份回归时，另发现已存节点原收据目前仅由同 UUID 写入口恢复，缺少按原 requestId 的只读查询。未知时目录或绑定状态相同不足以证明原写收据，准备器会保留未知并停止，不重新提交。此项是后续最小合同/交互代码缺口，继续列待完成，不作为缺少用户信息的阻塞；已明确成功的同 UUID 幂等回归与未知结果核对分开记录。
+
+`3e496ce7-stable2` 实际完成切换，收据 `.deployment/current-release-switch/switch-3e496ce7-stable2.json` SHA256 `78d9bca00e39a0bcd4c0d985066c817b824195d2b51a0274f0c662ed8c759fc8`。两阶段均按完整原数据 owner 读取两轮稳定快照并最终复核，没有原行/内容豁免或历史 unknown 例外；Web 阶段原电脑仍为真实 0.3.0，新代次 64，固定能力目录只更新采集时间，完整原行摘要可重建。等待预算仅覆盖已核实旧客户端 37.5 秒最大退避；8 个预算/失败负例及原 154 项通过，完整 owner 失败仍立即拒绝。旧失败保留，不追记成功。
+
+实际 Web PID373558、Worker launcher373429/native373441 的目录均为固定发行，原 DATA_DIR、Node24.22.0、发行和官方原生清单逐项匹配；loopback/公共健康、HTML 和两个 Worker 字节通过。独立只读复核 `.deployment/current-release-switch/3e496ce7-live-independent-v2.json` SHA256 `25f39d67660533649e7b33c8408cebb21efb8886c4ca7d217242b43c697b76ec` 另确认：原引用释放完整表精确不变、395 个原文件和凭证主密钥保留、原 12 条部署任务及 9 条版本摘要不变，原部署 Agent 59368 的实际根目录/启动身份保持。root 进程读取复用已验证的固定只读 helper，没有更改 Agent。原存储维护真实失败仍保留失败；只重建原节点存储报告后，整体部署摘要命中原基线，迁移报告没有重复刷新。未恢复数据库、未执行备份或清理业务数据。S1 四类状态现为代码完成、自动测试通过、部署已生效、真实启动和数据保留验收通过；这只关闭 S1，账号、真实问答、定时更新、共享电脑、部署版本链/回退及整页验收仍继续。
+
+账号修复已固定并正常推送为 `305af444`，[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40349345502)和[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40349349865)均通过：Node 846 通过/2 条件跳过，Linux 真实锁回归已运行；原生 251 通过/2 跳过及过滤回归 2/1 项通过，Web 631/631（含新增 8 项账号交互）、客户 76/76，类型、边界、构建、语言和 Markdown 全过。日志 `.deployment/ci-305af444.log` SHA256 `54e23daef550d374dddc1513f66df5fd40e74784cc0aed8738e453c812d69607`。独占源码归档、fresh 构建、实际包内正常账号初始化/创建/重开/登录/收据冒烟、完整发行正文与官方 Linux 原生依赖均核对通过；独立发行已准备，发行清单 `6faafe0d8f71f0a647d1e5ca641eb685c264d1821836550cfc5caaa8d17e24b5`、原生清单 `132ace6313d4ca57331b5ba40c54699f2a85663bf16149e3926d53d62061258c`。以上仅补代码与自动证据；实际接管、部署生效、旧合法会话和真实账号流程仍待验。
