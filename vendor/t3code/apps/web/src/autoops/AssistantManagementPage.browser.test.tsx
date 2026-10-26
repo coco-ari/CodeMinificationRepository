@@ -551,7 +551,10 @@ it.each([false, true])("保存后等待目录刷新，恢复空焦点但不抢�
     finish = resolve;
   });
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input), window.location.origin).pathname;
+    const path = new URL(String(input), window.location.origin).pathname.replace(
+      /^\/api\/agent-demo\/t3/,
+      "",
+    );
     if (path === "/api/v1/assistants/provided" && init?.method === "GET" && f.writes.length) {
       refreshing = true;
       await gate;
@@ -620,7 +623,13 @@ it.each(["withdrawn", "changed", "model"] as const)(
     await menu("本人排障助手", "编辑助手");
     await expect
       .element(page.getByRole("combobox", { name: "运行目录", exact: true }))
-      .toHaveTextContent(kind === "model" ? "隔离运行器" : "原隔离运行器 · 已不可用");
+      .toHaveTextContent(
+        kind === "model"
+          ? "隔离运行器"
+          : kind === "withdrawn"
+            ? "隔离运行器 · 已不可用"
+            : "原隔离运行器 · 已不可用",
+      );
     await expect
       .element(page.getByRole("combobox", { name: "模型", exact: true }))
       .toHaveTextContent("isolated-model · 已不可用");
