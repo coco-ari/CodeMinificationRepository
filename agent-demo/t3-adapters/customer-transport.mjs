@@ -71,6 +71,21 @@ export function createCustomerTransportJournal(db) {
       db.prepare('UPDATE customer_transport_commands SET receipt=? WHERE id=?').run(JSON.stringify(receipt),receipt.commandId);
       return receipt;
     },
+    /** 只用于同设备已查询原收据的人工停止核实，不接受设备把未知结果声称为成功。 */
+    reconcileStoppedReceipt(receipt, query) {
+      return transaction(() => {
+        const old=this.command(receipt.commandId),session=this.session(query.sessionId);
+        if(!old||old.command.sessionId!==receipt.sessionId||query.sessionId!==receipt.sessionId)fail('UNKNOWN_COMMAND','原客户命令范围不匹配');
+        if(old.command.executionScope?.grantId!==receipt.grantId)fail('RECEIPT_SCOPE_CHANGED','客户回执不属于原命令固定执行范围');
+        if(old.receipt&&['completed','failed'].includes(old.receipt.state))return old.receipt;
+        if(!old.receipt||old.receipt.state!=='unknown'||receipt.type!=='receipt'||receipt.state!=='failed'||receipt.result!==undefined||receipt.error?.code!=='CUSTOMER_MANUALLY_RECONCILED'||typeof receipt.error.message!=='string'||!receipt.error.message.trim()||receipt.error.message.length>2000)fail('RECEIPT_RECONCILIATION_INVALID','仅原命令合法的人工停止失败收据可收束未知结果');
+        if(!query.runtimeEpoch||receipt.runtimeEpoch!==query.runtimeEpoch||session?.runtimeEpoch!==query.runtimeEpoch||(old.command.runtimeEpoch!==undefined&&old.command.runtimeEpoch!==query.runtimeEpoch))fail('RUNTIME_EPOCH','人工核实收据不属于原运行代次');
+        db.prepare('UPDATE customer_transport_commands SET receipt=? WHERE id=?').run(JSON.stringify(receipt),receipt.commandId);
+        return receipt;
+      });
+    },
+    // 有界只读查询，与执行重放列表严格分开；unknown永远不进pendingCommands。
+    unknownCommands: sessionId => db.prepare("SELECT body FROM customer_transport_commands WHERE session_id=? AND json_extract(receipt,'$.state')='unknown' ORDER BY rowid LIMIT 64").all(sessionId).map(parse),
     pendingCommands: sessionId => db.prepare('SELECT body,receipt FROM customer_transport_commands WHERE session_id=? ORDER BY rowid').all(sessionId)
       .filter(row => !row.receipt || JSON.parse(row.receipt).state === 'accepted').map(row => JSON.parse(row.body)),
     cursor: (sessionId, epoch) => ({...(db.prepare('SELECT received,applied FROM customer_transport_cursors WHERE session_id=? AND epoch=?').get(sessionId,epoch) ?? {received:0,applied:0})}),

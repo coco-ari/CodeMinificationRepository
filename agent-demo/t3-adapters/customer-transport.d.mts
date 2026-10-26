@@ -28,6 +28,8 @@ export interface CustomerTransportJournal {
  command(id:string):{command:TransportCommand;receipt?:TransportReceipt}|undefined;
  saveCommand(value:TransportCommand):{command:TransportCommand;receipt?:TransportReceipt}|undefined;
  saveReceipt(value:TransportReceipt):TransportReceipt;
+ reconcileStoppedReceipt(value:TransportReceipt,query:{sessionId:string;runtimeEpoch:string}):TransportReceipt;
+ unknownCommands(sessionId:string):TransportCommand[];
  pendingCommands(sessionId:string):TransportCommand[];
  cursor(sessionId:string,epoch:string):{received:number;applied:number};
  receive(sessionId:string,epoch:string,events:ReadonlyArray<{seq:number;event:unknown}>):number;

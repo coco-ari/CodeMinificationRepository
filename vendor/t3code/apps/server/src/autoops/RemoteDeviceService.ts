@@ -23,7 +23,7 @@ import { customerProviderInstanceId,customerWorkspaceKey } from '../../../../../
 import { createCustomerTransportJournal, customerCommandId, CustomerTransportError, type CustomerTransportJournal, type TransportSession, type TransportReceipt } from '../../../../../../agent-demo/t3-adapters/customer-transport.mjs';
 
 type Send = (frame: CustomerAgentServerFrame) => Promise<void>;
-type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; sharedExecutionVersion?:1; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
+type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; sharedExecutionVersion?:1; receiptQueries:Map<string,{sessionId:string;runtimeEpoch:string;grantId?:string|undefined}>; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
 type Delivery = {sessionId:string;epoch:string;seq:number};
 const error = (code:string,message:string) => new CustomerTransportError(code,message);
 export class RemoteDeviceHub {
@@ -160,7 +160,7 @@ export class RemoteDeviceHub {
     this.access.assertAccepting();
     const prior=this.connections.get(principal.deviceId);prior?.close();
     const {connectionEpoch}=this.access.customerRegistry.markConnected(principal);
-    const connection:Connection={principal,epoch:connectionEpoch,send,hello:false,sessions:new Map(),close:onClose};
+    const connection:Connection={principal,epoch:connectionEpoch,send,hello:false,sessions:new Map(),receiptQueries:new Map(),close:onClose};
     this.connections.set(principal.deviceId,connection);
     const current=()=>{if(this.connections.get(principal.deviceId)!==connection)throw error('STALE_CONNECTION','旧设备连接已被替换');};
     return {
@@ -195,6 +195,16 @@ export class RemoteDeviceHub {
                   catch { await send({type:'receiptQuery',commandId:command.commandId,sessionId:command.sessionId,grantId:command.executionScope.grantId});continue; }
                 }
                 await send(command as CustomerAgentServerFrame);
+              }
+              const unknown=this.journal.unknownCommands(session.sessionId);
+              if(unknown.length&&!frame.receiptQueries)await send({type:'error',code:'RECEIPT_QUERY_UPDATE_REQUIRED',message:'请更新原连接程序以查询原未知收据；没有重发执行'});
+              if(frame.receiptQueries&&reported.state==='idle')for(const command of unknown) {
+                const epoch:string|undefined=command.runtimeEpoch??session.runtimeEpoch;
+                if(!epoch||epoch!==session.runtimeEpoch)continue;
+                const grantId=command.executionScope?.grantId;
+                connection.receiptQueries.set(command.commandId,{sessionId:session.sessionId,runtimeEpoch:epoch,grantId});
+                // 撤回只阻止新执行；已绑定设备可只读查原command/session/grant，不再校验新执行权限。
+                await send({type:'receiptQuery',commandId:command.commandId,sessionId:session.sessionId,...(grantId?{grantId}:{})});
               }
             }
           }
@@ -232,6 +242,17 @@ export class RemoteDeviceHub {
         if(frame.type==='receipt') {
           const pending=this.journal.command(frame.commandId);
           if(!pending || pending.command.sessionId!==session.sessionId)throw error('COMMAND_SCOPE','客户回执不属于此会话');
+          if(pending.command.executionScope?.grantId!==frame.grantId)throw error('RECEIPT_SCOPE_CHANGED','客户回执不属于原命令固定执行范围');
+          if(pending.receipt?.state==='unknown'&&frame.state==='failed') {
+            if(frame.result!==undefined||frame.error?.code!=='CUSTOMER_MANUALLY_RECONCILED'||typeof frame.error.message!=='string'||!frame.error.message.trim()||frame.error.message.length>2000)throw error('RECEIPT_RECONCILIATION_INVALID','仅原合法人工停止失败收据可收束未知结果');
+            const query=connection.receiptQueries.get(frame.commandId),reported=connection.sessions.get(session.sessionId);
+            if(!query||query.sessionId!==session.sessionId||query.grantId!==frame.grantId||reported?.state!=='idle')throw error('RECEIPT_QUERY_REQUIRED','此连接尚未查询原人工核实收据');
+            if(query.runtimeEpoch!==frame.runtimeEpoch||reported.runtimeEpoch!==query.runtimeEpoch||session.runtimeEpoch!==query.runtimeEpoch)throw error('RUNTIME_EPOCH','原收据不属于此连接核对的运行代次');
+            const reconciled=this.journal.reconcileStoppedReceipt(frame,query);
+            connection.receiptQueries.delete(frame.commandId);
+            for(const notify of this.waiters.get(frame.commandId)??[])notify(reconciled);
+            this.signals.emit(session.sessionId);this.signals.emit('session-state',session.sessionId);return;
+          }
           // A delayed replay of an already settled openSession must not roll a newer runtime back.
           if(pending.receipt&&['completed','failed','unknown'].includes(pending.receipt.state)) {
             for(const notify of this.waiters.get(frame.commandId)??[])notify(pending.receipt);

@@ -42,6 +42,32 @@ test('unknown outcome is durable and will never enter automatic retry list',t=>{
  assert.equal(journal.pendingCommands('session').length,0);
  assert.equal(journal.saveCommand(command).receipt.state,'unknown');
 });
+test('人工核实后的原失败收据只收束unknown，不改已完成结果也不进入重放',t=>{
+ const journal=fixture(t);journal.saveSession({...session,runtimeEpoch:'original-epoch'});journal.saveCommand({...command,method:'resumeThread',runtimeEpoch:'original-epoch'});
+ journal.saveReceipt({type:'receipt',commandId:'command',sessionId:'session',state:'unknown'});
+ assert.equal(journal.pendingCommands('session').length,0);
+ assert.deepEqual(journal.unknownCommands('session').map(value=>value.commandId),['command']);
+ const failed={type:'receipt',commandId:'command',sessionId:'session',state:'failed',runtimeEpoch:'original-epoch',error:{code:'CUSTOMER_MANUALLY_RECONCILED',message:'原进程已人工核实停止，未重做'}};
+ assert.equal(journal.reconcileStoppedReceipt(failed,{sessionId:'session',runtimeEpoch:'original-epoch'}).state,'failed');
+ assert.equal(journal.unknownCommands('session').length,0);
+ assert.equal(journal.saveReceipt({...failed,state:'completed',result:{fabricated:true}}).state,'failed');
+});
+
+test('人工失败收束严格固定原session/grant/epoch，非法结果不改原unknown',t=>{
+ const journal=fixture(t),scope={grantId:'original-grant'};
+ journal.saveSession({...session,runtimeEpoch:'epoch'});journal.saveCommand({...command,runtimeEpoch:'epoch',executionScope:scope});
+ journal.saveReceipt({type:'receipt',commandId:'command',sessionId:'session',grantId:scope.grantId,state:'unknown'});
+ const receipt={type:'receipt',commandId:'command',sessionId:'session',grantId:scope.grantId,state:'failed',runtimeEpoch:'epoch',error:{code:'CUSTOMER_MANUALLY_RECONCILED',message:'已核实停止'}};
+ for(const [changed,code] of [[{sessionId:'other'},'UNKNOWN_COMMAND'],[{grantId:'other'},'RECEIPT_SCOPE_CHANGED'],[{runtimeEpoch:'other'},'RUNTIME_EPOCH'],[{state:'completed'},'RECEIPT_RECONCILIATION_INVALID'],[{result:{}},'RECEIPT_RECONCILIATION_INVALID'],[{error:{code:'other',message:'不能猜测'}},'RECEIPT_RECONCILIATION_INVALID']]) {
+  assert.throws(()=>journal.reconcileStoppedReceipt({...receipt,...changed},{sessionId:'session',runtimeEpoch:'epoch'}),{code});
+  assert.equal(journal.command('command').receipt.state,'unknown');
+ }
+ assert.equal(journal.pendingCommands('session').length,0);
+ journal.reconcileStoppedReceipt(receipt,{sessionId:'session',runtimeEpoch:'epoch'});
+ assert.deepEqual(journal.reconcileStoppedReceipt({...receipt,error:{code:'other',message:'篡改终态'}},{sessionId:'session',runtimeEpoch:'epoch'}),receipt);
+ journal.saveCommand({...command,commandId:'completed'});const completed={type:'receipt',commandId:'completed',sessionId:'session',state:'completed',result:{original:true}};journal.saveReceipt(completed);
+ assert.deepEqual(journal.reconcileStoppedReceipt({...receipt,commandId:'completed',grantId:undefined},{sessionId:'session',runtimeEpoch:'epoch'}),completed);
+});
 
 test('传输会话固定实际调用者、提供者与业务项目，不能通过旧设备会话改投身份', () => {
   const db = new DatabaseSync(':memory:'), journal = createCustomerTransportJournal(db)
