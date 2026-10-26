@@ -28,8 +28,10 @@ function safeId(value) {
 function atom(file, value) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
   const temporary = `${file}.${randomUUID()}.tmp`
-  writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600 })
-  renameSync(temporary, file)
+  try {
+    writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600 })
+    renameSync(temporary, file)
+  } finally { rmSync(temporary, { force: true }) }
 }
 function publicVersion(value) {
   const { files: _files, directory: _directory, ...rest } = value
@@ -263,7 +265,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     const contents = truncated ? new TextDecoder().decode(bytes.subarray(0, MAX_READ_BYTES)) : text
     return { path, name, mime, contents, byteLength: bytes.length, truncated }
   }
-  async function ensureProject(project) {
+  async function ensureProject(project, options = {}) {
     jobs.assertAccepting()
     const id = safeId(project.id)
     if (existsSync(stateFile(id))) return
@@ -282,6 +284,10 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       const versionId = randomUUID(), staging = join(root, 'staging', `seed-${versionId}`), files = join(staging, 'files')
       try {
         if (existsSync(stateFile(id))) return
+        if (options.initialContent !== 'example') {
+          save(id, { schemaVersion: SCHEMA_VERSION, projectId: id, versions: [], releases: [], tasks: [] })
+          return
+        }
         await mkdir(files, { recursive: true, mode: 0o700 })
         const entries = {
           'WORKSPACE.md': `# ${project.name}：示例工作区\n\n本目录是用于验证流程的最小示例，不是项目实际源码。内部与外部版本均只读。\n\n- frontend/：前端源码与 Git 历史\n- backend/：后端源码与 Git 历史\n- docs/：需求、设计与项目资料\n- prototypes/：原型与需要确认的图片\n\n外部版本单向生成并固定内容；前后端部署包从内部版本生成。示例中的账号、密钥及内部地址均为虚构测试数据。\n`,

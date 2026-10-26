@@ -21,7 +21,7 @@ async function setup(t) {
   for(const user of users) sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update(user.id).digest('hex'),user.id,'csrf',Date.now()+60000)
   const access=createAutoOpsAccess({sessionDb,bindingDb,workspaceStore,catalog:structuredClone({users,projects,agents})})
   const admin=access.authenticateCookie('demo_session=u-admin')
-  await workspaceStore.ensureProject(projects.find(p=>p.id===scope.projectId))
+  await workspaceStore.ensureProject(projects.find(p=>p.id===scope.projectId),{initialContent:'example'})
   const internal=workspaceStore.overview(scope.projectId).internalVersions[0]
   return {workspaceStore,access,admin,internal,bindingDb}
 }

@@ -14,7 +14,7 @@ async function fixture(t, options = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), 't3-workspaces-'))
   const store = createWorkspaceStore({ dataDir, authorizeTask: () => {}, ...options })
   t.after(async () => { await store.close(); rmSync(dataDir, { recursive: true, force: true }) })
-  await store.ensureProject({ id: 'p-test', name: '验证项目', documents: [{ id: 'd1', name: '设计.md', content: '# 固定项目资料\n项目代号 INTERNAL-DEMO' }] })
+  await store.ensureProject({ id: 'p-test', name: '验证项目', documents: [{ id: 'd1', name: '设计.md', content: '# 固定项目资料\n项目代号 INTERNAL-DEMO' }] }, { initialContent: 'example' })
   return { store, dataDir, version: store.overview('p-test').internalVersions[0] }
 }
 async function finish(store, task) {
@@ -91,7 +91,7 @@ test('工作区导入、脱敏和打包领取时重查真实项目权限，撤�
 test('任务与失败状态双重写入异常被收敛，其他项目仍可读取并完成打包', async (t) => {
   const diagnostics = []
   const { store, version, dataDir } = await fixture(t, { onTaskDiagnostic: (event) => { diagnostics.push(event); throw new Error('诊断接收端也失败') } })
-  await store.ensureProject({ id: 'p-healthy', name: '独立项目', documents: [] })
+  await store.ensureProject({ id: 'p-healthy', name: '独立项目', documents: [] }, { initialContent: 'example' })
   const statePath = join(dataDir, 'project-workspaces', 'p-test', 'state.json')
   const task = store.startPackages('p-test', { sourceVersionId: version.id, services: ['frontend'], requestId: 'state-write-failure' })
   const original = readFileSync(statePath)

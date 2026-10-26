@@ -33,7 +33,7 @@ const deferred = () => {
   return { promise, resolve }
 }
 
-async function fixture(t) {
+async function fixture(t, initialization) {
   const dataDir = await mkdtemp(join(tmpdir(), 'autoops-workspace-management-'))
   const sessionDb = new DatabaseSync(':memory:'),
     bindingDb = new DatabaseSync(':memory:')
@@ -92,7 +92,7 @@ async function fixture(t) {
     workspaceStore: store,
     deploymentEnabled: () => false,
   })
-  await store.ensureProject(catalog.projects[0])
+  await store.ensureProject(catalog.projects[0], initialization)
   const authoring = createWorkspaceAuthoring({
     dataDir,
     authorize: (actor, project, action) =>
@@ -296,6 +296,22 @@ async function fixture(t) {
     repository,
   }
 }
+
+test('新项目的当前资料和固定输入保持可读空态，不调用 Git 或自动写入示例', async t => {
+  const f = await fixture(t)
+  const overview = await f.http('authoring')
+  assert.deepEqual(overview.body.entries,[])
+  assert.deepEqual(overview.body.sources,[])
+  const tree = await f.http('current/tree')
+  assert.deepEqual(tree.body.entries,[])
+  const input = await f.service.captureAgentInput(projectId,{requestId:'empty-initial-input',workspaceType:'internal'},owner)
+  assert.deepEqual(input.files,[])
+  assert.deepEqual(input.repositories,[])
+  assert.deepEqual(f.service.inputTree(projectId,input.id,'',owner).entries,[])
+  assert.deepEqual(f.store.overview(projectId).internalVersions,[])
+  assert.deepEqual(f.calls.resolve,[])
+  assert.deepEqual(f.calls.fetch,[])
+})
 
 test('当前文档立即可读，每轮只固定引用，原请求重放不联网且新轮复用相同源码缓存', async (t) => {
   const f = await fixture(t)
@@ -955,7 +971,7 @@ test('抓取故障限定源码范围，但校验失败、撤权与取消不能�
 })
 
 test('清理预检保护旧会话与当前输入，显式释放后只删除无引用版本', async (t) => {
-  const f = await fixture(t)
+  const f = await fixture(t, { initialContent: 'example' })
   await f.source('frontend')
   const captured = await f.service.captureAgentInput(
     projectId,

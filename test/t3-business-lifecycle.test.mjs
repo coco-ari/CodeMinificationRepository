@@ -13,7 +13,7 @@ async function workspace(t) {
     assert.equal(actorId, 'fixture-manager'); assert.equal(projectId, fixtureProject.id)
   } })
   t.after(async () => { await store.close({force:true}); rmSync(dataDir, {recursive:true,force:true}) })
-  await store.ensureProject(fixtureProject)
+  await store.ensureProject(fixtureProject, { initialContent: 'example' })
   const input = {sourceVersionId:store.overview(fixtureProject.id).internalVersions[0].id,services:['frontend']}
   return {dataDir,store,input}
 }
@@ -48,7 +48,7 @@ test('关闭等待已进入的工作区初始化完成，Git退出后才清理�
   const dataDir=mkdtempSync(join(tmpdir(),'autoops-initialize-close-'))
   const store=createWorkspaceStore({dataDir,authorizeTask(){assert.fail('初始化不应提交业务任务')}})
   t.after(()=>rmSync(dataDir,{recursive:true,force:true}))
-  const initializing=store.ensureProject(fixtureProject)
+  const initializing=store.ensureProject(fixtureProject,{initialContent:'example'})
   await store.close()
   await initializing
   assert.equal(store.overview(fixtureProject.id).internalVersions.length,1)
@@ -194,7 +194,7 @@ for (const force of [false,true]) test(`真实配置宿主${force?'排空预算�
     const project=access.requireProject(principal,'p-autoops'),workspaces=configuredWorkspaceStore();
     const preferences=configuredPreferences(),settings=configuredSettingsPreferences(),artifacts=configuredBusinessArtifactStore();
     const deployments=configuredDeploymentStore();await deployments.ensureProject(project);
-    await workspaces.ensureProject(project);
+    await workspaces.ensureProject(project,{initialContent:'example'});
     const version=workspaces.overview(project.id).internalVersions[0];
     workspaces.startPackages(project.id,{sourceVersionId:version.id,services:['frontend'],requestId:'drain-fixture'},principal.id);
     process.env.AUTOOPS_T3_MODEL='fixture-model';

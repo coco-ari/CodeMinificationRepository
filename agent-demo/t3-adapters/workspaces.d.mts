@@ -4,7 +4,7 @@ export interface WorkspaceStore {
   whenIdle(): Promise<void>;
   stopAccepting(): void;
   close(options?: {force?: boolean}): Promise<void>;
-  ensureProject(project: { id: string; name: string; documents?: ReadonlyArray<{ id: string; name: string; mime?: string; content: string }> }): Promise<void>;
+  ensureProject(project: { id: string; name: string; documents?: ReadonlyArray<{ id: string; name: string; mime?: string; content: string }> }, options?: { initialContent: 'example' }): Promise<void>;
   overview(projectId: string): WorkspaceOverview;
   getVersion(projectId: string, versionId: string): WorkspaceVersion;
   findSourceCache(projectId: string, cacheKey: string): WorkspaceVersion | undefined;

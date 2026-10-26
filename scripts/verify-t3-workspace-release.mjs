@@ -73,7 +73,10 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
         authorizations++
       },
     })
-    await store.ensureProject({ id: projectId, name: '发行工作区隔离验证', documents: [] })
+    await store.ensureProject({ id: created.id, name: created.name, documents: [] })
+    assert.deepEqual(store.overview(created.id).internalVersions, [], '新业务项目不应自动生成示例资料')
+    assert.deepEqual(store.overview(created.id).releases, [], '新业务项目不应自动生成源码包')
+    await store.ensureProject({ id: projectId, name: '发行工作区隔离验证', documents: [] }, { initialContent: 'example' })
     const source = store.overview(projectId).internalVersions[0]
     assert.equal(source?.status, 'published', '未生成内部固定版本')
     const input = { sourceVersionId: source.id, services: ['frontend'], requestId }

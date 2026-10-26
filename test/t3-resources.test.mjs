@@ -243,7 +243,7 @@ test('真实生成的脱敏快照同时驱动MCP文档与原生@读取，原始�
   const sessions = new DatabaseSync(':memory:'), bindings = new DatabaseSync(':memory:')
   t.after(() => { sessions.close(); bindings.close(); rmSync(dataDir, { recursive: true, force: true }) })
   const workspaceStore = createWorkspaceStore({ dataDir, authorizeTask: () => {} })
-  await workspaceStore.ensureProject({ id: 'p-autoops', name: '真实工作区验证', documents: [{ id: 'custom-doc', name: '测试资料.md', content: '# 资料\n内部项目代号 PRIVATE-CONTENT' }] })
+  await workspaceStore.ensureProject({ id: 'p-autoops', name: '真实工作区验证', documents: [{ id: 'custom-doc', name: '测试资料.md', content: '# 资料\n内部项目代号 PRIVATE-CONTENT' }] }, { initialContent: 'example' })
   const internal = workspaceStore.overview('p-autoops').internalVersions[0]
   const task = workspaceStore.startExternal('p-autoops', { sourceVersionId: internal.id, rules: [{ find: 'PRIVATE-CONTENT', replace: '公开项目' }], requestId: 'resource-integration' })
   for (let i = 0; i < 200 && ['queued', 'running'].includes(workspaceStore.overview('p-autoops').tasks.find(({id}) => id === task.id).status); i++)

@@ -34,7 +34,7 @@ async function finish(workspaces, projectId, task) {
 }
 async function fixture(t, {listener = false, accessLayer = access, requestPrincipal = principal, workspaceManagement, installAssetsRoot} = {}) {
   const dataDir = await mkdtemp(join(tmpdir(),'t3-deployment-')), workspaceStore = createWorkspaceStore({dataDir,authorizeTask:()=>{}})
-  for (const project of projects) await workspaceStore.ensureProject(project)
+  for (const project of projects) await workspaceStore.ensureProject(project, { initialContent: 'example' })
   let store = createDeploymentStore({dataDir,workspaceStore,workspaceManagement,access:accessLayer,...(listener ? {agentPort:0} : {}),...(installAssetsRoot ? {installAssetsRoot} : {})})
   await store.initialize()
   const request = (suffix = '', method = 'GET', input, p = requestPrincipal, projectId = 'p-one') => handleDeploymentRequest({access:accessLayer, store, principal:p, url:new URL(`http://demo/autoops/projects/${projectId}/deployments${suffix}`), method,input})
