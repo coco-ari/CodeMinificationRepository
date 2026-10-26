@@ -84,7 +84,7 @@ async function management(t, overrides = {}) {
   const credential = credentials.create('owner', 'p-test', { name: '隔离凭证', username: 'fixture', password: 'fixture-secret', requestId: randomUUID() })
   state.current.credentialId = credential.id
   const service = createWorkspaceManagement({ access: { requireWorkspaceActor: requireActor, requireWorkspaceReader: requireActor, requireProjectActionForActor: requireActor }, credentials,
-    authoring: { repositories: () => ({items:state.current ? [state.current] : [],revision:1}), overview: () => ({ sources: [], entries: [], revision: 1 }), close: async () => {} },
+    authoring: { currentAdoptionProjects: () => [], repositories: () => ({items:state.current ? [state.current] : [],revision:1}), overview: () => ({ sources: [], entries: [], revision: 1 }), close: async () => {} },
     store: { whenIdle: async () => {} }, git: { validateRepositorySource: value => value, ...overrides } })
   t.after(() => service.close())
   return { service, state, credentials, credential }
