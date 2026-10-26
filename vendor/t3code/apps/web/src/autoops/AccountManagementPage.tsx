@@ -367,8 +367,12 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
   const visible = items.filter((item) =>
     `${item.name} ${item.username}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   );
-  const description = (item: RuntimeAccount) =>
-    `${item.username} · ${item.kind === "internal" ? "内部成员" : "外部成员"}${item.platformAdmin ? " · 平台管理员" : ""} · ${item.enabled ? "已启用" : "已停用"}`;
+  const description = (item: RuntimeAccount) => (
+    <>
+      <span className="wrap-anywhere">{item.username}</span>
+      {` · ${item.kind === "internal" ? "内部成员" : "外部成员"}${item.platformAdmin ? " · 平台管理员" : ""} · ${item.enabled ? "已启用" : "已停用"}`}
+    </>
+  );
   return (
     <div className="space-y-6">
       {error && !editor ? (

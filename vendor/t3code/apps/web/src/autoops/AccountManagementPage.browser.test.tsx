@@ -349,3 +349,52 @@ it("保存后刷新恢复入口焦点；用户主动聚焦搜索时迟到刷新�
   await expect.element(screen.getByRole("button", { name: "创建账号", exact: true })).toBeEnabled();
   await expect.element(screen.getByRole("searchbox", { name: "搜索已加载账号" })).toHaveFocus();
 });
+it("窄短窗口的完整64字符用户名在账号元数据内换行，状态和操作可访问名保持完整", async () => {
+  const previousSize = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(390, 520);
+  try {
+    const fixture = setup();
+    const username = "w".repeat(64);
+    fixture.items[1]!.username = username;
+    using _fetch = stubGlobal("fetch", fixture.fetcher);
+    await using screen = await render(<App />, { router: "/accounts" });
+    await screen.getByRole("searchbox", { name: "搜索已加载账号" }).fill(username);
+    const reset = screen.getByRole("button", { name: `重置密码 ${username}`, exact: true });
+    await expect.element(reset).toBeVisible();
+    const row = reset.element().closest<HTMLElement>('[data-slot="settings-row"]')!;
+    const description = row.querySelector("p")!;
+    expect(description.textContent).toBe(`${username} · 内部成员 · 已启用`);
+    // 测量真实文本行，不以外壳无横向滚动代替账号卡片的内容边界。
+    const walker = document.createTreeWalker(description, NodeFilter.SHOW_TEXT);
+    let text: Text | null = null;
+    while (walker.nextNode()) {
+      if (walker.currentNode.textContent?.includes(username)) {
+        text = walker.currentNode as Text;
+        break;
+      }
+    }
+    expect(text).not.toBeNull();
+    const start = text!.data.indexOf(username);
+    const range = document.createRange();
+    range.setStart(text!, start);
+    range.setEnd(text!, start + username.length);
+    const lines = [...range.getClientRects()];
+    const bounds = description.getBoundingClientRect();
+    const card = row.getBoundingClientRect();
+    expect(lines.length).toBeGreaterThan(1);
+    expect(description.scrollWidth).toBeLessThanOrEqual(description.clientWidth + 1);
+    for (const line of lines) {
+      expect(line.left).toBeGreaterThanOrEqual(bounds.left - 1);
+      expect(line.right).toBeLessThanOrEqual(bounds.right + 1);
+      expect(line.left).toBeGreaterThanOrEqual(card.left - 1);
+      expect(line.right).toBeLessThanOrEqual(card.right + 1);
+    }
+    await expect.element(reset).toHaveAccessibleName(`重置密码 ${username}`);
+    await expect
+      .element(screen.getByRole("button", { name: `停用账号 ${username}`, exact: true }))
+      .toBeVisible();
+    expect(fixture.writes).toHaveLength(0);
+  } finally {
+    await page.viewport(previousSize.width, previousSize.height);
+  }
+});
