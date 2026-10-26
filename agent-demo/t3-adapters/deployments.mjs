@@ -73,7 +73,9 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
   const directory = join(resolve(dataDir), 'deployment-center')
   const denied = async () => fail(403, 'DEPLOYMENT_GIT_DISABLED', '部署只接受已经固定 Git 提交与构建上下文的源码包')
   const repository = new RepositoryService({directory, builder:{initialize:async () => {}, build:denied, history:denied, branches:denied}})
-  const deployment = new DeploymentService(repository, {publicOrigin, resolveWorkspaceSource: async (task) => {
+  const deployment = new DeploymentService(repository, {publicOrigin,
+    maintainWorkspacePackages: references => workspaceStore.cleanupPackages(references),
+    resolveWorkspaceSource: async (task) => {
     if (!workspaceManagement) fail(503, 'DEPLOYMENT_SOURCE_UNAVAILABLE', '源码服务暂不可用')
     const projectId = task.workspaceProjectId, actorId = task.actor.id
     const scope = deployment.projects.claimScope(task, deployment.projects.target(projectId, task.targetId).target)

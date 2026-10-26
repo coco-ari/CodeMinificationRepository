@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, statfsSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, statfsSync, readdirSync } from 'node:fs'
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
 import { WorkspaceError, MAX_FILES, MAX_BYTES, sha, safePath, textOf, checkedFile, checkImportFiles, scan } from './workspace-files.mjs'
@@ -15,9 +15,11 @@ const RULES_VERSION = 'autoops-secrets-v1'
 const PROCESS_INSTANCE_ID = randomUUID()
 const MAX_READ_BYTES = 64 * 1024
 const STORAGE_RESERVE = 32 * 1024 * 1024
+const PACKAGE_RETENTION_MS = 7 * 86400000
 const SUPPORTED_HOSTS = new Set(['github.com', 'gitlab.com', 'gitee.com', 'codeberg.org'])
 const now = () => new Date().toISOString()
 const clone = (value) => structuredClone(value)
+const packageTerminal = (task) => task?.type === 'packages' && ['completed', 'failed', 'interrupted'].includes(task.status)
 
 const fail = (status, code, message) => { throw new WorkspaceError(status, code, message) }
 const missing = () => fail(404, 'WORKSPACE_NOT_FOUND', '工作区版本不存在或尚未发布')
@@ -34,11 +36,11 @@ function atom(file, value) {
   } finally { rmSync(temporary, { force: true }) }
 }
 function publicVersion(value) {
-  const { files: _files, directory: _directory, ...rest } = value
+  const { files: _files, directory: _directory, packageUsedAt: _packageUsedAt, ...rest } = value
   return clone(rest)
 }
 function publicTask(value) {
-  const { fingerprint: _fingerprint, ownerPid: _ownerPid, ownerInstanceId: _ownerInstanceId, actorId: _actorId, ...rest } = value
+  const { fingerprint: _fingerprint, ownerPid: _ownerPid, ownerInstanceId: _ownerInstanceId, actorId: _actorId, sourceVersionId: _sourceVersionId, ...rest } = value
   return clone(rest)
 }
 function livePid(pid) { try { process.kill(pid, 0); return true } catch { return false } }
@@ -121,6 +123,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
   if (typeof dataDir !== 'string' || !dataDir) throw new TypeError('dataDir is required')
   const base = resolve(dataDir, 'project-workspaces'), initializing = new Map()
   const failedPersistenceTasks = new Set()
+  const runningPackages = new Set()
   const jobs = createWorkspaceJobs({ ...taskLimits, onFailure(event) {
     failedPersistenceTasks.add(event.taskId)
     if (onTaskDiagnostic) onTaskDiagnostic(event)
@@ -136,6 +139,17 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     let changed = false
     for (const task of state.tasks) if (['queued', 'running'].includes(task.status) && (!taskOwnerAlive(task) || failedPersistenceTasks.has(task.id))) {
       task.status = 'interrupted'; task.stage = 'interrupted'; task.message = failedPersistenceTasks.has(task.id) ? '任务状态保存失败，任务已中断，原有已发布版本仍可使用' : '服务重启中断了任务，原有已发布版本仍可使用'; changed = true
+      if (task.type === 'packages') task.finishedAt = now()
+    }
+    for (const task of state.tasks) if (packageTerminal(task) && !runningPackages.has(task.id) && state.protectedReferences?.[`task:${task.id}`]) {
+      // 只归还本模块打包任务的输入；交付包和调用方持有的其他引用继续保护原件。
+      const version = state.versions.find(value => value.id === state.protectedReferences[`task:${task.id}`])
+      if (version?.cachePurpose === 'deployment') {
+        const finishedAt = task.finishedAt ?? now()
+        if (!version.packageUsedAt || Date.parse(finishedAt) > Date.parse(version.packageUsedAt)) version.packageUsedAt = finishedAt
+        task.sourceVersionId ??= version.id
+      }
+      delete state.protectedReferences[`task:${task.id}`]; changed = true
     }
     if (changed) { atom(file, state); for (const task of state.tasks) if (task.status === 'interrupted') failedPersistenceTasks.delete(task.id) }
     return state
@@ -151,7 +165,9 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
   function updateTask(id, taskId, changes) {
     const state = load(id), task = state.tasks.find((entry) => entry.id === taskId)
     if (!task) missing()
-    Object.assign(task, changes); save(id, state)
+    Object.assign(task, changes)
+    if (packageTerminal(task)) task.finishedAt ??= now()
+    save(id, state)
     return task
   }
   function authorize(actorId, projectId, type) {
@@ -162,21 +178,24 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       fail(503, 'WORKSPACE_AUTHORIZATION_REQUIRED', '工作区授权端口必须同步返回当前权限')
     }
   }
-  function start(id, type, input, run, actorId) {
+  function requestTask(id, type, input, actorId) {
     const state = load(id)
     const requestId = input.requestId
     if (typeof requestId !== 'string' || !requestId || requestId.length > 160 || /[\x00-\x1f]/.test(requestId)) fail(400, 'WORKSPACE_REQUEST_ID_INVALID', '任务需要有效的幂等请求标识')
     authorize(actorId, id, type)
     const fingerprint = sha(JSON.stringify({ ...input, requestId: undefined, actorId }))
     const previous = state.tasks.find((task) => task.type === type && task.requestId === requestId)
-    if (previous) {
-      if (previous.fingerprint !== fingerprint) fail(409, 'WORKSPACE_REQUEST_CONFLICT', '该请求标识已用于其他参数，请刷新后重试')
-      return publicTask(previous)
-    }
+    if (previous && previous.fingerprint !== fingerprint) fail(409, 'WORKSPACE_REQUEST_CONFLICT', '该请求标识已用于其他参数，请刷新后重试')
+    return { state, requestId, fingerprint, previous }
+  }
+  function start(id, type, input, run, actorId) {
+    const { state, requestId, fingerprint, previous } = requestTask(id, type, input, actorId)
+    if (previous) return publicTask(previous)
     jobs.assertCapacity()
     const task = { id: randomUUID(), type, actorId, status: 'queued', stage: 'queued', message: '任务已排队', createdAt: now(), requestId, fingerprint, ownerPid: process.pid, ownerInstanceId: PROCESS_INSTANCE_ID }
     state.tasks.unshift(task); save(id, state)
     jobs.submit(task.id, async (signal) => {
+      if (type === 'packages') runningPackages.add(task.id)
       const temporary = join(projectRoot(id), 'staging', task.id)
       const progress = (stage, message, changes = {}) => {
         if (signal.aborted) throw new WorkspaceError(409, 'WORKSPACE_TASK_CANCELLED', '任务已取消')
@@ -197,6 +216,13 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         updateTask(id, task.id, { status: cancelled || revoked ? 'interrupted' : 'failed', stage: cancelled ? 'cancelled' : revoked ? 'interrupted' : 'failed', message, error: message, ...(typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code) ? { failureCode: error.code } : {}) })
       } finally {
         await rm(temporary, { recursive: true, force: true }).catch(() => {})
+        if (type === 'packages') {
+          try {
+            const state = load(id), saved = state.tasks.find(value => value.id === task.id)
+            if (packageTerminal(saved)) { saved.finishedAt = now(); save(id, state) }
+          } finally { runningPackages.delete(task.id) }
+          load(id)
+        }
       }
     })
     return publicTask(task)
@@ -340,8 +366,70 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         if (signal.aborted) { await rm(destination, { recursive: true, force: true }); throw new Error('cancelled') }
         const state = load(id), release = { id: releaseId, name: `源码发布 ${state.releases.length + 1}`, sourceVersionId: parent.id, createdAt: manifest.createdAt, services: artifacts, manifest }
         state.releases.unshift(release)
-        Object.assign(state.tasks.find((entry) => entry.id === task.id), { status: 'completed', stage: 'completed', message: '源码部署包已生成并通过校验', releaseId })
+        Object.assign(state.tasks.find((entry) => entry.id === task.id), { status: 'completed', stage: 'completed', message: '源码部署包已生成并通过校验', releaseId, sourceVersionId: parent.id, finishedAt: now() })
         save(id, state)
+  }
+
+  function packageProjects(references) {
+    if (!Array.isArray(references) || references.some(value => !value || typeof value.projectId !== 'string' || ['requestId', 'packageId', 'versionId'].some(key => value[key] !== undefined && typeof value[key] !== 'string'))) fail(503, 'WORKSPACE_PACKAGE_REFERENCES_UNAVAILABLE', '部署引用核对未完成，保留临时源码')
+    return readdirSync(base, { withFileTypes: true }).filter(entry => entry.isDirectory() && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(entry.name) && existsSync(stateFile(entry.name))).map(entry => entry.name)
+  }
+  const expiredPackage = value => Number.isFinite(Date.parse(value)) && Date.now() - Date.parse(value) >= PACKAGE_RETENTION_MS
+  const packageProtected = (references, task, release, versionId) => references.some(value => (release && value.packageId === release.id) || (versionId && value.versionId === versionId) || (value.requestId && value.requestId === task.requestId))
+  const packagesActive = state => state.tasks.some(task => ['queued', 'running'].includes(task.status) || runningPackages.has(task.id))
+  function packageCleanupCandidates(references) {
+    const candidates = []
+    for (const projectId of packageProjects(references)) {
+      const state = load(projectId)
+      if (packagesActive(state)) continue
+      const protectedByDeployment = references.filter(value => value.projectId === projectId)
+      for (const task of state.tasks) {
+        if (!packageTerminal(task) || typeof task.actorId !== 'string' || typeof task.requestId !== 'string' || !expiredPackage(task.finishedAt || task.createdAt)) continue
+        const release = state.releases.find(value => value.id === task.releaseId), sourceVersionId = task.sourceVersionId || release?.sourceVersionId
+        if (!sourceVersionId || packageProtected(protectedByDeployment, task, release, sourceVersionId)) continue
+        candidates.push({ projectId, requestId: task.requestId, actorId: task.actorId, taskId: task.id, sourceVersionId })
+      }
+    }
+    return candidates
+  }
+  function cleanupPackages(references) {
+    const removed = [], errors = []
+    for (const id of packageProjects(references)) {
+      try {
+        const state = load(id)
+        if (packagesActive(state)) continue
+        const protectedByDeployment = references.filter(value => value.projectId === id)
+        const cleared = []
+        for (const release of state.releases) {
+          const task = state.tasks.find(value => value.type === 'packages' && value.releaseId === release.id)
+          if (release.clearedAt || !task || !packageTerminal(task) || !expiredPackage(task.finishedAt || release.createdAt)) continue
+          if (packageProtected(protectedByDeployment, task, release, release.sourceVersionId)) continue
+          release.clearedAt = now(); cleared.push(release.id)
+        }
+        const protectedIds = new Set([...Object.values(state.protectedReferences ?? {}), ...protectedByDeployment.flatMap(value => value.versionId ? [value.versionId] : [])])
+        for (const release of state.releases) if (!release.clearedAt) protectedIds.add(release.sourceVersionId)
+        for (const version of state.versions) if (version.sourceVersionId) protectedIds.add(version.sourceVersionId)
+        const retired = state.versions.filter(version => version.cachePurpose === 'deployment' && !protectedIds.has(version.id) && expiredPackage(version.packageUsedAt || version.createdAt))
+        state.retiredPackageVersions ??= []
+        for (const version of retired) state.retiredPackageVersions.push({ id: version.id, clearedAt: now() })
+        if (retired.length) state.versions = state.versions.filter(version => !retired.includes(version))
+        // 先关闭读取并保存原任务与清单；物理删除失败时按同一收据继续，不重建新包。
+        if (cleared.length || retired.length) save(id, state)
+        const pending = [
+          ...state.releases.filter(release => release.clearedAt && !release.purgedAt).map(value => ({ value, directory: 'packages' })),
+          ...state.retiredPackageVersions.filter(value => !value.purgedAt).map(value => ({ value, directory: 'versions' })),
+        ]
+        let purged = false
+        for (const { value, directory } of pending) {
+          try { rmSync(join(projectRoot(id), directory, safeId(value.id)), { recursive: true, force: true }); value.purgedAt = now(); purged = true }
+          catch (error) { errors.push(error) }
+        }
+        if (purged) save(id, state)
+        removed.push({ projectId: id, packages: cleared, versions: retired.map(value => value.id) })
+      } catch (error) { errors.push(error) }
+    }
+    if (errors.length) throw new AggregateError(errors, '部分临时源码清理未完成，将在下次维护时重试')
+    return removed
   }
 
   return {
@@ -355,17 +443,20 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       for (const [kind, count, message] of [
         ['workspace-tasks',state.tasks.filter(task => ['queued','running'].includes(task.status)).length,'工作区仍有活动任务'],
         ['workspace-versions',state.versions.length,'工作区仍有当前资料或历史版本'],
-        ['workspace-packages',state.releases.length,'工作区仍有源码包'],
+        ['workspace-packages',state.releases.filter(value => !value.clearedAt || !value.purgedAt).length,'工作区仍有源码包'],
+        ['workspace-retired-packages',(state.retiredPackageVersions ?? []).filter(value => !value.purgedAt).length,'工作区仍有待完成回收的源码目录'],
         ['workspace-protection',Object.keys(state.protectedReferences ?? {}).length,'工作区仍有活动或未知输入保护'],
       ]) if (count) values.push({kind,count,message})
       return values
     },
+    packageCleanupCandidates,
+    cleanupPackages,
     stopAccepting: jobs.stopAccepting,
     async whenIdle() { await Promise.allSettled([...initializing.values()]); await jobs.whenIdle() },
     async close(options) { jobs.stopAccepting(); await Promise.all([Promise.allSettled([...initializing.values()]), jobs.close(options)]) },
     overview(id) {
       const state = load(id)
-      return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal' && !entry.cachePurpose).map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
+      return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal' && !entry.cachePurpose).map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases.filter(release => !release.clearedAt)), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
     },
     getVersion(id, versionId) { return publicVersion(versionRecord(id, versionId)) },
     findSourceCache(id, cacheKey) {
@@ -389,12 +480,12 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       const state = load(id)
       if (!Array.isArray(versionIds) || versionIds.length > 500 || versionIds.some(value => typeof value !== 'string') || !Array.isArray(additionalReferences)) fail(400, 'WORKSPACE_CLEANUP_INVALID', '清理目标无效')
       const protectedIds = new Set([...Object.values(state.protectedReferences ?? {}), ...additionalReferences])
-      for (const release of state.releases) protectedIds.add(release.sourceVersionId)
+      for (const release of state.releases) if (!release.clearedAt) protectedIds.add(release.sourceVersionId)
       for (const version of state.versions) if (!versionIds.includes(version.id) && version.sourceVersionId) protectedIds.add(version.sourceVersionId)
       const reasons = Object.fromEntries(versionIds.map(versionId => {
         const values = Object.entries(state.protectedReferences ?? {}).filter(([, value]) => value === versionId).map(([reference]) => ({ kind: reference.startsWith('task:') ? 'unknown-task' : reference.split(':')[0], reference }))
         if (additionalReferences.includes(versionId)) values.push({ kind: 'current-or-session', reference: '当前资料或会话授权引用' })
-        for (const release of state.releases) if (release.sourceVersionId === versionId) values.push({ kind: 'package', reference: release.id })
+        for (const release of state.releases) if (!release.clearedAt && release.sourceVersionId === versionId) values.push({ kind: 'package', reference: release.id })
         for (const version of state.versions) if (!versionIds.includes(version.id) && version.sourceVersionId === versionId) values.push({ kind: 'derived-version', reference: version.id })
         return [versionId, values]
       }))
@@ -407,7 +498,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       if (state.tasks.some(task => ['queued', 'running'].includes(task.status))) fail(409, 'WORKSPACE_TASK_ACTIVE', '工作区任务仍在运行，不能清理历史资料')
       if (!Array.isArray(versionIds) || versionIds.length > 500 || versionIds.some(value => typeof value !== 'string')) fail(400, 'WORKSPACE_CLEANUP_INVALID', '清理目标无效')
       const protectedIds = new Set([...Object.values(state.protectedReferences ?? {}), ...additionalReferences])
-      for (const release of state.releases) protectedIds.add(release.sourceVersionId)
+      for (const release of state.releases) if (!release.clearedAt) protectedIds.add(release.sourceVersionId)
       for (const version of state.versions) if (!versionIds.includes(version.id) && version.sourceVersionId) protectedIds.add(version.sourceVersionId)
       if (versionIds.some(value => protectedIds.has(value))) fail(409, 'WORKSPACE_VERSION_IN_USE', '资料仍被当前工作区、执行输入或交付物引用，不能清理')
       const removed = state.versions.filter(version => versionIds.includes(version.id)).map(version => version.id)
@@ -485,6 +576,8 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       return publicVersion(version)
     },
     startPackages(id, input, actorId) {
+      const { previous } = requestTask(id, 'packages', input, actorId)
+      if (previous) return publicTask(previous)
       const parent = source(id, input.sourceVersionId), services = input.services
       if (!Array.isArray(services) || !services.length || services.length > 2 || new Set(services).size !== services.length || services.some((entry) => !['frontend', 'backend'].includes(entry))) fail(400, 'WORKSPACE_SERVICES_INVALID', '请选择前端、后端或两者')
       if (parent.source.authoringRevision !== undefined && input.contexts === undefined) fail(400, 'WORKSPACE_BUILD_CONTEXT_REQUIRED', '请明确选择各服务的构建上下文与构建目录')
@@ -505,14 +598,14 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         const prepared = await prepare({ signal, progress, materializeCache: async (cacheInput, materialize) => {
           authorize(actorId, id, 'packages')
           const previous = load(id).versions.find(version => version.cacheKey === cacheInput.cacheKey && version.status === 'published')
-          if (previous) { const state = load(id); state.protectedReferences ??= {}; state.protectedReferences[`task:${context.task.id}`] = previous.id; save(id, state); return publicVersion(previous) }
+          if (previous) { const state = load(id); state.protectedReferences ??= {}; state.protectedReferences[`task:${context.task.id}`] = previous.id; state.tasks.find(task => task.id === context.task.id).sourceVersionId = previous.id; save(id, state); return publicVersion(previous) }
           const root = join(temporary, 'source-cache', 'files')
           await mkdir(root, { recursive: true, mode: 0o700 })
           await materialize({ root, signal, progress, checkBudget: () => checkImportBudget(temporary) })
           checkCompleteSource(root)
           authorize(actorId, id, 'packages')
           const version = publicVersion(await persistVersion(id, root, { id: randomUUID(), name: '部署源码输入', type: 'internal', status: 'published', createdAt: now(), source: cacheInput.source, cacheKey: cacheInput.cacheKey, cachePurpose: 'deployment', isExample: false }, undefined, signal))
-          const state = load(id); state.protectedReferences ??= {}; state.protectedReferences[`task:${context.task.id}`] = version.id; save(id, state)
+          const state = load(id); state.protectedReferences ??= {}; state.protectedReferences[`task:${context.task.id}`] = version.id; state.tasks.find(task => task.id === context.task.id).sourceVersionId = version.id; save(id, state)
           return version
         } })
         authorize(actorId, id, 'packages')
@@ -526,6 +619,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       const release = load(id).releases.find((entry) => entry.id === releaseId)
       if (!release) missing()
       if (service === 'manifest') return { bytes: Buffer.from(JSON.stringify(release.manifest, null, 2)), name: 'manifest.json', mime: 'application/json' }
+      if (release.clearedAt) fail(410, 'WORKSPACE_PACKAGE_EXPIRED', '临时源码包已到期清理，请重新选择提交生成；原任务记录仍保留')
       const entry = release.services.find((item) => item.service === service)
       if (!entry) missing()
       const bytes = readFileSync(checkedFile(join(projectRoot(id), 'packages', release.id), entry.name))

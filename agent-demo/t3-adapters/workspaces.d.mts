@@ -11,6 +11,8 @@ export interface WorkspaceStore {
   findSourceCache(projectId: string, cacheKey: string): WorkspaceVersion | undefined;
   retainVersion(projectId: string, versionId: string, reference: string): void;
   releaseVersion(projectId: string, reference: string): void;
+  packageCleanupCandidates(references: Array<{ projectId: string; requestId?: string; packageId?: string; versionId?: string }>): Array<{ projectId: string; requestId: string; actorId: string; taskId: string; sourceVersionId: string }>;
+  cleanupPackages(references: Array<{ projectId: string; requestId?: string; packageId?: string; versionId?: string }>): Array<{ projectId: string; packages: string[]; versions: string[] }>;
   planCleanupVersions(projectId: string, versionIds: string[], actorId: string, additionalReferences?: string[]): { activeTasks: string[]; protected: string[]; removable: string[]; reasons: Record<string, Array<{ kind: string; reference: string }>> };
   pruneVersions(projectId: string, versionIds: string[], actorId: string, additionalReferences?: string[]): { removed: string[] };
   taskForRequest(projectId: string, type: string, requestId: string, actorId: string): WorkspaceTask | undefined;

@@ -283,12 +283,13 @@ function sameTaskRequest(task, requestFingerprint, submission) {
 }
 
 export class DeploymentService extends EventEmitter {
-  constructor(repository, { publicOrigin = '', authorizeTask, authorizeProjectMutation, resolveWorkspaceSource } = {}) {
+  constructor(repository, { publicOrigin = '', authorizeTask, authorizeProjectMutation, resolveWorkspaceSource, maintainWorkspacePackages } = {}) {
     super();
     if (authorizeTask !== undefined && typeof authorizeTask !== 'function') throw new TypeError('任务授权端口必须是函数');
     if (resolveWorkspaceSource !== undefined && typeof resolveWorkspaceSource !== 'function') throw new TypeError('工作区源码解析端口必须是函数');
     if (authorizeProjectMutation !== undefined && typeof authorizeProjectMutation !== 'function') throw new TypeError('部署写入授权端口必须是函数');
     this.authorizeTask = authorizeTask; this.authorizeProjectMutation = authorizeProjectMutation; this.resolveWorkspaceSource = resolveWorkspaceSource;
+    this.maintainWorkspacePackages = maintainWorkspacePackages;
     this.repository = repository; this.store = repository.store; this.publicOrigin = publicOrigin;
     this.root = path.join(repository.directory, 'deployments'); this.preparations = new Map(); this.sourceCleanups = new Set();
     this.archives = new SourceArchives(this);
@@ -879,8 +880,25 @@ export class DeploymentService extends EventEmitter {
     void operation.then(() => this.sourceCleanups.delete(operation), () => this.sourceCleanups.delete(operation));
     return operation;
   }
+  workspacePackageReferences() {
+    const references = [], retain = (value) => {
+      const projectId = value.workspaceProjectId || value.sourceIdentity?.projectId;
+      if (projectId) references.push({ projectId, requestId: value.requestId, packageId: value.sourceIdentity?.packageId, versionId: value.sourceIdentity?.sourceVersionId });
+    };
+    for (const task of this.data.tasks) {
+      const finishedAt = Date.parse(task.finishedAt || task.createdAt);
+      if (task.sourceKind === 'workspace-package' && (!terminal.has(task.status) || !Number.isFinite(finishedAt) || Date.now() - finishedAt < 7 * 86400000)) retain(task);
+    }
+    // 链上原包已经完整交付中心后，工作区副本不再是恢复依赖；缺失或损坏时保守保留。
+    for (const release of this.data.releases) if (!release.sourceClearedAt && release.sourceKind === 'workspace-package' && this.archives.status(release) !== 'available') retain(release);
+    return references;
+  }
   async #cleanupSources() {
     await this.archives.cleanup();
+    if (this.maintainWorkspacePackages) {
+      try { await this.maintainWorkspacePackages(this.workspacePackageReferences()); }
+      catch { this.emit('error-safe', { message: '工作区临时源码包清理延后' }); }
+    }
     for (const task of this.data.tasks) if (terminal.has(task.status) && task.sourceArchiveId) {
       const directory = path.join(this.root, 'tasks', task.id);
       await rm(path.join(directory, 'source.zip'), { force: true }); await rm(path.join(directory, 'source.json'), { force: true });
