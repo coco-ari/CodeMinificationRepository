@@ -1,5 +1,6 @@
 // 会话与请求仍由 T3 管理；每次业务调用必须携带本轮固定资料身份。
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import { Tool, Toolkit } from "effect/ai";
@@ -14,7 +15,7 @@ const shared = {
   success: Schema.Record(Schema.String, Schema.Unknown),
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
-  dependencies: [Invocation.McpInvocationContext, Threads.ThreadManagementService, ServerConfig.ServerConfig, FileSystem.FileSystem],
+  dependencies: [Invocation.McpInvocationContext, McpProviderSessions.McpProviderSessions, Threads.ThreadManagementService, ServerConfig.ServerConfig, FileSystem.FileSystem],
 };
 const list = Tool.make("list_project_materials", {
   ...shared, description: "列出本轮固定输入的授权项目资料与当前会话历史中可用的附件。",

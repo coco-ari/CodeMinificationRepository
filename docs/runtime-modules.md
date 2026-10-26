@@ -219,7 +219,9 @@ B4 区分全局节点管理与项目环境绑定，继续复用 DeploymentServic
 
 用户可按对象完成管理且保留失败恢复；开发者复用同一弹窗和原引擎收据，职责随公开合同分开；AI Agent 可通过同源接口、明确按钮语义和 saved/available/准入状态识别结果，不向用户暴露内部身份或凭证。自动刷新不计操作；真实网络等待尚未实测，不以步骤数推定时间改善。
 
-本地新增与关联 Node 定向 35 项、原生真实 HTTP 6 项、Web 请求边界 4 项通过；原生/适配器/Web 类型和模块边界通过。此前完整 Node 627 通过/1 条平台条件跳过、原生业务 158 通过/2 条条件跳过等仅作为本批更早阶段证据，最终回归以新 CI 为准，不累加计数。`1363ba61` 质量 CI 通过；运行 CI 的 Web 398 项通过、2 项新增断言失败：选择器完整文本为“节点名称 · 在线”，两处测试仅写节点名称。失败日志排除候选未加载/选错节点，现行 Choice 的名称与状态组合支持完整文本断言有误；只补全预期文本，不删除状态、不放宽交互或授权断言。两条修正后，`7110d150` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40271621627)和[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40271621753)全部通过：630 项 Node、原生业务 160 通过/2 条条件跳过、Web 400 项（含新增 18 条）通过，语言、Markdown 与客户运行门禁也通过；不在本机受限路径启动系统 Chrome。Web/Worker 构建及 `.deployment/project-node-scope-reviewed` 独立发行冒烟通过（原输入、重复请求及源码包证据保留），不替代节点真实业务。真实节点接入、全局准入/项目绑定及整页浅深色/窄屏/长数据仍待实际验证，未在服务器启用本批。B4 整项仍待完成，D1 每轮问答不访问远端 Git 的新方案仍待实现。
+本地新增与关联 Node 定向 35 项、原生真实 HTTP 6 项、Web 请求边界 4 项通过；原生/适配器/Web 类型和模块边界通过。此前完整 Node 627 通过/1 条平台条件跳过、原生业务 158 通过/2 条条件跳过等仅作为本批更早阶段证据，最终回归以新 CI 为准，不累加计数。`1363ba61` 质量 CI 通过；运行 CI 的 Web 398 项通过、2 项新增断言失败：选择器完整文本为“节点名称 · 在线”，两处测试仅写节点名称。失败日志排除候选未加载/选错节点，现行 Choice 的名称与状态组合支持完整文本断言有误；只补全预期文本，不删除状态、不放宽交互或授权断言。两条修正后，`7110d150` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40271621627)和[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40271621753)全部通过：630 项 Node、原生业务 160 通过/2 条条件跳过、Web 400 项（含新增 18 条）通过，语言、Markdown 与客户运行门禁也通过；不在本机受限路径启动系统 Chrome。Web/Worker 构建及 `.deployment/project-node-scope-reviewed` 独立发行冒烟通过（原输入、重复请求及源码包证据保留），不替代节点真实业务。该能力随后已随 be768c19 发行，真实验证范围见下段；B4 整项仍待完成。D1 新方案已实现，连续新轮工具读取仍在真实验收，不能继续记作未实现或用历史测试替代新方案验收。
+
+真实 be768c19 的专属空节点 9d75c6af-7fc2-453f-b0e2-1d612d529759 已经正常 API 验证：平台登记与原 UUID 收据、项目准入及旧修订 409、绑定后撤回遮罩与原绑定收据、策略修订与原收据、撤销/删除及原删除重放；guest 读取全局节点实际返回 403。节点已按本次目标正常删除，未启动 Agent；另一测试环境保留。原 D123 失败收据、原节点配置和原环境指纹逐字保持。验收脚本最初因 settings DTO 路径及非 UUID 请求 ID 失败，真实 200/400 与零节点受理证据保留，修复脚本后才发合法新请求，没有修改产品合同。证据 `.deployment/d123-real-acceptance/b4-e4-runtime-preparation/`。平台管理者绑定只证明该调用者；项目管理员/只读成员身份、真实离线节点、整页交互仍待验证，不启用林晓和陈一。
 
 统一问答提交 `05078762` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40260681991) 和[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40260681942) 全部通过，覆盖下节修正后的浏览器、真实 HTTP 合同及全部运行检查。新问答真实模型及旧来源映射仍按清单待验证，不由 CI 代替。
 
@@ -1033,7 +1035,7 @@ macOS 定向 Node 22 项、Web 8 项、独立 ZIP 分发及真实本地 WebSocke
 
 实际恢复的 Mac 客户包发送 `0.3.0`，中心却继续显示初次配对的 `0.1.0`。已核对旧包常量、当前 SDK 的 `0.4.0` 常量及真实 WS 握手，排除客户端发送旧值；根因是中心建立连接时不含版本，合法 HELLO 也未把版本交回登记所有者。修复复用 [customer-registry](../agent-demo/t3-adapters/customer-registry.mjs) 的当前代次 heartbeat 入口，由 [RemoteDeviceService](../vendor/t3code/apps/server/src/autoops/RemoteDeviceService.ts) 在合法握手后更新，不重新建连或增加代次。旧连接、重复握手、撤证和非法元数据均不能改写当前版本。
 
-原登记测试新增两项先失败，真实 SDK/WS 三项亦先复现旧值；修后关联 Node 53/53、原生 53/53及适配器、原生、客户严格类型通过，根代理另复跑真实 WS、登记与传输 13/13。证据 `.deployment/connector-version-fix/`。没有新增界面操作；用户仍通过原详情读取真实版本，开发与 Agent 复用同一登记合同。本修复尚待完整 CI、发行及真实新 HELLO 核验，不能将隔离握手测试计作实际客户升级完成。
+原登记测试新增两项先失败，真实 SDK/WS 三项亦先复现旧值；修后关联 Node 53/53、原生 53/53及适配器、原生、客户严格类型通过，根代理另复跑真实 WS、登记与传输 13/13。证据 `.deployment/connector-version-fix/`。没有新增界面操作；用户仍通过原详情读取真实版本，开发与 Agent 复用同一登记合同。35571708 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40322470252)和[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40322470278)均通过：Node 807 中 805 通过/2 条条件跳过、原生 222 通过/2 条条件跳过、Web 612/612、客户 76/76，286 文件边界 0 错误，日志 `.deployment/ci-35571708.log`。发行及真实新 HELLO 核验仍待完成，不能将隔离握手测试计作实际客户升级完成。
 
 [共享范围合同](../autoops/contracts/shared-execution.ts) 固定实际调用者、提供者、业务及来源项目、线程/轮次、预设/共享/分配修订、真实能力修订、profile、目标、模型和技能。中心持久签发的 grant 与完整事实共同复核，公开标识或设备自报不能成为授权。断线后按原 command/grant 查原收据；撤回仅允许核对结果，不重发执行，旧连接程序没有共享协议也不能接收共享命令。模型、思考及技能来自隔离原生目录，不补平台默认；低权限不可篡改参数。项目管理员的可分配状态与自身可执行状态分别裁决，外部成员不能接入尚未证明外部资料隔离的共享目录。
 
@@ -1115,4 +1117,8 @@ v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3`
 
 真实私有仓库已在本次专属项目同步成功，Worker 的 strace 观察器有 ls-remote/fetch 各 1 次正对照；原收据读取没有新增远端 Git。缺失分支同步在准备阶段返回真实 404，验收器正在按原更新收据继续核对，尚不把这一阶段当成完整失败恢复通过。连续新轮问答零 Git、五分钟周期、MCP 原生调用、双用户共享、Java/static 及整页仍须继续实际验收；该批不是整体完成报告。
 
-原缺失分支更新收据随后已核实为真实失败，旧当前正文、版本和提交保持可读；验收器只恢复同一原请求，不重发同步。首轮实际问答虽为 completed，但 5 个 dynamic_tool（列目录及不同资料读取）均 failed，完整读取验收明确失败，未用最终回答替代。原消息、run 及 inputId 保留，正在按实际工具错误与授权/输入时间线复现；尚不能宣称 D1 连续问答成功。证据 `.deployment/d123-native-1-discovery.json`。
+原缺失分支更新收据随后已核实为真实失败，旧当前正文、版本和提交保持可读；验收器只恢复同一原请求，不重发同步。首轮实际问答虽为 completed，但 5 个 dynamic_tool（列目录及不同资料读取）均 failed，完整读取验收明确失败，未用最终回答替代。原消息、run 及 inputId 保留，尚不能宣称 D1 连续问答成功。证据 `.deployment/d123-native-1-discovery.json`。
+
+5 个真实错误均为 `capability_denied`。已用生产 Registry 的真实 UUID 和能力配发复现，排除缺少 autoops capability；实际事件中工具发生在 3455–3482，运行终态 3498、根节点终态 3499 后回收 guard 才允许释放，且输入失效映射应为 invalid_request，排除提前回收。根因为 [业务 MCP 入口](../vendor/t3code/apps/server/src/mcp/toolkits/autoops/handlers.ts) 把 MCP 凭据 UUID 与原生逻辑 providerSessionId 作相等比较。现复用同一运行组合中的 McpProviderSessions.read，核对当前凭据、线程、环境和实例，再按活动轮的 providerThreadId 校验原生投影；保留真实调用者、业务授权、固定输入和子任务继承，准备与返回前复核，拒绝撤权、换轮和凭据替换后的迟到结果。
+
+新增 20 项生产工具注册回归先红后绿，关联 9 文件 211 项、原生严格类型和定向 lint 通过；根代理按 CI 使用的 server 目录另复跑 20/20，并将同一工具测试目录加入 runtime server 门禁。证据 `.deployment/mcp-business-session-{analysis.md,prepared.json,red.log,related.log}`。没有界面操作变化，用户继续使用唯一问答入口；开发与 Agent 共用现有凭据和原生会话的公开合同，不增加第二套会话状态。修后完整 CI、发行及新独立真实问答仍待完成；原 native-1 不重发、不改成成功。

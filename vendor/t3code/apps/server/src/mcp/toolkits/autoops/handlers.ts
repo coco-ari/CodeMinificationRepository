@@ -1,9 +1,11 @@
 import { OrchestratorMcpFailure, ThreadId } from "@t3tools/contracts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
+// eslint-disable-next-line t3code/no-raw-mcp-registration -- 此处仅发送原生交互表单；工具仍经 Access.toLayer 和统一注册入口授权。
 import { McpServer, McpSchema } from "effect/ai";
 import { resolveAttachmentPath } from "../../../attachmentStore.ts";
 import * as Config from "../../../config.ts";
@@ -32,9 +34,19 @@ const toolFailure = (error: unknown) => new OrchestratorMcpFailure({
   code: "invalid_request",
   message: error instanceof Error && "code" in error ? error.message : "业务工具无法完成，请检查文件或授权状态。",
 });
-const current = (inputId: string) => Effect.gen(function* () {
+const current = Effect.fn("AutoOps.current")(function* (inputId: string) {
   const scope = yield* Invocation.requireMcpCapability("autoops").pipe(Effect.mapError(unavailable));
   const caller = yield* Invocation.requireThreadScope(scope, "AutoOps business tools");
+  const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  // MCP 凭据与原生逻辑会话有不同身份；只接受此线程当前登记的凭据。
+  const requireCurrentCredential = mcpSessions.read(caller.thread.threadId).pipe(Effect.flatMap(session =>
+    session?.providerSessionId === caller.thread.providerSessionId &&
+    session.threadId === caller.thread.threadId &&
+    session.providerInstanceId === caller.thread.providerInstanceId &&
+    session.environmentId === caller.environmentId
+      ? Effect.void : unavailable(),
+  ));
+  yield* requireCurrentCredential;
   const access = configuredAutoOpsAccess();
   if (!access) return yield* unavailable();
   const workspace = configuredWorkspaceManagement(access);
@@ -45,7 +57,7 @@ const current = (inputId: string) => Effect.gen(function* () {
   const projection = yield* threads.getThreadProjection(caller.thread.threadId).pipe(Effect.mapError(unavailable));
   if (projection.thread.deletedAt !== null) return yield* unavailable();
   const active = Threads.latestActiveRun(projection);
-  const nativeThread = projection.providerThreads.find(thread => thread.providerSessionId === caller.thread.providerSessionId && (active === undefined || thread.id === active.providerThreadId));
+  const nativeThread = projection.providerThreads.find(thread => thread.appThreadId === caller.thread.threadId && thread.providerInstanceId === caller.thread.providerInstanceId && (active === undefined || thread.id === active.providerThreadId));
   if (!nativeThread || (active && active.providerInstanceId !== caller.thread.providerInstanceId)) return yield* unavailable();
   const run = yield* Effect.try({ try: () => businessToolRun(access, caller.thread.threadId, inputId, active?.id), catch: toolFailure });
   const authorized = yield* Effect.try({ try: () => inputs.require(caller.thread.threadId, inputId, run.runId), catch: toolFailure });
@@ -102,6 +114,7 @@ const current = (inputId: string) => Effect.gen(function* () {
   });
   const catalog = configuredBusinessResourceCatalog({ attachmentsDir: config.attachmentsDir, readFile: (path) => Effect.runPromise(fs.readFile(path)) });
   const resourceHistory = { runId, actorId: authorized.actorId, referencePaths, attachmentIds: files.map((file) => file.id), acceptedAt: historyRun ? DateTime.formatIso(historyRun.requestedAt) : "" };
+  yield* requireCurrentCredential;
   return { caller, authorized, runId, tools, catalog, referenceInputIds, resourceHistory, access };
 });
 const invoke = (inputId: string, operation: (context: Effect.Success<ReturnType<typeof current>>) => Promise<Record<string, unknown>>) => current(inputId).pipe(
