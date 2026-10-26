@@ -68,7 +68,10 @@ function setup({ lost = false, denyWrite = false } = {}) {
   })
   installAutoOpsHost(bootstrap(), window.location.origin)
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input), window.location.origin).pathname
+    const path = new URL(String(input), window.location.origin).pathname.replace(
+      /^\/api\/agent-demo\/t3/,
+      '',
+    )
     if (path.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
     if (path.endsWith('/assistants/choices'))
       return Response.json({ agents: [], sources: [], platformSkills: [] })

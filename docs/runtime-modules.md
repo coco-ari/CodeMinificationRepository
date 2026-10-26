@@ -83,6 +83,8 @@ Git 分支/历史查询只固定连接及凭证版本，不随工作区分支或
 
 新增 5 项浏览器交互与既有凭证待核对/资料恢复、整页流程一并由 Linux CI 执行，结果待回填；本地 Web 类型、241 个源文件的模块边界、Web 单测 137 项及凭证服务 8 项通过（`.deployment/project-credentials-ui-*`）。真实私有 Git 与服务器发行仍待后续验收，不由模拟网络或历史凭证单测代替。
 
+`11ab04ab` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40264098575) 通过；[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40264098642) 浏览器 377 通过、5 失败，仓库集中入口 7 项全部通过。凭证用例均停在项目目录加载，未进入凭证表单：可能一是管理权限未授予，夹具 bootstrap 明确 project.manage=true 且页面已识别项目标题，排除；可能二是请求前缀匹配错误，apiClient 在公开项目路径前拼接 gatewayBasePath，而新夹具对项目目录做未带前缀的精确匹配，代码及连接失败画面支持。夹具先去掉已声明的固定网关前缀再匹配，生产代码不变；新增凭证成功、恢复、撤回及秘密边界仍待新 CI 通过，不能将本次加载失败说成这些业务已验收。
+
 ### 工作区独立使用配置
 
 工作区来源编辑器继续复用原 T3 Dialog/Select/Input 和 authoring 原请求控制器，只选择项目已登记仓库、作用、自己的分支/标签/提交、挂载及子目录。连接名称、地址与凭证从唯一目录派生，不能在工作区重新写入。编辑现有使用配置不允许替换其仓库身份；新增选择禁用已在工作区使用的仓库，目录错误有原表单重试，来源被撤回时不能自动选择其他仓库。工作区 POST sources/save 严格解析 ConfigureRepositoryWorkspace，拒绝 URL、凭证、秘密、名称及未知字段；模块不再提供旧组合 saveSource 方法。测试夹具改为调用独立保存连接/配置使用两个公开入口，既有存储升级、修订冲突、路径互斥与固定输入断言保留。
