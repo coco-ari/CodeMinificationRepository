@@ -1066,3 +1066,15 @@ v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3`
 通过直接 SSH，以本轮独立目标中新 profile `linux-cpa-readonly-validation` revision 3 验证：镜像 ID `sha256:63ceb822d4747132da262e8bcc533933035158e91439ad6b6fb18ffa4803e8a8`，profile 摘要 `82d4237127a1529ca88746b06c8810b701d5220a5ed9eada5689980c8cce86b3`；真实 OS 10 项通过且容器确认停止。提供者 HTTPS 实时目录转换为本机兼容文件（摘要 `f0811c74e8f19a8b937c16bbecbe8be744da60d03fcc9529fdaf0745955c7d31`），显式使用原生文件工具；真实 Codex 0.159.2 两次目录进程返回完全相同的 12 个模型及各自强度，未选择的 5 个内置技能禁用。证据 `.deployment/provider-profile-cpa-discovery.json`、`.deployment/shared-native-catalog-v4-result.json` 和服务器 `native-catalog-S32KXV/result.json`；结果仍为 `noInference:true`、`sharedBusinessAccepted:false`。目录验证不证明模型推理、技能实际调用、跨用户附件、撤回或断线恢复。
 
 `f680dc14` 完整运行 CI 的 Node/原生部分通过，Linux 浏览器 604 通过、6 失败（助手表单焦点/选择状态及实际身份切换边界），没有把该 CI 记为通过。独立发行已构建、上传并按源码清单及实际官方 Linux 依赖逐字核验，尚未切换正在运行的服务；正式依赖来源以存量发行清单登记的 `/home/tao/autoops-agent-demo/runtime/t3-0.1.1-linux-x64/node_modules` 为准，历史对照目录已不适用。测试账号入口目前仍只有 4 个存量身份；林晓/陈一继续待分配，不通过改会话表或借独立后端制造验收身份。私有隔离仓库 `coco-ari/autoops-acceptance-20261026` 已正常推送，后续真实资料和部署验收继续使用它，不能据准备材料宣称业务完成。
+
+## 助手保存后的焦点与迟到结果回归（2026-10-26）
+
+真实 Linux CI `40303779343` 的 6 个失败按原日志定位后修复：[提供者面板](../vendor/t3code/apps/web/src/autoops/ProviderAssistantPanel.tsx) 保存成功关闭 Dialog 时，目录刷新暂时禁用原入口，导致原有 finalFocus 落到 body；旧触发按钮仍存在，排除引用丢失。现在保留一次恢复意图，目录重新有效后回到原入口；用户已主动移到其他控件时不抢焦点，撤权清除意图，不放宽禁用或授权规则。其余失败包括 4 类完整文字断言和原页直接换身份违反真实重载 guard；已保留正确目录/模型/参数、禁止写入及跨项目迟到断言，身份测试验证实际 guard、原 principal/CSRF、卸载取消与迟到不恢复内容。
+
+相同本人身份、电脑和原生目录下，创建合法表单的前置操作为：点击添加、填写名称、展开来源、选择电脑目录、展开运行目录、选择自用、展开模型、选择真实模型，共 8 次；自动应用原生默认强度不计操作。从该合法表单保存后再打开，鼠标前后均为点击保存、等待、点击添加，共 2 次（含前置 10 次），未宣称减少操作。键盘原焦点在保存按钮时，修前 Enter 保存后已由 CI 证实焦点丢失，恢复导航次数尚未实测；修后预期 Enter 保存、等待真实刷新、Enter 再开，共 2 次，仍待 Linux CI。刷新中用户主动点击其他入口另计 1 次，完成后保留该入口焦点；等待均单列，不算操作。
+
+用户获得可靠键盘返回与主动焦点保护；开发继续复用原 Dialog、目录和原收据；Agent 可按入口可用状态、完整错误及焦点判断真实结果。相关 39 项单测、严格 Web 类型和 diff 检查通过，修后两个浏览器文件 21+6 项尚待真实 CI，截图或类型检查不替代交互。原失败 `.deployment/ci-f680.log`，原因及步骤 `.deployment/c6-browser-ci-f680-analysis.md`。
+
+同一测试服务器的新 profile revision 4（摘要 `7fdd7a97c602071f0950d36874219b9b4bb30fe90c2546fc04c3af44144e4db6`）另经 OS 10 项及真实原生技能目录验证：12 个提供者模型保持不变，初始 7 个技能中仅显式选择的 `autoops-acceptance-readonly` 保持启用，未选择的仓库技能已被真实发现并排除，容器确认停止。证据 `.deployment/shared-native-curated-v4-result.json`，仍为 `noInference:true`、`curatedSkillsAccepted:false`、`sharedBusinessAccepted:false`，不等于技能实际业务已验。
+
+发行只读 preflight 同时发现一条历史客户 `resumeThread` 原收据仍为 unknown。本机原命令已在 2026-10-25 人工确认停止并保存 `CUSTOMER_MANUALLY_RECONCILED`，但中心将 unknown 当作不可更新终态，旧重连不能收束；没有清表、重复执行或再次人工 resolve。服务切换继续暂停，后续按原 command/session/grant 的真实只读收据恢复链路修复并验证。

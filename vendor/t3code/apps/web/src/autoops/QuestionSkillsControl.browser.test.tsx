@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { act, render, stubGlobal } from '../../test/render'
 import { QuestionSkillsControl } from './QuestionSkillsControl'
-import { installAutoOpsHost, type AutoOpsThreadScope } from './hostConfig'
+import { installAutoOpsHost, readAutoOpsHost, type AutoOpsThreadScope } from './hostConfig'
 import type { CustomerAssistantRuntime } from '../../../../../../autoops/contracts/customer-assistant-runtime.ts'
 import '../index.css'
 
@@ -266,41 +266,68 @@ it('只读预设的目录撤回显示可访问的重试入口，恢复不修改�
   expect(value.question?.configuration.skillIds).toEqual(['isolated-skill'])
 })
 
-it.each(['project', 'actor'] as const)(
-  '切换%s后旧请求迟到不能恢复旧技能或调用提供者管理目录',
-  async (kind) => {
-    const f = setup(),
-      changed = vi.fn()
-    let finish!: (response: Response) => void
-    f.fetcher.mockImplementationOnce(
-      () =>
-        new Promise<Response>((resolve) => {
-          finish = resolve
-        }),
-    )
-    using _fetch = stubGlobal('fetch', f.fetcher)
-    await using screen = await render(<Harness value={scope()} onChange={changed} />)
-    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
-    const next = scope(kind === 'project' ? 'next-project' : 'recipient-project')
-    if (kind === 'project') next.question = { ...next.question!, assistantId: 'next-assistant' }
-    install(kind === 'actor' ? 'next-recipient' : 'recipient', next.projectId)
-    f.state.response = runtime('next-skill', '当前调用者技能')
-    await screen.rerender(<Harness value={next} onChange={changed} />)
-    await open()
-    await expect
-      .element(page.getByRole('menuitemcheckbox', { name: '当前调用者技能', exact: true }))
-      .toBeVisible()
-    await act(() => finish(Response.json(runtime('old-skill', '旧调用者私有技能'))))
-    await expect
-      .element(page.getByRole('menuitemcheckbox', { name: '当前调用者技能', exact: true }))
-      .toBeVisible()
-    await expect
-      .element(page.getByRole('menuitemcheckbox', { name: '旧调用者私有技能', exact: true }))
-      .not.toBeInTheDocument()
-    expect(changed).not.toHaveBeenCalled()
-    expect(f.requests.at(-1)?.body).toEqual({ projectId: next.projectId, question: next.question })
-    expect(f.requests.at(-1)?.csrf).toBe(
-      kind === 'actor' ? 'csrf-next-recipient' : 'csrf-recipient',
-    )
-  },
-)
+it('切换项目后旧请求迟到不能恢复旧技能或调用提供者管理目录', async () => {
+  const f = setup(),
+    changed = vi.fn()
+  let finish!: (response: Response) => void
+  f.fetcher.mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = resolve
+      }),
+  )
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(<Harness value={scope()} onChange={changed} />)
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+  const next = scope('next-project')
+  next.question = { ...next.question!, assistantId: 'next-assistant' }
+  install('recipient', next.projectId)
+  f.state.response = runtime('next-skill', '当前调用者技能')
+  await screen.rerender(<Harness value={next} onChange={changed} />)
+  await open()
+  await expect
+    .element(page.getByRole('menuitemcheckbox', { name: '当前调用者技能', exact: true }))
+    .toBeVisible()
+  await act(() => finish(Response.json(runtime('old-skill', '旧调用者私有技能'))))
+  await expect
+    .element(page.getByRole('menuitemcheckbox', { name: '当前调用者技能', exact: true }))
+    .toBeVisible()
+  await expect
+    .element(page.getByRole('menuitemcheckbox', { name: '旧调用者私有技能', exact: true }))
+    .not.toBeInTheDocument()
+  expect(changed).not.toHaveBeenCalled()
+  expect(f.requests.at(-1)?.body).toEqual({ projectId: next.projectId, question: next.question })
+  expect(f.requests.at(-1)?.csrf).toBe('csrf-recipient')
+})
+
+it('原页面拒绝直接切换身份，卸载后旧技能请求迟到不能恢复原用户内容', async () => {
+  const f = setup(),
+    changed = vi.fn()
+  let finish!: (response: Response) => void
+  let requestSignal: AbortSignal | null | undefined
+  f.fetcher.mockImplementationOnce((_input, init) => {
+    requestSignal = init?.signal
+    return new Promise<Response>((resolve) => {
+      finish = resolve
+    })
+  })
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(<Harness value={scope()} onChange={changed} />)
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+  expect(() => install('next-recipient')).toThrow(
+    'Reload the page before changing the authenticated user.',
+  )
+  expect(readAutoOpsHost()?.principal.id).toBe('recipient')
+  expect(readAutoOpsHost()?.csrfToken).toBe('csrf-recipient')
+  await screen.unmount()
+  expect(requestSignal?.aborted).toBe(true)
+  await act(() => finish(Response.json(runtime('old-skill', '旧调用者私有技能'))))
+  await expect
+    .element(page.getByRole('menuitemcheckbox', { name: '旧调用者私有技能', exact: true }))
+    .not.toBeInTheDocument()
+  await expect
+    .element(page.getByRole('button', { name: '技能', exact: true }))
+    .not.toBeInTheDocument()
+  expect(f.fetcher).toHaveBeenCalledTimes(1)
+  expect(changed).not.toHaveBeenCalled()
+})

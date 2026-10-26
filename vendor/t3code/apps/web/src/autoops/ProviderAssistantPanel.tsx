@@ -130,9 +130,11 @@ export function ProviderAssistantPanel() {
   const alive = useRef(true),
     write = useRef<AbortController | null>(null),
     trigger = useRef<HTMLButtonElement | null>(null);
+  const savedFocus = useRef(false);
   const menuTriggers = useRef(new Map<string, HTMLButtonElement>());
   const disabled = busy || !!pending || invalid || !fresh;
   function denied(cause: unknown) {
+    savedFocus.current = false;
     try {
       const original = readPendingProvidedAssistant();
       if (original) clearPendingProvidedAssistant(original);
@@ -154,6 +156,8 @@ export function ProviderAssistantPanel() {
       );
       return;
     }
+    savedFocus.current = true;
+    setFresh(false);
     setPending(null);
     setEditor(null);
     setError(null);
@@ -256,6 +260,18 @@ export function ProviderAssistantPanel() {
       });
     return () => controller.abort();
   }, [actor, attempt]);
+  useEffect(() => {
+    // 保存会先关闭弹窗，再刷新目录；入口暂时禁用时不能丢失键盘返回位置。
+    if (savedFocus.current && editor === null && !disabled) {
+      savedFocus.current = false;
+      const focused = document.activeElement;
+      if (
+        (!focused || focused === document.body || focused === trigger.current || !focused.isConnected) &&
+        trigger.current?.isConnected
+      )
+        trigger.current.focus();
+    }
+  }, [editor, disabled]);
   const sources = data?.sources ?? [];
   const openSave = (preset: AssistantPreset | null, button: HTMLButtonElement) => {
     trigger.current = button;

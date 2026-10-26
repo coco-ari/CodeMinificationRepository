@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
-import { render, stubGlobal } from "../../test/render";
+import { act, render, stubGlobal } from "../../test/render";
 import { Sidebar, SidebarContent, SidebarProvider } from "~/components/ui/sidebar";
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from "./ModuleWorkspace";
 import { AssistantManagementPage } from "./AssistantManagementPage";
@@ -531,7 +531,7 @@ it("编辑自用预设保留原参数，显式切换运行目录清除旧模型�
   await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
   await expect
     .element(page.getByRole("dialog").getByRole("alert"))
-    .toHaveTextContent("请选择所选运行目录提供的模型");
+    .toHaveTextContent("请选择所选运行目录提供的模型。");
   expect(f.writes).toHaveLength(0);
   await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
   await page.getByRole("option", { name: "自用运行器", exact: true }).click();
@@ -541,6 +541,51 @@ it("编辑自用预设保留原参数，显式切换运行目录清除旧模型�
   await expect
     .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
     .not.toBeChecked();
+});
+
+it.each([false, true])("保存后等待目录刷新，恢复空焦点但不抢走用户已移动的焦点%s", async (moveFocus) => {
+  const f = setup();
+  let finish!: () => void;
+  let refreshing = false;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input), window.location.origin).pathname;
+    if (path === "/api/v1/assistants/provided" && init?.method === "GET" && f.writes.length) {
+      refreshing = true;
+      await gate;
+    }
+    return f.fetcher(input, init);
+  });
+  using _fetch = stubGlobal("fetch", fetcher);
+  await using _screen = await render(<App />, {
+    router: "/assistants?projectId=target-project&assistantView=provided",
+  });
+  const add = page.getByRole("button", { name: "添加个人助手", exact: true });
+  await expect.element(add).toBeEnabled();
+  await create();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  await vi.waitFor(() => expect(refreshing).toBe(true));
+  await expect.element(add).toBeDisabled();
+  expect(f.writes).toHaveLength(1);
+  const refresh = page.getByRole("button", { name: "刷新助手", exact: true });
+  if (moveFocus) {
+    await refresh.click();
+    await expect.element(refresh).toHaveFocus();
+  }
+  await act(() => finish());
+  await expect.element(add).toBeEnabled();
+  if (moveFocus) {
+    await expect.element(refresh).toHaveFocus();
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  } else {
+    await expect.element(add).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    await expect.element(page.getByRole("dialog")).toBeVisible();
+    await expect.element(page.getByRole("textbox", { name: "名称", exact: true })).toHaveValue("");
+  }
+  expect(f.writes).toHaveLength(1);
 });
 
 it.each(["withdrawn", "changed", "model"] as const)(
@@ -575,7 +620,7 @@ it.each(["withdrawn", "changed", "model"] as const)(
     await menu("本人排障助手", "编辑助手");
     await expect
       .element(page.getByRole("combobox", { name: "运行目录", exact: true }))
-      .toHaveTextContent("隔离运行器");
+      .toHaveTextContent(kind === "model" ? "隔离运行器" : "原隔离运行器 · 已不可用");
     await expect
       .element(page.getByRole("combobox", { name: "模型", exact: true }))
       .toHaveTextContent("isolated-model · 已不可用");
@@ -868,7 +913,7 @@ it("目标默认范围拒绝保留当前表单与实际目标，未把该业务�
     .toHaveTextContent("所选目标成员不能使用此资料范围");
   await expect
     .element(page.getByRole("combobox", { name: "分配对象", exact: true }))
-    .toHaveTextContent("待分配成员");
+    .toHaveTextContent("成员 · 待分配成员");
   expect(f.writes).toHaveLength(1);
   await userEvent.keyboard("{Escape}");
   await expect.element(assign).toHaveFocus();
