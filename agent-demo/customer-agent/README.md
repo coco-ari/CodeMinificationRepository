@@ -76,6 +76,26 @@ node autoops-customer-agent.mjs run
 
 `resolve` 保留人工核实记录，并向中心报告旧 run/attempt。旧轮次以“结果不完整”结束，不自动重做、回滚或伪造成成功。该操作要求连接程序当前未运行；不应只因为网页离线就使用它。
 
+连接程序 0.4.1 补充了严格受限的原共享 `openSession` 人工中止入口。四种状态须分别处理：原命令收据缺失表示中心没有结果；本机没有原记录也不能证明原命令从未执行；提供者明确核实并中止后只记录“结果不完整”的 failed；真实设备回传及业务恢复仍须另有实际验收证据。已有 epoch、已接收/unknown 收据、本机原命令/会话/运行历史或目录占用继续使用原运行恢复流程，不能套用此入口。
+
+该入口要求先停止原连接程序，提供者检查旧受管进程。已获授权的运维通过严格验证主机的 SSH，在原中心上运行所属模块的只读工具；这不是 Web 查询，也不提供密码学签名。工具用 `DatabaseSync({readOnly:true})` 和 `query_only` 查询原账本，不创建表、不修改收据、不移除占用。默认执行只显示 prepared，显式 `--execute` 才读取。
+
+```sh
+node scripts/export-customer-unseen-open.mjs --execute --inspect --database /原中心/customer-transport.sqlite --command 原命令ID --session 原会话ID --device 原设备ID --provider 原提供者ID --thread 原线程ID --grant 原授权ID
+node scripts/export-customer-unseen-open.mjs --execute --database /原中心/customer-transport.sqlite --output /私有目录/原命令.json --command 原命令ID --session 原会话ID --device 原设备ID --provider 原提供者ID --thread 原线程ID --grant 原授权ID --fingerprint 上一步核对的完整命令SHA256
+```
+
+inspect 只输出固定公开标识与完整命令 canonical SHA-256；原 input 仅在所属模块内存中参与指纹计算，不写入导出文件或 stdout。导出只允许原 SQL NULL 收据、原共享 open、无运行代次且无原线程或目标占用，完整匹配设备、提供者、调用者、项目、线程、grant 和登记目标。会话若为 active/unknown，或已有 runs、节点/实体/轮次绑定、待停止指令和人工核实记录，即使 epoch 缺失也拒绝；这些历史不能清除后再套用本入口，空数组允许。文件以 `0600`、独占新建写入，不能覆盖旧文件。运维使用相同 SSH 信任边界交给原提供者，并核对文件公开范围及指纹，不能把来源不明的 JSON 当作授权事实。
+
+```sh
+node autoops-customer-agent.mjs resolve --command-file /本机私有目录/原命令.json --command 原命令ID --session 原会话ID --provider 原提供者ID --thread 原线程ID --grant 原授权ID --workspace 原登记ID --fingerprint 同一完整命令SHA256 --confirm-stopped
+node autoops-customer-agent.mjs run
+```
+
+正式 CLI 要求原设备凭据、原登记修订和来源项目匹配，持有原状态目录进程锁，在事务内再次拒绝原命令、会话、日志、锁或该目录活动。人工记录保留公开事实、指纹和明确确认；不伪造 session/epoch、不声称曾未执行。以后收到同 ID 完整原命令时返回原 failed，内容篡改则拒绝；不会执行原 open 或重发问题。人工 failed 单独在正常 welcome 后回传，沿既有中心原 device/session/grant 校验接纳；重启不把它降为 unknown。每个本机账本最多保留 64 条该类永久保护记录，独立于原 accepted/unknown 列表，不能删除保护记录来重试旧命令。
+
+本项已通过隔离原库只读、文件/身份拒绝、CLI 和真实回环 WebSocket 旧 Hub 回归；这些测试不等于真实用户设备和部署验收。真实原命令恢复仍须由运维核对固定标识、停止状态及实际原收据后单独执行。
+
 ## 发送图片与文件
 
 连接程序 0.2.0 起，在绑定这台电脑的问答中选择文件、拖拽或粘贴截图后发送即可。连接程序自动接收附件，图片交给 Codex 的图片输入，其他文件由 Agent 在本机读取。附件保存在连接程序的私有缓存，不自动放进项目目录或共享工作区。

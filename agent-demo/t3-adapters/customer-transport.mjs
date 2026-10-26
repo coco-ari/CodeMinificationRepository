@@ -1,6 +1,9 @@
 // Transport receipts and delivery cursors only. T3 remains the conversation/run store.
 import { createHash } from 'node:crypto';
 import { sharedSessionIdentity } from '../../autoops/contracts/shared-execution.ts';
+import { canonicalCustomerCommand, decodeUnseenOpenCommandExport, matchesUnseenOpenIdentity } from '../../autoops/contracts/customer-command-reconciliation.ts';
+import { decodeCustomerAgentServerFrame } from '../../vendor/t3code/packages/contracts/src/autoopsRemote.ts';
+import { customerWorkspaceKey } from './customer-target.mjs';
 
 export class CustomerTransportError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -8,6 +11,40 @@ export class CustomerTransportError extends Error {
 const fail = (code, message) => { throw new CustomerTransportError(code, message); };
 const parse = (row) => row ? JSON.parse(row.body) : undefined;
 export const customerCommandId = (sessionId, method, key) => `remote-${createHash('sha256').update(JSON.stringify([sessionId, method, key])).digest('hex')}`;
+
+/** 运维只读导出原 NULL/open 的公开事实；原 input 仅在内存中计算完整命令指纹。 */
+function readUnseenOpenCommand(db, expected, inspect = false) {
+  if (Number(db.prepare('PRAGMA query_only').get().query_only) !== 1) fail('READ_ONLY_REQUIRED', '导出必须使用只读数据库连接');
+  db.exec('BEGIN');
+  try {
+    const row = db.prepare('SELECT id,session_id,body,receipt FROM customer_transport_commands WHERE id=?').get(expected.commandId);
+    const saved = db.prepare('SELECT id,device_id,thread_id,body FROM customer_transport_sessions WHERE id=?').get(expected.sessionId);
+    if (!row || !saved || row.session_id !== expected.sessionId || row.receipt !== null) fail('UNSEEN_OPEN_REQUIRED', '只允许核实原收据缺失的未报告 open 命令');
+    let command, session;
+    try {
+      if (Buffer.byteLength(row.body) > 1024 * 1024 || Buffer.byteLength(saved.body) > 1024 * 1024) throw Error();
+      command = JSON.parse(row.body); session = JSON.parse(saved.body);
+      decodeCustomerAgentServerFrame(row.body);
+    } catch { fail('ORIGINAL_COMMAND_INVALID', '原命令或会话合同不完整'); }
+    const scope = command.executionScope;
+    if (command.type !== 'command' || command.method !== 'openSession' || command.commandId !== row.id || command.sessionId !== saved.id || session.sessionId !== saved.id || command.runtimeEpoch !== undefined || session.runtimeEpoch != null || session.providerSession != null || session.providerThreadId != null || !scope) fail('UNSEEN_OPEN_REQUIRED', '仅无运行代次的原共享 open 可以使用此人工核实入口');
+    // 缺少代次不能抹去已有运行痕迹；异常历史必须留给原运行恢复流程核实。
+    if ((session.state !== undefined && session.state !== 'idle') || ['runs', 'nodeIds', 'nodeBindings', 'entityBindings', 'providerTurnBindings'].some(key => session[key] !== undefined && (!Array.isArray(session[key]) || session[key].length > 0)) || ['pendingInterrupt', 'resolution', 'appliedResolution'].some(key => session[key] != null)) fail('UNSEEN_OPEN_REQUIRED', '原会话已有运行、控制或人工核实历史，不能使用未报告 open 入口');
+    if (session.deviceId !== saved.device_id || session.threadId !== saved.thread_id || scope.actorId !== session.ownerId || scope.providerId !== session.providerId || scope.projectId !== session.projectId || scope.threadId !== session.threadId || scope.target.deviceId !== session.deviceId || canonicalCustomerCommand(scope) !== canonicalCustomerCommand(session.executionScope) || canonicalCustomerCommand(command.target) !== canonicalCustomerCommand(session.target) || canonicalCustomerCommand({ kind: 'customer', deviceId: session.deviceId, ...command.target }) !== canonicalCustomerCommand(scope.target)) fail('ORIGINAL_SCOPE_CHANGED', '原设备、提供者、会话、授权或登记目标不一致');
+    if (db.prepare('SELECT 1 FROM customer_transport_commands WHERE session_id=? AND id<>? LIMIT 1').get(saved.id, row.id) || db.prepare('SELECT 1 FROM customer_transport_events WHERE session_id=? LIMIT 1').get(saved.id) || db.prepare('SELECT 1 FROM customer_transport_cursors WHERE session_id=? LIMIT 1').get(saved.id)) fail('UNSEEN_OPEN_REQUIRED', '该会话已有其他命令或运行历史，须使用原运行恢复流程');
+    if (db.prepare('SELECT 1 FROM customer_workspace_leases WHERE thread_id=? OR workspace_key=? LIMIT 1').get(session.threadId, customerWorkspaceKey(scope.target))) fail('ORIGINAL_WORKSPACE_BUSY', '原线程或登记目标仍有运行占用，不能据此人工收束命令');
+    const value = decodeUnseenOpenCommandExport({ format: 'autoops-unseen-open-command-v1', method: 'openSession', receipt: 'missing', commandId: command.commandId, sessionId: command.sessionId, deviceId: session.deviceId, providerId: scope.providerId, threadId: scope.threadId, grantId: scope.grantId, commandFingerprint: createHash('sha256').update(canonicalCustomerCommand(command)).digest('hex'), executionScope: scope, exportedAt: new Date().toISOString() });
+    if (!matchesUnseenOpenIdentity(value, inspect ? { ...expected, commandFingerprint: value.commandFingerprint } : expected)) fail('ORIGINAL_IDENTITY_MISMATCH', '指定标识与原命令完整指纹不一致');
+    db.exec('COMMIT'); return value;
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+export function exportUnseenOpenCommand(db, expected) { return readUnseenOpenCommand(db, expected); }
+/** 公开指纹核对阶段；不返回原 input，也不省略随后导出的指纹确认。 */
+export function inspectUnseenOpenCommand(db, expected) {
+  const value = readUnseenOpenCommand(db, expected, true);
+  const { commandId, sessionId, deviceId, providerId, threadId, grantId, commandFingerprint } = value;
+  return { commandId, sessionId, deviceId, providerId, threadId, grantId, commandFingerprint };
+}
 
 /** Durable, bounded, ordered inbox; no prompt replay and no second task queue. */
 export function createCustomerTransportJournal(db) {

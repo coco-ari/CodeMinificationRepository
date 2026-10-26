@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CustomerAgentCommand, CustomerAgentReceipt, CustomerAgentTarget, CustomerAgentResolution } from "../../vendor/t3code/packages/contracts/src/autoopsRemote.ts";
 import { sharedSessionIdentity, type SharedExecutionScope } from "../../autoops/contracts/shared-execution.ts";
+import { canonicalCustomerCommand, decodeUnseenOpenCommandExport, matchesUnseenOpenIdentity, type UnseenOpenCommandIdentity } from '../../autoops/contracts/customer-command-reconciliation.ts';
 
 export interface LocalPolicy {
   approvalPolicy: "untrusted" | "on-request";
@@ -41,11 +42,6 @@ function directoryIdentity(path: string): string {
   return `${stat.dev}:${stat.ino}`;
 }
 const parse = <T>(row: unknown, column: string): T => JSON.parse((row as Record<string, string>)[column]!) as T;
-const canonicalJson = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonicalJson);
-  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalJson(item)]));
-  return value;
-};
 export class CustomerAgentStore {
   readonly db: DatabaseSync;
   readonly directory: string;
@@ -69,7 +65,8 @@ export class CustomerAgentStore {
       CREATE TABLE IF NOT EXISTS events(session_id TEXT NOT NULL, epoch TEXT NOT NULL, seq INTEGER NOT NULL,
         payload TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY(session_id,epoch,seq));
       CREATE TABLE IF NOT EXISTS reconciliations(session_id TEXT NOT NULL, epoch TEXT NOT NULL,
-        payload TEXT NOT NULL, PRIMARY KEY(session_id,epoch));`);
+        payload TEXT NOT NULL, PRIMARY KEY(session_id,epoch));
+      CREATE TABLE IF NOT EXISTS command_reconciliations(command_id TEXT PRIMARY KEY, payload TEXT NOT NULL);`);
     if (process.platform !== "win32") chmodSync(join(directory, "connector.sqlite"), 0o600);
   }
   close(): void { this.db.close(); }
@@ -131,7 +128,7 @@ export class CustomerAgentStore {
     return receipt;
   }
   commandHash(command: CustomerAgentCommand): string {
-    return createHash("sha256").update(JSON.stringify(canonicalJson(command))).digest("hex");
+    return createHash("sha256").update(canonicalCustomerCommand(command)).digest("hex");
   }
   accept(command: CustomerAgentCommand): CustomerAgentReceipt {
     const previous = this.receipt(command);
@@ -153,6 +150,37 @@ export class CustomerAgentStore {
   }
   pendingReceipts(): CustomerAgentReceipt[] {
     return this.db.prepare("SELECT receipt FROM commands WHERE state IN ('accepted','unknown')").all().map((row) => parse<CustomerAgentReceipt>(row, "receipt"));
+  }
+  /** 与待执行/未知收据分开，重启不能把已人工中止的 tombstone 降成 unknown。 */
+  manuallyReconciledOpenReceipts(): CustomerAgentReceipt[] {
+    return this.db.prepare('SELECT c.receipt FROM commands c JOIN command_reconciliations r ON r.command_id=c.id WHERE c.state=\'failed\' ORDER BY c.rowid LIMIT 64').all().map(row => parse<CustomerAgentReceipt>(row, 'receipt'));
+  }
+  reconcileUnseenOpen(input: unknown, expected: UnseenOpenCommandIdentity, confirmed: boolean): CustomerAgentReceipt {
+    if (!confirmed) throw new ConnectorError('confirmation_required', '必须明确核实旧受管进程已经结束，再指定 --confirm-stopped');
+    let value;
+    try { value = decodeUnseenOpenCommandExport(input); } catch { throw new ConnectorError('original_export_invalid', '原命令公开导出合同不完整'); }
+    const scope = value.executionScope;
+    if (!matchesUnseenOpenIdentity(value, expected) || scope.grantId !== value.grantId || scope.providerId !== value.providerId || scope.threadId !== value.threadId || scope.target.deviceId !== value.deviceId) throw new ConnectorError('original_identity_mismatch', '人工确认标识与原设备、提供者、授权或命令指纹不一致');
+    return this.transaction(() => {
+      const workspace = this.resolveWorkspace(scope.target, true);
+      if (workspace.projectId !== scope.sourceProjectId) throw new ConnectorError('original_scope_changed', '原命令的来源项目与本机登记不一致');
+      const history = this.db.prepare('SELECT 1 FROM commands WHERE id=? OR session_id=? LIMIT 1').get(value.commandId, value.sessionId)
+        || this.db.prepare('SELECT 1 FROM sessions WHERE id=?').get(value.sessionId)
+        || this.db.prepare('SELECT 1 FROM workspace_locks WHERE session_id=? OR workspace_id=? LIMIT 1').get(value.sessionId, workspace.registeredWorkspaceId)
+        || this.db.prepare('SELECT 1 FROM streams WHERE session_id=? LIMIT 1').get(value.sessionId)
+        || this.db.prepare('SELECT 1 FROM events WHERE session_id=? LIMIT 1').get(value.sessionId)
+        || this.db.prepare('SELECT 1 FROM reconciliations WHERE session_id=? LIMIT 1').get(value.sessionId)
+        || this.sessions().some(session => session.workspaceId === workspace.registeredWorkspaceId && session.state !== 'idle');
+      if (history) throw new ConnectorError('original_local_history_exists', '原命令、会话或目录已有本机执行记录，须使用原运行恢复流程');
+      if (Number(this.db.prepare('SELECT COUNT(*) count FROM command_reconciliations').get()!.count) >= 64) throw new ConnectorError('manual_reconciliation_full', '本机人工中止记录已达上限；历史保护记录不能删除，请联系维护人员');
+      const receipt: CustomerAgentReceipt = { type: 'receipt', commandId: value.commandId, sessionId: value.sessionId, grantId: value.grantId, state: 'failed', error: { code: 'CUSTOMER_MANUALLY_RECONCILED', message: '用户已在本机明确中止原命令并核实旧受管进程结束；结果不完整，不重做或回滚，不据本机记录缺失推断曾未执行' } };
+      const audit = JSON.stringify({ original: value, operatorConfirmedStopped: true, resultIncomplete: true, recordedAt: new Date().toISOString() });
+      const count = Number(this.db.prepare('SELECT COUNT(*) count FROM commands').get()!.count);
+      if (count >= 100000 || this.logBytes() + Buffer.byteLength(audit) + Buffer.byteLength(JSON.stringify(receipt)) > this.maxLogBytes) throw new ConnectorError('command_log_full', '本机恢复日志已达容量，请先维护日志');
+      this.db.prepare('INSERT INTO commands(id,hash,session_id,method,state,receipt,updated_at) VALUES(?,?,?,?,?,?,?)').run(value.commandId, value.commandFingerprint, value.sessionId, 'openSession', 'failed', JSON.stringify(receipt), Date.now());
+      this.db.prepare('INSERT INTO command_reconciliations(command_id,payload) VALUES(?,?)').run(value.commandId, audit);
+      return receipt;
+    });
   }
   sessions(): LocalSession[] { return this.db.prepare("SELECT payload FROM sessions").all().map((row) => parse<LocalSession>(row, "payload")); }
   session(id: string): LocalSession | undefined { return this.sessions().find((session) => session.sessionId === id); }
@@ -215,7 +243,8 @@ export class CustomerAgentStore {
   logBytes(): number {
     const events = Number(this.db.prepare("SELECT COALESCE(SUM(bytes),0) bytes FROM events").get()!.bytes);
     const commands = Number(this.db.prepare("SELECT COALESCE(SUM(LENGTH(CAST(receipt AS BLOB))),0) bytes FROM commands").get()!.bytes);
-    return events + commands;
+    const reconciliations = Number(this.db.prepare('SELECT COALESCE(SUM(LENGTH(CAST(payload AS BLOB))),0) bytes FROM command_reconciliations').get()!.bytes);
+    return events + commands + reconciliations;
   }
   assertCapacity(): void {
     if (this.logBytes() >= this.maxLogBytes - this.reserveBytes) throw new ConnectorError("outbox_high_water", "待回传日志接近容量上限，请恢复连接并完成同步后再开始新轮次");

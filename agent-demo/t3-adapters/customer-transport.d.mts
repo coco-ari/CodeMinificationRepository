@@ -1,6 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CustomerExecutionBinding } from './customer-registry.mjs';
 import type { SharedExecutionScope } from '../../autoops/contracts/shared-execution.ts';
+import type { UnseenOpenCommandExport, UnseenOpenCommandIdentity, UnseenOpenCommandLocator } from '../../autoops/contracts/customer-command-reconciliation.ts';
+export function exportUnseenOpenCommand(db:DatabaseSync,expected:UnseenOpenCommandIdentity):UnseenOpenCommandExport;
+export function inspectUnseenOpenCommand(db:DatabaseSync,expected:UnseenOpenCommandLocator):UnseenOpenCommandIdentity;
 export class CustomerTransportError extends Error {code:string;constructor(code:string,message:string)}
 export function customerCommandId(sessionId:string,method:string,key:unknown):string;
 export interface TransportSession {

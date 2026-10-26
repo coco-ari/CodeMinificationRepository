@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { hostname, homedir } from "node:os";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { constants, chmodSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -10,6 +10,7 @@ import { CustomerAgentStore, defaultLocalPolicy, ConnectorError } from "./store.
 import { CustomerAgentConnection, CustomerAgentHttpClient, CONNECTOR_VERSION, type DeviceCredentials } from "./connection.ts";
 import { loadSharedDockerProfile } from './shared-docker-profile.ts';
 import { createCustomerRunnerFactory } from './runner-environment.ts';
+import { decodeUnseenOpenCommandExport, type UnseenOpenCommandExport } from '../../autoops/contracts/customer-command-reconciliation.ts';
 
 export function defaultStateDirectory(): string { return join(homedir(), ".autoops", "customer-agent"); }
 function ensureDirectory(directory: string): void {
@@ -52,12 +53,26 @@ async function question(prompt: string): Promise<string> {
   const readline = createInterface({ input: process.stdin, output: process.stdout });
   try { return (await readline.question(prompt)).trim(); } finally { readline.close(); }
 }
+export function readUnseenOpenCommandFile(path: string): UnseenOpenCommandExport {
+  const absolute = resolve(path);
+  if (realpathSync(absolute) !== absolute) throw new ConnectorError('original_export_file_invalid', '原命令导出必须使用无符号链接的本机常规文件');
+  const descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > 128 * 1024 || (process.platform !== 'win32' && ((stat.mode & 0o077) !== 0 || stat.uid !== process.getuid!()))) throw new Error();
+    const bytes = readFileSync(descriptor);
+    if (bytes.length > 128 * 1024) throw new Error();
+    return decodeUnseenOpenCommandExport(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+  } catch { throw new ConnectorError('original_export_file_invalid', '原命令导出须为当前用户私有的有效0600常规文件'); }
+  finally { closeSync(descriptor); }
+}
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     "state-dir": { type: "string" }, url: { type: "string" }, code: { type: "string" }, name: { type: "string" },
     project: { type: "string" }, path: { type: "string" }, label: { type: "string" },
     workspace: { type: "string" }, "allow-insecure": { type: "boolean" },
     session: { type: "string" }, "confirm-stopped": { type: "boolean" },
+    "command-file": { type: 'string' }, command: { type: 'string' }, provider: { type: 'string' }, thread: { type: 'string' }, grant: { type: 'string' }, fingerprint: { type: 'string' },
     help: { type: "boolean", short: "h" },
     "read-only": { type: "boolean" }, "network-access": { type: "boolean" }, "approval-policy": { type: "string" },
     "shared-profile": {type:'string'},
@@ -65,7 +80,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   } });
   const command = positionals[0]; const directory = resolve(values["state-dir"] ?? defaultStateDirectory());
   if (values.help || !["connect", "register", "profile", "validate-profile", "status", "run", "revoke", "resolve"].includes(command ?? "")) {
-    console.log("AutoOps 客户连接程序\n\nconnect --url https://中心地址 [--code 一次性配对码]\nregister --project 项目ID --path 本机目录 --label 名称 [--read-only] [--network-access] [--shared-profile 本机JSON]\nprofile --workspace 登记ID --shared-profile 本机JSON\nprofile --workspace 登记ID --disable-shared-profile\nvalidate-profile --shared-profile 本机JSON\nstatus\nrun\nrevoke --workspace 登记ID\nresolve --session 会话ID --confirm-stopped\n\n自用需本机 Codex CLI 已安装并登录；隔离profile另需 Linux Docker 和已核验固定镜像。公网必须使用 HTTPS。凭据保留在本机，不上传目录内容。");
+    console.log("AutoOps 客户连接程序\n\nconnect --url https://中心地址 [--code 一次性配对码]\nregister --project 项目ID --path 本机目录 --label 名称 [--read-only] [--network-access] [--shared-profile 本机JSON]\nprofile --workspace 登记ID --shared-profile 本机JSON\nprofile --workspace 登记ID --disable-shared-profile\nvalidate-profile --shared-profile 本机JSON\nstatus\nrun\nrevoke --workspace 登记ID\nresolve --session 会话ID --confirm-stopped\nresolve --command-file 运维只读导出.json --command 原命令ID --session 原会话ID --provider 原提供者ID --thread 原线程ID --grant 原授权ID --workspace 原登记ID --fingerprint 原完整命令SHA256 --confirm-stopped\n\n自用需本机 Codex CLI 已安装并登录；隔离profile另需 Linux Docker 和已核验固定镜像。公网必须使用 HTTPS。凭据保留在本机，不上传目录内容。");
     return;
   }
   if(command==='validate-profile') {
@@ -87,6 +102,21 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         ...(values["allow-insecure"] ? { allowInsecure: true } : {}) });
       console.log("设备已接入。请在本机登记目录，然后运行 run。设备凭据已单独保存，不会打印。");
     } finally { await client.close(); }
+    return;
+  }
+  if (command === 'resolve' && values['command-file']) {
+    for (const key of ['command', 'session', 'provider', 'thread', 'grant', 'workspace', 'fingerprint'] as const) if (!values[key]?.trim()) throw new ConnectorError('confirmation_required', '请逐项指定原命令、会话、提供者、线程、授权、登记ID及完整命令指纹，并明确 --confirm-stopped');
+    if (!values['confirm-stopped']) throw new ConnectorError('confirmation_required', '必须在本机核实旧受管进程结束，再指定 --confirm-stopped');
+    const credentials = readCredentials(directory);
+    const release = acquireProcessLock(directory);
+    try {
+      const value = readUnseenOpenCommandFile(values['command-file']);
+      if (value.executionScope.target.registeredWorkspaceId !== values.workspace) throw new ConnectorError('original_identity_mismatch', '人工确认的登记ID与原命令不一致');
+      const store = new CustomerAgentStore(directory);
+      try { store.reconcileUnseenOpen(value, { commandId: values.command!, sessionId: values.session!, deviceId: credentials.deviceId, providerId: values.provider!, threadId: values.thread!, grantId: values.grant!, commandFingerprint: values.fingerprint! }, true); }
+      finally { store.close(); }
+      console.log('已保存原命令人工中止记录，结果不完整；没有重发、重做或回滚。运行 run 后由原设备正常回传中心。');
+    } finally { release(); }
     return;
   }
   const store = new CustomerAgentStore(directory);

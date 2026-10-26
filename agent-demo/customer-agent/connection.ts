@@ -8,7 +8,7 @@ import { ConnectorError } from "./store.ts";
 import { CUSTOMER_FILE_LIMITS } from "../../vendor/t3code/packages/contracts/src/customerFiles.ts";
 
 export interface DeviceCredentials { deviceId: string; token: string; baseUrl: string; allowInsecure?: boolean; }
-export const CONNECTOR_VERSION = "0.4.0";
+export const CONNECTOR_VERSION = "0.4.1";
 export function validateBaseUrl(value: string, allowInsecure = false): string {
   const url = new URL(value);
   if (url.username || url.password || url.hash || url.search) throw new Error("中心地址不能包含账号、密码、查询参数或片段");
@@ -150,6 +150,7 @@ export class CustomerAgentConnection {
           case "welcome":
             this.ready = true; this.retry = 0; this.onState("已连接中心，正在核对待回传结果");
             for (const receipt of this.store.pendingReceipts()) this.enqueue(receipt);
+            for (const receipt of this.store.manuallyReconciledOpenReceipts()) this.enqueue(receipt);
             void this.onReady().catch(() => this.onState("本机能力目录暂未刷新，保留原缓存与运行状态"));
             this.flush(); break;
           case "command":
