@@ -12,6 +12,7 @@ import { makeRemoteProviderAdapter } from "./RemoteProviderAdapter.ts";
 import { customerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
 import type { CustomerDevice } from "../../../../../../agent-demo/t3-adapters/customer-registry.mjs";
 import { isCustomerAgentsEnabled } from "../../../../../../agent-demo/t3-adapters/customer-registry.mjs";
+import { CurrentAutoOpsPrincipal } from "./RequestScope.ts";
 import { ProviderInstanceAvailability } from "../provider/ProviderInstanceAvailability.ts";
 
 export const availabilityLayer = Layer.effect(
@@ -19,28 +20,60 @@ export const availabilityLayer = Layer.effect(
   Effect.gen(function* () {
     const { hub } = yield* RemoteDeviceService;
     return {
-      resolve: ({ projectId, instanceId }) =>
-        Effect.sync(() => {
-          if (!instanceId.startsWith("customer-")) return undefined;
-          if (!hub || !isCustomerAgentsEnabled()) return false;
-          const registry = hub.access.customerRegistry;
-          const device = registry
-            .listRegisteredDevices()
-            .find(
-              (item) =>
-                customerProviderInstanceId({ deviceId: item.id, runtimeId: "codex" }) ===
-                instanceId,
-            );
-          if (!device || device.status !== "active") return false;
-          try {
-            return registry
-              .listWorkspaces(device.ownerId, projectId)
-              .some(
-                (workspace) => workspace.deviceId === device.id && workspace.status === "active",
+      resolve: ({ projectId, instanceId, threadId }) =>
+        Effect.gen(function* () {
+          const principal = yield* Effect.service(CurrentAutoOpsPrincipal);
+          return yield* Effect.sync(() => {
+            if (!instanceId.startsWith("customer-")) return undefined;
+            if (!hub || !isCustomerAgentsEnabled()) return false;
+            const registry = hub.access.customerRegistry;
+            const device = registry
+              .listRegisteredDevices()
+              .find(
+                (item) =>
+                  customerProviderInstanceId({ deviceId: item.id, runtimeId: "codex" }) ===
+                  instanceId,
               );
-          } catch {
-            return false;
-          }
+            if (!device || device.status !== "active") return false;
+            try {
+              if (threadId !== undefined) {
+                const binding = hub.access.getThreadBinding(threadId);
+                if (
+                  !binding ||
+                  binding.projectId !== projectId ||
+                  binding.executionBinding.kind !== "customer" ||
+                  customerProviderInstanceId(binding.executionBinding) !== instanceId
+                )
+                  return false;
+                // Web 调用仍核对实际身份；后台仅沿原生传来的可信父/原绑定，不继承提供者身份。
+                if (principal)
+                  hub.access.requireThreadExecution(principal, threadId, { requireOnline: true });
+                const source = hub.access.customerExecutionSource(threadId, binding.ownerId);
+                const selection = hub.access.requireQuestionForActor(binding.ownerId, threadId);
+                if (
+                  (source.ownerId !== binding.ownerId ||
+                    source.projectId !== projectId ||
+                    binding.question?.configuration.customerProfile) &&
+                  !selection
+                )
+                  return false;
+                registry.validateTarget(
+                  source.ownerId,
+                  source.projectId,
+                  binding.executionBinding,
+                  { requireOnline: true },
+                );
+                return true;
+              }
+              return registry
+                .listWorkspaces(device.ownerId, projectId)
+                .some(
+                  (workspace) => workspace.deviceId === device.id && workspace.status === "active",
+                );
+            } catch {
+              return false;
+            }
+          });
         }),
     };
   }),

@@ -381,6 +381,7 @@ export interface ThreadManagementServiceShape {
     readonly projectId: ProjectId;
     readonly commandId: CommandId;
     readonly instanceId: ProviderInstanceId;
+    readonly threadId?: ThreadId;
   }) => Effect.Effect<void, ThreadManagementProviderInstanceDisabledError>;
   readonly isProviderInstanceEnabledForProject: (input: {
     readonly projectId: ProjectId;
@@ -516,7 +517,11 @@ const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const availability = yield* Effect.serviceOption(ProviderInstanceAvailability);
-  const resolveEnabled = (input: { projectId: ProjectId; instanceId: ProviderInstanceId }) =>
+  const resolveEnabled = (input: {
+    projectId: ProjectId;
+    instanceId: ProviderInstanceId;
+    threadId?: ThreadId;
+  }) =>
     (Option.isSome(availability)
       ? availability.value.resolve(input)
       : Effect.succeed(undefined)
@@ -661,6 +666,7 @@ const make = Effect.gen(function* () {
             assertProviderInstanceEnabled({
               projectId: projection.thread.projectId,
               commandId: command.commandId,
+              threadId: command.threadId,
               instanceId: (command.modelSelection ?? projection.thread.modelSelection).instanceId,
             }),
           ),
@@ -671,6 +677,7 @@ const make = Effect.gen(function* () {
             assertProviderInstanceEnabled({
               projectId: parent.thread.projectId,
               commandId: command.commandId,
+              threadId: command.parentThreadId,
               instanceId: command.modelSelection.instanceId,
             }),
           ),

@@ -842,6 +842,7 @@ const make = Effect.gen(function* () {
         projectId: input.projectId,
         commandId: input.commandId,
         instanceId: input.modelSelection.instanceId,
+        ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
       });
       return yield* Effect.gen(function* () {
         // A retried launch has no client-supplied id to replay against, so

@@ -1,3 +1,7 @@
+import { availabilityLayer as remoteAvailabilityLayer } from '../autoops/RemoteProviderRegistry.ts';
+import { RemoteDeviceService, type RemoteDeviceHub } from '../autoops/RemoteDeviceService.ts';
+import { ProviderInstanceAvailability } from '../provider/ProviderInstanceAvailability.ts';
+import type { AutoOpsAccess } from '../../../../../../agent-demo/t3-adapters/access.mjs';
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
@@ -122,6 +126,7 @@ const claudeAdapter = {
 } as ProviderAdapter.ProviderAdapterV2["Service"];
 
 interface HarnessOptions {
+  readonly availability?: Layer.Layer<ProviderInstanceAvailability>;
   readonly closeTerminal?: TerminalManager.TerminalManager["Service"]["close"];
   readonly adapters?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>;
   readonly managedFolders?: Layer.Layer<ManagedProjectFolders.ManagedProjectFolders>;
@@ -148,11 +153,14 @@ function makeHarness(options: HarnessOptions = {}) {
   );
   const layerServerSettings = ServerSettings.layerTest(options.serverSettings);
   const layerReceipts = CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase));
-  const layerThreadManagement = ThreadManagement.layer.pipe(
+  const layerThreadManagementBase = ThreadManagement.layer.pipe(
     Layer.provide(layerOrchestrator),
     Layer.provide(layerServerSettings),
     Layer.provide(layerReceipts),
   );
+  const layerThreadManagement = options.availability
+    ? layerThreadManagementBase.pipe(Layer.provide(options.availability))
+    : layerThreadManagementBase;
   const layerOutbox = EffectOutbox.layer.pipe(Layer.provide(layerDatabase));
   const createWorktree = vi.fn(
     options.createWorktree ??
@@ -3683,3 +3691,97 @@ for (const invalid of ["missing", "other-project"] as const) it.effect(`new-thre
     if(Result.isFailure(result)) assert.match(JSON.stringify(result.failure),invalid==="missing"?/does not exist/:/different project/);
   }).pipe(Effect.provide(harness.layer));
 });
+
+
+it.effect(
+  "已授权跨项目共享来源在原生启动时沿可信原thread核对，不能误判未登记目标项目为disabled",
+  () => {
+    const previousCustomerFlag = process.env.AUTOOPS_CUSTOMER_AGENTS;
+    process.env.AUTOOPS_CUSTOMER_AGENTS = "1";
+    const deviceId = "fixture-device",
+      instanceId = ProviderInstanceId.make(`customer-${deviceId}-codex`);
+    const threadId = ThreadId.make("thread:launch:shared-source");
+    const source = {
+      kind: "customer" as const,
+      deviceId,
+      registeredWorkspaceId: "source-directory",
+      workspaceBindingRevision: 1,
+      runtimeId: "codex",
+    };
+    const access = {
+      customerRegistry: {
+        listRegisteredDevices: () => [{ id: deviceId, ownerId: "provider", status: "active" }],
+        listWorkspaces: (_owner: string, project?: string) =>
+          project === projectId ? [] : [{ deviceId, status: "active" }],
+        validateTarget: () => source,
+      },
+      getThreadBinding: (id: string) =>
+        id === threadId
+          ? {
+              threadId,
+              projectId,
+              ownerId: "recipient",
+              executionBinding: source,
+              question: { configuration: { customerProfile: { id: "fixture-profile" } } },
+            }
+          : undefined,
+      customerExecutionSource: (id: string, actor: string) => {
+        assert.equal(id, threadId);
+        assert.equal(actor, "recipient");
+        return { ownerId: "provider", projectId: "source-project" };
+      },
+      requireQuestionForActor: (actor: string, id: string) => {
+        assert.equal(id, threadId);
+        assert.equal(actor, "recipient");
+        return { assistantId: "assigned-current-preset" };
+      },
+    } as unknown as AutoOpsAccess;
+    const availability = remoteAvailabilityLayer.pipe(
+      Layer.provide(Layer.succeed(RemoteDeviceService, { hub: { access } as RemoteDeviceHub })),
+    );
+    const legacyContract = Layer.effect(
+      ProviderInstanceAvailability,
+      Effect.gen(function* () {
+        const current = yield* ProviderInstanceAvailability;
+        return {
+          resolve: (input: { projectId: ProjectId; instanceId: ProviderInstanceId }) =>
+            current.resolve({ projectId: input.projectId, instanceId: input.instanceId }),
+        };
+      }),
+    ).pipe(Layer.provide(availability));
+    const legacyHarness = makeHarness({
+      availability: legacyContract,
+      adapters: [{ ...adapter, instanceId }],
+    });
+    const harness = makeHarness({ availability, adapters: [{ ...adapter, instanceId }] });
+    return Effect.gen(function* () {
+      // 原合同没有可信线程上下文，只能走登记项目规则；同一来源确实被拒绝。
+      const legacyFailure = yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        return yield* launches
+          .launch({
+            ...launchInput({ command: "command:launch:shared-without-context", thread: threadId }),
+            modelSelection: { instanceId, model: "isolated-model" },
+          })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(legacyHarness.layer));
+      assert.equal(legacyFailure._tag, "ThreadManagementProviderInstanceDisabledError");
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const result = yield* launches.launch({
+          ...launchInput({ command: "command:launch:shared-source", thread: threadId }),
+          modelSelection: { instanceId, model: "isolated-model" },
+        });
+        assert.equal(result.threadId, threadId);
+        assert.equal(result.projection.thread.modelSelection.instanceId, instanceId);
+      }).pipe(Effect.provide(harness.layer));
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (previousCustomerFlag === undefined) delete process.env.AUTOOPS_CUSTOMER_AGENTS;
+          else process.env.AUTOOPS_CUSTOMER_AGENTS = previousCustomerFlag;
+        }),
+      ),
+    );
+  },
+);
