@@ -15,6 +15,9 @@ import {
 import { resolve, join, dirname, extname } from 'node:path'
 import type { SQLOutputValue } from 'node:sqlite'
 import type {
+  ProjectRepositoryCommand,
+  ProjectRepositoryConnection,
+  WorkspaceRepositoryUsage,
   WorkspaceInputCapture,
   WorkspaceSourceSyncRecord,
   WorkspaceDeploymentSourceCapture,
@@ -47,6 +50,7 @@ import {
   limits,
   mimeFor,
   normalizeSource,
+  normalizeRepository,
   overlaps,
   parserVersion,
   path,
@@ -56,9 +60,15 @@ import {
 } from './rules.ts'
 
 export { WorkspaceAuthoringError } from './rules.ts'
-export type WorkspaceAuthoringAction = 'read' | 'external-read' | 'manage' | 'source-manage' | 'source-generate'
+export type WorkspaceAuthoringAction =
+  'read' | 'external-read' | 'manage' | 'source-manage' | 'source-generate' | 'repository-read'
 export interface WorkspaceAuthoringOptions {
   dataDir: string
+  validateRepository?: (
+    actorId: string,
+    projectId: string,
+    value: ProjectRepositoryConnection,
+  ) => unknown
   authorize: (actorId: string, projectId: string, action: WorkspaceAuthoringAction) => unknown
 }
 type Row = Record<string, SQLOutputValue>
@@ -159,7 +169,9 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
   }
   const sources = (projectId: string) =>
     db
-      .prepare('SELECT * FROM authoring_sources WHERE project_id=? ORDER BY id')
+      .prepare(
+        'SELECT s.*,r.name,r.url,r.credential_id FROM authoring_sources s JOIN authoring_repositories r ON r.project_id=s.project_id AND r.id=s.id WHERE s.project_id=? ORDER BY s.id',
+      )
       .all(projectId)
       .map(sourceFrom)
   function extraction(contentHash: string, mime: string): WorkspaceExtraction {
@@ -334,7 +346,14 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
     payload: unknown,
     work: () => Omit<WorkspaceAuthoringResult, 'requestId'>,
   ): WorkspaceAuthoringResult {
-    authorize(projectId, actorId, operation === 'save-source' || operation === 'remove-source' ? 'source-manage' : 'manage', true)
+    authorize(
+      projectId,
+      actorId,
+      ['save-source', 'save-repository', 'remove-repository'].includes(operation)
+        ? 'source-manage'
+        : 'manage',
+      true,
+    )
     const requestId = id(input.requestId),
       expectedRevision = revision(input.expectedRevision)
     const fingerprint = hash(JSON.stringify({ actorId, operation, expectedRevision, payload }))
@@ -592,7 +611,119 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         : {}),
     }
   }
+  const repositoryRows = (projectId: string): ProjectRepositoryConnection[] =>
+    db
+      .prepare('SELECT * FROM authoring_repositories WHERE project_id=? ORDER BY id')
+      .all(projectId)
+      .map((row) => ({
+        id: text(row, 'id'),
+        name: text(row, 'name'),
+        url: text(row, 'url'),
+        ...(row.credential_id ? { credentialId: text(row, 'credential_id') } : {}),
+      }))
+  const repository = (projectId: string, repositoryId: string) =>
+    repositoryRows(projectId).find((value) => value.id === repositoryId) ??
+    fail(404, 'REPOSITORY_NOT_FOUND', '项目仓库连接不存在')
+  const persistRepository = (projectId: string, value: ProjectRepositoryConnection) =>
+    db
+      .prepare(
+        'INSERT INTO authoring_repositories VALUES(?,?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET name=excluded.name,url=excluded.url,credential_id=excluded.credential_id',
+      )
+      .run(projectId, value.id, value.name, value.url, value.credentialId ?? null)
+  function persistSource(projectId: string, value: WorkspaceRepositorySource) {
+    const current = sources(projectId)
+    if (!current.some((source) => source.id === value.id) && current.length >= 32)
+      fail(413, 'WORKSPACE_SOURCE_LIMIT', '最多配置 32 个工作区仓库')
+    if (
+      current.some(
+        (source) => source.id !== value.id && overlaps(source.mountPath, value.mountPath),
+      ) ||
+      rows(projectId).some((entry) => overlaps(text(entry, 'path'), value.mountPath))
+    )
+      fail(409, 'WORKSPACE_MOUNT_CONFLICT', '仓库挂载与其他来源或资料目录重叠')
+    db.prepare(
+      'INSERT INTO authoring_sources VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET role=excluded.role,ref_kind=excluded.ref_kind,ref=excluded.ref,mount_path=excluded.mount_path,source_path=excluded.source_path',
+    ).run(
+      projectId,
+      value.id,
+      value.role,
+      value.refKind,
+      value.ref,
+      value.mountPath,
+      value.sourcePath ?? null,
+    )
+    return { revision: advance(projectId), source: value }
+  }
   const api = {
+    repositories(projectId: string, actorId: string) {
+      authorize(projectId, actorId, 'repository-read')
+      return { revision: projectRevision(projectId), items: repositoryRows(projectId) }
+    },
+    saveRepository(
+      projectId: string,
+      repositoryId: string | null,
+      input: ProjectRepositoryCommand,
+      actorId: string,
+    ) {
+      const value = normalizeRepository(input.value)
+      if (repositoryId !== null) id(repositoryId)
+      return mutation(projectId, actorId, 'save-repository', input, { repositoryId, value }, () => {
+        if (repositoryId !== null) repository(projectId, repositoryId)
+        else if (repositoryRows(projectId).length >= 32)
+          fail(413, 'REPOSITORY_LIMIT', '每个项目最多配置 32 个仓库连接')
+        const saved = { ...value, id: repositoryId ?? randomUUID() }
+        options.validateRepository?.(actorId, projectId, saved)
+        persistRepository(projectId, saved)
+        return { revision: advance(projectId), repository: saved }
+      })
+    },
+    removeRepository(
+      projectId: string,
+      repositoryId: string,
+      input: WorkspaceAuthoringMutation,
+      actorId: string,
+    ) {
+      id(repositoryId)
+      return mutation(projectId, actorId, 'remove-repository', input, { repositoryId }, () => {
+        repository(projectId, repositoryId)
+        if (sources(projectId).some((value) => value.id === repositoryId))
+          fail(
+            409,
+            'REPOSITORY_IN_USE',
+            '请先移除工作区使用配置，再删除仓库连接；已固定任务仍保留原来源',
+          )
+        db.prepare('DELETE FROM authoring_repositories WHERE project_id=? AND id=?').run(
+          projectId,
+          repositoryId,
+        )
+        return { revision: advance(projectId) }
+      })
+    },
+    configureSource(projectId: string, input: WorkspaceRepositoryUsage, actorId: string) {
+      authorize(projectId, actorId, 'manage', true)
+      if (
+        !input ||
+        Object.keys(input).some(
+          (key) =>
+            ![
+              'requestId',
+              'expectedRevision',
+              'id',
+              'role',
+              'refKind',
+              'ref',
+              'mountPath',
+              'sourcePath',
+            ].includes(key),
+        )
+      )
+        fail(400, 'REPOSITORY_USAGE_INVALID', '工作区只选择已配置仓库及自己的分支和目录')
+      id(input.id)
+      return mutation(projectId, actorId, 'configure-source', input, input, () => {
+        const selected = repository(projectId, input.id)
+        return persistSource(projectId, normalizeSource({ ...input, ...selected }, input.id))
+      })
+    },
     overview(projectId: string, actorId: string): WorkspaceAuthoringOverview {
       authorize(projectId, actorId, 'read')
       return {
@@ -611,34 +742,13 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       const sourceId = input.id === undefined ? undefined : id(input.id)
       const normalized = normalizeSource(input, sourceId ?? 'new-source')
       return mutation(projectId, actorId, 'save-source', input, normalized, () => {
-        const current = sources(projectId)
-        if (sourceId && !current.some((source) => source.id === sourceId))
+        if (sourceId && !repositoryRows(projectId).some((source) => source.id === sourceId))
           fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '仓库来源不存在')
-        if (!sourceId && current.length >= 32)
-          fail(413, 'WORKSPACE_SOURCE_LIMIT', '最多配置 32 个仓库来源')
-        if (
-          current.some(
-            (source) => source.id !== sourceId && overlaps(source.mountPath, normalized.mountPath),
-          ) ||
-          rows(projectId).some((entry) => overlaps(text(entry, 'path'), normalized.mountPath))
-        )
-          fail(409, 'WORKSPACE_MOUNT_CONFLICT', '仓库挂载与其他来源或资料目录重叠')
+        if (!sourceId && repositoryRows(projectId).length >= 32)
+          fail(413, 'REPOSITORY_LIMIT', '每个项目最多配置 32 个仓库连接')
         const value = { ...normalized, id: sourceId ?? randomUUID() }
-        db.prepare(
-          'INSERT INTO authoring_sources VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET name=excluded.name,role=excluded.role,url=excluded.url,ref_kind=excluded.ref_kind,ref=excluded.ref,mount_path=excluded.mount_path,source_path=excluded.source_path,credential_id=excluded.credential_id',
-        ).run(
-          projectId,
-          value.id,
-          value.name,
-          value.role,
-          value.url,
-          value.refKind,
-          value.ref,
-          value.mountPath,
-          value.sourcePath ?? null,
-          value.credentialId ?? null,
-        )
-        return { revision: advance(projectId), source: value }
+        persistRepository(projectId, value)
+        return persistSource(projectId, value)
       })
     },
     removeSource(
@@ -1273,14 +1383,12 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
             ],
           }
         }),
-        pendingCaptures: captures
-          .slice(0, 500)
-          .map((row) => ({
-            captureId: text(row, 'id'),
-            requestId: text(row, 'request_id'),
-            fileCount: Number(row.file_count),
-            reason: '原请求尚未交接，保留未知结果与原件',
-          })),
+        pendingCaptures: captures.slice(0, 500).map((row) => ({
+          captureId: text(row, 'id'),
+          requestId: text(row, 'request_id'),
+          fileCount: Number(row.file_count),
+          reason: '原请求尚未交接，保留未知结果与原件',
+        })),
         truncated: inputs.length > 500 || captures.length > 500,
       }
     },

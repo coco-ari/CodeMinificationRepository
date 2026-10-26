@@ -3,6 +3,26 @@ import type { WorkspaceBuildContext } from './workspaces.ts'
 export type WorkspaceSourceRole = 'frontend' | 'backend' | 'shared' | 'documentation' | 'other'
 export type WorkspaceRepositoryRefKind = 'default' | 'branch' | 'tag' | 'commit'
 
+export interface ProjectRepositoryDetails {
+  name: string
+  url: string
+  credentialId?: string
+}
+export interface ProjectRepositoryConnection extends ProjectRepositoryDetails {
+  id: string
+}
+export interface ProjectRepositoryCommand extends WorkspaceAuthoringMutation {
+  value: ProjectRepositoryDetails
+}
+export interface WorkspaceRepositoryUsage extends WorkspaceAuthoringMutation {
+  id: string
+  role: WorkspaceSourceRole
+  refKind: WorkspaceRepositoryRefKind
+  ref: string
+  mountPath: string
+  sourcePath?: string
+}
+
 export interface WorkspaceRepositorySource {
   id: string
   name: string
@@ -87,6 +107,7 @@ export interface WorkspaceAuthoringResult {
   revision: number
   entry?: WorkspaceMaterialEntry
   source?: WorkspaceRepositorySource
+  repository?: ProjectRepositoryConnection
   skipped?: boolean
 }
 export interface WorkspaceUploadInput extends WorkspaceAuthoringMutation {

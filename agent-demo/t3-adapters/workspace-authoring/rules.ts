@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { extname, basename } from 'node:path'
 import type {
   WorkspaceRepositorySource,
+  ProjectRepositoryDetails,
   WorkspaceSourceInput,
 } from '../../../autoops/contracts/workspace-authoring.ts'
 
@@ -121,6 +122,24 @@ export function normalizeSource(
     mountPath,
     ...(sourcePath === undefined ? {} : { sourcePath }),
     ...(input.credentialId ? { credentialId: id(input.credentialId) } : {}),
+  }
+}
+export function normalizeRepository(input: ProjectRepositoryDetails): ProjectRepositoryDetails {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    Array.isArray(input) ||
+    Object.keys(input).some((key) => !['name', 'url', 'credentialId'].includes(key))
+  )
+    fail(400, 'REPOSITORY_INPUT_INVALID', '仓库连接只配置名称、地址和凭证')
+  const value = normalizeSource(
+    { ...input, role: 'other', refKind: 'default', ref: '', mountPath: 'repository' },
+    'repository',
+  )
+  return {
+    name: value.name,
+    url: value.url,
+    ...(value.credentialId ? { credentialId: value.credentialId } : {}),
   }
 }
 export function plainText(bytes: Uint8Array): string | null {

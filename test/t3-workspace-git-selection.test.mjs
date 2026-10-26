@@ -84,14 +84,14 @@ async function management(t, overrides = {}) {
   const credential = credentials.create('owner', 'p-test', { name: '隔离凭证', username: 'fixture', password: 'fixture-secret', requestId: randomUUID() })
   state.current.credentialId = credential.id
   const service = createWorkspaceManagement({ access: { requireWorkspaceActor: requireActor, requireWorkspaceReader: requireActor, requireProjectActionForActor: requireActor }, credentials,
-    authoring: { overview: () => ({ sources: [state.current], entries: [], revision: 1 }), close: async () => {} },
+    authoring: { repositories: () => ({items:state.current ? [state.current] : [],revision:1}), overview: () => ({ sources: [], entries: [], revision: 1 }), close: async () => {} },
     store: { whenIdle: async () => {} }, git: { validateRepositorySource: value => value, ...overrides } })
   t.after(() => service.close())
   return { service, state, credentials, credential }
 }
 
 test('来源查询复用固定凭证，迟到结果在撤权、凭证撤销和来源更新后拒绝', async t => {
-  for (const change of ['actor', 'credential', 'source']) {
+  for (const change of ['actor', 'credential', 'source', 'removed']) {
     const gate = deferred(), entered = deferred()
     const f = await management(t, { repositoryRefs: async (_source, secret) => { assert.equal(secret.password, 'fixture-secret'); entered.resolve(); return gate.promise } })
     const reading = f.service.repositoryRefs('p-test', source.id, 'owner')
@@ -99,10 +99,21 @@ test('来源查询复用固定凭证，迟到结果在撤权、凭证撤销和�
     if (change === 'actor') f.state.allowed = false
     if (change === 'credential') f.credentials.revoke('owner', 'p-test', f.credential.id, { requestId: randomUUID(), expectedRevision: f.credential.revision })
     if (change === 'source') f.state.current = { ...f.state.current, url: 'https://github.com/example/other.git' }
+    if (change === 'removed') f.state.current = null
     gate.resolve({ branches: [] })
     await assert.rejects(reading, error => [403, 409, 410].includes(error.status))
     f.state.allowed = true
   }
+})
+
+test('仅有连接即可查询；工作区分支变化不干扰独立部署的分支查询',async t => {
+  const gate=deferred(),entered=deferred()
+  const f=await management(t,{repositoryRefs:async selected => {assert.equal(selected.refKind,'default');entered.resolve();return gate.promise}})
+  const reading=f.service.repositoryRefs('p-test',source.id,'owner')
+  await entered.promise
+  f.state.current={...f.state.current,refKind:'branch',ref:'other-workspace-branch',mountPath:'other/workspace'}
+  gate.resolve({branches:[{name:'production',commit:'a'.repeat(40)}]})
+  assert.deepEqual(await reading,{branches:[{name:'production',commit:'a'.repeat(40)}]})
 })
 
 test('Git 查询最多两个并发，宿主关闭取消查询并等待回收', async t => {

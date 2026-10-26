@@ -27,5 +27,18 @@ CREATE TABLE authoring_source_sync (project_id TEXT NOT NULL, source_id TEXT NOT
 CREATE TABLE authoring_deployment_inputs (project_id TEXT NOT NULL, request_id TEXT NOT NULL, actor_id TEXT NOT NULL, fingerprint TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(project_id,request_id)) STRICT;
 `,
 }
+const repositoryConnections = {
+  version: 3,
+  name: '项目仓库连接与工作区分支分离',
+  sql: `
+CREATE TABLE authoring_repositories (project_id TEXT NOT NULL REFERENCES authoring_projects(project_id), id TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL, credential_id TEXT, PRIMARY KEY(project_id,id)) STRICT;
+INSERT INTO authoring_repositories SELECT project_id,id,name,url,credential_id FROM authoring_sources;
+CREATE TABLE authoring_repository_usage (project_id TEXT NOT NULL REFERENCES authoring_projects(project_id), id TEXT NOT NULL, role TEXT NOT NULL, ref_kind TEXT NOT NULL, ref TEXT NOT NULL, mount_path TEXT NOT NULL, source_path TEXT, PRIMARY KEY(project_id,id), UNIQUE(project_id,mount_path), FOREIGN KEY(project_id,id) REFERENCES authoring_repositories(project_id,id)) STRICT;
+INSERT INTO authoring_repository_usage SELECT project_id,id,role,ref_kind,ref,mount_path,source_path FROM authoring_sources;
+DROP TABLE authoring_sources;
+ALTER TABLE authoring_repository_usage RENAME TO authoring_sources;
+`,
+}
+export const authoringMigrations = [migration, currentInputs, repositoryConnections]
 export const openAuthoringDatabase = (filename: string) =>
-  openDatabase(filename, [migration, currentInputs])
+  openDatabase(filename, authoringMigrations)

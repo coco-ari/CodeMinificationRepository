@@ -41,13 +41,15 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     if (!accepting) fail(503, 'WORKSPACE_STOPPING', '工作区正在停止接单，请稍后重试')
     access.requireProjectActionForActor(actorId, projectId, 'repository.read')
     if (repositoryQueries.size + preparations.size >= 2) fail(429, 'WORKSPACE_GIT_QUERY_BUSY', '已有源码正在查询，请稍后重试')
-    const source = authoring.overview(projectId, actorId).sources.find(entry => entry.id === sourceId)
+    const connection = authoring.repositories(projectId,actorId).items.find(entry => entry.id === sourceId)
+    const source: WorkspaceRepositorySource | undefined = connection ? {...connection,role:'other',refKind:'default',ref:'',mountPath:'repository'} : undefined
     if (!source) fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '当前项目中不存在此源码来源')
     const hash = configurationHash(source), reference = source.credentialId ? credentials.referenceVersion(actorId, projectId, source.credentialId) : undefined
     const controller = new AbortController()
     const check = () => {
       access.requireProjectActionForActor(actorId, projectId, 'repository.read')
-      const current = authoring.overview(projectId, actorId).sources.find(entry => entry.id === sourceId)
+      const connection = authoring.repositories(projectId,actorId).items.find(entry => entry.id === sourceId)
+      const current: WorkspaceRepositorySource | undefined = connection ? {...connection,role:'other',refKind:'default',ref:'',mountPath:'repository'} : undefined
       if (!current || configurationHash(current) !== hash) fail(409, 'WORKSPACE_SOURCE_CHANGED', '源码来源已经修改，请刷新后重新选择')
       if (reference) {
         const currentCredential = credentials.referenceVersion(actorId, projectId, reference.credentialId)
@@ -305,7 +307,7 @@ export function configuredWorkspaceManagement(access: AutoOpsAccess): WorkspaceM
   })
   try {
     const git = createWorkspaceGit({ allowedOrigins: (process.env.AUTOOPS_WORKSPACE_GIT_ORIGINS ?? '').split(',').map(origin => origin.trim()).filter(Boolean) })
-    const authoring = createWorkspaceAuthoring({ dataDir, authorize: (actor, project, action) => action === 'read' ? access.requireWorkspaceReader(actor, project) : action === 'external-read' ? access.requireWorkspaceInputReader(actor, project, 'external') : action === 'source-manage' ? access.requireProjectActionForActor(actor, project, 'repository.manage') : action === 'source-generate' ? access.requireProjectActionForActor(actor, project, 'source.generate') : access.requireWorkspaceActor(actor, project) })
+    const authoring = createWorkspaceAuthoring({ dataDir, validateRepository: (actor, project, value) => { if (value.credentialId) credentials.referenceVersion(actor,project,value.credentialId) }, authorize: (actor, project, action) => action === 'read' ? access.requireWorkspaceReader(actor, project) : action === 'external-read' ? access.requireWorkspaceInputReader(actor, project, 'external') : action === 'repository-read' ? access.requireProjectActionForActor(actor, project, 'repository.read') : action === 'source-manage' ? access.requireProjectActionForActor(actor, project, 'repository.manage') : action === 'source-generate' ? access.requireProjectActionForActor(actor, project, 'source.generate') : access.requireWorkspaceActor(actor, project) })
     configured = { dataDir, service: createWorkspaceManagement({ access, store, authoring, credentials, git }) }
     return configured.service
   } catch (error) { credentials.close(); throw error }
