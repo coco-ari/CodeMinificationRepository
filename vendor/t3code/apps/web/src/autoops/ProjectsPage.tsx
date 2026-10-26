@@ -71,12 +71,12 @@ function ProjectsContent() {
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState(readPendingProjectWrite)
   const alive = useRef(true)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    alive.current = true
+    return () => {
       alive.current = false
-    },
-    [],
-  )
+    }
+  }, [])
   const request = useRef<AbortController | null>(null)
   const trigger = useRef<HTMLButtonElement | null>(null)
   const load = useCallback(async () => {
@@ -431,13 +431,14 @@ function ProjectsContent() {
                   : '编辑项目'}
             </DialogTitle>
           </DialogHeader>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              void save()
-            }}
-          >
-            <DialogPanel>
+          <DialogPanel>
+            <form
+              id="directory-editor-form"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void save()
+              }}
+            >
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="directory-name">名称</Label>
@@ -471,31 +472,32 @@ function ProjectsContent() {
                 ) : null}
                 {error ? <p role="alert">{error}</p> : null}
               </div>
-            </DialogPanel>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                type="button"
-                disabled={busy || !!pending}
-                onClick={() => setEditor(null)}
-              >
-                取消
-              </Button>
-              <Button
-                type={pending ? 'button' : 'submit'}
-                disabled={busy || (!pending && !editor?.name.trim())}
-                onClick={
-                  pending
-                    ? () => {
-                        void save(true)
-                      }
-                    : undefined
-                }
-              >
-                {busy ? '正在保存…' : pending ? '重试' : '保存'}
-              </Button>
-            </DialogFooter>
-          </form>
+            </form>
+          </DialogPanel>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              disabled={busy || !!pending}
+              onClick={() => setEditor(null)}
+            >
+              取消
+            </Button>
+            <Button
+              form="directory-editor-form"
+              type={pending ? 'button' : 'submit'}
+              disabled={busy || (!pending && !editor?.name.trim())}
+              onClick={
+                pending
+                  ? () => {
+                      void save(true)
+                    }
+                  : undefined
+              }
+            >
+              {busy ? '正在保存…' : pending ? '重试' : '保存'}
+            </Button>
+          </DialogFooter>
         </DialogPopup>
       </Dialog>
     </SidebarInset>

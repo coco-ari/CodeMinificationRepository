@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { render, stubGlobal } from '../../test/render'
@@ -37,10 +38,11 @@ function setup({ manage = true, failFirst = false, loseResponse = false } = {}) 
   return { fetch, bodies, project, writes: () => writes }
 }
 function App() {
-  return <SidebarProvider><ModuleSidebarProvider><ModuleSidebarOutlet /><AutoOpsProjectsPage /></ModuleSidebarProvider></SidebarProvider>
+  return <StrictMode><SidebarProvider><ModuleSidebarProvider><ModuleSidebarOutlet /><AutoOpsProjectsPage /></ModuleSidebarProvider></SidebarProvider></StrictMode>
 }
 
 it('管理员编辑项目到可见保存结果，保留待分配成员，关闭表单恢复入口焦点', async () => {
+  await page.viewport(390, 500)
   const f = setup()
   using _fetch = stubGlobal('fetch', f.fetch)
   await using screen = await render(<App />, { router: '/projects?projectId=directory-project' })
