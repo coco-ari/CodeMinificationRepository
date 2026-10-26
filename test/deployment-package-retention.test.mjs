@@ -14,7 +14,7 @@ const epoch = Date.parse('2026-01-01T00:00:00.000Z')
 const principal = { id: 'package-manager', displayName: '隔离验收管理者' }
 const project = { id: 'p-retention', name: '隔离回收项目', environments: [{ id: 'env-test', name: '隔离环境' }] }
 
-async function fixture(t) {
+async function fixture(t, workspaceManagement) {
   const dataDir = await mkdtemp(join(tmpdir(), 'autoops-delivery-retention-'))
   const workspace = createWorkspaceStore({ dataDir, authorizeTask() {} })
   await workspace.ensureProject(project)
@@ -34,7 +34,7 @@ async function fixture(t) {
   let store
   const open = async () => {
     if (store) await store.close()
-    store = createDeploymentStore({ dataDir, workspaceStore: workspace, access, agentPort: 0 })
+    store = createDeploymentStore({ dataDir, workspaceStore: workspace, workspaceManagement, access, agentPort: 0 })
     await store.initialize()
     return store
   }
@@ -116,4 +116,36 @@ test('缺失中心档案的保留版本链及未知任务仍在公开依赖快�
     assert.equal(reference.packageId, sourceIdentity.packageId)
     assert.equal(reference.versionId, sourceIdentity.sourceVersionId)
   }
+})
+
+test('捕获证明失败时保留包与输入，恢复后先归还对应引用再回收', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: epoch })
+  let proof = 'error'
+  const candidates = []
+  const f = await fixture(t, {
+    releaseDeploymentSourceForMaintenance(candidate) {
+      if (proof === 'error') throw new Error('隔离捕获证明故障')
+      if (proof === 'blocked') return false
+      if (proof === 'asynchronous') return Promise.resolve(true)
+      candidates.push(candidate)
+      // 此处仅验证适配器协调顺序；原捕获身份核对由真实资料所有者的回归负责。
+      f.workspace.releaseVersion(project.id, 'deployment:isolated-capture')
+      return true
+    },
+  })
+  f.workspace.retainVersion(project.id, f.pack.sourceVersionId, 'deployment:isolated-capture')
+  t.mock.timers.setTime(epoch + week + 1)
+  for (const state of ['error', 'blocked', 'asynchronous']) {
+    proof = state
+    await f.open()
+    assert.ok(f.workspace.packageFile(project.id, f.pack.id, 'frontend').bytes.length, state)
+    assert.equal(f.workspace.getVersion(project.id, f.pack.sourceVersionId).id, f.pack.sourceVersionId)
+  }
+  proof = 'verified'
+  await f.open()
+  assert.equal(candidates.length, 1)
+  assert.equal(candidates[0].actorId, principal.id)
+  assert.equal(candidates[0].sourceVersionId, f.pack.sourceVersionId)
+  assert.throws(() => f.workspace.packageFile(project.id, f.pack.id, 'frontend'), { status: 410 })
+  assert.throws(() => f.workspace.getVersion(project.id, f.pack.sourceVersionId), { status: 404 })
 })

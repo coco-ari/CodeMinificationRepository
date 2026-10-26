@@ -154,6 +154,8 @@ test('捕获归还候选仅包含无部署依赖且超过保留期的原打包�
   assert.deepEqual(store.packageCleanupCandidates([]), [{ projectId: 'p-retention', requestId: input.requestId, actorId: 'manager', taskId: task.id, sourceVersionId: release.sourceVersionId }])
   assert.throws(() => store.packageCleanupCandidates([{ projectId: 'p-retention', packageId: 123 }]), { code: 'WORKSPACE_PACKAGE_REFERENCES_UNAVAILABLE' })
   assert.ok(store.packageFile('p-retention', release.id, 'frontend').bytes.length)
+  store.cleanupPackages([])
+  assert.deepEqual(store.packageCleanupCandidates([]), [])
 })
 
 test('旧固定版本打包入口在包和输入回收后仍返回原请求收据，篡改参数继续拒绝', async t => {

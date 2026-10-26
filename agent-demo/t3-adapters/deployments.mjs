@@ -74,7 +74,18 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
   const denied = async () => fail(403, 'DEPLOYMENT_GIT_DISABLED', '部署只接受已经固定 Git 提交与构建上下文的源码包')
   const repository = new RepositoryService({directory, builder:{initialize:async () => {}, build:denied, history:denied, branches:denied}})
   const deployment = new DeploymentService(repository, {publicOrigin,
-    maintainWorkspacePackages: references => workspaceStore.cleanupPackages(references),
+    maintainWorkspacePackages(references) {
+      if (workspaceManagement) {
+        const candidates = workspaceStore.packageCleanupCandidates(references)
+        if (candidates.length && typeof workspaceManagement.releaseDeploymentSourceForMaintenance !== 'function') fail(503, 'DEPLOYMENT_SOURCE_RELEASE_UNAVAILABLE', '源码捕获核对尚未就绪，保留临时资料')
+        for (const candidate of candidates) {
+          const released = workspaceManagement.releaseDeploymentSourceForMaintenance(candidate)
+          if (released?.then) { Promise.resolve(released).catch(() => {}); fail(503, 'DEPLOYMENT_SOURCE_RELEASE_UNAVAILABLE', '源码捕获维护必须同步核对，保留临时资料') }
+          if (released !== true) fail(503, 'DEPLOYMENT_SOURCE_RELEASE_UNAVAILABLE', '源码捕获仍有引用或尚未确认，保留临时资料')
+        }
+      }
+      return workspaceStore.cleanupPackages(deployment.workspacePackageReferences())
+    },
     resolveWorkspaceSource: async (task) => {
     if (!workspaceManagement) fail(503, 'DEPLOYMENT_SOURCE_UNAVAILABLE', '源码服务暂不可用')
     const projectId = task.workspaceProjectId, actorId = task.actor.id

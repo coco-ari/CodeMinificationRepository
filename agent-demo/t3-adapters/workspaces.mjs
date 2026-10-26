@@ -387,6 +387,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         if (!packageTerminal(task) || typeof task.actorId !== 'string' || typeof task.requestId !== 'string' || !expiredPackage(task.finishedAt || task.createdAt)) continue
         const release = state.releases.find(value => value.id === task.releaseId), sourceVersionId = task.sourceVersionId || release?.sourceVersionId
         if (!sourceVersionId || packageProtected(protectedByDeployment, task, release, sourceVersionId)) continue
+        if (!state.versions.some(version => version.id === sourceVersionId && version.cachePurpose === 'deployment')) continue
         candidates.push({ projectId, requestId: task.requestId, actorId: task.actorId, taskId: task.id, sourceVersionId })
       }
     }
