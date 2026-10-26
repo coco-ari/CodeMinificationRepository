@@ -10,6 +10,7 @@ import { waitForOpenCodeHealth as waitForRuntimeHealth } from './vendor/opencham
 import { createT3Gateway } from './t3-adapters/gateway.mjs'
 import { configuredDeploymentAgentGateway } from './t3-adapters/deployment-agent-gateway.mjs'
 import { resolveProductProfile } from './t3-adapters/product-profile.mjs'
+import { configuredRuntimeAccounts } from './t3-adapters/account-runtime.ts'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const BUILD_HASH = createHash('sha256')
@@ -25,6 +26,8 @@ if (t3Mode) resolveProductProfile(process.env)
 const t3Gateway = t3Mode ? createT3Gateway(process.env.AUTOOPS_T3_INTERNAL_URL || 'http://127.0.0.1:8788') : null
 const deploymentAgentGateway = t3Mode ? configuredDeploymentAgentGateway(process.env) : null
 mkdirSync(DATA, { recursive: true, mode: 0o700 })
+const accounts = t3Mode ? configuredRuntimeAccounts(DATA) : null
+accounts?.assertInitialized()
 const db = new DatabaseSync(join(DATA, 'demo.sqlite'))
 let legacyT3Map
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
@@ -441,6 +444,7 @@ function auth(req) {
     .map((s) => s.trim())
     .find((s) => s.startsWith('demo_session='))
     ?.slice(13)
+  if (accounts) return accounts.session(hash(token || ''))
   const row =
     token &&
     db.prepare('SELECT * FROM sessions WHERE token=? AND expires>?').get(hash(token), Date.now())
@@ -1430,6 +1434,12 @@ const server = http.createServer(async (req, res) => {
       }
       if (++attempts.count > 30) fail(429, 'RATE_LIMIT', '尝试过于频繁，请稍后重试')
       loginAttempts.set(ip, attempts)
+      if (accounts) {
+        const result = await accounts.login(b)
+        return json(res, 200, { user: result.user, csrf: result.csrf }, {
+          'Set-Cookie': `demo_session=${result.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${process.env.COOKIE_SECURE === '1' ? '; Secure' : ''}`,
+        })
+      }
       const user = users.find((u) => u.username === b.username)
       const a = hash(String(b.password || '')),
         z = hash(process.env.DEMO_PASSWORD || 'Demo123!')
@@ -1460,7 +1470,8 @@ const server = http.createServer(async (req, res) => {
       await body(req)
     }
     if (path === '/logout' && req.method === 'POST') {
-      db.prepare('DELETE FROM sessions WHERE token=?').run(s.token)
+      if (accounts) accounts.logout(s.token)
+      else db.prepare('DELETE FROM sessions WHERE token=?').run(s.token)
       for (const client of connections) if (client.sessionToken === s.token) client.res.end()
       return json(
         res,
@@ -2171,8 +2182,10 @@ function shutdown() {
     finish(r, 'interrupted', '服务正常关闭，执行已中断，可继续。')
   }
   for (const c of connections) c.res.end()
-  server.close(() => {
+  accounts?.stopAccepting()
+  server.close(async () => {
     legacyT3Map?.close()
+    await accounts?.close()
     db.close()
     process.exit(0)
   })

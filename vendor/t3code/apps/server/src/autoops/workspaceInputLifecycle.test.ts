@@ -24,7 +24,6 @@ import {
   createAutoOpsAccess,
   initializeAutoOpsAccessSchema,
 } from '../../../../../../agent-demo/t3-adapters/access.mjs'
-// @ts-expect-error 既有业务测试夹具由 JavaScript 导出，实际结构仍走 access 公共边界校验。
 import { users, projects, agents } from '../../../../../../agent-demo/fixtures.mjs'
 import { createRunResourceLifecycle } from '../../../../../../agent-demo/t3-adapters/run-resource-lifecycle.ts'
 import { createNativeSubagentBindings } from '../../../../../../agent-demo/t3-adapters/subagents.mjs'
@@ -266,7 +265,7 @@ it('同一输入全部真实运行结束后自动归还，排队和另一会话�
           yield* service.handle(original.at(-1)!)
           expect(released).toEqual([])
           f.catalog.users.find(
-            (value: { id: string; status: string }) => value.id === 'u-lin',
+            (value: { id: string; status?: string }) => value.id === 'u-lin',
           )!.status = 'disabled'
           const terminal = yield* sink.write({ events: [update('target', 'second')] })
           yield* service.handle(terminal[0]!)

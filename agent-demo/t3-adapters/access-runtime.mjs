@@ -12,6 +12,7 @@ import { createAssistantDirectory, questionConfigurationPolicy, questionConfigur
 import { resolveSkillLibrary } from './skill-library.mjs'
 import { isProjectRole } from '../../autoops/contracts/project-access.ts'
 import { sharedProfileVerifier } from './shared-profile-approvals.ts'
+import { configuredRuntimeAccounts } from './account-runtime.ts'
 
 const fail = (status, code, message) => { throw new AutoOpsAccessError(status, code, message) }
 const configuration = () => {
@@ -29,7 +30,9 @@ export function configuredAutoOpsProjects() { return autoOpsAccessEnabled() ? co
 export function configuredAutoOpsProjectDirectory() {
   if (closed || stopping) fail(503, 'AUTOOPS_STOPPING', '项目目录正在停止')
   if (!process.env.AUTOOPS_T3_DATA_DIR?.trim()) fail(500, 'INVALID_DATA_DIR', 'AutoOps 数据目录不能为空')
-  return configuredDirectory ||= createProjectDirectory({ dataDir: resolve(process.env.AUTOOPS_T3_DATA_DIR), seed: { users, projects, agents }, validateMember: (project, actor, member) => configuredAutoOpsAssistantDirectory().validateMember(project, actor, member), authorize(actor, project, action) {
+  const accounts = configuredRuntimeAccounts()
+  accounts.assertInitialized()
+  return configuredDirectory ||= createProjectDirectory({ dataDir: resolve(process.env.AUTOOPS_T3_DATA_DIR), seed: { get users() { return accounts.users() }, projects: accounts.legacyInstallation ? projects : [], agents: accounts.legacyInstallation ? agents : agents.map(agent => ({...agent,projectIds:[]})) }, validateMember: (project, actor, member) => configuredAutoOpsAssistantDirectory().validateMember(project, actor, member), authorize(actor, project, action) {
     if (!configuredAccess) fail(503, 'PROJECT_AUTHORIZATION_REQUIRED', '项目授权尚未就绪')
     return configuredAccess.requireProjectActionForActor(actor, project, action)
   } })

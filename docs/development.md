@@ -39,7 +39,7 @@
 | A3 | 异步读取撤权、跨环境伪造与原地址恢复 | 已实现 | `a2b8d768`；[回归](../test/t3-deployment-response-access.test.mjs) 与[验收](runtime-modules.md#部署读取撤权回归2026-10-26)，尚未随本批发行部署 |
 | A4 | 统一问答最终参数合同、调整权及受限预设校验 | 待验证 | [最终参数](../autoops/contracts/assistants.ts)、[绑定/RPC](../agent-demo/t3-adapters/access-service.mjs)、[原生队列](../vendor/t3code/apps/server/src/autoops/questionCommands.ts) 已接唯一问答入口，原生已固定模型、排队恢复、实际调用者及所选技能按同一合同复核；服务/原生回归通过，浏览器与真实发行、旧会话映射待验，见[本批证据](runtime-modules.md#统一问答最终参数接入2026-10-26) |
 | A5 | 存量权限映射、私有内容及撤权后的历史阅读 | 待验证 | 用户已选择林晓/陈一先不启用新授权；[目录](../agent-demo/fixtures.mjs) 显式标记待分配，仅保留原使用边界，后续由管理员保存分配。外部不绑定新环境，历史自用电脑仍保留原身份/未知收据。自动负例已覆盖，服务器存量实测待最终发行 |
-| A6 | 当前运行链路的持久账号、登录及账号生命周期 | 待实现 | [已确认账号需求](../examples/workbench-v2-requirements.md#产品与访问)及[重建方案](../examples/autoops-rebuild-plan.md#4-各模块的完整业务流程与界面组织)要求平台管理员维护账号、本人改密、管理员重置及停用。核对发现 [实际网关](../agent-demo/server.mjs) 与 [Worker 身份](../agent-demo/t3-adapters/access-runtime.mjs) 仍读取静态 `fixtures.users`；独立后端的身份模块不能代替当前运行链路。沿现有链路接入持久账号所有者、管理页面和统一失效规则，保留原 ID、私有内容及林晓/陈一待分配状态；账号创建、越权、改密/停用、旧会话与后台撤权及真实角色验收均待补齐 |
+| A6 | 当前运行链路的持久账号、登录及账号生命周期 | 待验证 | [实际账号所有者](../agent-demo/t3-adapters/accounts/index.ts)、[正常接管命令](../scripts/initialize-runtime-accounts.mjs)、[原生 HTTP](../vendor/t3code/apps/server/src/autoops/http/accounts.ts)和[账号页面](../vendor/t3code/apps/web/src/autoops/AccountManagementPage.tsx)已沿原网关/Worker接入。复用既有 scrypt，保留原 ID、会话、私有内容及林晓/陈一待分配；创建不授项目权。全量本地 Node 839 通过/3 跳过，原生 250 通过/2 跳过，最后事务守卫 HTTP 9/9及独立锁/密码收据/注销时序复验通过。新增浏览器、完整 CI、新发行接管、真实管理流程与角色仍待验；[本批证据](runtime-modules.md#当前运行链路账号生命周期2026-10-26) |
 | B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待验证 | [项目目录](../agent-demo/t3-adapters/project-directory/index.ts) 已将存量项目/环境/成员一次导入自有版本化数据库，授权读取当前事实；[页面](../vendor/t3code/apps/web/src/autoops/ProjectsPage.tsx) 已接入创建、基本信息、环境添加/编辑和成员状态。SQLite/HTTP 正反例已过，浏览器在 `23003b65` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40249611790) 通过；成员固定角色/环境覆盖、默认助手准入及分配表单已接 API，`9dc39661` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40253068408) 全部交互通过；新项目默认空资料初始化已修复，原示例和已有内容保留，见[本批证据](runtime-modules.md#新项目空资料初始化2026-10-26)；删除与公开引用预检、原生持久删除及环境授权同事务清理已接，新增服务/HTTP/请求恢复通过；删除浏览器、完整配置与真实发行待验。不切换独立后端或清空业务库 |
 | B2 | 项目仓库连接与工作区/部署分支配置分离 | 待验证 | [连接合同](../autoops/contracts/project-repositories.ts)、[authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 的 v3 升级及[原生项目 API](../vendor/t3code/apps/server/src/autoops/http/repositories.ts) 已拆分唯一连接与工作区引用，保留现有 ID/分支/捕获；集中仓库/凭证及工作区使用交互在 `97a7945f` CI 通过。部署现独立读取项目连接并提交自己的版本和目录，未加入工作区也可打包，旧组合入口已移除；新增部署交互已在 `5a9703e3` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40266628636)通过；真实私有 Git、存量来源重新确认和服务器发行待验；[本批证据](runtime-modules.md#项目仓库连接与工作区引用拆分2026-10-26) |
 | B3 | 项目凭证创建、替换、撤销及受控使用 | 待验证 | [credentials](../agent-demo/t3-adapters/credentials.ts)、[回归](../test/t3-workspace-credentials.test.mjs)；[集中入口](../vendor/t3code/apps/web/src/autoops/ProjectCredentialsPanel.tsx) 复用秘密仅留内存及原收据核对，工作区改为跳转唯一入口；新交互在 `97a7945f` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40264887443)通过，真实私有仓库成功、撤销、失败恢复仍待验 |
@@ -71,13 +71,13 @@
 
 | 编号 | 代码完成 | 自动测试 | 部署生效 | 真实业务验收 |
 | --- | --- | --- | --- | --- |
-| S1 启动重复写入 | 档案报告与同版本资料引用释放已修，待固定新候选 | 档案完整 CI 通过；释放新增 6 项与关联回归通过，新候选 CI 待验 | 未闭环：前三次 e8 切换均恢复旧程序 | stable3 独立还原确认唯一释放记录仅 created_at 重写，原 sequence/version 未变。下一步固定包含条件写入的新候选并完成 CI/部署/保留复验；真实来源校验、回收恢复与旧失败保留 |
+| S1 启动重复写入 | 档案报告与同版本资料引用释放已修，新候选 `3e496ce7` | 档案完整 CI 通过；释放新增 6 项与关联回归通过，新候选质量 CI 通过、运行 CI 进行中 | 未闭环：前三次 e8 切换均恢复旧程序 | stable3 独立还原确认唯一释放记录仅 created_at 重写，原 sequence/version 未变。下一步固定包含条件写入的新候选并完成 CI/部署/保留复验；真实来源校验、回收恢复与旧失败保留 |
 | A1 | 完成 | 通过 | 已生效 | 新账号的角色成功/拒绝待验 |
 | A2 | 完成 | 通过 | 部分生效 | RPC/MCP、撤权与后台完整组合待验 |
 | A3 | 完成 | 通过 | 已随现有发行生效 | 新角色与原地址恢复继续 E2 |
 | A4 | 完成 | 通过 | 部分生效 | 低权限参数、篡改及真实执行待验 |
 | A5 | 完成 | 通过 | 待分配状态已保留 | 待真实管理操作；不启用林晓/陈一 |
-| A6 | 实施中 | 所有者/HTTP/网关局部通过 | 未生效 | 待完整账号与角色流程 |
+| A6 | 完成，待本批提交 | Node 839/3 跳过、原生 250/2 跳过及最终 HTTP 9 项通过；新增浏览器和完整 CI 待验 | 未生效 | 正常接管、旧身份/会话保留、完整账号与角色流程待验 |
 | B1 | 完成 | 通过 | 已生效 | 完整管理、删除及真实成员待验 |
 | B2 | 完成 | 通过 | 已生效 | 私有资料同步部分通过，部署分支仍待验 |
 | B3 | 完成 | 通过 | 已生效 | 创建与真实 Git 部分通过，替换/撤回/恢复待验 |
@@ -96,7 +96,7 @@
 | D4 | 完成，复用 | 通过 | 已生效 | 真实固定提交、完整包及工作区分支不干扰待验 |
 | D5 | 完成，复用 | 通过 | 已生效 | 新隔离 Java/static、健康、版本链、回退及原包恢复待验 |
 | D6 | 完成 | 通过 | 已生效 | 原 12 任务/9 版本与包保留已核对，新增任务回收待验 |
-| E1 | 项目/环境/助手完成，账号页实施中 | 既有 612 项通过，新账号交互待 CI | 部分生效 | 新整页和真实权限待验 |
+| E1 | 项目/环境/助手/账号页代码完成 | 既有 612 项通过，新账号交互待 CI | 部分生效 | 新整页和真实权限待验 |
 | E2 | 授权边界已接 | 服务/原生/组件通过 | 部分生效 | 新角色全矩阵及共享跨环境待验 |
 | E3 | 页面已接 T3 | 既有组件通过，新账号待 CI | 部分生效 | 整页主题、窄短窗、长数据、滚动与键盘待验 |
 | E4 | 接入代码完成 | 协议/工具回归通过 | 部分生效 | Git/MCP 配置部分通过，问答/共享模型待验 |

@@ -50,6 +50,31 @@ test('运行门禁真实解析新增嵌套模块、类型导入和 T3 路径别�
   assert.deepEqual(result.result.violations, [])
 })
 
+test('运行账号与共享身份只能使用公开入口，不能穿透存储及密码内部文件', async (t) => {
+  const f = await fixture(t)
+  await f.write('agent-demo/t3-adapters/accounts/schema.ts', 'export const schema = true\n')
+  await f.write('autoops/server/modules/identity/secrets.ts', 'export const secret = true\n')
+  await f.write(
+    'agent-demo/t3-adapters/invalid.ts',
+    "import {schema} from './accounts/schema.ts'; import {secret} from '../../autoops/server/modules/identity/secrets.ts'; export const invalid = [schema,secret]\n",
+  )
+  const rejected = f.run()
+  assert.equal(rejected.status, 1, rejected.stderr)
+  assert.ok(
+    rejected.result.violations.some((row) => row.rule.name === '账号存储只通过公开入口被调用'),
+  )
+  assert.ok(
+    rejected.result.violations.some((row) => row.rule.name === '共享身份能力只通过公开入口被调用'),
+  )
+  await f.write('agent-demo/t3-adapters/accounts/index.ts', "export {schema} from './schema.ts'\n")
+  await f.write('autoops/server/modules/identity/index.ts', "export {secret} from './secrets.ts'\n")
+  await f.write(
+    'agent-demo/t3-adapters/invalid.ts',
+    "import {schema} from './accounts/index.ts'; import {secret} from '../../autoops/server/modules/identity/index.ts'; export const valid = [schema,secret]\n",
+  )
+  assert.equal(f.run().status, 0)
+})
+
 test('部署模块深层类型导入、别名和动态导入不能绕过公开入口', async (t) => {
   const f = await fixture(t)
   await f.write(

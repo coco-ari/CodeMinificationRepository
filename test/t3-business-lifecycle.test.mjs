@@ -83,7 +83,7 @@ test('已启用部署的宿主冷启动即提供安装与Agent入口，无需先
       await assert.rejects(fetch(origin+'/agent/install.sh'));
     } finally { await runtime.close(); }
   `
-  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1',AUTOOPS_DEPLOYMENT_AGENT_PORT:'0'},encoding:'utf8',timeout:30000,windowsHide:true})
+  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,DEMO_PASSWORD:'isolated-lifecycle-password',AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1',AUTOOPS_DEPLOYMENT_AGENT_PORT:'0'},encoding:'utf8',timeout:30000,windowsHide:true})
   assert.equal(result.status,0,result.stderr)
 })
 
@@ -106,7 +106,7 @@ test('未启用部署的宿主不初始化部署数据库和监听器', t => {
       assert.equal((await readdir(process.env.AUTOOPS_T3_DATA_DIR)).includes('deployment-center'),false);
     } finally { await runtime.close(); }
   `
-  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'0',AUTOOPS_DEPLOYMENT_AGENT_PORT:'invalid-unused-port'},encoding:'utf8',timeout:30000,windowsHide:true})
+  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,DEMO_PASSWORD:'isolated-lifecycle-password',AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'0',AUTOOPS_DEPLOYMENT_AGENT_PORT:'invalid-unused-port'},encoding:'utf8',timeout:30000,windowsHide:true})
   assert.equal(result.status,0,result.stderr)
 })
 
@@ -132,7 +132,7 @@ test('宿主等待部署监听失败并关闭自己取得的资源，不关闭�
       assert.throws(()=>configuredAutoOpsAccess(),{code:'AUTOOPS_STOPPING'});
     } finally { await runtime.close(); await new Promise(done=>existing.close(done)); }
   `
-  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1'},encoding:'utf8',timeout:30000,windowsHide:true})
+  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,DEMO_PASSWORD:'isolated-lifecycle-password',AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1'},encoding:'utf8',timeout:30000,windowsHide:true})
   assert.equal(result.status,0,result.stderr)
 })
 
@@ -166,7 +166,7 @@ test('宿主初始化尚未完成时停止并关闭，最终不留下监听器�
     finally { await new Promise(done=>rebound.close(done)); }
     await runtime.close();
   `
-  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1'},encoding:'utf8',timeout:30000,windowsHide:true})
+  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,DEMO_PASSWORD:'isolated-lifecycle-password',AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1'},encoding:'utf8',timeout:30000,windowsHide:true})
   assert.equal(result.status,0,result.stderr)
 })
 
@@ -215,6 +215,6 @@ for (const force of [false,true]) test(`真实配置宿主${force?'排空预算�
     for(const getter of [configuredAutoOpsAccess,configuredWorkspaceStore,configuredDeploymentStore,configuredPreferences,configuredSettingsPreferences,configuredBusinessArtifactStore])assert.throws(()=>getter(),{status:503});
     assert.throws(()=>access.getThreadBinding('fixture-thread'),/not open|closed/i);
   `
-  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1'},encoding:'utf8',timeout:30000,windowsHide:true})
+  const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('..',import.meta.url),env:{...process.env,DEMO_PASSWORD:'isolated-lifecycle-password',AUTOOPS_T3_DATA_DIR:dataDir,AUTOOPS_DEPLOYMENT_ENABLED:'1'},encoding:'utf8',timeout:30000,windowsHide:true})
   assert.equal(result.status,0,result.stderr)
 })

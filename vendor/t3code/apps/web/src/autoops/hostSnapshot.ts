@@ -12,6 +12,7 @@ export interface AutoOpsT3Bootstrap {
   readonly fixedModel: { readonly instanceId: string; readonly model: string }
   readonly canCreateProject?: boolean
   readonly canManageDeploymentNodes?: boolean
+  readonly canManageAccounts?: boolean
   readonly modelSelectionEnabled?: boolean
   readonly customerAgentsEnabled?: boolean
   readonly assistantDirectoryEnabled?: boolean

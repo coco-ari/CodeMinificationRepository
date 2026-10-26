@@ -6,6 +6,7 @@ export const AUTOOPS_AREAS = [
   { id: 'deployments', label: '部署', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'deployment.read', manage: 'server', sidebar: true },
   { id: 'projects', label: '项目管理', icon: 'folderSettings', path: '/projects', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'assistants', label: '助手', icon: 'bot', path: '/assistants', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
+  { id: 'accounts', label: '账号', icon: 'users', path: '/accounts', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
 ] as const
 
@@ -99,6 +100,7 @@ export function autoOpsAreaFromPath(pathname: string): AutoOpsArea {
 }
 
 const CONTROL_ROUTES = new Set([
+  'accounts',
   'settings', 'projects', 'workspaces', 'deployments', 'skills', 'assistants', 'devices', 'usage', 'pull-requests',
   'connect', 'connect-agent', 'pair', 'welcome', 'new', 'api', 'autoops',
 ])

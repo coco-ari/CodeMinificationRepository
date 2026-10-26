@@ -10,6 +10,15 @@ import {
   resolveAutoOpsRouteProjectId,
 } from '../vendor/t3code/apps/web/src/autoops/projectNavigation.logic.ts'
 
+test('账号为所有已登录用户提供全局入口，无项目也可到达且不恢复为会话链接', () => {
+  const host = { principal: { id: 'ordinary-account' }, projects: [] }
+  assert.equal(autoOpsAreaAvailable('accounts', host), true)
+  assert.equal(autoOpsAreaAvailable('accounts', undefined), false)
+  assert.equal(autoOpsAreaFromPath('/accounts'), 'accounts')
+  assert.equal(normalizeAutoOpsChatHref('/accounts?accountView=manage'), null)
+  assert.equal(AUTOOPS_AREAS.find(area => area.id === 'accounts')?.scope, 'global')
+})
+
 test('归档会话保留真实项目上下文，但不能恢复为最近聊天目的地', () => {
   const archived = { projectId: 'project-a', deletedAt: null, archivedAt: '2026-10-22T00:00:00Z' }
   assert.equal(resolveAutoOpsNativeThreadProjectId(archived, null), 'project-a')

@@ -7,6 +7,7 @@ import { closeConfiguredBusinessArtifactStore } from './business-tools.mjs'
 import { stopConfiguredWorkspaceManagement, closeConfiguredWorkspaceManagement } from './workspace-management.ts'
 import { configuredEnvironmentMcp, stopConfiguredEnvironmentMcp, closeConfiguredEnvironmentMcp } from './environment-mcp-runtime.ts'
 import { configuredWorkspaceUpdates, stopConfiguredWorkspaceUpdates, closeConfiguredWorkspaceUpdates } from './workspace-update-runtime.ts'
+import { stopConfiguredRuntimeAccounts, closeConfiguredRuntimeAccounts } from './account-runtime.ts'
 
 // 宿主协调已启用的服务入口；未启用模块与其他可选存储仍按需初始化。
 export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
@@ -20,6 +21,7 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
     stopped = true
     stopConfiguredWorkspaceUpdates()
     stopConfiguredAutoOpsAccess()
+    stopConfiguredRuntimeAccounts()
     stopConfiguredEnvironmentMcp()
     stopConfiguredWorkspaceManagement()
     stopConfiguredWorkspaceStore()
@@ -70,6 +72,7 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
         for (const close of [closeConfiguredPreferences, closeConfiguredSettingsPreferences, closeConfiguredBusinessArtifactStore, closeConfiguredAutoOpsAccess]) {
           try { close() } catch (error) { errors.push(error) }
         }
+        try { await closeConfiguredRuntimeAccounts() } catch (error) { errors.push(error) }
         if (errors.length) throw new AggregateError(errors, '业务资源关闭失败')
       })()
     },

@@ -55,6 +55,7 @@ export async function autoOpsRequest<T>(
     method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
     signal?: AbortSignal
     timeoutMs?: number
+    allowNull?: boolean
   },
 ): Promise<T> {
   const url = autoOpsApiUrl(path)
@@ -122,7 +123,7 @@ export async function autoOpsRequest<T>(
     if (current?.principal.id !== host.principal.id || current.csrfToken !== host.csrfToken) {
       throw new DOMException('登录上下文已经改变', 'AbortError')
     }
-    if (!response.ok || result === null || typeof result !== 'object') {
+    if (!response.ok || (result === null ? mutation || !options.allowNull : typeof result !== 'object')) {
       const details = errorDetails(result)
       const uncertain =
         mutation && (response.status >= 500 || response.status === 408 || response.ok)

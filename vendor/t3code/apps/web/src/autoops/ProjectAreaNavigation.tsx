@@ -7,6 +7,7 @@ import {
   MessageSquareIcon,
   RocketIcon,
   SparklesIcon,
+  UsersIcon,
 } from 'lucide-react'
 import { readAutoOpsHost, useAutoOpsHost } from './hostConfig'
 import {
@@ -44,6 +45,7 @@ const areaIcons = {
   sparkles: SparklesIcon,
   bot: BotIcon,
   folderSettings: FolderGit2Icon,
+  users: UsersIcon,
 }
 const areas = AUTOOPS_AREAS.map((area) => ({ ...area, icon: areaIcons[area.icon] }))
 

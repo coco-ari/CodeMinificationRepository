@@ -5,6 +5,7 @@ import { secrets } from './secrets.ts'
 import { createIdentityService } from './service.ts'
 export { migration } from './sqlite.ts'
 export type { IdentityService } from './service.ts'
+export { secrets as identitySecrets, hashImportedPassword } from './secrets.ts'
 export const createIdentity = (
   db: DatabaseSync,
   tx: Transaction,

@@ -18,7 +18,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   if (!(await stat(root)).isDirectory()) throw new Error('发行路径不是目录')
   if (!(await stat(join(root, 'node_modules'))).isDirectory()) throw new Error('发行目录缺少运行依赖')
   const adapters = join(root, 'agent-demo/t3-adapters')
-  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'workspace-update-runtime.ts', 'workspace-updates/index.ts', 'workspace-updates/storage.ts', 'thread-inputs.ts', 'project-directory/index.ts', 'project-directory/schema.ts', 'assistants/index.ts', 'assistants/schema.ts', 'assistants/policy.ts']) {
+  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'workspace-update-runtime.ts', 'workspace-updates/index.ts', 'workspace-updates/storage.ts', 'thread-inputs.ts', 'project-directory/index.ts', 'project-directory/schema.ts', 'assistants/index.ts', 'assistants/schema.ts', 'assistants/policy.ts', 'accounts/index.ts', 'accounts/schema.ts', 'account-runtime.ts']) {
     const path = await realpath(join(adapters, file))
     if (!within(root, path) || !(await stat(path)).isFile()) throw new Error(`发行工作区文件缺失或越界：${file}`)
   }
@@ -31,7 +31,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   const temporaryRoot = await realpath(tmpdir()), prefix = 'autoops-workspace-release-'
   const dataDir = await mkdtemp(join(temporaryRoot, prefix))
   const previousResources = process.env.AUTOOPS_BUSINESS_RESOURCES_DIR
-  let store, management, authoring, credentials, projectDirectory, assistants, updates
+  let store, management, authoring, credentials, projectDirectory, assistants, updates, accounts
   try {
     process.env.AUTOOPS_BUSINESS_RESOURCES_DIR = adapters
     const [{ createWorkspaceStore }, { inspectZip }] = await Promise.all([
@@ -39,6 +39,16 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     ])
     const schemaDependency = await realpath(workerRequire.resolve('effect/Schema'))
     if (!within(root, schemaDependency)) throw new Error('发行目录缺少独立的 Effect 合同依赖')
+    const { createRuntimeAccounts } = await import(pathToFileURL(join(adapters, 'accounts/index.ts')).href)
+    const accountPath = join(dataDir, 'accounts-smoke.sqlite')
+    accounts = createRuntimeAccounts({databasePath:accountPath})
+    const accountAdmin = await accounts.initialize({username:'release.owner',name:'发行隔离管理员',password:'release-smoke-password-only',kind:'internal',platformAdmin:true})
+    const accountRequest = {requestId:randomUUID(),value:{username:'release.member',name:'发行隔离成员',password:'release-member-password-only',kind:'internal',platformAdmin:false}}
+    const accountMember = await accounts.create(accountAdmin.id, accountRequest)
+    await accounts.close()
+    accounts = createRuntimeAccounts({databasePath:accountPath})
+    assert.equal((await accounts.create(accountAdmin.id, accountRequest)).id, accountMember.id, '账号原请求没有保持')
+    assert.equal((await accounts.login({username:'release.member',password:'release-member-password-only'})).user.id, accountMember.id, '发行内真实账号无法正常登录')
     const { createProjectDirectory } = await import(pathToFileURL(join(adapters, 'project-directory/index.ts')).href)
     const directoryOptions = { dataDir, seed: { users: [{ id: 'release-smoke-actor', name: '发行测试账号', role: 'member' }], projects: [], agents: [] }, authorize: (actor, project) => {
       assert.equal(actor, 'release-smoke-actor')
@@ -135,11 +145,11 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     assert.deepEqual(Buffer.from(management.readInputFile(projectId, first.id, 'docs/发行验收.md', actorId).bytes), document)
     assert.equal((await management.captureAgentInput(projectId, firstRequest, actorId)).id, first.id)
     assert.equal(store.overview(projectId).internalVersions.length, overview.internalVersions.length, '每轮输入不应新增日常版本')
-    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, currentInput: second.id, previousInputPreserved: true, repeatedRequestPreserved: true, workspaceUpdateSettingsPreserved: true }
+    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, currentInput: second.id, previousInputPreserved: true, repeatedRequestPreserved: true, workspaceUpdateSettingsPreserved: true, runtimeAccountLoginAndReceiptPreserved:true }
   } finally {
     try {
       const results = await Promise.allSettled([updates?.close()])
-      results.push(...await Promise.allSettled([assistants?.close(), projectDirectory?.close(), store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()]))
+      results.push(...await Promise.allSettled([accounts?.close(), assistants?.close(), projectDirectory?.close(), store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()]))
       const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
       if (errors.length) throw new AggregateError(errors, '发行冒烟资源关闭失败')
     }

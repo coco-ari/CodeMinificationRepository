@@ -39,6 +39,6 @@ test('实际组合根将默认助手准入接到项目成员保存，权限变�
       assert.equal(assistants.catalog('u-lin', 'p-autoops').ready, false)
       console.log(JSON.stringify({ preservedPending: true, guardedScopeChange: true, originalReceipt: true }))
     } finally { await runtime.close() }
-  `], { cwd: process.cwd(), env: { PATH: process.env.PATH, AUTOOPS_T3_DATA_DIR: dataDir, AUTOOPS_T3_MODEL: 'runtime-model', AUTOOPS_DEPLOYMENT_ENABLED: '0' }, encoding: 'utf8', timeout: 30000 })
+  `], { cwd: process.cwd(), env: { PATH: process.env.PATH, DEMO_PASSWORD: 'isolated-assistant-password', AUTOOPS_T3_DATA_DIR: dataDir, AUTOOPS_T3_MODEL: 'runtime-model', AUTOOPS_DEPLOYMENT_ENABLED: '0' }, encoding: 'utf8', timeout: 30000 })
   assert.deepEqual(JSON.parse(output.trim()), { preservedPending: true, guardedScopeChange: true, originalReceipt: true })
 })

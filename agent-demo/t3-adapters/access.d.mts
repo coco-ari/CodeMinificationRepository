@@ -150,6 +150,7 @@ export interface AutoOpsAccess {
     fixedModel: {instanceId: 'codex'; model: string}; runtimeMode: 'approval-required';
     canCreateProject:boolean;
     canManageDeploymentNodes:boolean;
+    canManageAccounts:boolean;
     modelSelectionEnabled:boolean;
     customerAgentsEnabled:boolean;
     assistantDirectoryEnabled?:boolean;
