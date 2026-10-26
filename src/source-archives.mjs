@@ -115,7 +115,11 @@ export class SourceArchives {
         const release = data.releases.find(item => item.id === target.currentRelease.id && item.targetId === target.id);
         if (release) target.currentRelease = structuredClone(release);
       }
-      data.sourceArchiveMigration = { ...(data.sourceArchiveMigration || {}), ...report, version: 1 };
+      const previous = data.sourceArchiveMigration;
+      // 每次仍校验和修复档案；实质结果未变时保留原报告，避免仅启动时间改写历史。
+      if (previous?.version !== 1 || previous.imported !== report.imported || previous.missing !== report.missing || previous.invalid !== report.invalid) {
+        data.sourceArchiveMigration = { ...(previous || {}), ...report, version: 1 };
+      }
     });
   }
   status(release) {

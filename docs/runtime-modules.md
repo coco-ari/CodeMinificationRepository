@@ -1122,3 +1122,17 @@ v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3`
 5 个真实错误均为 `capability_denied`。已用生产 Registry 的真实 UUID 和能力配发复现，排除缺少 autoops capability；实际事件中工具发生在 3455–3482，运行终态 3498、根节点终态 3499 后回收 guard 才允许释放，且输入失效映射应为 invalid_request，排除提前回收。根因为 [业务 MCP 入口](../vendor/t3code/apps/server/src/mcp/toolkits/autoops/handlers.ts) 把 MCP 凭据 UUID 与原生逻辑 providerSessionId 作相等比较。现复用同一运行组合中的 McpProviderSessions.read，核对当前凭据、线程、环境和实例，再按活动轮的 providerThreadId 校验原生投影；保留真实调用者、业务授权、固定输入和子任务继承，准备与返回前复核，拒绝撤权、换轮和凭据替换后的迟到结果。
 
 新增 20 项生产工具注册回归先红后绿，关联 9 文件 211 项、原生严格类型和定向 lint 通过；根代理按 CI 使用的 server 目录另复跑 20/20，并将同一工具测试目录加入 runtime server 门禁。证据 `.deployment/mcp-business-session-{analysis.md,prepared.json,red.log,related.log}`。没有界面操作变化，用户继续使用唯一问答入口；开发与 Agent 共用现有凭据和原生会话的公开合同，不增加第二套会话状态。修后完整 CI、发行及新独立真实问答仍待完成；原 native-1 不重发、不改成成功。
+
+`24fa534b` 后续[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40324760583)与[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40324760575)均通过：Node 805 通过/2 跳过，原生 242 通过/2 跳过，Web 612/612，客户 76/76；完整类型、边界、构建和语言/Markdown 门禁通过。日志 `.deployment/ci-24fa534b.log` 的 SHA256 为 `5274317d0eef2fd66f7c13d0a698dbe3dd95b56d7ed0fad8cc37d2573e2c47dc`。新发行文件及 Linux 官方原生依赖已核验，但两次严格切换均被启动后的原数据保留比较拒绝，自动恢复到 `be768c19`，没有恢复旧数据库或将失败改成成功。原生问答修复尚未上线验收。
+
+## 源码档案重复启动报告（2026-10-26）
+
+真实切换的保留比较发现部署投影变化。第一种原因是原 Agent 正常重试存储维护，中心报告与原 PID59368 的固定持久文件一致，失败仍记失败；第二种原因是 [SourceArchives.migrate](../src/source-archives.mjs) 每次启动都生成新 `at` 并覆盖迁移报告。对真实 Store、SQLite 行和有效 ZIP 的最小复现确认：档案、任务、版本均未变化时，唯一变化仍是迁移报告时间。另用 95 秒只读观察核对正常心跳，其变化仅在存储报告；没有证据把前次失败的全部变化追认为同一字段，因此原 `stable1`、`stable3` 失败收据保留。
+
+最小修复只在迁移的 version/imported/missing/invalid 实质结果变化时更新报告；每次启动仍执行原内容校验、旧任务导入和版本补全。`imported` 保留当次执行计数，真实导入后的 1→0 仍更新，后续 0→0 才稳定。缺失、同大小损坏和经原接口修复仍产生真实报告，不通过跳过校验或放宽发行比较解决。
+
+[新增回归](../test/source-archive-migration.test.mjs) 使用真实 ZIP、文件、Store 和 SQLite，旧实现 6 例中 2 个幂等场景失败，修后 6/6；关联部署、档案、生命周期、保留、HTTP、网关及适配器共 138/138，通过适配器类型与基础检查。证据 `.deployment/current-release-switch/stable3-deployment-diagnostic/source-archive-{valid-before-corrected,valid-after,related-after}.log`。完整 CI、新发行及真实部署仍待验证；这项修复和文件核验不代替 D1、B4、D5/E5 的业务验收。
+
+同一验收继续保留两项真实边界：B5 专属环境三个连接的正常创建/测试/启用及原 12 个写收据已验证，guest 五次跨项目读取均按合同返回 404；真实 MCP 工具使用尚未通过。D2 五分钟计划实际产生 `workspace_update_abd02a53-d0e1-404c-aeff-6a681a19f650`，因 Git 超时失败，旧当前内容与原收据保留，计划已停用；后续服务器 Git TLS 与私有 `ls-remote` 恢复，只证明当时连通，不将原失败改记为周期成功。
+
+完整清单新增 A6：实际 agent-demo 网关和 Worker 仍使用四个静态账号，未接上已确认的持久账号、本人改密、管理员重置及停用。独立后端的实现不能代替实际链路；继续在原链路补齐，不启用林晓、陈一的新授权，不通过伪造会话或操作用户表制造验收身份。
