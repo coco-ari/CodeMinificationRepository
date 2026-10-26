@@ -38,8 +38,8 @@
 | A2 | 页面、HTTP/RPC/MCP、下载与后台执行统一授权 | 待验证 | [access](../agent-demo/t3-adapters/access.mjs)、[消息/轮次身份回归](../test/t3-request-actors.test.mjs) 及原生 RPC/MCP 已接入实际调用者，排队编辑按 T3 已提交事件裁决，下载/后台角色边界复用已闭环入口；完整问答参数和环境 MCP 仍分别随 A3/A4/B5/B6 验收 |
 | A3 | 异步读取撤权、跨环境伪造与原地址恢复 | 已实现 | `a2b8d768`；[回归](../test/t3-deployment-response-access.test.mjs) 与[验收](runtime-modules.md#部署读取撤权回归2026-10-26)，尚未随本批发行部署 |
 | A4 | 统一问答最终参数合同、调整权及受限预设校验 | 待验证 | [最终参数](../autoops/contracts/assistants.ts)、[绑定/RPC](../agent-demo/t3-adapters/access-service.mjs)、[原生队列](../vendor/t3code/apps/server/src/autoops/questionCommands.ts) 已接唯一问答入口，原生已固定模型、排队恢复、实际调用者及所选技能按同一合同复核；服务/原生回归通过，浏览器与真实发行、旧会话映射待验，见[本批证据](runtime-modules.md#统一问答最终参数接入2026-10-26) |
-| A5 | 存量权限映射、私有内容及撤权后的历史阅读 | 待验证 | 用户已选择林晓/陈一先不启用新授权；[目录](../agent-demo/fixtures.mjs) 显式标记待分配，仅保留原使用边界，后续由管理员保存分配。外部不绑定新环境，历史自用电脑仍保留原身份/未知收据。自动负例已覆盖，服务器存量实测待最终发行 |
-| A6 | 当前运行链路的持久账号、登录及账号生命周期 | 待验证 | [实际账号所有者](../agent-demo/t3-adapters/accounts/index.ts)、[正常接管命令](../scripts/initialize-runtime-accounts.mjs)、[原生 HTTP](../vendor/t3code/apps/server/src/autoops/http/accounts.ts)和[账号页面](../vendor/t3code/apps/web/src/autoops/AccountManagementPage.tsx)已沿原网关/Worker接入。`305af444` 两项完整 CI 通过并已部署，原四 ID、全部原数据及林晓/陈一待分配保留，升级前四个合法 Cookie 实际读取通过、三个非管理员目录读取 403。真实正常 HTTP 创建四个独立非管理员、拒绝提权及重置/本人改密/启停/注销链路通过；创建不授项目权。账号整页及后台 RPC/MCP/共享执行撤回仍待验；[本批证据](runtime-modules.md#账号发行接续与真实-http2026-10-27) |
+| A5 | 存量权限映射、私有内容及撤权后的历史阅读 | 待验证 | 用户已选择林晓/陈一先不启用新授权；[目录](../agent-demo/fixtures.mjs) 显式标记待分配，仅保留原使用边界，后续由管理员保存分配。外部不绑定新环境，历史自用电脑仍保留原身份/未知收据。自动负例及当前 305 实测已覆盖：原成员/环境行保留，原身份部署和 MCP 管理 GET 明确拒绝；实际问答工具边界继续 E2 |
+| A6 | 当前运行链路的持久账号、登录及账号生命周期 | 待验证 | [实际账号所有者](../agent-demo/t3-adapters/accounts/index.ts)、[正常接管命令](../scripts/initialize-runtime-accounts.mjs)、[原生 HTTP](../vendor/t3code/apps/server/src/autoops/http/accounts.ts)和[账号页面](../vendor/t3code/apps/web/src/autoops/AccountManagementPage.tsx)已沿原网关/Worker接入。`305af444` 两项完整 CI 通过并已部署，原四 ID、全部原数据及林晓/陈一待分配保留，升级前四个合法 Cookie 实际读取通过、三个非管理员目录读取 403。真实正常 HTTP 创建四个独立非管理员、拒绝提权及重置/本人改密/启停/注销链路通过；创建不授项目权。账号整页四种尺寸/主题、生命周期、真实冲突及原收据 GET 已验；后台 RPC/MCP/共享执行撤回仍待验；[本批证据](runtime-modules.md#账号发行接续与真实-http2026-10-27) |
 | B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待验证 | [项目目录](../agent-demo/t3-adapters/project-directory/index.ts) 已将存量项目/环境/成员一次导入自有版本化数据库，授权读取当前事实；[页面](../vendor/t3code/apps/web/src/autoops/ProjectsPage.tsx) 已接入创建、基本信息、环境添加/编辑和成员状态。SQLite/HTTP 正反例已过，浏览器在 `23003b65` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40249611790) 通过；成员固定角色/环境覆盖、默认助手准入及分配表单已接 API，`9dc39661` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40253068408) 全部交互通过；新项目默认空资料初始化已修复，原示例和已有内容保留，见[本批证据](runtime-modules.md#新项目空资料初始化2026-10-26)；删除与公开引用预检、原生持久删除及环境授权同事务清理已接，新增服务/HTTP/请求恢复通过；删除浏览器、完整配置与真实发行待验。不切换独立后端或清空业务库 |
 | B2 | 项目仓库连接与工作区/部署分支配置分离 | 待验证 | [连接合同](../autoops/contracts/project-repositories.ts)、[authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 的 v3 升级及[原生项目 API](../vendor/t3code/apps/server/src/autoops/http/repositories.ts) 已拆分唯一连接与工作区引用，保留现有 ID/分支/捕获；集中仓库/凭证及工作区使用交互在 `97a7945f` CI 通过。部署现独立读取项目连接并提交自己的版本和目录，未加入工作区也可打包，旧组合入口已移除；新增部署交互已在 `5a9703e3` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40266628636)通过；真实私有 Git、存量来源重新确认和服务器发行待验；[本批证据](runtime-modules.md#项目仓库连接与工作区引用拆分2026-10-26) |
 | B3 | 项目凭证创建、替换、撤销及受控使用 | 待验证 | [credentials](../agent-demo/t3-adapters/credentials.ts)、[回归](../test/t3-workspace-credentials.test.mjs)；[集中入口](../vendor/t3code/apps/web/src/autoops/ProjectCredentialsPanel.tsx) 复用秘密仅留内存及原收据核对，工作区改为跳转唯一入口；新交互在 `97a7945f` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40264887443)通过，真实私有仓库成功、撤销、失败恢复仍待验 |
@@ -52,8 +52,8 @@
 | C4 | 电脑自用接入、文件、附件、可靠事件及恢复 | 已实现 | [customer-registry](../agent-demo/t3-adapters/customer-registry.mjs)、[customer-agent](../agent-demo/customer-agent)、[真实证据](runtime-modules.md#客户电脑文件引用2026-10-25)；迁入助手时保留 |
 | C5 | 提供者主动共享、管理员分配、撤回和实际调用者 | 待验证 | [提供者事实](../agent-demo/t3-adapters/assistants/schema.ts)、[本人管理 HTTP](../vendor/t3code/apps/server/src/autoops/http/providedAssistants.ts) 已实现主动指定项目共享与撤回、管理者分配及修订复核，管理权不能代替本人同意；已保存后撤权只确认事实，原收据恢复不重复。服务/HTTP正反例通过；跨用户实际执行与真实身份验收继续 C6，不能将元数据配置当执行完成 |
 | C6 | 跨用户电脑会话、附件、工作目录及收据隔离 | 待验证 | [中心签发范围](../autoops/contracts/shared-execution.ts)、[固定隔离运行器](../agent-demo/customer-agent/shared-docker-profile.ts)、[项目助手目录](../autoops/contracts/customer-assistant-runtime.ts) 已接入；实际调用者、来源、分配、profile 和原收据固定，外部未隔离来源明确拒绝，自用保留。Linux OS 10 项通过；发现内置模型目录与实际提供者无交集后，已补显式本机目录并由真实 CLI 返回提供者 12 个模型及强度，客户 73 项及 `be768c19` 两项完整 CI 通过，Linux 新发行已上线；原历史失败收据已正常归并、原自用连接已恢复。模型推理、选定技能、双用户附件及断线恢复仍待真实业务验收。未具备精确验证许可的来源继续拒绝跨用户执行，见[提供者模型目录与验收边界](runtime-modules.md#提供者模型目录与验收边界2026-10-26) |
-| D1 | 问答读取已同步当前资料、失败保留与每轮固定输入 | 待验证 | [当前资料](../agent-demo/t3-adapters/workspace-current.ts) 已改为只读有效当前源，新轮零 Git resolve/fetch；[authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) v4 持久准备收据、原子当前指针与旧资料一次接管，失败/待切换保留原真实目录及提交。新增真实 owner/SQLite/Worker+受控 Git、越权、重启与工具读取回归 87 项通过，SQLite 并发及升级/事务相关 36 项通过；`be768c19` 完整 CI 已通过并上线；真实私有仓库手动同步及原收据零 Git 已验，真实原生问答仍待验；须继续验证连续新轮零 Git，并覆盖成功读取、越权/跨范围拒绝、失败保留和原输入异常恢复，旧无来源用例不能替代新方案整项验收；整项仍待完成，[本批证据](runtime-modules.md#问答只读已同步当前资料2026-10-26) |
-| D2 | 内外部各一份当前内容、手动与定期更新 | 待验证 | [更新所有者](../agent-demo/t3-adapters/workspace-updates/index.ts)、[实际组合根](../agent-demo/t3-adapters/workspace-update-runtime.ts)、原生 HTTP 与当前范围设置 Dialog 已接入；默认关闭，按真实配置者和当前来源复核，原任务恢复不重新执行，外部待复核不自动发布。28 项 SQLite/任务回归（含实际资料与权限组合）、7 项原生 HTTP、13 项 Web 请求单测通过；11 项更新 Dialog 及 `be768c19` 完整 Web CI 均通过；真实私有仓库手动同步和原收据零 Git 已验。真实五分钟计划已调度一次，Git 连接超时使原请求失败，有效当前内容及原收据保持不变，计划已停用；该失败不算周期更新成功。周期成功、撤权及异常原任务恢复与整页继续验收。证据见[定期更新验收](runtime-modules.md#当前资料定期更新2026-10-26)；D3 的活动输入回收仍独立待完成 |
+| D1 | 问答读取已同步当前资料、失败保留与每轮固定输入 | 待验证 | [当前资料](../agent-demo/t3-adapters/workspace-current.ts) 已改为只读有效当前源，新轮零 Git resolve/fetch；[authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) v4 持久准备收据、原子当前指针与旧资料一次接管，失败/待切换保留原真实目录及提交。新增真实 owner/SQLite/Worker+受控 Git、越权、重启与工具读取回归 87 项通过，SQLite 并发及升级/事务相关 36 项通过；`be768c19` 完整 CI 已通过并上线；真实私有仓库、失败保留、原生工具读取及原消息恢复已验；成功 fetch 正对照后两连续新轮读取新当前资料且远端 Git 零增量，四轮输入释放已验；跨角色/环境及 MCP 原 scope 继续验，旧无来源用例不能替代新方案整项验收；整项仍待完成，[本批证据](runtime-modules.md#问答只读已同步当前资料2026-10-26) |
+| D2 | 内外部各一份当前内容、手动与定期更新 | 待验证 | [更新所有者](../agent-demo/t3-adapters/workspace-updates/index.ts)、[实际组合根](../agent-demo/t3-adapters/workspace-update-runtime.ts)、原生 HTTP 与当前范围设置 Dialog 已接入；默认关闭，按真实配置者和当前来源复核，原任务恢复不重新执行，外部待复核不自动发布。28 项 SQLite/任务回归（含实际资料与权限组合）、7 项原生 HTTP、13 项 Web 请求单测通过；11 项更新 Dialog 及 `be768c19` 完整 Web CI 均通过；真实私有仓库手动同步和原收据零 Git 已验。真实五分钟计划已调度一次，Git 连接超时使原请求失败，有效当前内容及原收据保持不变，计划已停用；该失败不算周期更新成功。随后新独占请求的真实内部五分钟周期已取得新提交，原 task/收据与计划停用确认通过；外部周期、撤权及异常原任务恢复与整页继续验收。证据见[定期更新验收](runtime-modules.md#当前资料定期更新2026-10-26)；D3 的活动输入回收仍独立待完成 |
 | D3 | 活动/排队/未知输入临时保护、终态释放和自动回收 | 待验证 | [实际引用所有者](../agent-demo/t3-adapters/access-input-lifecycle.mjs) 与[原生生命周期](../vendor/t3code/apps/server/src/autoops/workspaceInputLifecycle.ts) 已接原命令、排队、活动/未知、子任务及可信终态；当前/部署/必要输入继续保护，旧选择与无引用资料回收，原收据不切最新输入。独立 C6 v2 组合 owner125、MCP24、原生/升级41及四类严格类型、286源边界和Worker构建通过；完整 CI 和服务器升级已验，14 份历史真实终态输入在启动时正常释放、原数据按持久来源逐项核对；新问答/回收/断线仍待验，见[输入生命周期证据](runtime-modules.md#当前资料输入保护与按引用回收2026-10-26) |
 | D4 | 部署独立分支、固定 Commit、完整构建上下文源码包 | 已实现 | [deployments](../agent-demo/t3-adapters/deployments.mjs)、[源码回归](../test/deployment-workspace-source.test.mjs)；仓库连接拆分后复用、真实用户仓库打包待验 |
 | D5 | 版本链、配置快照、原包恢复、失败恢复与收据 | 待验证 | [DeploymentService](../src/deployment.mjs)、[Agent](../agent/main.mjs) 已有核心；[适配记录](runtime-modules.md#main-部署核心适配2026-10-25) 尚缺新增 Java/static 隔离目标完整真实验收 |
@@ -72,16 +72,16 @@
 | 编号 | 代码完成 | 自动测试 | 部署生效 | 真实业务验收 |
 | --- | --- | --- | --- | --- |
 | S1 启动重复写入 | 完成，档案报告与同版本释放两处修复固定 `3e496ce7` | 新/关联/原生/事务回归与两项完整 CI 通过 | 已生效，`3e496ce7-stable2` 两阶段完整 owner 通过 | 完成：原档案、395 文件、原任务 12 条、版本 9 条、首次释放完整行保留；实际健康、进程与同版电脑新代次已独立复核，旧失败均保留 |
-| A1 | 完成 | 通过 | 已生效 | 新账号的角色成功/拒绝待验 |
+| A1 | 完成 | 通过 | 已生效 | 新项目管理员及仅一个环境的受限 reader 已正常分配，默认助手前置拒绝与补齐后准入通过；完整环境覆盖矩阵继续 E2 |
 | A2 | 完成 | 通过 | 部分生效 | RPC/MCP、撤权与后台完整组合待验 |
 | A3 | 完成 | 通过 | 已随现有发行生效 | 新角色与原地址恢复继续 E2 |
 | A4 | 完成 | 通过 | 部分生效 | 低权限参数、篡改及真实执行待验 |
-| A5 | 完成 | 通过 | 待分配状态已保留 | 待真实管理操作；不启用林晓/陈一 |
-| A6 | 完成，已固定 `305af444` | 完整 CI 通过：Node 846/2 跳过、原生 251/2 跳过、Web 631/631、客户 76/76 | 已生效，接续切换及两阶段完整 owner 通过；不重复接管 | 原四 ID/会话/授权及升级前 Cookie 保留；真实 HTTP 创建、提权拒绝、重置/本人改密/启停/注销通过。页面与后台撤回仍待验；首次失败仍保留 |
+| A5 | 完成 | 通过 | 待分配状态已保留 | 林晓/陈一原身份正常登录，原成员/环境行不变，新部署查看及 MCP 管理 GET 均拒绝；未启用新授权。实际问答 MCP 拒绝仍待验 |
+| A6 | 完成，已固定 `305af444` | 完整 CI 通过：Node 846/2 跳过、原生 251/2 跳过、Web 631/631、客户 76/76 | 已生效，接续切换及两阶段完整 owner 通过；不重复接管 | 原 ID/会话及升级前 Cookie 保留；真实 HTTP 生命周期、完整账号 UI、真实 409 与断线只 GET 原收据、浅深/窄短窗及键盘交互通过；测试主机缺 CJK 字体，中文视觉复验中。后台执行撤回仍待验 |
 | B1 | 完成 | 通过 | 已生效 | 完整管理、删除及真实成员待验 |
 | B2 | 完成 | 通过 | 已生效 | 私有资料同步部分通过，部署分支仍待验 |
 | B3 | 完成 | 通过 | 已生效 | 创建与真实 Git 部分通过，替换/撤回/恢复待验 |
-| B4 | 全局/项目边界及未知结果只读原收据查询完成 | 新 Node 29、原生 HTTP 9、Web 单测 22 通过；20 项浏览器及完整 CI 待验 | 现有节点边界已生效；新 GET 恢复未部署 | 平台管理及 guest 拒绝通过；真实项目管理员、参数冲突、断线及原收据仍待验，不以目录相同代替收据 |
+| B4 | 全局/项目边界及未知结果只读原收据查询完成 | 新 Node 29、原生 HTTP 9、Web 单测 22 通过；449 CI 的 637/638 Web 通过，删除收据测试缺原参数导致 1 例失败，已最小补齐，Linux 复验待验 | 现有节点边界已生效；新 GET 恢复未部署 | 真实 manager/reader 前置已合法配置；项目绑定、参数冲突、断线及原收据仍待验，不以目录相同代替收据 |
 | B5 | 完成 | 通过 | 已生效 | 配置及原收据通过，真实模型调用待验 |
 | B6 | 完成 | 通过 | 部分生效 | 原 scope、停用及迟到实际结果待验 |
 | C1 | 完成 | 通过 | 已生效 | 统一入口实际问答待验 |
@@ -90,18 +90,18 @@
 | C4 | 完成，复用 | 通过 | 已生效 | 既有自用闭环保留，迁入统一助手后复验 |
 | C5 | 完成 | 通过 | 已生效 | 真实提供者共享/分配/撤回待验 |
 | C6 | 完成 | 通过 | 部分生效 | OS/能力目录通过，双用户模型/技能/附件/断线待验 |
-| D1 | 完成 | 通过 | 已生效 | 修后两次真实原生问答读取已同步资料、第二轮丢回执后只读原消息恢复及原输入释放通过；旧工具失败仍保留。当前观察器缺成功 fetch 正对照，连续新轮零 Git 仍待验，越权/跨环境继续验 |
-| D2 | 完成 | 通过 | 已生效 | 手动同步通过；五分钟任务因 Git 超时失败，成功周期仍待验 |
-| D3 | 完成 | 通过 | 已生效 | 历史终态释放已核对；新轮、回收及断线待验 |
+| D1 | 完成 | 通过 | 已生效 | 真实失败保留、原消息丢回执恢复通过；成功 fetch 正对照后连续两轮读取新当前资料且远端 Git 零增量，四个原输入正常释放。跨角色/环境及 MCP 原 scope 继续验 |
+| D2 | 完成 | 通过 | 已生效 | 真实内部五分钟周期成功取得新 Commit，原 task/收据及停用确认通过；旧超时仍保留失败。外部周期、撤权及异常任务恢复仍待验 |
+| D3 | 完成 | 通过 | 已生效 | 四个新原生终态 input/capture 引用释放、旧当前目录正常清除、新当前与合法保护引用保留已只读核对；部署包七天过期回收仍待验 |
 | D4 | 完成，复用 | 通过 | 已生效 | 真实固定提交、完整包及工作区分支不干扰待验 |
 | D5 | 完成，复用 | 通过 | 已生效 | 新隔离 Java/static、健康、版本链、回退及原包恢复待验 |
 | D6 | 完成 | 通过 | 已生效 | 原 12 任务/9 版本与包保留已核对，新增任务回收待验 |
-| E1 | 项目/环境/助手/账号页代码完成 | 新账号交互及全量 Web 631 项 CI 通过 | 部分生效 | 新整页和真实权限待验 |
+| E1 | 项目/环境/助手/账号页代码完成 | 账号 631 项既有 CI 与新节点 637/638 通过，失败用例复验中 | 部分生效 | 账号整页/生命周期及新角色准入通过；其余整页与真实业务继续验 |
 | E2 | 授权边界已接 | 服务/原生/组件通过 | 部分生效 | 新角色全矩阵及共享跨环境待验 |
-| E3 | 页面已接 T3 | 新账号组件及全量 Web 631 项 CI 通过 | 部分生效 | 整页主题、窄短窗、长数据、滚动与键盘待验 |
-| E4 | 接入代码完成 | 协议/工具回归通过 | 部分生效 | Git/MCP 配置部分通过，问答/共享模型待验 |
+| E3 | 页面已接 T3 | 新账号组件及既有全量 Web CI 通过 | 部分生效 | 账号页桌面/窄短窗×浅深四组合、长数据、内部滚动、Tab/Esc 交互通过；测试主机缺 CJK 字体，中文视觉复验中。其余页面仍待验 |
+| E4 | 接入代码完成 | 协议/工具回归通过 | 部分生效 | 私有 Git、真实问答与内部周期更新通过；环境 MCP 已实际执行，跨环境拒绝通过但原 scope 恢复失败调查中，共享模型仍待验 |
 | E5 | 原引擎保留 | 引擎回归通过，辅助脚本仅作准备 | 原引擎已生效 | 专属 Agent 及 Java/static 全流程待验 |
-| E6 | 各批修复持续整合 | `3e496ce7`、账号 `305af444` 与状态文档 `b27ea3d2` 两项 CI 均通过 | 当前 `305af444` 健康、原数据保留及旧 Cookie 实际读取通过 | S1 已闭环；账号整页/后台、问答零 Git、定期更新、共享、部署及全部剩余事项继续验收 |
+| E6 | 各批修复持续整合 | 启动/账号既有 CI 均通过；449 新节点 CI 的删除测试数据漏字段，修正后复验中 | 当前 `305af444` 健康、原数据及旧 Cookie 保留通过；449 未部署 | S1 已闭环；账号后台、MCP 原 scope、共享、部署及其余事项继续验收 |
 
 2026-10-26 状态纠正：B4、D1 最初均改为待实现，已有部分能力和历史测试仅作为复用依据。B4 随后在 `7110d150` 接完新方案并通过新增自动回归，现为待真实验证；D1 随后已接入只读当前资料并通过新自动回归，完整 CI 已过，现待连续新轮及权限异常的真实验证。保持当前实施顺序，不因本次纠正重排批次。以下逐层补齐用例和实际证据；B4 新服务/HTTP 证据不代表页面与真实验收完成，D1 的本机新方案证据已补，真实问答仍待验。
 

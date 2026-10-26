@@ -184,7 +184,7 @@ describe("部署节点管理", () => {
     await page.getByRole("button", { name: "确认删除", exact: true }).click();
     await expect.element(page.getByRole("button", { name: "核对结果", exact: true })).toBeVisible();
     const original = structuredClone(mocks.mutateGlobal.mock.calls[0]?.[0]);
-    mocks.receiptGlobal.mockResolvedValue({ state: "completed", requestId: original.input.requestId, operation: "delete", serverId: "node-one", projectId: null, environmentId: null, result: { ok: true } });
+    mocks.receiptGlobal.mockResolvedValue({ state: "completed", requestId: original.input.requestId, operation: "delete", serverId: "node-one", projectId: null, environmentId: null, publicIntent: { serverId: "node-one" }, result: { ok: true } });
     mocks.loadGlobal.mockResolvedValue({ ...globalFixture(), servers: [] });
     await page.getByRole("button", { name: "返回", exact: true }).click();
     await page.getByRole("button", { name: "刷新节点", exact: true }).click();
