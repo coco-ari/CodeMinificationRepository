@@ -601,6 +601,8 @@ it("实际输入器已有文本和未上传图片时切换来源新建干净草�
     expect(useComposerDraftStore.getState().getComposerDraft(f.draftId)?.images).toHaveLength(1),
   );
   const originalImage = useComposerDraftStore.getState().getComposerDraft(f.draftId)!.images[0];
+  const originalPrompt = f.handle.current!.getSendContext().prompt;
+  expect(originalPrompt).toContain("原来源的必要输入");
   await page.getByRole("button", { name: "助手", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
   await vi.waitFor(() => expect(mocks.createThread).toHaveBeenCalledOnce());
@@ -614,7 +616,7 @@ it("实际输入器已有文本和未上传图片时切换来源新建干净草�
   expect(readAutoOpsThreadScope(`${f.id}-clean`, "composer-project")?.question?.assistantId).toBe(
     "preset-two",
   );
-  expect(f.handle.current?.getSendContext().prompt).toBe("原来源的必要输入");
+  expect(f.handle.current?.getSendContext().prompt).toBe(originalPrompt);
   await expect.element(editor()).toBeVisible();
   await vi.waitFor(() => expect(editor().element().textContent).toContain("原来源的必要输入"));
 });

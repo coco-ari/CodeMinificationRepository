@@ -385,6 +385,7 @@ async function create() {
 }
 
 it("普通提供者不需项目管理权，按真实来源创建，再主动共享和撤回目标项目", async () => {
+  await page.viewport(1280, 800);
   const f = setup();
   using _fetch = stubGlobal("fetch", f.fetcher);
   await using screen = await render(<App />, {
@@ -449,6 +450,7 @@ it("个人预设断线按GET原payload恢复不重复创建；配对仍从同一
 });
 
 it("原收据读取失败后关闭编辑并切分类，重开仍恢复同一原请求且不重复创建", async () => {
+  await page.viewport(1280, 800);
   const f = setup();
   f.state.lost = true;
   f.state.receipt503 = 1;
