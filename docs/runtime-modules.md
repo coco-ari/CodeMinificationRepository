@@ -1246,3 +1246,25 @@ B4 准备真实项目管理员/只读身份回归时，另发现已存节点原�
 最小修改仅在 AccountManagementPage 的用户名 span 复用锁定 T3 `StorageSettings.tsx` 的 `wrap-anywhere`，不改变共享 SettingsRow 或按钮、状态及无障碍名称。新增浏览器回归测 390×520、64 个更宽字符的真实 Range 每行、描述 scrollWidth 和卡片边界，并核完整操作名称及零写入；结束恢复原 viewport。账号请求单测 11/11（根代理独立复跑亦通过）、Web 严格类型、构建和目标 lint 通过；Linux 浏览器 CI 与新发行同账号真实复验待完成，旧失败图片保留。
 
 同一核心任务是已登录管理员在 390×520 查该账号：修改前“更多→账号→搜索”三次操作，用户名越出卡片；修改后仍三次操作，自动换行不计用户步骤，真实等待随新发行复验记录，不宣称减少步骤。用户可完整识别目标，开发者沿现有 T3 局部规则维护，Agent 保留完整 DOM/aria 信息并可依据实际几何判断结果；表单标签、错误、焦点恢复和真实业务流程保留。后台 RPC/MCP/共享撤回和其余整页仍待验。
+
+## 577 固定发行与真实续读复验（2026-10-27）
+
+`2a52f0da` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40370985129)与[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40370985120)均通过；随后固定 `5775655e81efbb3efcd9ca4c8d158f83b8a36c0d`，[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40372812638)和[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40372812436)均通过，Web 639/639、Node 852/2 跳过、原生 254/2 跳过及过滤入口 2/3/3、客户 76/76。独占发行源码、依赖及 16 个关键 Worker source map 与固定正文一致；发行清单 SHA256 `a19503dba8ac3ab6b903c83369a748299c131bd6150acccbd8fb7481ccf0ec33`，上传包 `0ba7e746a15428669114e3ad8dabde2f23bb7bc5d1360c647cd1aa09a087e0c9`。
+
+第一次 stable1 切换在 post-worker 通过后被 post-web 守卫明确拒绝：原自用 Mac 的实际目录从七模型变为八模型，新增真实 `gpt-6.1-terra`，不是守卫误报。独立摘要重建同时还原外层与快照 revision 后命中原七列行 SHA，原始旧正文未保留，证据明确区分密码学重建和原文。没有删除新模型、修改选择、放宽守卫或延长超时；按既有失败恢复恢复 305，数据未恢复数据库。失败与独立恢复核对保留在 `.deployment/switch-5775655e-stable1-evidence/`。
+
+以实际八模型目录重新取得独占 stable2 基线，同一固定候选及同一完整守卫通过 Worker/Web 两阶段后生效。实际发行 `/home/tao/autoops-agent-demo/releases/t3-confirmed-5775655e`，Web387723、Worker launcher387580/native387592，原 Node24.22.0 与 DATA_DIR 保持；服务页面 `/agent-demo.html` SHA256 `96f098005ed6fe7b702190b20cda9446de03e605607be6a6933d8f4f37bc6e39`，公开/回环健康及两个 Worker 字节一致。独立只读结果 `.deployment/switch-5775655e-stable2-evidence/live-5775655e-independent-v2.json` SHA256 `1707680fcbaf4b06af550245e28bde3bff618391d4003c02b460e1b1ddfcda62` 核对完整发行和原生清单、fresh 基线全部文件/密钥/账号五表、首次资源释放完整行、原 12 任务/9 版本及原 Agent59368。此前旧当前目录已按合法引用回收，因此不把 305 时的 395 文件数量冒称本次当前基线。两次尝试均没有执行备份或恢复业务库。
+
+正常恢复 Redis DB2 并测试后，新源轮 5 实际 query、中断，再正常改当前 DB3；紧接的手动轮 6 实际沿相同输入 `fdd4875c-f642-45ec-8e86-42cf65b6ddda` 和 revision4/DB2 读取 `AO_MCP_REDIS_READ_20261026`，未改读当前 DB3。五个配置写均 HTTP200 并仅用各原 GET 收据确认，最后正常恢复并测试 DB2/revision6。只读 owner 核对 manual 来源持久化、同一原连接修订、inputReleased=true、mcpReleased=true；历史 3/4 轮原消息、输入及失败状态不变。索引 `.deployment/mcp-manual-regression-5775655e-evidence-index-v1.json` SHA256 `beab56f2be6b92fcfa9d3bd9c17e6e4b8ed7bd52b53bcc97d1ec3a6347b97a3e`。此子项四类状态为代码完成、自动测试通过、部署生效、真实同条件续读通过；B5/B6 的低权限、停用、账号撤回及共享组合仍待完成。
+
+同版真实账号四布局各自的 Range 行宽、描述 scrollWidth、卡片边界均通过，窄窗用户名分为两行，Noto 字体实际加载；Tab/Esc、内部上下滚动及八张截图/86 步亦已记录。但验收器最终因四条未分类非 GET 请求触发 `UNEXPECTED_BUSINESS_WRITE`，不能把几何成功宣称完整视觉通过；保留 `.deployment/real-ui-geometry-5775655e-evidence-v2/` 原失败，继续用脱敏元数据识别实际请求，不猜测放行。
+
+真实 B4 首次角色验收已确认 manager/reader 全局读取及 manager 全局写均 403，未准入绑定 403，平台批准后 manager 绑定 HTTP200，同原 UUID GET 的 actor/project/environment/publicIntent 全部匹配。随后验收器因将公开 `{server:...}` POST 合同误读成裸节点，在注入失回执前断言失败；不能宣称已实际丢回执。原状态和收据保留，隔离空节点 `307daeee-7ac1-4558-a400-d5fd63d96c51` 仍获准并已绑定，待修复验收器后按已知原结果继续正常撤回、恢复与清理，不重发未知写。完整 B4 仍待验。
+
+## 正式客户运行器环境隔离修复（2026-10-27）
+
+准备真实共享执行时，原 CLI 的 beforeConnect 每次 self 目录发现直接创建原生运行器，继承宿主共享网关授权键。候选一是运行器默认环境继承；真实虚构密钥子进程证实。候选二是显式环境删除该键即可阻断；最小红测仍泄漏，Effect ChildProcess 的 extendEnv 会再次合并 process.env，只有显式 undefined tombstone 在最终 spawn 处移除。影响入口为 cli.ts → createCustomerRunnerFactory → 原 HeadlessCodexRunner，新增 runner-environment.ts/test，不改执行位置、模型或共享授权合同。
+
+根代理审查又发现提前完整读取共享 profile 会使损坏配置阻断既有 self，改为仅有界读取合法授权键提示，真实准入继续归原 profile/runtime/authorize。键名随 profile 更新只增记忆，撤回和删除后不重新泄漏；未知且从未见过的删除/非法 profile 键无法推断，明确保留此边界，不以未知名称阻断自用。第二轮独立审发现完整 loader 先阻塞 FIFO，后续 fallback 无法到达；两个公开子进程红测分别超时，原 profile open 加 NONBLOCK 后由既有 stat 拒绝非普通文件，2/2 通过。提示读取同样采用 canonical 路径、NOFOLLOW/NONBLOCK、普通文件、不可组/全局写、64KiB 上限和严格 UTF-8，不读取模型/技能目录来决定 self 是否可用。
+
+冻结 v3 `.deployment/c6-execution-parent-v1/formal-client-fix-v3/manifest.json` SHA256 `16c52640f3665b312781c746f36bd937b4cdbb5a3652c5334d2a60e9eb2a1d9e`；关联 48/48，根代理独立两个测试文件 20/20、随后完整客户 87/87，客户类型、构建、离仓 ZIP 冒烟和 294 模块边界通过。正式 ZIP SHA256 `eaf854417fb9fb46c512e21ebb75e23d85d5a256fa084a974a90a68a066faa15`，三个实际 source map 与冻结源码逐字一致。四类状态为代码完成、上述自动测试通过、完整 CI 待验、新客户包未部署、真实共享业务未验。此前 V5 十项 OS/十二模型目录证明的是旧客户包；须用本次修复后的 CI 固定包重新核验后再进行实际共享推理，辅助 parent 和离线测试不计业务通过。

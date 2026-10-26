@@ -9,6 +9,7 @@ import { createInterface } from "node:readline/promises";
 import { CustomerAgentStore, defaultLocalPolicy, ConnectorError } from "./store.ts";
 import { CustomerAgentConnection, CustomerAgentHttpClient, CONNECTOR_VERSION, type DeviceCredentials } from "./connection.ts";
 import { loadSharedDockerProfile } from './shared-docker-profile.ts';
+import { createCustomerRunnerFactory } from './runner-environment.ts';
 
 export function defaultStateDirectory(): string { return join(homedir(), ".autoops", "customer-agent"); }
 function ensureDirectory(directory: string): void {
@@ -148,7 +149,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         store.recoverAfterRestart();
         const { createHeadlessCodexRunner } = await import("../../vendor/t3code/apps/server/src/provider/HeadlessCodexRunner.ts");
         let refreshing = false;
-        connection = new CustomerAgentConnection({ store, credentials, runnerFactory: createHeadlessCodexRunner,
+        connection = new CustomerAgentConnection({ store, credentials, runnerFactory: createCustomerRunnerFactory(store, createHeadlessCodexRunner),
           onState: (message) => console.log(`[${new Date().toISOString()}] ${message}`),
           beforeConnect: async () => {
             for (const workspace of store.workspaces().filter((item) => !item.revoked && !item.published)) {

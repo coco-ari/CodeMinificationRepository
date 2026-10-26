@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm, symlink, chmod, realpath, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { loadSharedDockerProfile, retireSharedContainer, sharedCodexConfiguration, sharedContainerArguments } from './shared-docker-profile.ts'
 import { createSharedDockerRuntime } from './shared-docker-profile.ts'
 import * as Effect from 'effect/Effect'
@@ -35,6 +36,16 @@ test('profile宽权限、未知字段与技能符号链接均拒绝，不能借�
   const privateFile=join(f.root,'provider-private.txt');await writeFile(privateFile,'PRIVATE_FIXTURE_ONLY')
   await symlink(privateFile,join(f.skills,'escape.txt'))
   await assert.rejects(loadSharedDockerProfile(f.file),{code:'shared_profile_invalid'})
+})
+test('共享profile公开读取有界拒绝FIFO，不等待本机写入者',async t=>{
+  if(process.platform==='win32'){t.skip('FIFO边界在Unix运行环境验证');return}
+  const f=await fixture(t);await rm(f.file);execFileSync('mkfifo',[f.file],{env:{PATH:'/usr/bin:/bin'}})
+  const code=`import assert from 'node:assert/strict';import {loadSharedDockerProfile} from ${JSON.stringify(new URL('./shared-docker-profile.ts',import.meta.url).href)};
+    await assert.rejects(loadSharedDockerProfile(${JSON.stringify(f.file)}),{code:'shared_profile_invalid'});console.log('bounded-rejection');`
+  const child=spawnSync(process.execPath,['--input-type=module','--eval',code],{cwd:f.root,env:{PATH:'/usr/bin:/bin',HOME:f.root,LANG:'C.UTF-8'},timeout:2000,killSignal:'SIGKILL',encoding:'utf8'})
+  assert.equal(child.error,undefined,'FIFO公开读取超时；只终止本次隔离probe')
+  assert.equal(child.status,0)
+  assert.equal(child.stdout.trim(),'bounded-rejection')
 })
 test('隔离进程端口只允许固定本机镜像与独立挂载，禁止root及带逗号挂载注入',async t=>{
   const f=await fixture(t),profile=await loadSharedDockerProfile(f.file)

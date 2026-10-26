@@ -72,7 +72,7 @@ async function readLocalModelCatalog(path:string):Promise<{bytes:Buffer;sha256:s
 export async function loadSharedDockerProfile(path:string):Promise<LocalSharedProfile> {
   try {
     if(!isAbsolute(path) || await realpath(path)!==path)throw new Error()
-    const handle=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW)
+    const handle=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK)
     let configuration:typeof Configuration.Type
     try {
       const stat=await handle.stat()
