@@ -1050,3 +1050,40 @@ describe("default model settings and new-thread composer parity", () => {
     },
   );
 });
+
+describe("AutoOps 原参数发送合同", () => {
+  it.each([
+    { models: [] },
+    {
+      models: [{ slug: "surviving-first-model", name: "仍可用模型", isCustom: false, capabilities: {} }],
+    },
+  ])("目录缺失时派生与最终发送都保留原高强度，不按空能力归一化丢弃", ({ models }) => {
+    const instanceId = ProviderInstanceId.make("customer-real-device-codex"),
+      driver = ProviderDriverKind.make("codex");
+    const selected = createModelSelection(instanceId, "selected-actual-model", [
+      { id: "reasoningEffort", value: "high" },
+    ]);
+    const state = deriveEffectiveComposerModelState({
+      draft: { activeProvider: instanceId, modelSelectionByProvider: { [instanceId]: selected } },
+      providers: [],
+      selectedProvider: driver,
+      selectedInstanceId: instanceId,
+      threadModelSelection: selected,
+      projectModelSelection: null,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+      preserveModelSelection: true,
+    });
+    expect(state.modelOptions?.[instanceId]).toEqual(selected.options);
+    const dispatch = getComposerProviderState({
+      provider: driver,
+      model: state.selectedModel,
+      models,
+      modelOptions: state.modelOptions?.[instanceId],
+      planModeEnabled: false,
+      preserveModelOptions: true,
+    });
+    expect(
+      createModelSelection(instanceId, state.selectedModel, dispatch.modelOptionsForDispatch),
+    ).toEqual(selected);
+  });
+});

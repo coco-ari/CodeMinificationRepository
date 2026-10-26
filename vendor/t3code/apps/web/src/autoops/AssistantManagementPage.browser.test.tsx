@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import { render, stubGlobal } from "../../test/render";
-import { SidebarProvider } from "~/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarProvider } from "~/components/ui/sidebar";
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from "./ModuleWorkspace";
 import { AssistantManagementPage } from "./AssistantManagementPage";
 import { installAutoOpsHost } from "./hostConfig";
@@ -358,9 +358,13 @@ function setup(manage = false) {
 }
 function App() {
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen open>
       <ModuleSidebarProvider>
-        <ModuleSidebarOutlet />
+        <Sidebar>
+          <SidebarContent>
+            <ModuleSidebarOutlet />
+          </SidebarContent>
+        </Sidebar>
         <AssistantManagementPage />
       </ModuleSidebarProvider>
     </SidebarProvider>
@@ -434,7 +438,7 @@ it("个人预设断线按GET原payload恢复不重复创建；配对仍从同一
   await expect.element(page.getByText("新增本人助手", { exact: true })).toBeVisible();
   expect(f.writes).toHaveLength(1);
   await page.getByRole("button", { name: "连接电脑", exact: true }).click();
-  await expect.element(page.getByRole("dialog")).toHaveTextContent("isolated-pair-code");
+  await expect.element(page.getByRole("dialog").getByText("isolated-pair-code",{exact:true})).toBeVisible();
   expect(Object.values(sessionStorage).join("")).not.toContain("isolated-pair-code");
   await page.getByRole("button", { name: "完成", exact: true }).click();
   await expect.element(page.getByRole("button", { name: "连接电脑", exact: true })).toHaveFocus();
@@ -459,7 +463,7 @@ it("原收据读取失败后关闭编辑并切分类，重开仍恢复同一原�
   await expect.element(page.getByRole("button", { name: "重试", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByRole("button", { name: "当前项目", exact: true }).click();
-  await expect.element(page.getByText("项目预设", { exact: true })).toBeVisible();
+  await expect.element(page.getByRole("heading", { name: "项目预设", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "我提供的", exact: true }).click();
   await expect
     .element(page.getByRole("button", { name: "添加个人助手", exact: true }))
@@ -509,7 +513,7 @@ it("只读项目成员只看获分配预设，不读取管理接口，也不会�
   await using _screen = await render(<App />, {
     router: "/assistants?projectId=target-project&assistantView=project",
   });
-  await expect.element(page.getByText("项目预设", { exact: true })).toBeVisible();
+  await expect.element(page.getByRole("heading", { name: "项目预设", exact: true })).toBeVisible();
   await expect
     .element(page.getByRole("button", { name: "添加项目助手", exact: true }))
     .not.toBeInTheDocument();

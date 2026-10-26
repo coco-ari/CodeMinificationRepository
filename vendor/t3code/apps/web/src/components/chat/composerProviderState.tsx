@@ -33,6 +33,8 @@ export type ComposerProviderStateInput = {
   promptInjectionState?: ComposerPromptInjectionState;
   modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined;
   planModeEnabled: boolean;
+  /** 宿主参数由业务合同校验；能力暂缺时不能删除已提交的真实选项。 */
+  preserveModelOptions?: boolean;
 };
 
 export type ComposerPromptInjectionState = "none" | "ultrathink";
@@ -148,10 +150,9 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   return {
     provider,
     promptEffort,
-    modelOptionsForDispatch: buildExplicitProviderOptionSelectionsFromDescriptors(
-      descriptors,
-      selections,
-    ),
+    modelOptionsForDispatch: input.preserveModelOptions
+      ? modelOptions ?? undefined
+      : buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, selections),
     ...(ultrathinkActive
       ? {
           composerFrameClassName: "ultrathink-frame",

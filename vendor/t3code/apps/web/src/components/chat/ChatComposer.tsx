@@ -1767,6 +1767,7 @@ function useComposerProviderModel(
     promptInjectionState,
     modelOptions: modelState.modelOptions?.[selectedInstanceId],
     planModeEnabled: settings.planModeEnabled && autoOpsFeature("planMode"),
+    preserveModelOptions: host !== undefined,
   });
   return {
     providerInstanceEntries,
@@ -2299,9 +2300,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ? questionModelDisabledReason({ instanceId: selectedInstanceId, model: selectedModel,
       ...(composerModelOptions?.[selectedInstanceId] ? { options: composerModelOptions[selectedInstanceId] } : {}) }, selectedProviderModels)
     : null;
-  const sendDisabledReason =
+  const businessSendBlockReason =
     questionSendDisabledReason(autoOpsThreadScope) ?? externalSendDisabledReason ??
-    fixedModelSendBlockReason ??
+    fixedModelSendBlockReason;
+  const sendDisabledReason = businessSendBlockReason ??
     (multipleModelSelections?.length === 0 ? "请至少选择一个模型。" : null) ??
     (activePendingProgress
       ? attachmentBlockReason
@@ -6603,7 +6605,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )
             : null,
         providerAvailable:
-          fixedModelSendBlockReason === null && (multipleModelSelections !== null ||
+          businessSendBlockReason === null && (multipleModelSelections !== null ||
           (!noProviderAvailable && providerSendBlockReason === null)),
         selectedProvider,
         selectedModel,
@@ -6626,6 +6628,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       canAdjustQuestion,
       fixedModelSendBlockReason,
+      businessSendBlockReason,
       stashCurrentPromptStable,
       restoreStashEntryStable,
       activeThread,

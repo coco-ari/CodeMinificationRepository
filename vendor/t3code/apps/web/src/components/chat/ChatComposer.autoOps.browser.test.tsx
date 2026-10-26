@@ -277,9 +277,9 @@ function Harness({
     environmentId: f.environmentId,
     canOperateThread: true,
     attachmentUploadsCapabilityKnown: true,
-    supportsAttachmentUploads: false,
+    supportsAttachmentUploads: true,
     supportsQuestionAttachments: false,
-    maxFileAttachmentBytes: null,
+    maxFileAttachmentBytes: 1024 * 1024,
     routeKind: "draft",
     routeThreadRef: scopeThreadRef(f.environmentId, f.threadId),
     draftId: f.draftId,
@@ -594,10 +594,9 @@ it("实际输入器已有文本和图片时切换来源新建干净草稿，原�
     ),
     (value) => value.charCodeAt(0),
   );
-  await userEvent.upload(
-    screen.container.querySelector('input[type="file"]')!,
-    new File([bytes], "isolated.png", { type: "image/png" }),
-  );
+  const input = screen.container.querySelector<HTMLInputElement>('input[type="file"]');
+  if (!input) throw new Error('实际附件选择控件未呈现');
+  await page.elementLocator(input).upload(new File([bytes], "isolated.png", { type: "image/png" }));
   await vi.waitFor(() =>
     expect(useComposerDraftStore.getState().getComposerDraft(f.draftId)?.images).toHaveLength(1),
   );
@@ -644,6 +643,8 @@ it("本机离线期间保留原模型及草稿，不选平台或其他本机来�
   );
   expect(f.handle.current?.getSendContext().selectedModelSelection).toMatchObject(f.selected);
   expect(f.handle.current?.getSendContext().providerAvailable).toBe(false);
+  await editor().click();
+  await userEvent.keyboard("{Enter}");
   await expect.element(editor()).toHaveTextContent("离线后继续保留");
   expect(f.sent).toHaveLength(0);
   expect(readAutoOpsThreadScope(f.id, "composer-project")?.executionBinding).toEqual(

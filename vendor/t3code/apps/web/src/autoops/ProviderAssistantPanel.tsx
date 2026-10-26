@@ -121,6 +121,7 @@ export function ProviderAssistantPanel() {
   const alive = useRef(true),
     write = useRef<AbortController | null>(null),
     trigger = useRef<HTMLButtonElement | null>(null);
+  const menuTriggers = useRef(new Map<string, HTMLButtonElement>());
   const disabled = busy || !!pending || invalid || !fresh;
   function denied(cause: unknown) {
     try {
@@ -423,6 +424,10 @@ export function ProviderAssistantPanel() {
                         size="icon-sm"
                         variant="ghost"
                         aria-label={`管理个人助手 ${preset.name}`}
+                        ref={(element) => {
+                          if (element) menuTriggers.current.set(preset.id, element);
+                          else menuTriggers.current.delete(preset.id);
+                        }}
                         disabled={disabled}
                         onFocus={(event) => {
                           trigger.current = event.currentTarget;
@@ -433,11 +438,17 @@ export function ProviderAssistantPanel() {
                     <EllipsisIcon />
                   </MenuTrigger>
                   <MenuPopup align="end">
-                    <MenuItem onClick={() => trigger.current && openSave(preset, trigger.current)}>
+                    <MenuItem
+                      onClick={() => {
+                        const button = menuTriggers.current.get(preset.id);
+                        if (button) openSave(preset, button);
+                      }}
+                    >
                       编辑助手
                     </MenuItem>
                     <MenuItem
                       onClick={() => {
+                        trigger.current = menuTriggers.current.get(preset.id) ?? null;
                         setError(null);
                         setEditor({ kind: "share", preset, projectId: "", enabled: true });
                       }}
