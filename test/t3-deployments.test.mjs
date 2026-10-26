@@ -20,7 +20,9 @@ const principal = {id:'manager', displayName:'真实管理者', allowed:['env-on
 const forbidden = () => { throw Object.assign(new Error('无权访问'), {status:403}) }
 const access = {
   requireDeploymentActionForActor(userId, projectId, action, environmentId) { if (userId !== principal.id) forbidden(); return this.requireDeploymentAction(principal, projectId, action, environmentId) },
-  requireDeploymentAction(p, projectId, action, environmentId) { const member = this.requireWorkspaceManager(p, projectId); if (environmentId) this.requireEnvironment(p, projectId, environmentId); if (['server.admin','server.bind'].includes(action)) forbidden(); return member },
+  requireDeploymentAction(p, projectId, action, environmentId) { const member = this.requireWorkspaceManager(p, projectId); if (environmentId) this.requireEnvironment(p, projectId, environmentId); if (action === 'server.admin') forbidden(); return member },
+  requireDeploymentNodeManagerForActor(userId) { if (userId !== 'platform') forbidden() },
+  requireDeploymentNodeManager(p) { this.requireDeploymentNodeManagerForActor(p.id) },
   requireDeploymentActor(userId, projectId, environmentId) { if (userId !== principal.id) forbidden(); this.requireWorkspaceManager(principal, projectId); this.requireEnvironment(principal, projectId, environmentId) },
   requireProject(p, id) { const project = projects.find((item) => item.id === id); if (!project || p.id === 'other-user') forbidden(); return project },
   requireWorkspaceManager(p) { if (p.id !== 'manager' || p.external) forbidden(); return {workspaceAccess:'internal', role:'project_admin', environmentIds:p.allowed} },
@@ -39,9 +41,18 @@ async function fixture(t, {listener = false, accessLayer = access, requestPrinci
   t.after(async () => { await store.close(); await workspaceStore.close(); await rm(dataDir,{recursive:true,force:true}) })
   return {dataDir,workspaceStore,get store(){return store}, request, async reopen(){await store.close();store = createDeploymentStore({dataDir,workspaceStore,workspaceManagement,access:accessLayer,...(listener ? {agentPort:0} : {}),...(installAssetsRoot ? {installAssetsRoot} : {})});await store.initialize();return store}}
 }
-async function records(f) {
+async function provisionNode(f, input, platform) {
+  platform ||= { id: 'platform', displayName: '平台节点管理者' }
+  await f.store.ensureProject(projects[0])
+  const created = await f.store.createGlobalServer({ name: input.name, requestId: input.requestId }, platform)
+  const expectedRevision = f.store.globalNodeCatalog(platform).projectAccess.find(entry => entry.projectId === 'p-one').revision
+  await f.store.setServerAccess('p-one', { serverId: created.server.id, allowed: true, expectedRevision, requestId: randomUUID() }, platform)
+  await f.request(`/servers/${created.server.id}/bind`, 'POST', { environmentId: input.environmentId, requestId: randomUUID() })
+  return created
+}
+async function records(f, platform) {
   const serverInput = {name:'隔离服务器',environmentId:'env-one',requestId:randomUUID()}
-  const server = (await f.request('/servers','POST',serverInput)).body
+  const server = await provisionNode(f, serverInput, platform)
   const targetInput = {name:'前端站点',environmentId:'env-one',serverId:server.server.id,requestId:randomUUID(),config:{module:'.',artifactPath:'dist',health:{url:'http://127.0.0.1:12345/'}}}
   const target = (await f.request('/targets','POST',targetInput)).body.target
   const source = f.workspaceStore.overview('p-one').internalVersions[0]
@@ -82,11 +93,13 @@ test('真实成员排队后撤权、重启后撤权均不能领取，权限服�
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
   initializeAutoOpsAccessSchema(bindingDb)
   sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('real-manager-session').digest('hex'), 'manager', 'csrf', Date.now() + 60_000)
-  const catalog = { users: [{ id: 'manager', name: '真实管理者', role: 'member', status: 'active' }], agents: [], projects: projects.map((project) => ({ ...project, documents: [], resources: [], memberIds: ['manager'], memberships: [{ userId: 'manager', workspaceAccess: 'internal', role: 'project_admin', status: 'active', environmentIds: ['env-one'] }] })) }
+  sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('real-platform-session').digest('hex'), 'platform', 'csrf', Date.now() + 60_000)
+  const catalog = { users: [{ id: 'manager', name: '真实管理者', role: 'member', status: 'active' }, { id: 'platform', name: '平台节点管理者', role: 'admin', status: 'active' }], agents: [], projects: projects.map((project) => ({ ...project, documents: [], resources: [], memberIds: ['manager'], memberships: [{ userId: 'manager', workspaceAccess: 'internal', role: 'project_admin', status: 'active', environmentIds: ['env-one'] }] })) }
   let outage = false
   const realAccess = createAutoOpsAccess({ sessionDb, bindingDb, catalog, deploymentEnabled: () => { if (outage) throw new Error('授权配置不可用'); return true } })
   const realPrincipal = realAccess.authenticateCookie('demo_session=real-manager-session')
-  const f = await fixture(t, { listener: true, accessLayer: realAccess, requestPrincipal: realPrincipal }), r = await records(f)
+  const platformPrincipal = realAccess.authenticateCookie('demo_session=real-platform-session')
+  const f = await fixture(t, { listener: true, accessLayer: realAccess, requestPrincipal: realPrincipal }), r = await records(f, platformPrincipal)
   const registered = await agent(f, '/register', { registrationToken: r.server.registrationToken, capabilities: ['static-site-v1'] })
   const submit = async () => (await f.request('/tasks', 'POST', { targetId: r.target.id, action: 'deploy', service: 'frontend', packageId: r.pack.id, configKey: r.target.configKey, requestId: randomUUID() })).body.task
   const claim = (signal) => fetch(`http://127.0.0.1:${f.store.agentAddress.port}/api/agent/v1/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${registered.token}` }, body: '{}', signal })
@@ -113,6 +126,37 @@ test('真实成员排队后撤权、重启后撤权均不能领取，权限服�
   assert.equal(f.workspaceStore.overview('p-other').internalVersions.length, 1)
   outage = false
   assert.equal((await (await claim()).json()).task.id, task.id)
+})
+
+test('项目准入撤回拒绝新发布与实际 Agent 领取，原提交收据保持且重新准入后可新建任务', async t => {
+  const f = await fixture(t, {listener:true}), r = await records(f)
+  const platform = {id:'platform'}
+  const registered = await agent(f, '/register', {registrationToken:r.server.registrationToken,capabilities:['static-site-v1']})
+  const input = {targetId:r.target.id,action:'deploy',service:'frontend',packageId:r.pack.id,configKey:r.target.configKey,requestId:randomUUID()}
+  const accepted = (await f.request('/tasks','POST',input)).body.task
+  await f.store.setServerAccess('p-one',{serverId:r.server.server.id,allowed:false,expectedRevision:2,requestId:randomUUID()},platform)
+  assert.equal((await f.request('/tasks','POST',input)).body.task.id,accepted.id)
+  await assert.rejects(f.request('/tasks','POST',{...input,requestId:randomUUID()}),{status:403,code:'DEPLOYMENT_SERVER_ACCESS_REVOKED'})
+  const claimed = Promise.withResolvers(), originalClaim = DeploymentService.prototype.claim
+  t.mock.method(DeploymentService.prototype,'claim',async function(...args) {
+    const result = await originalClaim.apply(this,args)
+    claimed.resolve(result)
+    return result
+  })
+  const controller = new AbortController()
+  const pending = fetch(`http://127.0.0.1:${f.store.agentAddress.port}/api/agent/v1/claim`,{
+    method:'POST',headers:{'content-type':'application/json',Authorization:`Bearer ${registered.token}`},body:'{}',signal:controller.signal,
+  }).catch(error => {if(error.name !== 'AbortError') throw error})
+  try {
+    assert.equal(await claimed.promise,null)
+    const rejected = (await f.request(`/tasks/${accepted.id}`)).body.task
+    assert.equal(rejected.status,'interrupted')
+    assert.equal(rejected.startedAt,undefined)
+  } finally {controller.abort();await pending}
+  await f.store.setServerAccess('p-one',{serverId:r.server.server.id,allowed:true,expectedRevision:3,requestId:randomUUID()},platform)
+  const next = (await f.request('/tasks','POST',{...input,requestId:randomUUID()})).body.task
+  assert.notEqual(next.id,accepted.id)
+  assert.equal(next.status,'queued')
 })
 
 test('项目与同名环境使用持久ID映射，重启不新增默认环境；GET/POST和历史均校验管理及环境权限',async t=>{
@@ -164,13 +208,15 @@ test('真实角色经 HTTP 与引擎同源裁决环境覆盖，伪造环境和�
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
   initializeAutoOpsAccessSchema(bindingDb)
   sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('role-http-session').digest('hex'), 'manager', 'csrf', Date.now() + 60_000)
+  sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update('platform-role-http-session').digest('hex'), 'platform', 'csrf', Date.now() + 60_000)
   const membership = { userId: 'manager', role: 'project_admin', workspaceAccess: 'internal', environmentIds: ['env-one', 'env-two'], environmentRoles: {}, status: 'active' }
-  const catalog = { users: [{ id: 'manager', name: '真实角色成员', role: 'member' }], projects: [{ ...projects[0], memberships: [membership], memberIds: ['manager'], documents: [], resources: [] }], agents: [] }
+  const catalog = { users: [{ id: 'manager', name: '真实角色成员', role: 'member' }, { id: 'platform', name: '平台节点管理者', role: 'admin' }], projects: [{ ...projects[0], memberships: [membership], memberIds: ['manager'], documents: [], resources: [] }], agents: [] }
   const realAccess = createAutoOpsAccess({ sessionDb, bindingDb, catalog, deploymentEnabled: () => true })
   const realPrincipal = realAccess.authenticateCookie('demo_session=role-http-session')
-  const f = await fixture(t, { listener: true, accessLayer: realAccess, requestPrincipal: realPrincipal }), r = await records(f)
+  const platformPrincipal = realAccess.authenticateCookie('demo_session=platform-role-http-session')
+  const f = await fixture(t, { listener: true, accessLayer: realAccess, requestPrincipal: realPrincipal }), r = await records(f, platformPrincipal)
   await agent(f, '/register', { registrationToken: r.server.registrationToken, capabilities: ['static-site-v1'] })
-  const server = (await f.request('/servers', 'POST', { name: '生产隔离节点', environmentId: 'env-two', requestId: randomUUID() })).body.server
+  const server = (await provisionNode(f, { name: '生产隔离节点', environmentId: 'env-two', requestId: randomUUID() }, platformPrincipal)).server
   const production = (await f.request('/targets', 'POST', { ...r.targetInput, name: '生产隔离目标', serverId: server.id, environmentId: 'env-two', requestId: randomUUID() })).body.target
   Object.assign(membership, { role: 'developer', environmentRoles: { 'env-one': 'release_operator', 'env-two': 'reader' } })
   const input = { targetId: r.target.id, action: 'deploy', service: 'frontend', packageId: r.pack.id, configKey: r.target.configKey, requestId: randomUUID() }
@@ -227,7 +273,7 @@ test('真实内部ZIP移交原引擎归档、原Agent协议、日志补读、发
 
 test('固定包上下文、项目来源和配置变化拒绝发布，服务器一次性口令不重发',async t=>{
   const f=await fixture(t,{listener:true}), r=await records(f)
-  const repeated=(await f.request('/servers','POST',r.serverInput)).body
+  const repeated=await f.store.createGlobalServer({name:r.serverInput.name,requestId:r.serverInput.requestId},{id:'platform'})
   assert.equal(repeated.server.id,r.server.server.id);assert.equal(repeated.registrationToken,null)
   await agent(f,'/register',{registrationToken:r.server.registrationToken,capabilities:['static-site-v1']})
   const base={targetId:r.target.id,action:'deploy',service:'frontend',packageId:r.pack.id,configKey:r.target.configKey,requestId:randomUUID()}
@@ -290,7 +336,7 @@ test('未启用部署也要授权，合法GET显示真实关闭状态，其余�
 test('关闭等待已接受的Agent写入，即使客户端断开也先落盘后释放存储', async t => {
   const f=await fixture(t,{listener:true})
   await f.store.ensureProject(projects[0])
-  const server=await f.store.createServer('p-one',{name:'关闭验证',environmentId:'env-one',requestId:randomUUID(),actor:{id:principal.id}})
+  const server=await provisionNode(f,{name:'关闭验证',environmentId:'env-one',requestId:randomUUID()})
   const entered=Promise.withResolvers(),release=Promise.withResolvers(),listenerClosed=Promise.withResolvers()
   const originalRegister=DeploymentService.prototype.register,originalClose=Store.prototype.close,originalListenerClose=HttpServer.prototype.close
   let storageClosed=false

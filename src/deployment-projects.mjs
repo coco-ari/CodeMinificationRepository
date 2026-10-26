@@ -55,7 +55,19 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
   function server(projectId, id, state = store.state) {
     const map = mapping(projectId, state), selected = state.deployments.servers.find(entry => entry.id === id && map.servers.some(bound => bound.serverId === id))
     if (!selected) fail(404, 'DEPLOYMENT_SERVER_NOT_FOUND', '当前项目中不存在此服务器')
+    return { ...publicServer(selected), projectAllowed: map.allowedServerIds.includes(id) }
+  }
+  function globalServer(id, state = store.state) {
+    const selected = state.deployments.servers.find(entry => entry.id === id && entry.mode === 'managed')
+    if (!selected) fail(404, 'DEPLOYMENT_SERVER_NOT_FOUND', '全局节点不存在')
     return publicServer(selected)
+  }
+  const nodeReceipts = state => ({ mutationRequests: state.autoopsDeploymentBindings.nodeMutationRequests })
+  function requireServerUse(projectId, serverId, state = store.state) {
+    if (!mapping(projectId, state).allowedServerIds.includes(serverId)) fail(403, 'DEPLOYMENT_SERVER_ACCESS_REVOKED', '此项目未获准使用该节点，或准入已撤回')
+    const selected = globalServer(serverId, state)
+    if (selected.revoked) fail(409, 'DEPLOYMENT_SERVER_REVOKED', '节点接入已撤销')
+    return selected
   }
   function expected(key, current, message) {
     if (key !== current) fail(409, 'DEPLOYMENT_CONFIG_CHANGED', message)
@@ -111,10 +123,20 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
         const bindings = state.autoopsDeploymentBindings
         if (bindings.version !== 1 || !Array.isArray(bindings.projects)) throw new Error('部署项目映射版本无效')
         if (bindings.configurationVersion !== undefined && bindings.configurationVersion !== 1) throw new Error('部署项目配置扩展版本无效')
+        if (bindings.nodeAccessVersion !== undefined && bindings.nodeAccessVersion !== 1) throw new Error('节点准入版本无效')
+        if (bindings.nodeAccessVersion === undefined) {
+          if (bindings.nodeMutationRequests !== undefined || bindings.projects.some(map => map.allowedServerIds !== undefined || map.nodeAccessRevision !== undefined)) throw new Error('缺少版本的节点准入数据不能被覆盖')
+          for (const map of bindings.projects) { map.allowedServerIds = [...new Set(map.servers.map(entry => entry.serverId))]; map.nodeAccessRevision = 1 }
+          bindings.nodeMutationRequests = []
+          bindings.nodeAccessVersion = 1
+        }
+        if (!Array.isArray(bindings.nodeMutationRequests)) throw new Error('节点操作收据损坏')
         for (const map of bindings.projects) {
           // 升级只扩展元数据，既有服务、位置、历史和请求身份保持不变。
           map.mutationRequests ||= []; map.serviceSources ||= []
           if (!Array.isArray(map.mutationRequests) || !Array.isArray(map.serviceSources)) throw new Error('部署项目配置损坏')
+          if (!Array.isArray(map.allowedServerIds) || new Set(map.allowedServerIds).size !== map.allowedServerIds.length || map.allowedServerIds.some(id => !state.deployments.servers.some(server => server.id === id))) throw new Error('项目节点准入损坏')
+          if (!Number.isSafeInteger(map.nodeAccessRevision) || map.nodeAccessRevision < 1) throw new Error('项目节点准入修订损坏')
         }
         // 保留原身份映射格式供程序回滚；新增可选配置使用独立版本，不降级未知格式。
         bindings.configurationVersion = 1
@@ -127,7 +149,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
         if (!map) {
           const applicationId = randomUUID()
           data.applications.push({ id: applicationId, name: project.name, description: '工作台部署验证', createdAt: now() })
-          map = { projectId: project.id, applicationId, environments: [], servers: [], targetRequests: [], serverRequests: [], mutationRequests: [], serviceSources: [] }
+          map = { projectId: project.id, applicationId, environments: [], servers: [], allowedServerIds: [], nodeAccessRevision: 1, targetRequests: [], serverRequests: [], mutationRequests: [], serviceSources: [] }
           maps(state).push(map)
         }
         const application = data.applications.find((entry) => entry.id === map.applicationId)
@@ -151,7 +173,64 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
       authorize(projectId, 'configure', input, input.environmentId)
       return replayReceipt(mapping(projectId), 'service-source', input, sourceRequestFields(input))
     },
-    availableServers() { return store.state.deployments.servers.map(publicServer) },
+    availableServers(projectId) { return store.state.deployments.servers.filter(server => mapping(projectId).allowedServerIds.includes(server.id) && !server.revoked).map(publicServer) },
+    requireServerUse,
+    globalNodeCatalog(input) {
+      authorize(null, 'server.admin', input)
+      return {
+        servers: store.state.deployments.servers.map(publicServer),
+        projectAccess: maps().map(map => ({ projectId: map.projectId, serverIds: [...map.allowedServerIds], revision: map.nodeAccessRevision })),
+        bindings: maps().flatMap(map => map.servers.map(bound => ({ projectId: map.projectId, environmentId: bound.environmentId, serverId: bound.serverId }))),
+      }
+    },
+    async createGlobalServer(input) {
+      const name = requireText(input.name, '节点名称', 80)
+      const result = await store.change(state => {
+        authorize(null, 'server.create', input)
+        let created
+        const saved = receipt(nodeReceipts(state), 'create-global-server', input, [name], () => {
+          created = insertServer(state.deployments, { name })
+          return publicServer(created.server)
+        })
+        // 一次性接入口令只返回首次结果，不能进入持久收据。
+        return created ?? { server: saved, registrationToken: null, expiresAt: null, repeated: true }
+      })
+      changed('server', result.server.id); return result
+    },
+    async mutateGlobalServer(serverId, operation, input) {
+      if (!['revoke', 'delete', 'storage'].includes(operation)) fail(400, 'DEPLOYMENT_SERVER_OPERATION_INVALID', '全局节点操作无效')
+      if (operation === 'storage' && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)) fail(400, 'DEPLOYMENT_POLICY_REVISION_REQUIRED', '缺少有效的存储策略版本')
+      const result = await store.change(state => {
+        authorize(null, 'server.admin', input)
+        const fields = operation === 'storage' ? [serverId, input.expectedRevision, input.retainedVersions, input.buildCacheGiB] : [serverId]
+        return receipt(nodeReceipts(state), `global-server-${operation}`, input, fields, () => {
+          const selected = globalServer(serverId, state)
+          if (operation === 'revoke') return revokeServer(state, serverId)
+          if (operation === 'delete') {
+            return deleteServer(state, serverId)
+          }
+          if (selected.storagePolicy.revision !== input.expectedRevision) fail(409, 'DEPLOYMENT_POLICY_CHANGED', '存储策略已变化，请刷新后重试')
+          return saveStoragePolicy(state, serverId, input)
+        })
+      })
+      changed('server', serverId); return result
+    },
+    async setServerAccess(projectId, input) {
+      if (typeof input.allowed !== 'boolean') fail(400, 'DEPLOYMENT_SERVER_ACCESS_INVALID', '请选择准许或撤回节点准入')
+      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) fail(400, 'DEPLOYMENT_SERVER_ACCESS_INVALID', '缺少有效的项目节点准入修订')
+      const result = await store.change(state => {
+        authorize(null, 'server.admin', input)
+        return receipt(nodeReceipts(state), 'server-project-access', input, [projectId, input.serverId, input.allowed, input.expectedRevision], () => {
+          const map = mapping(projectId, state), selected = globalServer(input.serverId, state)
+          if (map.nodeAccessRevision !== input.expectedRevision) fail(409, 'DEPLOYMENT_SERVER_ACCESS_CHANGED', '项目节点准入已变化，请刷新后重新确认')
+          if (input.allowed && selected.revoked) fail(409, 'DEPLOYMENT_SERVER_REVOKED', '节点接入已撤销')
+          map.allowedServerIds = input.allowed ? [...new Set([...map.allowedServerIds, input.serverId])] : map.allowedServerIds.filter(id => id !== input.serverId)
+          map.nodeAccessRevision++
+          return { projectId, serverId: input.serverId, allowed: input.allowed, revision: map.nodeAccessRevision }
+        })
+      })
+      changed('server-access', input.serverId); return result
+    },
     task(projectId, taskId) {
       const map = mapping(projectId), task = store.state.deployments.tasks.find((entry) => entry.id === taskId && entry.applicationId === map.applicationId)
       if (!task) fail(404, 'DEPLOYMENT_TASK_NOT_FOUND', '当前项目中不存在此部署任务')
@@ -167,7 +246,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
       const map = mapping(projectId), data = store.state.deployments
       return {
         mapping: copy(map), services: data.services.filter(entry => entry.applicationId === map.applicationId).map(entry => service(projectId, entry.id)),
-        serviceSources: map.serviceSources.map(entry => ({ ...copy(entry), configKey: sourceKey(entry) })), servers: data.servers.filter((entry) => map.servers.some((bound) => bound.serverId === entry.id)).map(publicServer),
+        serviceSources: map.serviceSources.map(entry => ({ ...copy(entry), configKey: sourceKey(entry) })), servers: data.servers.filter((entry) => map.servers.some((bound) => bound.serverId === entry.id)).map(server => ({ ...publicServer(server), projectAllowed: map.allowedServerIds.includes(server.id) })),
         targets: copy(data.targets.filter((entry) => entry.applicationId === map.applicationId && !entry.retiredAt && entry.mode === 'managed')),
         tasks: copy(data.tasks.filter((entry) => entry.applicationId === map.applicationId)),
       }
@@ -177,6 +256,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
       const env = map?.environments.find((entry) => entry.legacyEnvironmentId === selectedTarget.environmentId)
       if (!task.actor?.id || !env || selectedTarget.applicationId !== task.applicationId || !map.servers.some((entry) => entry.serverId === task.serverId && entry.environmentId === env.environmentId))
         fail(403, 'DEPLOYMENT_TASK_SCOPE_INVALID', '发布任务的操作人或目标归属已失效')
+      requireServerUse(map.projectId, task.serverId)
       return { projectId: map.projectId, environmentId: env.environmentId }
     },
     async createServer(projectId, input) {
@@ -194,12 +274,36 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
           return { server: publicServer(server), registrationToken: null, expiresAt: null, repeated: true }
         }
         const created = insertServer(data, { name, applicationId: map.applicationId })
+        map.allowedServerIds.push(created.server.id)
+        map.nodeAccessRevision++
         map.servers.push({ serverId: created.server.id, environmentId: input.environmentId })
         if (key) map.serverRequests.push({ requestId: key, fingerprint, serverId: created.server.id })
         return created
       })
       if (!result.repeated) changed('server', result.server.id)
       return result
+    },
+    async recoverServerCommand(projectId, operation, id, input) {
+      if (!['create', 'revoke', 'delete', 'storage'].includes(operation)) fail(400, 'DEPLOYMENT_SERVER_OPERATION_INVALID', '节点收据操作无效')
+      return store.change(state => {
+        const map = mapping(projectId, state)
+        authorize(projectId, operation === 'create' ? 'server.create' : 'server.admin', input, operation === 'create' ? input.environmentId : undefined)
+        const retired = () => fail(410, 'DEPLOYMENT_NODE_ROUTE_RETIRED', '项目节点全局管理入口已停用，请在平台节点管理中重新确认操作')
+        if (operation === 'create') {
+          const name = requireText(input.name, '节点名称', 80)
+          environment(map, input.environmentId)
+          const previous = map.serverRequests.find(entry => entry.requestId === requestId(input.requestId))
+          if (!previous) return retired()
+          if (previous.fingerprint !== digest(JSON.stringify([name, input.environmentId]))) fail(409, 'DEPLOYMENT_REQUEST_CONFLICT', '同一请求标识不能用于不同服务器参数')
+          const selected = state.deployments.servers.find(entry => entry.id === previous.serverId)
+          if (!selected) fail(409, 'DEPLOYMENT_SERVER_NOT_FOUND', '原登记节点已移除，请核对全局节点记录')
+          return { server: publicServer(selected), registrationToken: null, expiresAt: null, repeated: true }
+        }
+        const name = { revoke: 'revoke-server', delete: 'delete-server', storage: 'server-storage-policy' }[operation]
+        const fields = operation === 'storage' ? [id, input.expectedRevision, input.retainedVersions, input.buildCacheGiB] : [id]
+        // 仅核对原收据；失败的旧操作也必须在全局入口显式重新确认。
+        return receipt(map, name, input, fields, retired)
+      })
     },
     async saveService(projectId, input) {
       const fields = { name: input.name, kind: input.kind, module: input.module || '.', id: input.id || null, configKey: input.configKey || null }
@@ -253,6 +357,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
           return previous.targetId
         }
         return receipt(map, 'create-target', input, [input.serviceId || null, name, input.environmentId, input.serverId, config, input.networkIdentity || null], () => {
+          requireServerUse(projectId, input.serverId, state)
           if (!map.servers.some(entry => entry.serverId === input.serverId && entry.environmentId === input.environmentId)) fail(404, 'DEPLOYMENT_SERVER_NOT_FOUND', '当前项目与环境中不存在此服务器')
           const selected = existingService || saveEntity(state, 'services', { applicationId: map.applicationId, name, kind: 'static', module })
           return saveEntity(state, 'targets', { environmentId: env.legacyEnvironmentId, serviceId: selected.id, serverId: input.serverId, config, networkIdentity: input.networkIdentity }).id
@@ -287,6 +392,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
         authorize(projectId, 'server.bind', input, input.environmentId)
         environment(map, input.environmentId)
         return receipt(map, 'bind-server', input, [input.serverId, input.environmentId], () => {
+          requireServerUse(projectId, input.serverId, state)
           const selected = data.servers.find(entry => entry.id === input.serverId && !entry.revoked && entry.mode === 'managed')
           if (!selected) fail(404, 'DEPLOYMENT_SERVER_NOT_FOUND', '服务器不存在或接入已撤销')
           if (!data.serverBindings.some(entry => entry.serverId === selected.id && entry.applicationId === map.applicationId)) data.serverBindings.push({ serverId: selected.id, applicationId: map.applicationId, createdAt: now() })

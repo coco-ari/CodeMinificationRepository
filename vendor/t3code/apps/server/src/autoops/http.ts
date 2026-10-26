@@ -7,6 +7,7 @@ import { createBusinessHttpContext } from './http/context.ts'
 import { responseError } from './http/responses.ts'
 import { workspacesRoutes } from './http/workspaces.ts'
 import { workspaceAuthoringRoutes } from './http/workspaceAuthoring.ts'
+import { deploymentNodesRoutes } from './http/deploymentNodes.ts'
 import { deploymentsRoutes } from './http/deployments.ts'
 import { skillsRoutes } from './http/skills.ts'
 import { conversationsRoutes } from './http/conversations.ts'
@@ -22,7 +23,7 @@ export const layer = Layer.unwrap(Effect.sync(() => {
   const context = createBusinessHttpContext(access)
   const { principal } = context
   return Layer.mergeAll(
-    workspacesRoutes(context), workspaceAuthoringRoutes(context), deploymentsRoutes(context), skillsRoutes(context),
+    workspacesRoutes(context), workspaceAuthoringRoutes(context), deploymentsRoutes(context), deploymentNodesRoutes(context), skillsRoutes(context),
     conversationsRoutes(context), resourcesRoutes(context), projectDirectoryRoutes(context), assistantsRoutes(context), repositoriesRoutes(context),
     HttpRouter.middleware((handler) => Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;

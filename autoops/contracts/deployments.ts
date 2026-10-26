@@ -214,6 +214,7 @@ export interface DeploymentTargetUpdate {
 export interface DeploymentServer {
   id: string
   name: string
+  projectAllowed?: boolean
   environmentId?: string
   online?: boolean
   version?: string | null
@@ -246,6 +247,13 @@ export interface DeploymentServerManagement {
   servers: DeploymentServer[]
   availableServers: DeploymentServer[]
   canAdmin: boolean
+  canBind: boolean
+}
+export interface DeploymentGlobalNodeCatalog {
+  servers: DeploymentServer[]
+  projects: Array<{ id: string; name: string; environments: Array<{ id: string; name: string }> }>
+  projectAccess: Array<{ projectId: string; serverIds: string[]; revision: number }>
+  bindings: Array<{ projectId: string; environmentId: string; serverId: string }>
 }
 export interface DeploymentServerRegistration {
   server: DeploymentServer

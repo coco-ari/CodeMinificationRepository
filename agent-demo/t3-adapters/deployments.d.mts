@@ -1,6 +1,6 @@
 import type {AutoOpsPrincipal, AutoOpsProject, AutoOpsAccess} from './access.mjs';
 import type { WorkspaceManagement } from './workspace-management.ts';
-import type { DeploymentService, DeploymentServiceSource, DeploymentRepositoryRefs, DeploymentRepositoryHistory } from '../../autoops/contracts/deployments.ts';
+import type { DeploymentService, DeploymentServiceSource, DeploymentRepositoryRefs, DeploymentRepositoryHistory, DeploymentGlobalNodeCatalog, DeploymentServerRegistration } from '../../autoops/contracts/deployments.ts';
 import type {WorkspaceStore} from './workspaces.mjs';
 import type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
 export type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
@@ -9,7 +9,11 @@ export interface DeploymentStore {
  ensureProject(project:AutoOpsProject):Promise<void>;
  overview(project:AutoOpsProject,environmentIds:string[]):DeploymentOverview;
  createServer(projectId:string,input:Record<string,unknown>):Promise<{server:DeploymentServer;registrationToken:string|null;expiresAt:string|null;repeated?:boolean}>;
- availableServers():DeploymentServer[];
+ availableServers(projectId:string):DeploymentServer[];
+ globalNodeCatalog(principal:AutoOpsPrincipal):Omit<DeploymentGlobalNodeCatalog,'projects'>;
+ createGlobalServer(input:Record<string,unknown>,principal:AutoOpsPrincipal):Promise<DeploymentServerRegistration>;
+ mutateGlobalServer(id:string,operation:'revoke'|'delete'|'storage',input:Record<string,unknown>,principal:AutoOpsPrincipal):Promise<DeploymentServer|{ok:true}>;
+ setServerAccess(projectId:string,input:Record<string,unknown>,principal:AutoOpsPrincipal):Promise<{projectId:string;serverId:string;allowed:boolean;revision:number}>;
  serverScope(projectId:string,id:string):string[];
  server(projectId:string,id:string):DeploymentServer;
  bindServer(projectId:string,input:Record<string,unknown>):Promise<{server:DeploymentServer}>;
@@ -36,7 +40,7 @@ export interface DeploymentStore {
  stopAccepting():void;
  close():Promise<void>;
 }
-export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;workspaceManagement?:WorkspaceManagement;access:Pick<AutoOpsAccess,'requireDeploymentActor'|'requireDeploymentActionForActor'>;agentPort?:number;installAssetsRoot?:string;publicOrigin?:string}):DeploymentStore;
+export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;workspaceManagement?:WorkspaceManagement;access:Pick<AutoOpsAccess,'requireDeploymentActor'|'requireDeploymentActionForActor'|'requireDeploymentNodeManagerForActor'|'requireDeploymentNodeManager'>;agentPort?:number;installAssetsRoot?:string;publicOrigin?:string}):DeploymentStore;
 export function configuredDeploymentStore():DeploymentStore|undefined;
 
 export function stopConfiguredDeploymentStore():void;

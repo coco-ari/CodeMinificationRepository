@@ -37,6 +37,9 @@ import { readAutoOpsHost } from "../hostSnapshot";
 import { Choice } from "./DeploymentControls";
 import {
   loadDeploymentServers,
+  loadGlobalDeploymentNodes,
+  mutateGlobalDeploymentNode,
+  type DeploymentGlobalNodeCatalog,
   mutateDeploymentServer,
   type DeploymentServer,
   type DeploymentServerManagement,
@@ -44,9 +47,7 @@ import {
   type DeploymentServerRegistration,
 } from "./deploymentServersApi";
 
-type Props = {
-  projectId: string;
-  environmentId: string;
+type Props = ({ scope?: "project"; projectId: string; environmentId: string } | { scope: "platform" }) & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   finalFocus: ComponentProps<typeof DialogPopup>["finalFocus"];
@@ -57,6 +58,8 @@ type View =
   | { kind: "list" }
   | { kind: "create" }
   | { kind: "bind" }
+  | { kind: "projects"; server: DeploymentServer }
+  | { kind: "access"; server: DeploymentServer; projectId: string; projectName: string; allowed: boolean; expectedRevision: number }
   | { kind: "details"; server: DeploymentServer }
   | { kind: "unbind"; server: DeploymentServer }
   | { kind: "revoke"; server: DeploymentServer }
@@ -77,6 +80,7 @@ const operationLabels = {
   revoke: "撤销节点",
   delete: "删除节点",
   storage: "保存存储设置",
+  access: "保存项目准入",
 };
 const time = (value?: string | null) =>
   value && Number.isFinite(Date.parse(value))
@@ -89,8 +93,14 @@ const bytes = (value: number | null | undefined) =>
 const usage = (value?: { used: number | null; total: number | null } | null) =>
   value ? `${bytes(value.used)} / ${bytes(value.total)}` : "—";
 const status = (server: DeploymentServer) =>
-  server.revoked ? "已撤销" : server.online ? "在线" : "离线";
+  server.projectAllowed === false ? "准入已撤回" : server.revoked ? "已撤销" : server.online ? "在线" : "离线";
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : "操作失败，请重试。");
+const isRegistration = (value: unknown): value is DeploymentServerRegistration => {
+  if (!value || typeof value !== "object") return false;
+  return "server" in value && "registrationToken" in value &&
+    (value.registrationToken === null || typeof value.registrationToken === "string") &&
+    "expiresAt" in value && (value.expiresAt === null || typeof value.expiresAt === "string");
+};
 
 function Field({
   label,
@@ -117,6 +127,21 @@ function Field({
   );
 }
 
+function NodeImpact({ catalog, serverId }: { catalog: DeploymentGlobalNodeCatalog; serverId: string }) {
+  const projects = catalog.projects.filter((project) =>
+    catalog.projectAccess.some((entry) => entry.projectId === project.id && entry.serverIds.includes(serverId)) ||
+    catalog.bindings.some((entry) => entry.projectId === project.id && entry.serverId === serverId));
+  return <SettingsSection title="影响范围">
+    {projects.map((project) => {
+      const bindings = catalog.bindings.filter((entry) => entry.projectId === project.id && entry.serverId === serverId);
+      return <SettingsRow key={project.id} title={project.name}
+        description={bindings.length ? `已绑定：${bindings.map((binding) =>
+          project.environments.find((environment) => environment.id === binding.environmentId)?.name ?? binding.environmentId).join('、')}` : "尚未绑定环境"} />;
+    })}
+    {!projects.length ? <SettingsRow title="未分配项目" /> : null}
+  </SettingsSection>;
+}
+
 function readPending(key: string): DeploymentServerMutation | null {
   try {
     const value = JSON.parse(
@@ -136,25 +161,28 @@ export function DeploymentServers(props: Props) {
   const identity = readAutoOpsHost()?.principal.id ?? "";
   return (
     <DeploymentServersScope
-      key={`${identity}:${props.projectId}:${props.environmentId}`}
+      key={`${identity}:${props.scope === "platform" ? "platform" : `${props.projectId}:${props.environmentId}`}:${props.open}`}
       {...props}
       identity={identity}
     />
   );
 }
 
-function DeploymentServersScope({
-  projectId,
-  environmentId,
+function DeploymentServersScope(props: Props & { identity: string }) {
+  const {
   open,
   onOpenChange,
   finalFocus,
   onAccessDenied,
   onChanged,
   identity,
-}: Props & { identity: string }) {
-  const pendingKey = `autoops:deployment-servers:${identity}:${projectId}:${environmentId}`;
+} = props;
+  const platform = props.scope === "platform";
+  const projectId = props.scope === "platform" ? undefined : props.projectId;
+  const environmentId = props.scope === "platform" ? undefined : props.environmentId;
+  const pendingKey = `autoops:deployment-servers:${identity}:${platform ? "platform" : `${projectId}:${environmentId}`}`;
   const [data, setData] = useState<DeploymentServerManagement | null>(null);
+  const [catalog, setCatalog] = useState<DeploymentGlobalNodeCatalog | null>(null);
   const [view, setView] = useState<View>({ kind: "list" });
   const [pending, setPending] = useState(() => readPending(pendingKey));
   const [busy, setBusy] = useState(false);
@@ -176,6 +204,7 @@ function DeploymentServersScope({
     (cause: unknown) => {
       active.current = false;
       setData(null);
+      setCatalog(null);
       setView({ kind: "list" });
       setName("");
       setServerId("");
@@ -206,10 +235,17 @@ function DeploymentServersScope({
     if (!open || !active.current) return;
     const controller = new AbortController();
     setLoading(true);
-    void loadDeploymentServers(projectId, environmentId, controller.signal)
-      .then((result) => {
-        if (!controller.signal.aborted && active.current) setData(result);
-      })
+    const load = platform
+      ? loadGlobalDeploymentNodes(controller.signal).then((result) => {
+          if (!controller.signal.aborted && active.current) {
+            setCatalog(result);
+            setData({ servers: result.servers, availableServers: [], canAdmin: true, canBind: false });
+          }
+        })
+      : loadDeploymentServers(projectId!, environmentId!, controller.signal).then((result) => {
+          if (!controller.signal.aborted && active.current) setData({ ...result, canAdmin: false });
+        });
+    void load
       .catch((cause: unknown) => {
         if (controller.signal.aborted || !active.current) return;
         if (isAutoOpsAccessError(cause)) accessDenied(cause);
@@ -219,7 +255,7 @@ function DeploymentServersScope({
         if (!controller.signal.aborted && active.current) setLoading(false);
       });
     return () => controller.abort();
-  }, [projectId, environmentId, open, refresh, accessDenied]);
+  }, [platform, projectId, environmentId, open, refresh, accessDenied]);
 
   function go(next: View) {
     setView(next);
@@ -247,7 +283,9 @@ function DeploymentServersScope({
     const controller = new AbortController();
     mutationController.current = controller;
     try {
-      const result = await mutateDeploymentServer(projectId, operation, controller.signal);
+      const result = platform
+        ? await mutateGlobalDeploymentNode(operation, controller.signal)
+        : await mutateDeploymentServer(projectId!, operation, controller.signal);
       if (!active.current || controller.signal.aborted) return;
       setPending(null);
       try {
@@ -255,8 +293,12 @@ function DeploymentServersScope({
       } catch {
         /* 原请求再次核对仍由服务端幂等返回。 */
       }
+      if ("available" in result && result.available === false) {
+        accessDenied(new AutoOpsRequestError("操作已保存，当前管理权限已撤销。", "ACCESS_DENIED", 403));
+        return;
+      }
       setView({ kind: "list" });
-      if (operation.kind === "create" && "registrationToken" in result) setRegistration(result);
+      if (operation.kind === "create" && isRegistration(result)) setRegistration(result);
       setRefresh((value) => value + 1);
       callbacks.current.onChanged();
     } catch (cause) {
@@ -309,11 +351,12 @@ function DeploymentServersScope({
         ? "接入节点"
         : view.kind === "bind"
           ? "绑定已有节点"
-          : "部署节点";
+          : platform ? "平台节点" : "部署节点";
   const back = () => go({ kind: "list" });
   const confirmDisabled =
     disabled ||
     view.kind === "list" ||
+    view.kind === "projects" ||
     (view.kind === "create" && !name.trim()) ||
     (view.kind === "bind" && !serverId) ||
     (view.kind === "details" &&
@@ -322,17 +365,22 @@ function DeploymentServersScope({
     if (confirmDisabled) return;
     const requestId = randomUUID();
     if (view.kind === "create")
-      void submit({ kind: "create", input: { name: name.trim(), environmentId, requestId } });
-    else if (view.kind === "bind")
+      void submit({ kind: "create", input: { name: name.trim(), requestId } });
+    else if (view.kind === "bind" && environmentId)
       void submit({ kind: "bind", serverId, input: { environmentId, requestId } });
+    else if (view.kind === "access")
+      void submit({ kind: "access", serverId: view.server.id, projectId: view.projectId,
+        input: { allowed: view.allowed, expectedRevision: view.expectedRevision, requestId } });
     else if (view.kind === "delete")
       void submit({ kind: "delete", serverId: view.server.id, input: { requestId } });
-    else if (view.kind === "revoke" || view.kind === "unbind")
+    else if (view.kind === "revoke")
       void submit({
         kind: view.kind,
         serverId: view.server.id,
-        input: { environmentId, requestId },
+        input: { requestId },
       });
+    else if (view.kind === "unbind" && environmentId)
+      void submit({kind: "unbind", serverId: view.server.id, input: {environmentId, requestId}});
     else if (view.kind === "details" && view.server.storagePolicy)
       void submit({
         kind: "storage",
@@ -444,7 +492,7 @@ function DeploymentServersScope({
             ) : view.kind === "list" ? (
               <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
+                  {platform ? <Button
                     size="sm"
                     onClick={() => {
                       setName("");
@@ -454,8 +502,8 @@ function DeploymentServersScope({
                   >
                     <PlusIcon />
                     接入节点
-                  </Button>
-                  {data?.canAdmin ? (
+                  </Button> : null}
+                  {!platform && data?.canBind ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -502,7 +550,7 @@ function DeploymentServersScope({
                             <span className="break-all">{server.name}</span>
                           </span>
                         }
-                        description={
+                        description={server.projectAllowed === false ? "准入已撤回" : (
                           <span className="block space-y-1">
                             <span className="block">
                               {status(server)} · {time(server.lastSeenAt)}
@@ -522,7 +570,7 @@ function DeploymentServersScope({
                               存储：{storageLabels[server.storageState ?? "unsupported"]}
                             </span>
                           </span>
-                        }
+                        )}
                         control={
                           <Menu>
                             <MenuTrigger
@@ -541,14 +589,18 @@ function DeploymentServersScope({
                               <MenuItem onClick={() => go({ kind: "details", server })}>
                                 查看节点
                               </MenuItem>
-                              <MenuItem
+                              {!platform && data.canBind ? <MenuItem
                                 disabled={disabled}
                                 onClick={() => go({ kind: "unbind", server })}
                               >
                                 解绑节点
-                              </MenuItem>
+                              </MenuItem> : null}
                               {data.canAdmin ? (
                                 <>
+                                  <MenuItem disabled={disabled || server.revoked}
+                                    onClick={() => go({ kind: "projects", server })}>
+                                    项目准入
+                                  </MenuItem>
                                   <MenuItem
                                     disabled={disabled || server.revoked}
                                     onClick={() => go({ kind: "revoke", server })}
@@ -596,6 +648,26 @@ function DeploymentServersScope({
                 onChange={setServerId}
                 disabled={disabled}
               />
+            ) : view.kind === "projects" ? (
+              <SettingsSection title="项目准入">
+                {catalog?.projects.map((project) => {
+                  const access = catalog.projectAccess.find((item) => item.projectId === project.id);
+                  const allowed = access?.serverIds.includes(view.server.id) ?? false;
+                  return <SettingsRow key={project.id} title={project.name}
+                    description={allowed ? "已准入" : "未准入"}
+                    control={<Button variant="outline" size="sm" disabled={disabled}
+                      aria-label={`${allowed ? "撤回" : "允许"}${project.name}使用节点`}
+                      onClick={() => go({ kind: "access", server: view.server, projectId: project.id,
+                        projectName: project.name, allowed: !allowed, expectedRevision: access?.revision ?? 1 })}>
+                      {allowed ? "撤回" : "允许"}
+                    </Button>} />;
+                })}
+                {!catalog?.projects.length ? <SettingsRow title="暂无项目" /> : null}
+              </SettingsSection>
+            ) : view.kind === "access" ? (
+              <p className="break-words text-sm">{view.allowed
+                ? `允许“${view.projectName}”使用“${view.server.name}”。项目管理员可将其绑定到环境。`
+                : `撤回“${view.projectName}”使用“${view.server.name}”的准入。拒绝新部署与排队任务领取，已有任务结果仍按原收据核对。`}</p>
             ) : view.kind === "details" ? (
               <>
                 <SettingsSection title="节点信息">
@@ -661,6 +733,7 @@ function DeploymentServersScope({
                 </SettingsSection>
               </>
             ) : (
+              <>
               <p className="break-words text-sm">
                 {view.kind === "unbind"
                   ? `将“${view.server.name}”从当前项目环境解绑。已有部署目标引用该节点时不能解绑。`
@@ -668,6 +741,9 @@ function DeploymentServersScope({
                     ? `撤销“${view.server.name}”后，该执行器将无法连接，其他项目使用此节点的部署也会受到影响。`
                     : `永久删除“${view.server.name}”的接入记录。有部署目标或活动任务时不能删除。`}
               </p>
+              {catalog && (view.kind === "revoke" || view.kind === "delete") ?
+                <NodeImpact catalog={catalog} serverId={view.server.id} /> : null}
+              </>
             )}
           </DialogPanel>
           {view.kind !== "list" && !registration ? (
@@ -675,12 +751,14 @@ function DeploymentServersScope({
               <Button variant="outline" disabled={busy} onClick={back}>
                 返回
               </Button>
-              {view.kind !== "details" ||
-              (data?.canAdmin && view.server.storagePolicy && !view.server.revoked) ? (
+              {(view.kind !== "details" && view.kind !== "projects") ||
+              (view.kind === "details" && data?.canAdmin && view.server.storagePolicy && !view.server.revoked) ? (
                 <Button type="submit" disabled={!!confirmDisabled}>
                   {busy ? <Spinner size="sm" /> : null}
                   {view.kind === "details"
                     ? "保存存储设置"
+                    : view.kind === "access"
+                      ? view.allowed ? "确认允许" : "确认撤回"
                     : view.kind === "create"
                       ? "生成安装命令"
                       : view.kind === "bind"

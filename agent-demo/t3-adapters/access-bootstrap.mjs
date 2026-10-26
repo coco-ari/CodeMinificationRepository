@@ -1,11 +1,12 @@
 // 启动数据只投影已经裁决的范围，不读取会话表或打开宿主资源。
-export function projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration, assistantCatalog }) {
+export function projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration, assistantCatalog, canManageDeploymentNodes = false }) {
   const { profile, model, modelSelectionEnabled, customerAgentsEnabled } = configuration
   const visibleProjects = catalog.projects.filter((entry) => { try { membershipForUser(current.id, entry.id); return true } catch { return false } })
   return {
     principal: { id: current.id, displayName: current.displayName, role: current.role },
     csrfToken: current.csrf,
     canCreateProject: catalog.users.find(user => user.id === current.id)?.kind !== 'external',
+    canManageDeploymentNodes,
     gatewayBasePath: '/api/agent-demo/t3',
     fixedModel: { instanceId: 'codex', model },
     modelSelectionEnabled,

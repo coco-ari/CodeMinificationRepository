@@ -44,7 +44,7 @@ function fixture() {
     ensureProject: async () => {},
     targetScope: () => ({ environmentId: 'test' }),
     overview: () => ({ servers: [{ id: 'bound-server' }] }),
-    availableServers: () => [{ id: 'global-server' }],
+    availableServers: projectId => { assert.equal(projectId, 'project'); return [{ id: 'approved-server' }] },
     releaseSource: async () => file,
   }
   const request = (suffix, method = 'GET', input) =>
@@ -59,21 +59,24 @@ function fixture() {
   return { user, member, principal, store, file, request }
 }
 
-test('项目管理者不能伪装平台管理员枚举或修改共享节点', async () => {
+test('项目管理者只列本项目准入节点，不能伪装平台管理员管理全局节点', async () => {
   const f = fixture()
   const result = await f.request('/servers?environmentId=test')
   assert.deepEqual(result.body, {
     servers: [{ id: 'bound-server' }],
-    availableServers: [],
+    availableServers: [{ id: 'approved-server' }],
     canAdmin: false,
+    canBind: true,
   })
   await assert.rejects(
     f.request('/servers/global-server/revoke', 'POST', { actor: { id: 'admin' } }),
     { status: 403, code: 'DEPLOYMENT_SERVER_ADMIN_REQUIRED' },
   )
   f.user.role = 'admin'
-  assert.deepEqual((await f.request('/servers?environmentId=test')).body.availableServers, [
-    { id: 'global-server' },
+  const platformProjectNodes = (await f.request('/servers?environmentId=test')).body
+  assert.equal(platformProjectNodes.canAdmin, false)
+  assert.deepEqual(platformProjectNodes.availableServers, [
+    { id: 'approved-server' },
   ])
   f.user.role = 'member'
   f.member.role = 'reader'

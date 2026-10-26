@@ -11,6 +11,7 @@ export interface AutoOpsT3Bootstrap {
   /** 保留协议字段名；允许模型选择时，此值仅为默认模型。 */
   readonly fixedModel: { readonly instanceId: string; readonly model: string }
   readonly canCreateProject?: boolean
+  readonly canManageDeploymentNodes?: boolean
   readonly modelSelectionEnabled?: boolean
   readonly customerAgentsEnabled?: boolean
   readonly assistantDirectoryEnabled?: boolean

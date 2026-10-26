@@ -94,3 +94,17 @@ test('无环境项目和外部成员可以保存及恢复问答，不自动绑�
   f.access.finishThreadSubmission(input.threadId, 'original-command', true)
   assert.equal(f.access.requireThread(f.principal, input.threadId).environmentId, null)
 })
+
+test('平台全局节点管理与项目管理员的准入绑定动作分别裁决', t => {
+  const f = fixture(t, 'project_admin')
+  for (const action of ['server.create', 'server.admin'])
+    assert.throws(() => f.access.requireDeploymentAction(f.principal, 'project', action, 'test'), { status: 403, code: 'DEPLOYMENT_SERVER_ADMIN_REQUIRED' })
+  f.access.requireDeploymentAction(f.principal, 'project', 'server.bind', 'test')
+  f.access.requireDeploymentAction(f.principal, 'project', 'server.unbind', 'test')
+  f.user.role = 'admin'
+  f.access.requireDeploymentAction(f.principal, 'project', 'server.create', 'test')
+  f.access.requireDeploymentAction(f.principal, 'project', 'server.admin', 'test')
+  f.user.role = 'member'
+  f.member.role = 'release_operator'
+  assert.throws(() => f.access.requireDeploymentAction(f.principal, 'project', 'server.bind', 'test'), { status: 403 })
+})

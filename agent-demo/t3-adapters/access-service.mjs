@@ -114,7 +114,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
   const { refresh } = identity
-  const { membershipForUser, requireProjectActionForUser, requireEnvironmentQueryForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction: deploymentActionForUser, projectCapabilities } = createProjectAccess({ catalog, fail, deploymentEnabled })
+  const { membershipForUser, requireProjectActionForUser, requireEnvironmentQueryForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction: deploymentActionForUser, projectCapabilities, requireDeploymentNodeManagerForUser } = createProjectAccess({ catalog, fail, deploymentEnabled })
   const customerRegistry = suppliedCustomerRegistry || createCustomerRegistry({
     db: bindingDb, now,
     requireOwner(userId) {
@@ -540,6 +540,8 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       bindingDb.prepare('UPDATE t3_thread_bindings SET continuation_verified=1,native_thread_id=? WHERE thread_id=?').run(targetNativeId, targetThreadId)
     },
     requireDeploymentActor,
+    requireDeploymentNodeManagerForActor: requireDeploymentNodeManagerForUser,
+    requireDeploymentNodeManager: principal => requireDeploymentNodeManagerForUser(refresh(principal).id),
     requireProjectAction: (principal, projectId, action) => requireProjectActionForUser(refresh(principal).id, projectId, action),
     requireProjectActionForActor: requireProjectActionForUser,
     requireEnvironmentQuery: (principal, projectId, environmentId) => requireEnvironmentQueryForUser(refresh(principal).id, projectId, environmentId),
@@ -590,7 +592,9 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     principalForNativeSession: identity.principalForNativeSession,
     bootstrap(principal) {
       const current = refresh(principal)
-      return projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration: configuration(), ...(questions ? { assistantCatalog: (actor, project) => questions().catalog(actor, project) } : {}) })
+      let canManageDeploymentNodes = false
+      try { requireDeploymentNodeManagerForUser(current.id); canManageDeploymentNodes = true } catch (error) { if (![403, 503].includes(error.status)) throw error }
+      return projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration: configuration(), canManageDeploymentNodes, ...(questions ? { assistantCatalog: (actor, project) => questions().catalog(actor, project) } : {}) })
     },
   }
 }

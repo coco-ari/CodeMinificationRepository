@@ -44,6 +44,7 @@ import { ProjectCredentialsPanel } from './ProjectCredentialsPanel'
 import { ProjectRepositoryPanel } from './ProjectRepositoryPanel'
 import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
 import { ProjectConfigurationFields } from './ProjectConfigurationFields'
+import { DeploymentServers } from './deployment'
 import {
   isConfigurationEditor,
   configurationMutation,
@@ -70,6 +71,8 @@ export function AutoOpsProjectsPage() {
   )
 }
 function ProjectsContent() {
+  const [nodeScope, setNodeScope] = useState<{ scope: 'platform' } | { scope: 'project'; projectId: string; environmentId: string } | null>(null)
+  const nodeTrigger = useRef<HTMLButtonElement | null>(null)
   const [credentialLocked, setCredentialLocked] = useState(false)
   const repositoryAddButton = useRef<HTMLButtonElement | null>(null)
   const host = useAutoOpsHost()
@@ -231,6 +234,15 @@ function ProjectsContent() {
         detail={explicit ? (selected?.name ?? '项目不可用') : '项目管理'}
         actions={
           <>
+            {host?.canManageDeploymentNodes ? (
+              <Button variant="outline" size="sm" disabled={busy || !!pending || credentialLocked}
+                onClick={(event) => {
+                  nodeTrigger.current = event.currentTarget
+                  setNodeScope({ scope: 'platform' })
+                }}>
+                平台节点
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -381,6 +393,16 @@ function ProjectsContent() {
                       title={env.name}
                       control={
                         manageable ? (
+                          <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="sm"
+                            aria-label={`管理${env.name}节点`}
+                            disabled={busy || !!pending || credentialLocked}
+                            onClick={(event) => {
+                              nodeTrigger.current = event.currentTarget
+                              setNodeScope({ scope: 'project', projectId: current!.id, environmentId: env.id })
+                            }}>
+                            节点
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -400,6 +422,7 @@ function ProjectsContent() {
                           >
                             编辑
                           </Button>
+                          </div>
                         ) : undefined
                       }
                     />
@@ -440,6 +463,15 @@ function ProjectsContent() {
           )}
         </WorkspacePageContainer>
       </div>
+      {nodeScope ? <DeploymentServers {...nodeScope} open
+        finalFocus={nodeTrigger}
+        onOpenChange={(value) => { if (!value) setNodeScope(null) }}
+        onAccessDenied={(cause) => {
+          setError(cause instanceof Error ? cause.message : '当前节点权限已撤销')
+          void refreshProjectHost().catch(() => {})
+        }}
+        onChanged={() => { void load(true) }}
+      /> : null}
       <Dialog
         open={editor !== null}
         onOpenChange={(value) => {

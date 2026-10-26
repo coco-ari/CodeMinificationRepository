@@ -61,6 +61,7 @@ test('服务与目标编辑核对条件键，拒绝重绑归属和活动任务�
 test('共享节点显式绑定，解绑保护现有目标且不改其他项目', async t => {
   const f = await fixture(t)
   const bind = mutation({ serverId: f.server.id, environmentId: 'test' })
+  await f.projects.setServerAccess('p-two', mutation({ serverId: f.server.id, allowed: true, expectedRevision: 1 }))
   await f.projects.bindServer('p-two', bind)
   await f.projects.bindServer('p-two', bind)
   assert.equal(f.projects.snapshot('p-two').mapping.servers.length, 1)
@@ -70,7 +71,7 @@ test('共享节点显式绑定，解绑保护现有目标且不改其他项目',
   const targetId = await f.projects.createTarget('p-one', mutation({ name: '原静态服务', environmentId: 'test', serverId: f.server.id, config: { health: { url: 'https://test.invalid/' } } }))
   await assert.rejects(f.projects.unbindServer('p-one', mutation({ serverId: f.server.id, environmentId: 'test' })), { status: 409 })
   assert.equal(f.projects.target('p-one', targetId).service.kind, 'static')
-  const listed = f.projects.availableServers()
+  const listed = f.projects.availableServers('p-one')
   assert.equal(listed[0].registrationHash, undefined)
   assert.equal(listed[0].tokenHash, undefined)
 })

@@ -61,19 +61,15 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
   await store.ensureProject(project)
   if (method === 'GET' && parts.length === 1 && parts[0] === 'servers') {
     const environmentId = requireEnvironment(url.searchParams.get('environmentId'))
-    let canAdmin = false
-    try {
-      authorize('server.admin', environmentId)
-      canAdmin = true
-    } catch (error) {
-      if (error.status !== 403) throw error
-    }
+    let canBind = false
+    try { authorize('server.bind', environmentId); canBind = true } catch (error) { if (error.status !== 403) throw error }
     return {
       status: 200,
       body: {
         servers: store.overview(project, [environmentId]).servers,
-        availableServers: canAdmin ? store.availableServers() : [],
-        canAdmin,
+        availableServers: canBind ? store.availableServers(projectId) : [],
+        canAdmin: false,
+        canBind,
       },
     }
   }

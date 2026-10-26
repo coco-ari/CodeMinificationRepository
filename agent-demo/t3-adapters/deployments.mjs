@@ -86,7 +86,8 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
     if (!receipt || receipt.status !== 'completed' || !receipt.releaseId) fail(409, 'DEPLOYMENT_SOURCE_FAILED', receipt?.error || '源码准备未完成，请查看任务后重新发布')
     return preparePackage(projectId, receipt.releaseId, task.config.kind === 'java' ? 'backend' : 'frontend', task.config.module)
   }, authorizeProjectMutation({projectId, environmentId, action, actor}) {
-    access.requireDeploymentActionForActor(actor?.id, projectId, action, environmentId)
+    if (projectId === null) access.requireDeploymentNodeManagerForActor(actor?.id)
+    else access.requireDeploymentActionForActor(actor?.id, projectId, action, environmentId)
   }, authorizeTask({ task, target }) {
     const scope = deployment.projects.claimScope(task, target)
     access.requireDeploymentActor(task.actor.id, scope.projectId, scope.environmentId)
@@ -187,7 +188,11 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
       const tasks = scopedTasks.filter((item, index) => index >= scopedTasks.length - 200 || !['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(item.status)).reverse().map((item) => taskDto(project.id, item))
       return {enabled:true, environments:project.environments.filter((item) => allowed.has(item.id)).map((item) => ({id:item.id, name:item.name})), servers:map.servers.filter(bound => allowed.has(bound.environmentId)).flatMap(bound => { const server = all.servers.find(item => item.id === bound.serverId); return server ? [safeServer(server, bound.environmentId)] : [] }), services:all.services.map(item => pick(item, ['id', 'name', 'kind', 'module', 'configKey'])), serviceSources:all.serviceSources.filter(item => allowed.has(item.environmentId)), targets, tasks}
     },
-    availableServers() { return servers.availableServers() },
+    availableServers(projectId) { return servers.availableServers(projectId) },
+    globalNodeCatalog(principal) { access.requireDeploymentNodeManager(principal); const value = deployment.projects.globalNodeCatalog({ actor: safeActor(principal) }); return { ...value, servers: value.servers.map(server => safeServer(server)) } },
+    createGlobalServer(input, principal) { return accept(async () => { const value = await deployment.projects.createGlobalServer({ ...input, actor: safeActor(principal) }); return { ...value, server: safeServer(value.server) } }) },
+    mutateGlobalServer(id, operation, input, principal) { return accept(async () => { const value = await deployment.projects.mutateGlobalServer(id, operation, { ...input, actor: safeActor(principal) }); return operation === 'storage' ? safeServer(value) : value }) },
+    setServerAccess(projectId, input, principal) { return accept(() => deployment.projects.setServerAccess(projectId, { ...input, actor: safeActor(principal) })) },
     serverScope(projectId, serverId) { const snapshot = deployment.projects.snapshot(projectId); return snapshot.mapping.servers.filter(bound => bound.serverId === serverId).map(bound => bound.environmentId) },
     server(projectId, serverId) { return servers.server(projectId, serverId) },
     createServer(projectId, input) { return accept(() => serial(() => servers.createServer(projectId, input))) },
@@ -238,6 +243,7 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
           if (previous.submissionFingerprint !== fingerprint) fail(409, 'DEPLOYMENT_REQUEST_CONFLICT', '同一请求标识不能用于不同发布参数或操作人')
           return {task:taskDto(projectId, previous)}
         }
+        deployment.projects.requireServerUse(projectId, target.serverId)
         if (input.action !== 'deploy') {
           const task = await deployment.createTask({targetId:target.id, action:input.action, ...(input.action === 'rollback' ? {releaseId:uuid(input.releaseId, '回退版本')} : {}), requestId:input.requestId, configKey:input.configKey, submissionFingerprint:fingerprint, actor})
           return {task:taskDto(projectId, task)}

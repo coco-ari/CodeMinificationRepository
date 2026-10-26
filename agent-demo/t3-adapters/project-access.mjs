@@ -50,9 +50,13 @@ export function createProjectAccess({ catalog, fail, deploymentEnabled }) {
     if ((environmentId === undefined && action !== 'read' && role !== 'project_admin') || !environmentRoleAllows(role, action))
       fail(403, 'DEPLOYMENT_ACTION_FORBIDDEN', '此环境角色无权执行部署操作')
     if (!['read', 'source.download'].includes(action) && !deploymentEnabled()) fail(503, 'DEPLOYMENT_DISABLED', '部署尚未启用')
-    if (['server.bind', 'server.admin'].includes(action) && !platformAdmin(userFor(userId)))
+    if (['server.create', 'server.admin'].includes(action) && !platformAdmin(userFor(userId)))
       fail(403, 'DEPLOYMENT_SERVER_ADMIN_REQUIRED', '共享服务器操作仅限平台管理员')
     return member
+  }
+  function requireDeploymentNodeManagerForUser(userId) {
+    if (!platformAdmin(userFor(userId))) fail(403, 'DEPLOYMENT_SERVER_ADMIN_REQUIRED', '全局节点管理仅限平台管理员')
+    if (!deploymentEnabled()) fail(503, 'DEPLOYMENT_DISABLED', '部署尚未启用')
   }
   const requireDeploymentActor = (userId, projectId, environmentId) => requireDeploymentAction(userId, projectId, 'publish', environmentId)
   function requireCredentialActor(userId, projectId, action) {
@@ -75,5 +79,5 @@ export function createProjectAccess({ catalog, fail, deploymentEnabled }) {
     const execute = deploymentRead && member.environmentIds.some(id => deploys('publish', id))
     return { 'workspace.read': allows('workspace.read'), 'workspace.manage': allows('workspace.manage'), 'workspace.external.publish': allows('workspace.external.publish'), 'credential.use': allows('credential.use'), 'credential.manage': allows('credential.manage'), 'deployment.read': deploymentRead, 'deployment.execute': execute, 'project.manage': allows('project.manage'), 'chat.use': allows('chat.use'), 'chat.configure': allows('chat.configure') }
   }
-  return { membershipForUser, requireProjectActionForUser, requireEnvironmentQueryForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction, projectCapabilities }
+  return { membershipForUser, requireProjectActionForUser, requireEnvironmentQueryForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction, requireDeploymentNodeManagerForUser, projectCapabilities }
 }

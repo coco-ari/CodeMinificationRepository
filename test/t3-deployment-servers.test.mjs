@@ -20,17 +20,21 @@ async function fixture(t) {
   return { deployment, servers: createDeploymentServers({ deployment }) }
 }
 
-test('节点创建、共享绑定和解绑沿用公开引擎接口与原请求收据', async (t) => {
-  const { servers } = await fixture(t), input = mutation({ name: '共享节点', environmentId: 'env-test' })
-  const created = await servers.createServer('p-one', input)
+test('旧项目节点登记只能恢复原收据，共享绑定仍须明确项目准入', async (t) => {
+  const { servers, deployment } = await fixture(t), input = mutation({ name: '共享节点', environmentId: 'env-test' })
+  await assert.rejects(servers.createServer('p-one', input), {status:410,code:'DEPLOYMENT_NODE_ROUTE_RETIRED'})
+  const created = await deployment.projects.createServer('p-one', input)
+  assert.equal(deployment.projects.globalNodeCatalog(mutation({})).projectAccess.find(entry => entry.projectId === 'p-one').revision, 2)
   assert.match(created.installCommand, /^curl -fsS 'https:\/\/deploy\.example\.invalid\/agent\/install\.sh'/)
   assert.equal(typeof created.registrationToken, 'string')
   const repeated = await servers.createServer('p-one', input)
   assert.equal(repeated.server.id, created.server.id)
   assert.equal(repeated.registrationToken, null)
   assert.equal(repeated.installCommand, undefined)
-  assert.equal(servers.availableServers().length, 1)
+  assert.equal(deployment.projects.globalNodeCatalog(mutation({})).projectAccess.find(entry => entry.projectId === 'p-one').revision, 2)
+  assert.equal(servers.availableServers('p-one').length, 1)
   assert.throws(() => servers.server('p-other', created.server.id), { status: 404 })
+  await deployment.projects.setServerAccess('p-other', mutation({ serverId: created.server.id, allowed: true, expectedRevision: 1 }))
   const binding = mutation({ serverId: created.server.id, environmentId: 'env-test' })
   assert.equal((await servers.bindServer('p-other', binding)).id, created.server.id)
   assert.equal((await servers.bindServer('p-other', binding)).id, created.server.id)
@@ -39,24 +43,27 @@ test('节点创建、共享绑定和解绑沿用公开引擎接口与原请求�
   assert.equal(servers.server('p-one', created.server.id).id, created.server.id)
 })
 
-test('未绑定项目不能撤销、删除或修改存储策略；绑定节点仍保留引擎删除约束', async (t) => {
-  const { servers } = await fixture(t), { server } = await servers.createServer('p-one', mutation({ name: '隔离节点', environmentId: 'env-test' }))
-  for (const operation of [() => servers.revokeServer('p-other', server.id, mutation({})), () => servers.deleteServer('p-other', server.id, mutation({})), () => servers.saveStoragePolicy('p-other', server.id, mutation({ expectedRevision: 1, retainedVersions: 3, buildCacheGiB: 4 }))]) await assert.rejects(operation, { status: 404 })
-  await assert.rejects(servers.deleteServer('p-one', server.id, mutation({})), { status: 409 })
+test('项目全局操作只保留已接受收据，不接受新存储策略、撤销和删除', async (t) => {
+  const { servers, deployment } = await fixture(t), { server } = await deployment.projects.createServer('p-one', mutation({ name: '隔离节点', environmentId: 'env-test' }))
+  for (const operation of [() => servers.revokeServer('p-other', server.id, mutation({})), () => servers.deleteServer('p-other', server.id, mutation({})), () => servers.saveStoragePolicy('p-other', server.id, mutation({ expectedRevision: 1, retainedVersions: 3, buildCacheGiB: 4 }))]) await assert.rejects(operation, { status: 410 })
+  await assert.rejects(deployment.projects.deleteServer('p-one', server.id, mutation({})), { status: 409 })
   const policy = mutation({ expectedRevision: 1, retainedVersions: 3, buildCacheGiB: 4 })
-  const updated = await servers.saveStoragePolicy('p-one', server.id, policy)
+  await assert.rejects(servers.saveStoragePolicy('p-one', server.id, policy), {status:410})
+  const updated = deploymentServerDto(await deployment.projects.saveStoragePolicy('p-one', server.id, policy))
   assert.deepEqual(updated.storagePolicy, { revision: 2, retainedVersions: 3, buildCacheGiB: 4 })
   assert.deepEqual(await servers.saveStoragePolicy('p-one', server.id, policy), updated)
-  await assert.rejects(servers.saveStoragePolicy('p-one', server.id, mutation({ ...policy, retainedVersions: 4 })), { status: 409 })
+  await assert.rejects(servers.saveStoragePolicy('p-one', server.id, mutation({ ...policy, retainedVersions: 4 })), { status: 410 })
   await assert.rejects(servers.saveStoragePolicy('p-one', server.id, { ...policy, retainedVersions: 4 }), { status: 409 })
   const revoke = mutation({}), remove = mutation({})
-  await servers.revokeServer('p-one', server.id, revoke)
+  await assert.rejects(servers.revokeServer('p-one', server.id, revoke), {status:410})
+  await deployment.projects.revokeServer('p-one', server.id, revoke)
   await servers.revokeServer('p-one', server.id, revoke)
   assert.equal(servers.server('p-one', server.id).revoked, true)
-  await servers.deleteServer('p-one', server.id, remove)
+  await assert.rejects(servers.deleteServer('p-one', server.id, remove), {status:410})
+  await deployment.projects.deleteServer('p-one', server.id, remove)
   assert.deepEqual(await servers.deleteServer('p-one', server.id, remove), { ok: true })
   await assert.rejects(servers.deleteServer('p-one', server.id, { ...remove, actor: { id: 'other-admin' } }), { status: 409 })
-  assert.equal(servers.availableServers().length, 0)
+  assert.equal(servers.availableServers('p-one').length, 0)
 })
 
 test('节点快照保留主机指标，但不透出其他项目、任务、容器或存储报告明细', () => {

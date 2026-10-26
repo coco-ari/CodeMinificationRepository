@@ -185,7 +185,7 @@ async function assertStatus(client, suffix, method, input, status) {
 function deployInput(requestId) { return {targetId:state.targetId, action:'deploy', packageId:state.packageId, service:'frontend', configKey:state.configKey, requestId} }
 
 async function prepare() {
-  if (!state) { state = {schemaVersion:1, base, root, projectId, environmentId, createdAt:stamp(), requests:{package:randomUUID(), server:randomUUID(), target:randomUUID()}}; await saveState() }
+  if (!state) { state = {schemaVersion:1, base, root, projectId, environmentId, createdAt:stamp(), nodeRegistrationScope:'global', requests:{package:randomUUID(), server:randomUUID(), target:randomUUID()}}; await saveState() }
   checkedState()
   let workspaces = await workspace()
   const internal = state.sourceVersionId ? workspaces.internalVersions.find((item) => item.id === state.sourceVersionId) : workspaces.internalVersions.find((item) => item.isExample && item.status === 'published')
@@ -210,7 +210,18 @@ async function prepare() {
   let current = await overview()
   const tokenFile = join(root, 'agent', 'registration-token')
   if (!state.serverId) {
-    const server = await api.request(deployments('/servers'), 'POST', {environmentId, name:'部署验证节点', requestId:state.requests.server})
+    let server
+    if (state.nodeRegistrationScope !== 'global') {
+      // 旧状态先核对原收据；只有明确未接受，才能改用全局登记入口。
+      const previous = await api.raw(deployments('/servers'), 'POST', {environmentId, name:'部署验证节点', requestId:state.requests.server})
+      if (previous.status === 410 && previous.body?.code === 'DEPLOYMENT_NODE_ROUTE_RETIRED') {
+        state.nodeRegistrationScope = 'global'; await saveState()
+      } else {
+        assert.ok(previous.status >= 200 && previous.status < 300, `原节点登记收据未能核对：HTTP ${previous.status}；禁止建立替代节点`)
+        server = previous.body
+      }
+    }
+    if (!server) server = await api.request('/autoops/deployment-servers', 'POST', {name:'部署验证节点', requestId:state.requests.server})
     const existing = await ordinary(tokenFile)
     if (server.registrationToken) {
       credentials.add(server.registrationToken)
@@ -224,7 +235,26 @@ async function prepare() {
     }
     state.serverId = server.server.id; await saveState()
   }
-  current = await overview(); assert.ok(current.servers.some((item) => item.id === state.serverId), '已保存的验证服务器不存在')
+  if (state.nodeRegistrationScope === 'global') {
+    if (!state.nodeAccess) {
+      const catalog = await api.request('/autoops/deployment-servers')
+      assert.ok(catalog.servers.some((item) => item.id === state.serverId && !item.revoked), '原全局节点不存在或接入已撤销；禁止建立替代节点')
+      const projectAccess = catalog.projectAccess.find((item) => item.projectId === projectId)
+      // 项目尚无部署映射时，准入接口会建立修订 1；发送前固定本次条件与请求。
+      state.nodeAccess = {requestId:randomUUID(), expectedRevision:projectAccess?.revision ?? 1}
+      await saveState()
+    }
+    if (!state.nodeAccess.completed) {
+      const grant = await api.request(`/autoops/deployment-servers/${encodeURIComponent(state.serverId)}/projects/${encodeURIComponent(projectId)}`, 'POST', {allowed:true, expectedRevision:state.nodeAccess.expectedRevision, requestId:state.nodeAccess.requestId})
+      assert.equal(grant.serverId, state.serverId); assert.equal(grant.projectId, projectId); assert.equal(grant.allowed, true)
+      state.nodeAccess.completed = true; await saveState()
+    }
+    if (!state.requests.nodeBinding) { state.requests.nodeBinding = randomUUID(); await saveState() }
+    const binding = await api.request(deployments(`/servers/${encodeURIComponent(state.serverId)}/bind`), 'POST', {environmentId, requestId:state.requests.nodeBinding})
+    assert.equal(binding.server.id, state.serverId)
+    assert.notEqual(binding.server.projectAllowed, false, '节点准入已撤回，原绑定收据不能当作当前使用许可')
+  }
+  current = await overview(); assert.ok(current.servers.some((item) => item.id === state.serverId && item.projectAllowed !== false), '已保存的验证服务器不存在或项目准入已撤回')
   if (!state.targetId) {
     const config = {module:'.', artifactPath:'dist', buildImage:'public.ecr.aws/docker/library/node:24-alpine', packageManager:'npm', packageManagerVersion:'11.19.1', buildScript:'build', health:{url:'http://127.0.0.1:28890/', bodyIncludes:'AutoOps', timeoutSeconds:10, intervalSeconds:2}}
     const {target} = await api.request(deployments('/targets'), 'POST', {name:'前端部署验证', environmentId, serverId:state.serverId, config, requestId:state.requests.target})

@@ -63,6 +63,8 @@ export interface AutoOpsAccess {
   requireWorkspaceInputReader(userId: string, projectId: string, workspaceType: 'internal'|'external'): ProjectMembership;
   requireCredentialActor(userId: string, projectId: string, action: 'credential.use' | 'credential.manage'): ProjectMembership;
   requireDeploymentActor(userId:string, projectId:string, environmentId:string): ProjectMembership;
+  requireDeploymentNodeManagerForActor(userId: string): void;
+  requireDeploymentNodeManager(principal: AutoOpsPrincipal): void;
   requireDeploymentActionForActor(userId:string, projectId:string, action:DeploymentAction, environmentId?:string): ProjectMembership;
   requireDeploymentAction(principal: AutoOpsPrincipal, projectId:string, action:DeploymentAction, environmentId?:string): ProjectMembership;
   projectCapabilities(principal:AutoOpsPrincipal, projectId:string): ProjectCapabilities;
@@ -111,6 +113,7 @@ export interface AutoOpsAccess {
     principal: {id: string; displayName: string; role:string}; csrfToken: string; gatewayBasePath: string;
     fixedModel: {instanceId: 'codex'; model: string}; runtimeMode: 'approval-required';
     canCreateProject:boolean;
+    canManageDeploymentNodes:boolean;
     modelSelectionEnabled:boolean;
     customerAgentsEnabled:boolean;
     assistantDirectoryEnabled?:boolean;

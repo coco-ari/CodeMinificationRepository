@@ -96,7 +96,13 @@ function deleteServerRecord(state, id) {
   if (data.tasks.some(item => item.serverId === id) || data.releases.some(item => item.serverId === id)) throw new HttpError(409, '服务器存在发布历史，需保留记录供追溯，不能删除');
   data.serverBindings = data.serverBindings.filter(item => item.serverId !== id);
   data.servers = data.servers.filter(item => item.id !== id);
-  for (const map of state.autoopsDeploymentBindings?.projects || []) map.servers = map.servers.filter(item => item.serverId !== id);
+  for (const map of state.autoopsDeploymentBindings?.projects || []) {
+    map.servers = map.servers.filter(item => item.serverId !== id);
+    if (Array.isArray(map.allowedServerIds) && map.allowedServerIds.includes(id)) {
+      map.allowedServerIds = map.allowedServerIds.filter(serverId => serverId !== id);
+      map.nodeAccessRevision++;
+    }
+  }
   state.events.unshift({ id: randomUUID(), projectId: null, action: 'server-delete', serverId: id, at: now(), message: `删除已撤销的服务器记录：${server.name}；未操作服务器上的容器或文件` });
   state.events = state.events.slice(0, 100);
   return { ok: true };

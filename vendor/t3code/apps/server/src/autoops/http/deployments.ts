@@ -12,6 +12,24 @@ export function deploymentsRoutes({ access, principal }: BusinessHttpContext) {
     const request = yield* HttpServerRequest.HttpServerRequest
     if (request.method !== 'GET')
       yield* Effect.try(() => access.requireCsrf(current, request.headers['x-demo-csrf']))
+    if (request.method !== 'GET') {
+      const node =
+        /^\/autoops\/projects\/([^/]+)\/deployments\/servers(?:\/[^/]+(?:\/(bind|unbind|revoke|storage-policy))?)?$/.exec(
+          new URL(request.url, 'http://localhost').pathname,
+        )
+      if (node) {
+        const projectId = yield* Effect.try(() => decodeURIComponent(node[1]!))
+        const action =
+          node[2] === 'bind'
+            ? 'server.bind'
+            : node[2] === 'unbind'
+              ? 'server.unbind'
+              : new URL(request.url, 'http://localhost').pathname.endsWith('/servers')
+                ? 'server.create'
+                : 'server.admin'
+        yield* Effect.try(() => access.requireDeploymentAction(current, projectId, action))
+      }
+    }
     const input = request.method === 'GET' ? undefined : yield* request.json
     const result = yield* Effect.tryPromise(() =>
       handleDeploymentRequest({
