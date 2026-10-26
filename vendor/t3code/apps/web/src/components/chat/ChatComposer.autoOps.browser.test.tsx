@@ -615,7 +615,8 @@ it("实际输入器已有文本和未上传图片时切换来源新建干净草�
     "preset-two",
   );
   expect(f.handle.current?.getSendContext().prompt).toBe("原来源的必要输入");
-  await expect.element(editor()).toHaveTextContent(/原来源的必要输入/);
+  await expect.element(editor()).toBeVisible();
+  await vi.waitFor(() => expect(editor().element().textContent).toContain("原来源的必要输入"));
 });
 
 it("本机离线期间保留原模型及草稿，不选平台或其他本机来源", async () => {
