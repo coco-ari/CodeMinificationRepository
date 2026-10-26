@@ -38,6 +38,7 @@ function setup({ lost = false, conflict = false, manage = true, denied = false }
     }
     if (path.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
     if (path.endsWith('/repositories')) return Response.json({ revision: 0, items: [] })
+    if (path.endsWith('/workspace/authoring')) return Response.json({ projectId: project.id, revision: 0, sources: [], entries: [], limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 } })
     if (path.endsWith('/workspace/credentials')) return Response.json({ credentials: [] })
     if (path.endsWith('/assistants/choices')) return denied ? Response.json({ code: 'PROJECT_ACTION_FORBIDDEN', error: '项目管理权限已撤回' }, { status: 403 }) : Response.json(choices)
     if (path.endsWith('/assistants/settings')) return Response.json({ presets, allocations })

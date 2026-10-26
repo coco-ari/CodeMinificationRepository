@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import {
   FolderOpenIcon,
   GitBranchIcon,
-  KeyRoundIcon,
   MoreHorizontalIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -40,7 +39,6 @@ import {
   loadAuthoringTree,
   searchAuthoringFiles,
   type AuthoringReceipt,
-  type WorkspaceCredentialMetadata,
   type WorkspaceMaterialEntry,
   type WorkspaceRepositorySource,
   type WorkspaceAuthoringOverview,
@@ -49,7 +47,6 @@ import {
   WorkspaceAuthoringFocus,
   AuthoringNotice,
   WorkspaceAuthoringConfirm,
-  WorkspaceCredentialDialog,
   WorkspaceFileEditDialog,
   WorkspaceSourceDialog,
   WorkspaceUploadDialog,
@@ -93,9 +90,7 @@ export function WorkspaceAuthoringNavigation({
 
 type AuthoringDialog =
   | { type: 'source'; source?: WorkspaceRepositorySource }
-  | { type: 'credential'; credential?: WorkspaceCredentialMetadata }
   | { type: 'remove-source'; source: WorkspaceRepositorySource }
-  | { type: 'revoke-credential'; credential: WorkspaceCredentialMetadata }
   | { type: 'file'; action: 'mkdir' | 'save' | 'move' | 'delete'; entry?: WorkspaceMaterialEntry }
   | { type: 'upload' }
   | null
@@ -167,11 +162,7 @@ export function WorkspaceAuthoring({
         ? `source:${value.source.id}`
         : value?.type === 'remove-source'
           ? `source:${value.source.id}`
-          : value?.type === 'credential' && value.credential
-            ? `credential:${value.credential.id}`
-            : value?.type === 'revoke-credential'
-              ? `credential:${value.credential.id}`
-              : 'toolbar'
+          : 'toolbar'
     dialogReturnFocus.current =
       active instanceof HTMLElement && panelRoot.current?.contains(active)
         ? active
@@ -289,9 +280,10 @@ export function WorkspaceAuthoring({
                         <GitBranchIcon />
                         添加源码来源
                       </MenuItem>
-                      <MenuItem disabled={disabled} onClick={() => open({ type: 'credential' })}>
-                        <KeyRoundIcon />
-                        添加仓库凭证
+                      <MenuItem
+                        render={<a href={`/projects?projectId=${encodeURIComponent(projectId)}`} />}
+                      >
+                        项目仓库与凭证
                       </MenuItem>
                     </>
                   ) : null}
@@ -469,61 +461,6 @@ export function WorkspaceAuthoring({
                     <p className="px-4 py-5 text-sm text-muted-foreground">还没有源码来源。</p>
                   )}
                 </SettingsSection>
-                {manager ? (
-                  <SettingsSection
-                    title="仓库凭证"
-                    headerAction={
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => open({ type: 'credential' })}
-                      >
-                        添加凭证
-                      </Button>
-                    }
-                  >
-                    {controller.credentials.length ? (
-                      controller.credentials.map((credential) => (
-                        <SettingsRow
-                          key={credential.id}
-                          title={<span className="break-all">{credential.name}</span>}
-                          description={`版本 ${credential.version} · ${credential.revoked ? '已撤回' : '可用'}`}
-                          control={
-                            <Menu>
-                              <MenuTrigger
-                                render={
-                                  <Button
-                                    size="icon-sm"
-                                    variant="ghost"
-                                    aria-label={`管理凭证 ${credential.name}`}
-                                    data-authoring-focus={`credential:${credential.id}`}
-                                  />
-                                }
-                              >
-                                <MoreHorizontalIcon />
-                              </MenuTrigger>
-                              <MenuPopup align="end">
-                                <MenuItem onClick={() => open({ type: 'credential', credential })}>
-                                  替换凭证
-                                </MenuItem>
-                                <MenuItem
-                                  disabled={credential.revoked}
-                                  onClick={() => open({ type: 'revoke-credential', credential })}
-                                >
-                                  撤回凭证
-                                </MenuItem>
-                              </MenuPopup>
-                            </Menu>
-                          }
-                        />
-                      ))
-                    ) : (
-                      <p className="px-4 py-5 text-sm text-muted-foreground">
-                        私有仓库需要添加凭证。
-                      </p>
-                    )}
-                  </SettingsSection>
-                ) : null}
               </WorkspacePageContainer>
             </ScrollArea>
           )
@@ -544,13 +481,6 @@ export function WorkspaceAuthoring({
         )}
         {dialog?.type === 'source' ? (
           <WorkspaceSourceDialog controller={controller} source={dialog.source} onClose={close} />
-        ) : null}
-        {dialog?.type === 'credential' ? (
-          <WorkspaceCredentialDialog
-            controller={controller}
-            credential={dialog.credential}
-            onClose={close}
-          />
         ) : null}
         {dialog?.type === 'file' ? (
           <WorkspaceFileEditDialog
@@ -574,23 +504,6 @@ export function WorkspaceAuthoring({
             }
           >
             移除「{dialog.source.name}」？后续同步不再获取此仓库；已有任务与历史引用保留。
-          </WorkspaceAuthoringConfirm>
-        ) : null}
-        {dialog?.type === 'revoke-credential' ? (
-          <WorkspaceAuthoringConfirm
-            title="撤回仓库凭证"
-            controller={controller}
-            onClose={close}
-            onConfirm={() =>
-              controller.submit({
-                kind: 'credential',
-                action: 'revoke',
-                id: dialog.credential.id,
-                expectedCredentialRevision: dialog.credential.revision,
-              })
-            }
-          >
-            撤回「{dialog.credential.name}」后，使用此凭证的新获取操作将被拒绝。
           </WorkspaceAuthoringConfirm>
         ) : null}
       </div>

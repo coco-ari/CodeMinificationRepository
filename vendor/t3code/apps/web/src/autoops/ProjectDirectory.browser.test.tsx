@@ -27,6 +27,7 @@ function setup({ manage = true, failFirst = false, loseResponse = false } = {}) 
     if (url.endsWith('/assistants/settings')) return Response.json({ presets: [], allocations: [] })
     if (url.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
     if (url.endsWith('/repositories')) return Response.json({ revision: 0, items: [] })
+    if (url.endsWith('/workspace/authoring')) return Response.json({ projectId: project.id, revision: 0, sources: [], entries: [], limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 } })
     if (url.endsWith('/workspace/credentials')) return Response.json({ credentials: [] })
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { requestId: string; value: { name: string } }

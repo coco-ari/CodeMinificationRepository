@@ -40,6 +40,7 @@ import {
   type ProjectSettings,
 } from './projectDirectory'
 
+import { ProjectCredentialsPanel } from './ProjectCredentialsPanel'
 import { ProjectRepositoryPanel } from './ProjectRepositoryPanel'
 import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
 import { ProjectConfigurationFields } from './ProjectConfigurationFields'
@@ -69,6 +70,7 @@ export function AutoOpsProjectsPage() {
   )
 }
 function ProjectsContent() {
+  const [credentialLocked, setCredentialLocked] = useState(false)
   const repositoryAddButton = useRef<HTMLButtonElement | null>(null)
   const host = useAutoOpsHost()
   const location = useLocation()
@@ -251,7 +253,7 @@ function ProjectsContent() {
                     event.currentTarget,
                   )
                 }
-                disabled={busy || !!pending}
+                disabled={busy || !!pending || credentialLocked}
               >
                 <PlusIcon />
                 创建项目
@@ -261,7 +263,7 @@ function ProjectsContent() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busy || !!pending}
+                disabled={busy || !!pending || credentialLocked}
                 onClick={(event) =>
                   open(
                     {
@@ -358,7 +360,7 @@ function ProjectsContent() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      disabled={busy || !!pending}
+                      disabled={busy || !!pending || credentialLocked}
                       onClick={(event) =>
                         open(
                           { kind: 'environment', revision: 0, name: '', description: '' },
@@ -382,7 +384,7 @@ function ProjectsContent() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            disabled={busy || !!pending}
+                            disabled={busy || !!pending || credentialLocked}
                             onClick={(event) =>
                               open(
                                 {
@@ -408,11 +410,20 @@ function ProjectsContent() {
                 </SettingsGroup>
               </SettingsSection>
               {manageable && settings ? (
+                <ProjectCredentialsPanel
+                  key={settings.project.id}
+                  projectId={settings.project.id}
+                  disabled={busy || !!pending}
+                  onChanged={() => setConfigurationRevision((value) => value + 1)}
+                  onLockChange={setCredentialLocked}
+                />
+              ) : null}
+              {manageable && settings ? (
                 <ProjectRepositoryPanel
                   key={settings.project.id}
                   projectId={settings.project.id}
                   revision={configurationRevision}
-                  disabled={busy || !!pending}
+                  disabled={busy || !!pending || credentialLocked}
                   onOpen={open}
                   addButtonRef={repositoryAddButton}
                 />
@@ -421,7 +432,7 @@ function ProjectsContent() {
                 <ProjectConfigurationPanel
                   project={settings}
                   revision={configurationRevision}
-                  disabled={busy || !!pending}
+                  disabled={busy || !!pending || credentialLocked}
                   onOpen={open}
                 />
               ) : null}
@@ -471,7 +482,7 @@ function ProjectsContent() {
                 {editor && isConfigurationEditor(editor) ? (
                   <ProjectConfigurationFields
                     editor={editor}
-                    disabled={busy || !!pending}
+                    disabled={busy || !!pending || credentialLocked}
                     onChange={setEditor}
                   />
                 ) : (
@@ -483,7 +494,7 @@ function ProjectsContent() {
                         value={editor?.name ?? ''}
                         maxLength={120}
                         required
-                        disabled={busy || !!pending}
+                        disabled={busy || !!pending || credentialLocked}
                         onChange={(event) =>
                           setEditor((value) =>
                             value ? { ...value, name: event.target.value } : null,
@@ -499,7 +510,7 @@ function ProjectsContent() {
                           id="directory-description"
                           value={editor?.description ?? ''}
                           maxLength={2000}
-                          disabled={busy || !!pending}
+                          disabled={busy || !!pending || credentialLocked}
                           onChange={(event) =>
                             setEditor((value) =>
                               value ? { ...value, description: event.target.value } : null,
@@ -518,7 +529,7 @@ function ProjectsContent() {
             <Button
               variant="outline"
               type="button"
-              disabled={busy || !!pending}
+              disabled={busy || !!pending || credentialLocked}
               onClick={() => setEditor(null)}
             >
               取消
