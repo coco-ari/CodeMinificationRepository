@@ -129,3 +129,5 @@ export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb
 
 export function stopConfiguredAutoOpsAccess(): void;
 export function closeConfiguredAutoOpsAccess(): void;
+
+export function configuredAutoOpsAssistantDirectory(): ReturnType<typeof import("./assistants/index.ts").createAssistantDirectory>;

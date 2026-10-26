@@ -25,6 +25,7 @@ type Catalog = { users: User[]; projects: AutoOpsProject[]; agents: AutoOpsAgent
 type Options = {
   dataDir: string
   seed: Catalog
+  validateMember?: (project: string, actor: string, member: ProjectMembership) => void
   authorize: (actor: string, project: string, action: ProjectAction) => ProjectMembership
 }
 const fail = (status: number, code: string, message: string): never => {
@@ -38,7 +39,7 @@ function decode<T extends S.ConstraintDecoder<unknown>>(schema: T, input: unknow
   }
 }
 
-export function createProjectDirectory({ dataDir, seed, authorize }: Options) {
+export function createProjectDirectory({ dataDir, seed, authorize, validateMember }: Options) {
   const directory = join(dataDir, 'project-directory')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const database = openDatabase(join(directory, 'state.sqlite'), migrations)
@@ -392,9 +393,21 @@ export function createProjectDirectory({ dataDir, seed, authorize }: Options) {
             .get(project, id)
         )
           fail(400, 'PROJECT_MEMBER_SCOPE_INVALID', '环境不属于当前项目')
-      if (member.status === 'active' && member.role !== 'project_admin' && !member.canAdjustChat)
-        fail(409, 'PROJECT_DEFAULT_ASSISTANT_REQUIRED', '受限成员需要先分配有效默认助手')
       return command(actor, project, `member.save:${member.userId}`, value.requestId, value, () => {
+        if (validateMember)
+          validateMember(project, member.userId, {
+            ...member,
+            environmentIds: [...member.environmentIds],
+            environmentRoles: { ...member.environmentRoles },
+            workspaceAccess: member.role === 'external' ? 'external' : 'internal',
+          })
+        else if (
+          member.status === 'active' &&
+          member.role !== 'project_admin' &&
+          !member.canAdjustChat
+        )
+          fail(409, 'PROJECT_DEFAULT_ASSISTANT_REQUIRED', '受限成员需要先分配有效默认助手')
+
         const current = members(project),
           previous = current.find((entry) => entry.userId === member.userId)
         revision(previous?.revision ?? 0, value.expectedRevision)

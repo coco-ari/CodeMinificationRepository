@@ -18,7 +18,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   if (!(await stat(root)).isDirectory()) throw new Error('发行路径不是目录')
   if (!(await stat(join(root, 'node_modules'))).isDirectory()) throw new Error('发行目录缺少运行依赖')
   const adapters = join(root, 'agent-demo/t3-adapters')
-  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'thread-inputs.ts', 'project-directory/index.ts', 'project-directory/schema.ts']) {
+  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'thread-inputs.ts', 'project-directory/index.ts', 'project-directory/schema.ts', 'assistants/index.ts', 'assistants/schema.ts', 'assistants/policy.ts']) {
     const path = await realpath(join(adapters, file))
     if (!within(root, path) || !(await stat(path)).isFile()) throw new Error(`发行工作区文件缺失或越界：${file}`)
   }
@@ -31,7 +31,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   const temporaryRoot = await realpath(tmpdir()), prefix = 'autoops-workspace-release-'
   const dataDir = await mkdtemp(join(temporaryRoot, prefix))
   const previousResources = process.env.AUTOOPS_BUSINESS_RESOURCES_DIR
-  let store, management, authoring, credentials, projectDirectory
+  let store, management, authoring, credentials, projectDirectory, assistants
   try {
     process.env.AUTOOPS_BUSINESS_RESOURCES_DIR = adapters
     const [{ createWorkspaceStore }, { inspectZip }] = await Promise.all([
@@ -52,6 +52,15 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     projectDirectory.close()
     projectDirectory = createProjectDirectory(directoryOptions)
     assert.equal(projectDirectory.create('release-smoke-actor', createRequest).id, created.id)
+    const { createAssistantDirectory } = await import(pathToFileURL(join(adapters, 'assistants/index.ts')).href)
+    const assistantOptions = { dataDir, membership: () => ({ userId: 'release-smoke-actor', role: 'project_admin', workspaceAccess: 'internal', environmentIds: [], status: 'active' }), manage: () => {}, validate: () => {}, validateTarget: () => {} }
+    assistants = createAssistantDirectory(assistantOptions)
+    const assistantRequest = { requestId: randomUUID(), expectedRevision: 0, value: { name: '发行助手', description: '', instructions: '', enabled: true, configuration: { agentId: 'a-project', executionBinding: { kind: 'platform' }, environmentId: null, workspaceType: 'internal', visibility: 'private', model: { instanceId: 'codex', model: 'release-model', reasoningEffort: null }, skillIds: [] } } }
+    const assistant = assistants.save('release-smoke-actor', created.id, null, assistantRequest)
+    assistants.close()
+    assistants = createAssistantDirectory(assistantOptions)
+    assert.equal(assistants.save('release-smoke-actor', created.id, null, assistantRequest).id, assistant.id)
+
     const projectId = 'p-release-smoke', actorId = 'release-smoke-actor', requestId = randomUUID()
     const diagnostics = []
     let authorizations = 0
@@ -119,7 +128,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, currentInput: second.id, previousInputPreserved: true, repeatedRequestPreserved: true }
   } finally {
     try {
-      const results = await Promise.allSettled([projectDirectory?.close(), store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()])
+      const results = await Promise.allSettled([assistants?.close(), projectDirectory?.close(), store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()])
       const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
       if (errors.length) throw new AggregateError(errors, '发行冒烟资源关闭失败')
     }
