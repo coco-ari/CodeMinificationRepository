@@ -185,6 +185,41 @@ test('锁定CLI的内联消息、本机延迟工具和搜索结果保持可用',
   assert.equal((await f.call({ ...body(), input, tools: null })).status, 200)
 })
 
+test('锁定CLI完整内联消息的本机id不变成提供者远端引用', async t => {
+  const f = await fixture(t)
+  const input = ['developer', 'user', 'user', 'user', 'user'].map((role, index) => ({
+    type: 'message', id: `fixture-local-message-${index}`, role,
+    content: [{ type: 'input_text', text: '本轮虚构的内联资料' }],
+  }))
+  const result = await f.call({ ...body(), input })
+  assert.equal(result.status, 200)
+  assert.deepEqual(f.received[0]!.body.input, input.map(({ id: _id, ...message }) => message))
+  assert.equal(f.received.length, 1)
+  assert.equal(f.secretsRead, 1)
+})
+
+test('本机消息id只能附于完整显式内联消息，引用和不完整输入仍在读取凭据前拒绝', async t => {
+  const f = await fixture(t)
+  const content = [{ type: 'input_text', text: '虚构正文' }]
+  const inputs = [
+    [{ id: 'remote-message' }],
+    [{ id: 'ambiguous-message', role: 'user', content }],
+    [{ type: 'message', id: 'remote-message', role: 'user' }],
+    [{ type: 'message', id: 'remote-message', role: 'user', content: [] }],
+    [{ type: 'message', id: 'remote-message', role: 'user', content: '' }],
+    [{ type: 'message', id: { other: 'remote-message' }, role: 'user', content }],
+    [{ type: 'message', id: 'x'.repeat(257), role: 'user', content }],
+    [{ type: 'message', id: 'bad\nmessage', role: 'user', content }],
+    [{ type: 'message', id: 'inline', role: 'user', content, file_id: 'remote-file' }],
+    [{ type: 'message', id: 'inline', role: 'user', content: [{ type: 'input_file', file_id: 'remote-file' }] }],
+    [{ type: 'message', id: 'inline', role: 'user', content: [{ type: 'input_image', image_url: 'https://private.invalid/file' }] }],
+    [{ type: 'item_reference', id: 'remote-message', role: 'user', content }],
+  ]
+  for (const input of inputs) assert.equal((await f.call({ ...body(), input })).status, 400)
+  assert.equal(f.received.length, 0)
+  assert.equal(f.secretsRead, 0)
+})
+
 test('流式输出中撤回共享，迟到分块不能交付，原请求不重放', { timeout: 3_000 }, async t => {
   const first = Promise.withResolvers<ServerResponse>()
   const checked = Promise.withResolvers<void>()

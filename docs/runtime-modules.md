@@ -1450,3 +1450,31 @@ D2 撤权阶段已沿原 core state 正常完成：同 manager 正常启用新�
 根独立现场 `.deployment/switch-54def345-stable1-evidence/live-54def345-independent-v1.json` SHA256 `33b6e1d3aebc873255d32f261c873339af0bfa3280bc0ae44a8b94615544a978`：Web439660、launcher439504、native439516实际cwd、Node24.22.0和原DATA_DIR正确，start ticks分别33944480/33943297/33943389。公开HTML4fdc991c及两Worker字节匹配，公开及回环健康正常。当前全部档案、密钥、账号五表、完整resource-release表、原12任务/9版本摘要保持，原Agent59368及Mac自用不变，九类原生活动全0。没有数据库替换、空库、备份或账号重接管。
 
 四状态为准备归属修复代码完成、固定54完整自动检查通过、严格发行已生效、真实新共享模型仍待复验。正常凭据配置仅改实际Web PID/release，新配置bf4b11c7，原账号ID、namespace和权限保持。下一步沿同一设备/state/profile但新casePrefix做正例；955失败不能被发行成功替代，其余未完成项继续，不报告整体完成。
+
+## 待分配成员公开 RPC 拒绝与原授权库保留（2026-10-27）
+
+当前54下，原v1已完成Lin七GET/两绑定拒绝，但在无绑定RPC上误把内部THREAD_NOT_FOUND当作公开错误，且未持久raw Exit。该失败原件保留；旧三UUID仅沿正常GET恢复，不重发，也不补写原RPC通过。两候选原因分别核验：正式Effect/原生RPC codec将该内部拒绝公开映射为EnvironmentAuthorizationError；原payload符合正式解码，篡改payload红测另行拒绝。五份现场source map与54源码一致，确认是验收器误读公开合同，本次无需改产品。
+
+独占v2包SHA256 `587a32cbeba6d59451698a6b741c60c52fe77363cbd0d3e81168b949bed6f4d7`，manifest86f316f6；根独立Node13/Python2/原生3通过，均为辅助检查。新实际只执行Lin无绑定RPC与Chen七GET/两绑定/无绑定RPC。两个RPC均精确单次Fail、EnvironmentAuthorizationError、原公开消息及orchestration:read scope，持久Exit后再判断；前后正常同Cookie/同WS server.probe正对照通过。四个新潜在写UUID各一次，原Lin三个UUID未复用，initialMessage缺省、generateTitle=false，无模型调用。十一张本轮范围表前后为0。
+
+原件 `.deployment/e2-pending-rpc-v2-actual-evidence-v1/authorization-pending-rpc-20261027-v2-evidence/0038-result.json` SHA256 `92b1bb3cfbb90947f2d192eca8f404f5dc77fb737d0e440695f2d7aea5c9969a`；根独立索引SHA256 `227103e951bec73874f3430a513764715f25013dc11d6e6825241fdbf4d51a8a`。原Lin RPC原因仍不确认，不能以新请求倒填旧结果。根另只读整份project-directory原inode/设备、全部表列及原行hash、迁移，对54切换前基线逐项相同，quick/foreign_key检查通过；两人仍active reader且authorizationPending，证据 `.deployment/e2-pending-rpc-v2-directory-preservation-actual-v1.json` SHA256 `4609c16b9887f099450168f50ece8d2192c702cc4d9d8cb490ca72da8b65e999`。未启用新授权。九类全局原生活动/计划/更新均0，原C6连接441402仅空闲保留收据。
+
+四状态为原授权代码完成、相关自动通过、54选定拒绝已生效、新选定拒绝及原授权保留真实通过；完整E2、合法旧问答、实际MCP工具准备拒绝及其他角色/环境/共享组合仍待验。辅助脚本通过不代替这些业务。
+
+## 54 正常共享连接、原失败与模型网关复现（2026-10-27）
+
+新正常运行辅助v2第一次在任何attempt、秘密读取或进程启动前失败。根只读诊断确认两种原因：外层manifest完整不能证明内层正式包完整；打包copytree递归忽略manifest.json确实漏掉正式CLI/ops两文件。原包及全部71文件不变，独占补充包SHA256 `2ce622a86de254d04861a28b0f67754e23e3c00f1c6daa8f7ee19adc37e03060`仅wx写回正式原2份manifest，正文0b29b63f/4838df1b精确。原遗漏红、补充后正式全包校验绿及根3项通过，诊断确认尚无attempt后才首次正常启动；不是用新case绕过未知结果。
+
+设备device.json保持原字节。旧owned relay394481经精确PID/start ticks核验后正常SIGTERM，新440819仍在同127.0.0.1:42475，仅替换本轮测试转发器；替换证明 `.deployment/c6-owned-relay-replacement-54-actual-result-v1.json` SHA256 `b8397f9cfab9ba394365ade09445811130a8e66f0236c371afb7ed4fcf79b87e`，原state八表、旧完整收据、idle历史及设备摘要不变。新relay未arm、未丢任何回复。正式54 CLI0.4.1以正常UID1000临时Docker组启动441402/ticks34076436，原设备/state/profile/12模型及选定技能不变；正常提供者HTTP目录和受限recipient目录通过，proof7e414724。
+
+唯一新case c6-real-54def345-20261027-v1-01、线程fbad52ed-4995-48ec-ab9e-ab5094d40ea0、消息b09b51c7-480a-43a4-927f-93acc5a3dcce。正常绑定、launch、单次附件与recipient读取正例/provider越权拒绝通过；本轮已越过955的设备归属准备错误并产生startTurn，实际23:32:48.745开始、23:32:50.227自然failed，返回400 SHARED_MODEL_INPUT_INVALID。没有有效模型答案、技能或工具正文、只读写拒绝证明。原件 `.deployment/c6-positive-54-v1-01-actual-evidence-v1/`及正常recipient原投影保留，不重发f59/eeac/fbad。旧辅助器只记stderr摘要的限制也保留，不伪造旧原文；当前CLI空闲保留，待原中央/本机完整收据核验。
+
+先核网关调用链为正式HeadlessCodexRunner → sharedContainerArguments/固定Codex → 本机共享模型网关 → 配置上游。候选一为实际content-encoding被252行提前拒绝；候选二为validateBody将所有message.id等同远端handle。未先改实现，原20项网关测试全部绿但未覆盖实际形态。根实际运行独占shape探针：同63ceb822镜像、同真实12模型目录及已选技能，新空owned资料与虚构scope/key、network:none，仅本机mock UDS；无真实凭据、平台请求或模型推理。首请求合法JSON27772B、encoding absent、固定grok-4.6/medium，五条inline message带string id；原54网关400且mock上游计数0。故排除首候选的本次首请求，定位第二分支后须补真实形态红测并保留远端引用负例，不因准备完成而声称C6通过。
+
+探针包SHA256 `3898ad3da8c6d5b32d101227b1a30337c6031da3bdc2fcd8b68489e89e45987c`，manifest4490fc3e、11文件及三份正式源码对固定Git逐字核验；根4项shape回归通过。实际原件 `.deployment/c6-gateway-shape-54-v1/root-actual-result-v1.json` SHA256 `e78496a075c0096be57846e5d2ffe7f702ae9086be338fd630f41cd74f3f8c66`，只持久固定结构键/类型/枚举，不落任意header或正文；两owned诊断容器均正常stop/remove。四状态：原准备修复代码/自动/部署已完成，真实已进入模型请求但业务失败；新请求形态修复待完成，自动红绿/发行及真实共享模型、隔离、断线和后台撤回继续推进。
+
+已按上述根因最小修复[共享模型网关](../agent-demo/customer-agent/shared-model-gateway.ts)：仅显式message、合法role、非空typed正文数组及不超过256字符且无控制字符的本机id通过，检查完整正文后转发时移除id；省略type、缺正文、item_reference、file_id/外部URL继续在读取凭据前拒绝。没有更换模型、强度、上游或执行位置。两条新行为回归覆盖实际五消息与十二类歧义/越权输入，原红400保留；修复后网关22/22、关联39/39通过，根全客户153/153、客户类型、296源边界通过。正式HELLO及包清单同步0.4.2，原设备标识和协议版本不变，README仅补安装/行为说明，历史0.4.1恢复记录保留。
+
+新独占修复探针仍只用本机mock，无真实凭据/平台请求/推理。包c99f5331、manifest9509eb5d，实际 `.deployment/c6-gateway-shape-fixed-v1/root-actual-result-v1.json` SHA256 `a56fc8a139b0b7cb3244b8108712bb764879152cc9f9b46e2c0edf7afb2ca945`：通过本地校验后mock上游恰好一次，其故意502被正式网关正确公开为SHARED_MODEL_UPSTREAM_FAILED；此前为400且上游0。两次安全正文结构相同，实际wire27772/27778B，原正文只在RAM而未比较同字节；独立comparison记录该边界，不用长度相近声称请求完全相同。两owned容器正常stop/remove。四状态更新为新修复代码完成、相关自动通过、完整CI及发行待验、真实业务待验。
+
+原fbad完整中央/本机/原生只读提取 `.deployment/c6-positive-54-v1-01-actual-evidence-v1/complete-owned-ledgers-v1.json` SHA256 `33a64ddbe21a3d892ae8be25ee21e2f5c26b5f9a524179924b076be3ff093d5f`：唯一open/ensure/start三方法中央及本机均completed，startTurn完整raw语义相同；native实际failed，传输接收完成不等于模型运行成功。open.cwd及ensure四字段的raw差分保留，合法投影仍须沿正式验证器核对，不删字段凑相等。原session空闲、locks/events0，唯一streams行原session/epoch匹配且tail=ack=3，是正式Store保留的已确认游标；不删历史凑零行。六原本机命令、两session及八张完整原表继续保护，后续新发行沿正常空闲停止流程核对前后全表与收据。

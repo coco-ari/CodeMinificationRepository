@@ -133,9 +133,12 @@ function validateBody(value: unknown, scope: Scope, effort: string | null, compa
       rejectRemoteHandles(item)
       switch (item.type) {
         case undefined: case 'message':
-          if ('id' in item) throw invalid()
+          if ('id' in item && (item.type !== 'message' || !text(item.id) || item.id.length > 256 || /[\x00-\x1f\x7f]/.test(item.id) ||
+              !Array.isArray(item.content) || item.content.length === 0)) throw invalid()
           if (!['user', 'assistant', 'system', 'developer'].includes(String(item.role))) throw invalid()
           checkContent(item.content)
+          // 锁定 CLI 为完整内联消息生成本机 id；去除标识后转发正文，不能将其当提供者远端对象引用。
+          delete item.id
           break
         case 'agent_message':
           if (!text(item.author) || !text(item.recipient)) throw invalid()
