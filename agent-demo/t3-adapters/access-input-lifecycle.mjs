@@ -197,8 +197,9 @@ export function createAccessInputLifecycle({ db, fail, identifier, now }) {
         const current = workspaceVersionResourceSnapshot(snapshot.threadId)
         if (!current || current.truncated || JSON.stringify(current) !== JSON.stringify(snapshot))
           return false
+        // 重放和原生附加事件不构成新的释放；新业务命令已先清除此收据并重新保护。
         db.prepare(
-          'INSERT INTO t3_workspace_version_resource_releases VALUES(?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET version_id=excluded.version_id,sequence=excluded.sequence,created_at=excluded.created_at',
+          'INSERT INTO t3_workspace_version_resource_releases VALUES(?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET version_id=excluded.version_id,sequence=excluded.sequence,created_at=excluded.created_at WHERE t3_workspace_version_resource_releases.version_id<>excluded.version_id',
         ).run(current.threadId, current.versionId, sequence, new Date(now()).toISOString())
         const result = operation()
         if (result && typeof result.then === 'function')

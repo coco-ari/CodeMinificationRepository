@@ -1131,8 +1131,28 @@ v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3`
 
 最小修复只在迁移的 version/imported/missing/invalid 实质结果变化时更新报告；每次启动仍执行原内容校验、旧任务导入和版本补全。`imported` 保留当次执行计数，真实导入后的 1→0 仍更新，后续 0→0 才稳定。缺失、同大小损坏和经原接口修复仍产生真实报告，不通过跳过校验或放宽发行比较解决。
 
-[新增回归](../test/source-archive-migration.test.mjs) 使用真实 ZIP、文件、Store 和 SQLite，旧实现 6 例中 2 个幂等场景失败，修后 6/6；关联部署、档案、生命周期、保留、HTTP、网关及适配器共 138/138，通过适配器类型与基础检查。证据 `.deployment/current-release-switch/stable3-deployment-diagnostic/source-archive-{valid-before-corrected,valid-after,related-after}.log`。完整 CI、新发行及真实部署仍待验证；这项修复和文件核验不代替 D1、B4、D5/E5 的业务验收。
+[新增回归](../test/source-archive-migration.test.mjs) 使用真实 ZIP、文件、Store 和 SQLite，旧实现 6 例中 2 个幂等场景失败，修后 6/6；关联部署、档案、生命周期、保留、HTTP、网关及适配器共 138/138，通过适配器类型与基础检查。证据 `.deployment/current-release-switch/stable3-deployment-diagnostic/source-archive-{valid-before-corrected,valid-after,related-after}.log`。
+
+修复已固定并正常推送为 `e8ddf45a`，[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40336863331)和[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40336863621)均通过：Node 811 通过/2 跳过，原生 242 通过/2 跳过，Web 612/612、客户 76/76；日志 `.deployment/ci-e8ddf45a.log` SHA256 `13b4080f98418999f6e4b6663a4a23ea6b334ede0d3f2fb8ae537129c020f8fc`。独占源码归档和四项 fresh 构建、ZIP 冒烟、全部发行文件及官方 Linux 原生依赖核对通过；发行清单 `57754b534ae4e92b7c2d886890dfb47db9b424563d84a612da4ceb9188c684e7`，原生依赖清单 `2b3f77a311f3cd9c4d32625441a7b487a4ab50eb5b03910346e1cc73d3761a6c`。并发进行的账号改动未纳入该提交或冻结源码；中断过的首次 Web 部分构建另行保留，不当作成功复用。
+
+真实 `e8ddf45a-stable1` 新 Worker 核对通过，新 Web 也健康；两个阶段的完整部署摘要均精确等于原基线 `900f222bcd4de88cb64d2d485266739c6980e9cc1c99aaaff141a190df84f0b4`，迁移报告没有重复改写。Web 阶段仍因 `t3_native_auth_sessions` 在快照读取后变化而拒绝，已自动恢复旧程序及当前数据，没有恢复数据库。随后只读比对确认原 26 行全部保留，新增 2 行、没有过期行。代码入口为 `EnvironmentAuth` 的原 Cookie 会话重连：先签发原生会话，再写映射；尚须核验原 Cookie、原生会话及映射的同身份/期限关系，并在有限窗口取得一致快照后重新部署。旧失败保持失败，不把新 Worker 的单阶段通过当作整项闭环。证据 `.deployment/current-release-switch/owner-stages-e8ddf45a-stable1/` 与原切换收据。
+
+当前四类状态为：**代码完成；自动测试通过；部署未闭环；真实数据保留复验未完成**。这项修复和文件核验不代替 D1、B4、D5/E5 的业务验收，继续自行解决上述核对问题。
 
 同一验收继续保留两项真实边界：B5 专属环境三个连接的正常创建/测试/启用及原 12 个写收据已验证，guest 五次跨项目读取均按合同返回 404；真实 MCP 工具使用尚未通过。D2 五分钟计划实际产生 `workspace_update_abd02a53-d0e1-404c-aeff-6a681a19f650`，因 Git 超时失败，旧当前内容与原收据保留，计划已停用；后续服务器 Git TLS 与私有 `ls-remote` 恢复，只证明当时连通，不将原失败改记为周期成功。
 
 完整清单新增 A6：实际 agent-demo 网关和 Worker 仍使用四个静态账号，未接上已确认的持久账号、本人改密、管理员重置及停用。独立后端的实现不能代替实际链路；继续在原链路补齐，不启用林晓、陈一的新授权，不通过伪造会话或操作用户表制造验收身份。
+
+真实 `e8ddf45a-stable2` 仍为失败，自动恢复旧程序及当前数据。新窄核验保留原 28 条映射、原 231 条 Cookie 和原 362 条原生会话授权事实；新 Worker owner 通过，Web 阶段等待两轮一致快照时检测到非映射变化，原比较器列出 4 行 `orchestration_v2_projection_threads` 摘要变化。此时尚未完成事件支持核对，不将其直接归为合法重连。收据与三份阶段文件位于 `.deployment/current-release-switch/*e8ddf45a-stable2*`；下一步复现快照后 attached 抵达的时序，复用原 owner 对完整事件、身份、执行位置及线程仅时间变化的规则，不能直接忽略非 auth 变化。
+
+真实 `e8ddf45a-stable3` 使用逐轮完整 owner 的稳态核验；post-worker 两轮及最终复核均通过。post-web 三库、原附着事件和原存储报告均有合法来源，完整 owner 进一步拒绝 `t3_workspace_version_resource_releases` 原行变化；没有将这张表豁免。已自动恢复旧程序及当前数据，失败收据保留在 `.deployment/current-release-switch/*e8ddf45a-stable3*`。`access-input-lifecycle` 的释放记录无条件更新 sequence/created_at 是候选原因，现须复现并排除真实新任务重新占用/再次释放，再最小修复和固定新候选；此项仍未闭环。
+
+## 已释放资料重复启动写入（2026-10-26）
+
+`stable3` 完整 owner 拒绝后，独立只读比较确认唯一原释放记录的 thread/version/sequence 均未改变，sequence 仍为 1433，只有 `created_at` 从 `14:53:32.871Z` 变为 `15:03:34.555Z`；替回原安全时间后，完整四列 SHA256 精确命中原基线 `9b9716c5108d91210a1e97b69394055418687d336862fe4870ddce8050b30895`。原生新增八条均为提供者附着事件，没有新终态事件。原失败不追记为成功。
+
+第一种可验证原因是 [引用所有者](../agent-demo/t3-adapters/access-input-lifecycle.mjs) 无条件 UPSERT 在同版本、同持久事件重复维护时改写时间；第二种是 [原生生命周期](../vendor/t3code/apps/server/src/autoops/workspaceInputLifecycle.ts) 读取线程最新事件位置，附着等非业务事件前进也会改写释放位置。新独立 [实际公开访问服务回归](../test/t3-workspace-version-release.test.mjs) 旧实现 6 项中 3 项失败，证明两类重放及维护失败后的恢复均会覆盖原成功收据；新 message/edit 的重新保护原本正常，排除真实新业务需要释放这一解释。
+
+最小修改只对同版本的已有释放记录停止重复更新，保留首次位置与时间；不同版本、新业务先 arm 后的首次释放仍按原路径保存。每次维护继续验证有效事件位置、当前完整来源快照和同步事务，并执行回收恢复操作；失败回滚、旧快照/跨项目/跨版本、未知来源和异步回调仍拒绝。没有修改原生终态证明、保护引用、档案内容校验或发行数据比较。
+
+新增 6/6、原关联 5/5 通过，根代理另独立复跑 6/6；独立原生生命周期 7/7、嵌套事务回归 2/2 通过。证据 `.deployment/workspace-release-receipt-{red,green}.log` 与 `.deployment/current-release-switch/stable3-workspace-resource-{readonly,hash-reconstruction}.json`。此改动没有页面操作变化；用户保留原资料与任务恢复，开发只在已有所有者修复写入语义，Agent 沿原收据/来源判断结果。代码完成，自动检查部分通过，新固定候选 CI、部署生效及真实保留复验仍待完成。
