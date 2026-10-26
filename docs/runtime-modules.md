@@ -1056,3 +1056,13 @@ macOS 定向 Node 22 项、Web 8 项、独立 ZIP 分发及真实本地 WebSocke
 其二，真实第一次原生目录已读到技能，但 SDK 的临时进程 scope 结束只停止 Docker attach，容器仍运行，第二次启动按原保护规则拒绝。保留 `native-catalog-AVA9hm` 原失败现场后，复核普通 wrap 仍须拒绝运行旧容器，排除把新配置/身份误用当根因；修复仅为临时原生目录提供本机 bound lease，在 scope 真实释放后按该 lease 的固定 CID/名称停止并再核对。未启动、被旧进程拒绝、并发、重复及迟到回调均不能停止后来主进程；未知继续保留。未把 AgentScope.clear 或客户端退出当停止证明。
 
 v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3` 对应真实新探测通过，生产 owner 9 项、Headless 6 项、客户完整 64 项及类型检查通过。测试机原生 `model/list` 返回 8 个实际模型及各自默认/合法思考档位；首次 5 个内置技能经过生产配置再发现后全部禁用，最后启用数 0，容器停止已核对。`.deployment/shared-native-catalog-v3-result.json` 明确 `nativeCatalogPassed:true`、`noInference:true`、`curatedSkillsAccepted:false`、`sharedBusinessAccepted:false`；该结果证明真实目录与收束流程，不代替选定技能、模型推理、双用户执行或原收据恢复验收。两次失败目录和原 JSON 均保留，没有重做原任务伪装恢复。
+
+## 提供者模型目录与验收边界（2026-10-26）
+
+真实测试发现：[共享 profile](../agent-demo/customer-agent/shared-docker-profile.ts) 未传入提供者模型目录时，Codex 返回 8 个内置 GPT；当前提供者 CPA 实际公布 12 个 Grok，两者没有交集。第一项可能原因是本机 profile 没有目录字段、生成配置也没有 `model_catalog_json`，代码及原失败测试证实；第二项是 CLI 忽略该配置，既有 [native-catalog](../agent-demo/t3-adapters/native-catalog.mjs) 和官方 Codex 0.159.2 配置合同提供反证，随后真实新探测进一步排除。不能把内置目录可见当作提供者模型已可用。
+
+新增可选 `modelCatalogPath` 仅由提供者显式配置本机常规文件，不从远端 scope 或平台默认值补入。文件有权限、UTF-8、JSON、数量和大小限制，原字节摘要纳入 profile 修订；容器只读挂载本次固定副本，原件变化拒绝旧 scope。未配置者保留原来源，最终模型及强度仍由实际原生 CLI 目录裁决。没有增加运行依赖或导入平台所属模块到客户包。先添加 [失败回归](../agent-demo/customer-agent/shared-model-catalog.test.ts) 取得 3 红，再完成目录和原 lease 合计 13 项、完整客户 68 项及客户/原生严格类型验证。日志 `/tmp/autoops-shared-model-catalog-{before,after}.log`、`/tmp/autoops-model-catalog-all-customer.log`。
+
+通过直接 SSH，以本轮独立目标中新 profile `linux-cpa-readonly-validation` revision 3 验证：镜像 ID `sha256:63ceb822d4747132da262e8bcc533933035158e91439ad6b6fb18ffa4803e8a8`，profile 摘要 `82d4237127a1529ca88746b06c8810b701d5220a5ed9eada5689980c8cce86b3`；真实 OS 10 项通过且容器确认停止。提供者 HTTPS 实时目录转换为本机兼容文件（摘要 `f0811c74e8f19a8b937c16bbecbe8be744da60d03fcc9529fdaf0745955c7d31`），显式使用原生文件工具；真实 Codex 0.159.2 两次目录进程返回完全相同的 12 个模型及各自强度，未选择的 5 个内置技能禁用。证据 `.deployment/provider-profile-cpa-discovery.json`、`.deployment/shared-native-catalog-v4-result.json` 和服务器 `native-catalog-S32KXV/result.json`；结果仍为 `noInference:true`、`sharedBusinessAccepted:false`。目录验证不证明模型推理、技能实际调用、跨用户附件、撤回或断线恢复。
+
+`f680dc14` 完整运行 CI 的 Node/原生部分通过，Linux 浏览器 604 通过、6 失败（助手表单焦点/选择状态及实际身份切换边界），没有把该 CI 记为通过。独立发行已构建、上传并按源码清单及实际官方 Linux 依赖逐字核验，尚未切换正在运行的服务；正式依赖来源以存量发行清单登记的 `/home/tao/autoops-agent-demo/runtime/t3-0.1.1-linux-x64/node_modules` 为准，历史对照目录已不适用。测试账号入口目前仍只有 4 个存量身份；林晓/陈一继续待分配，不通过改会话表或借独立后端制造验收身份。私有隔离仓库 `coco-ari/autoops-acceptance-20261026` 已正常推送，后续真实资料和部署验收继续使用它，不能据准备材料宣称业务完成。

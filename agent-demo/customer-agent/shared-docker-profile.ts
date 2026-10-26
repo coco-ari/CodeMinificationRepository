@@ -21,15 +21,52 @@ const Configuration = S.Struct({
   imageDigest:S.String.check(S.isPattern(/^sha256:[a-f0-9]{64}$/)),
   skills:S.Array(Text).check(S.isMaxLength(32)),
   gateway:S.Struct({url:Text,authorizationEnv:S.String.check(S.isPattern(/^[A-Z][A-Z0-9_]{0,127}$/))}),
+  modelCatalogPath:S.optionalKey(Text),
   dockerBinary:S.optionalKey(Text),sudo:S.optionalKey(S.Boolean),
 })
 type SkillFile = {path:string;bytes:Buffer}
 export type LocalSharedProfile = {
   descriptor:SharedProfileDescriptor;configuration:typeof Configuration.Type;
   skillFiles:ReadonlyArray<SkillFile>;
+  modelCatalog?:{bytes:Buffer;sha256:string};
 }
 const fail = (code:string,message:string):never=>{throw new ConnectorError(code,message)}
 const stable = (value:unknown):string=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item)
+
+async function readLocalModelCatalog(path:string):Promise<{bytes:Buffer;sha256:string}> {
+  const maximum=1024*1024
+  if(!isAbsolute(path)||/[\x00-\x1f]/.test(path)||await realpath(path)!==path)throw new Error()
+  const handle=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK)
+  let bytes:Buffer
+  try {
+    const stat=await handle.stat()
+    if(!stat.isFile()||stat.size<1||stat.size>maximum||(stat.mode&0o022)!==0)throw new Error()
+    // 即使本机原件并发增长，也只读固定上限，不能依赖此前stat无限读取。
+    const buffer=Buffer.allocUnsafe(maximum+1);let length=0
+    while(length<buffer.length){const read=await handle.read(buffer,length,buffer.length-length,length);if(!read.bytesRead)break;length+=read.bytesRead}
+    if(length>maximum)throw new Error()
+    bytes=Buffer.from(buffer.subarray(0,length))
+  } finally {await handle.close()}
+  const value:unknown=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes))
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>key!=='models'))throw new Error()
+  const models=(value as {models?:unknown}).models
+  if(!Array.isArray(models)||models.length<1||models.length>1000)throw new Error()
+  const slugs=new Set<string>(),effort=(value:unknown)=>typeof value==='string'&&value.length>0&&value.length<=40&&!/[\x00-\x1f]/.test(value)
+  for(const model of models) {
+    if(!model||typeof model!=='object'||Array.isArray(model)||typeof model.slug!=='string'||!model.slug.trim()||model.slug!==model.slug.trim()||model.slug.length>128||/[\x00-\x1f]/.test(model.slug)||slugs.has(model.slug))throw new Error()
+    slugs.add(model.slug)
+    if(model.supported_reasoning_levels!==undefined&&(!Array.isArray(model.supported_reasoning_levels)||model.supported_reasoning_levels.length>16||model.supported_reasoning_levels.some((item:unknown)=>!item||typeof item!=='object'||!('effort' in item)||!effort(item.effort))))throw new Error()
+    if(model.default_reasoning_level!==undefined&&model.default_reasoning_level!==null&&!effort(model.default_reasoning_level))throw new Error()
+  }
+  let nodes=0
+  const inspect=(item:unknown,depth:number):void=>{
+    if(++nodes>50_000||depth>24)throw new Error()
+    if(typeof item==='string'&&item.length>64_000)throw new Error()
+    if(item&&typeof item==='object')for(const [key,child] of Object.entries(item)){if(key.length>200)throw new Error();inspect(child,depth+1)}
+  }
+  inspect(value,0)
+  return {bytes,sha256:createHash('sha256').update(bytes).digest('hex')}
+}
 
 /** 只接收提供者本机显式文件；不能由远端 scope 指定宿主挂载、镜像或技能路径。 */
 export async function loadSharedDockerProfile(path:string):Promise<LocalSharedProfile> {
@@ -45,6 +82,7 @@ export async function loadSharedDockerProfile(path:string):Promise<LocalSharedPr
     const upstream=new URL(configuration.gateway.url)
     if(!['https:','http:'].includes(upstream.protocol)||upstream.username||upstream.password||upstream.search||upstream.hash)throw new Error()
     if(configuration.dockerBinary && (!isAbsolute(configuration.dockerBinary)||configuration.dockerBinary.includes(',')))throw new Error()
+    const modelCatalog=configuration.modelCatalogPath===undefined?undefined:await readLocalModelCatalog(configuration.modelCatalogPath)
     const skillFiles:SkillFile[]=[]
     let size=0
     for(const root of configuration.skills) {
@@ -69,8 +107,8 @@ export async function loadSharedDockerProfile(path:string):Promise<LocalSharedPr
       await visit(root)
       if(!skillFiles.some(file=>file.path===join(label,'SKILL.md')))throw new Error()
     }
-    const digest=createHash('sha256').update(stable({configuration,skills:skillFiles.map(file=>({path:file.path,sha256:createHash('sha256').update(file.bytes).digest('hex')}))})).digest('hex')
-    return {configuration,skillFiles,descriptor:{id:configuration.id,revision:configuration.revision,digest,imageDigest:configuration.imageDigest,policy:'linux-docker-readonly-v1'}}
+    const digest=createHash('sha256').update(stable({configuration,skills:skillFiles.map(file=>({path:file.path,sha256:createHash('sha256').update(file.bytes).digest('hex')})),...(modelCatalog?{modelCatalogSha256:modelCatalog.sha256}:{})})).digest('hex')
+    return {configuration,skillFiles,...(modelCatalog?{modelCatalog}:{}),descriptor:{id:configuration.id,revision:configuration.revision,digest,imageDigest:configuration.imageDigest,policy:'linux-docker-readonly-v1'}}
   } catch {return fail('shared_profile_invalid','本机隔离profile、镜像或技能范围无效，请由提供者核对')}
 }
 
@@ -92,8 +130,9 @@ const mount = (source:string,target:string,readonly:boolean)=>{
   if([source,target].some(path=>!isAbsolute(path)||/[\x00-\x1f,]/.test(path)))return fail('shared_mount_invalid','隔离目录路径无效')
   return `type=bind,src=${source},dst=${target}${readonly?',readonly,bind-recursive=disabled':''}`
 }
-export function sharedContainerArguments(input:{profile:LocalSharedProfile;workspace:LocalWorkspace;name:string;cidFile:string;home:string;configuration:string;attachments:string;gateway:string;entry:string;uid:number;gid:number;command:string;args:ReadonlyArray<string>;skillsReadonly?:boolean}):ReadonlyArray<string> {
+export function sharedContainerArguments(input:{profile:LocalSharedProfile;workspace:LocalWorkspace;name:string;cidFile:string;home:string;configuration:string;attachments:string;gateway:string;entry:string;uid:number;gid:number;command:string;args:ReadonlyArray<string>;skillsReadonly?:boolean;modelCatalog?:string}):ReadonlyArray<string> {
   if(input.uid<=0||input.gid<0)return fail('shared_user_required','共享容器必须使用非 root 身份')
+  if(input.profile.modelCatalog&&!input.modelCatalog)return fail('shared_mount_invalid','本次隔离模型目录尚未固定')
   return ['run','--pull=never','--interactive','--name',input.name,'--cidfile',input.cidFile,
     '--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges=true',
     '--pids-limit','64','--memory','384m','--cpus','1','--user',`${input.uid}:${input.gid}`,
@@ -102,6 +141,7 @@ export function sharedContainerArguments(input:{profile:LocalSharedProfile;works
     '--mount',mount(input.home,'/home/autoops',false),
     ...(input.skillsReadonly?['--mount',mount(join(input.home,'.codex','skills'),'/home/autoops/.codex/skills',true)]:[]),
     '--mount',mount(input.configuration,'/home/autoops/.codex/config.toml',true),
+    ...(input.modelCatalog?['--mount',mount(input.modelCatalog,'/autoops/model-catalog.json',true)]:[]),
     '--mount',mount(input.attachments,'/autoops/attachments',true),
     '--mount',mount(input.gateway,'/autoops/gateway',true),
     '--mount',mount(input.entry,'/autoops-shared-entry.mjs',true),
@@ -109,8 +149,8 @@ export function sharedContainerArguments(input:{profile:LocalSharedProfile;works
     '--entrypoint','node',input.profile.descriptor.imageDigest,'/autoops-shared-entry.mjs',input.workspace.realPath,input.command,...input.args]
 }
 
-export function sharedCodexConfiguration(source:string,disabledSkills:ReadonlyArray<string>=[]):string {
-  return 'model_provider = "autoops_shared"\nweb_search = "disabled"\n[features]\nreasoning_effort_override = false\nimage_generation = false\n'+`[projects.${JSON.stringify(source)}]\ntrust_level = "untrusted"\n`+'[model_providers.autoops_shared]\nname = "AutoOps shared gateway"\nbase_url = "http://127.0.0.1:18766/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nsupports_websockets = false\n'+disabledSkills.map(path=>`\n[[skills.config]]\npath = ${JSON.stringify(path)}\nenabled = false\n`).join('')
+export function sharedCodexConfiguration(source:string,disabledSkills:ReadonlyArray<string>=[],hasModelCatalog=false):string {
+  return 'model_provider = "autoops_shared"\nweb_search = "disabled"\n'+(hasModelCatalog?'model_catalog_json = "/autoops/model-catalog.json"\n':'')+'[features]\nreasoning_effort_override = false\nimage_generation = false\n'+`[projects.${JSON.stringify(source)}]\ntrust_level = "untrusted"\n`+'[model_providers.autoops_shared]\nname = "AutoOps shared gateway"\nbase_url = "http://127.0.0.1:18766/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nsupports_websockets = false\n'+disabledSkills.map(path=>`\n[[skills.config]]\npath = ${JSON.stringify(path)}\nenabled = false\n`).join('')
 }
 
 /** 重新使用持久状态前，核对原容器；不能把客户端断开视为远端已停止。 */
@@ -180,7 +220,15 @@ export async function createSharedDockerRuntime(input:{directory:string;workspac
     try {await handle.writeFile(value)} finally {await handle.close()}
     await rename(temporary,configuration)
   }
-  await writeConfiguration(sharedCodexConfiguration(input.workspace.realPath))
+  const modelCatalog=profile.modelCatalog?join(root,'model-catalog.json'):undefined
+  if(modelCatalog) {
+    const temporaryModel=join(root,'model-catalog.next.json')
+    await rm(temporaryModel,{force:true})
+    const handle=await open(temporaryModel,constants.O_CREAT|constants.O_EXCL|constants.O_WRONLY|constants.O_NOFOLLOW,0o400)
+    try {await handle.writeFile(profile.modelCatalog!.bytes)} finally {await handle.close()}
+    await rename(temporaryModel,modelCatalog)
+  }
+  await writeConfiguration(sharedCodexConfiguration(input.workspace.realPath,[],modelCatalog!==undefined))
   const allowedSkills=new Set(profile.skillFiles.filter(file=>basename(file.path)==='SKILL.md').map(file=>`/home/autoops/.codex/skills/${file.path}`))
   // Unix socket 的内核路径长度有限；只有无秘密的会话模型通道使用独占短目录。
   const gatewayDirectory=await realpath(await mkdtemp('/tmp/autoops-gw-'))
@@ -218,7 +266,7 @@ export async function createSharedDockerRuntime(input:{directory:string;workspac
       await retireSharedContainer(cidFile,run,name)
       if(!accepting || (lease && (catalogLease!==lease || lease.closing)))return fail('shared_catalog_closed','本次目录进程已结束')
       const launch=sharedDockerCommand(profile);launched=true;launchOwner=lease?.token??Symbol('native-process')
-      return {command:launch.command,args:[...launch.prefix,...sharedContainerArguments({profile,workspace:input.workspace,name,cidFile,home,configuration,attachments,gateway:gatewayDirectory,entry:fileURLToPath(new URL('./shared-container-entry.mjs',import.meta.url)),uid,gid,command,args,skillsReadonly})]}
+      return {command:launch.command,args:[...launch.prefix,...sharedContainerArguments({profile,workspace:input.workspace,name,cidFile,home,configuration,attachments,gateway:gatewayDirectory,entry:fileURLToPath(new URL('./shared-container-entry.mjs',import.meta.url)),uid,gid,command,args,skillsReadonly,...(modelCatalog?{modelCatalog}:{})})]}
     } finally {launchPending=false}
   }),oomKilled:()=>Effect.succeed(false),clear:()=>Effect.void})
   const agentScope=scopeFor()
@@ -241,7 +289,7 @@ export async function createSharedDockerRuntime(input:{directory:string;workspac
     configureSkillCatalog:async skills=>{
       if(skills.length>2000||skills.some(skill=>!isAbsolute(skill.path)||skill.path.length>4096||/[\x00-\x1f]/.test(skill.path)))return fail('shared_skill_catalog_invalid','隔离运行器技能目录无效')
       const disabled=[...new Set(skills.filter(skill=>!allowedSkills.has(skill.path)).map(skill=>skill.path))]
-      await writeConfiguration(sharedCodexConfiguration(input.workspace.realPath,disabled))
+      await writeConfiguration(sharedCodexConfiguration(input.workspace.realPath,disabled,modelCatalog!==undefined))
       // 首次只发现目录，不执行模型；重新启动后技能挂载只读，不能在会话内改变已声明能力。
       skillsReadonly=true
     },
