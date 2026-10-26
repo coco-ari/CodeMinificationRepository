@@ -8,13 +8,27 @@ import type { BusinessHttpContext } from './context.ts'
 import { responseError } from './responses.ts'
 
 export function assistantsRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'list' | 'settings' | 'create' | 'save' | 'assign' | 'choices') =>
+  const handle = (operation: 'list' | 'settings' | 'create' | 'save' | 'assign' | 'choices' | 'receipt') =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
       const parts = new URL(request.url, 'http://localhost').pathname.split('/')
       const project = yield* Effect.try(() => decodeURIComponent(parts[4] ?? ''))
       const directory = yield* Effect.try(configuredAutoOpsAssistantDirectory)
+      if (operation === 'receipt') {
+        const requestId = yield* Effect.try(() => decodeURIComponent(parts[7] ?? ''))
+        yield* Effect.try(() => {
+          access.refresh(current)
+          return directory.projectReceipt(current.id, project, requestId)
+        })
+        const value = yield* Effect.try(() => {
+          access.refresh(current)
+          return directory.projectReceipt(current.id, project, requestId)
+        })
+        return HttpServerResponse.jsonUnsafe(value, {
+          headers: { 'cache-control': 'private, no-store' },
+        })
+      }
       if (operation === 'list' || operation === 'settings' || operation === 'choices') {
         const value = yield* Effect.try(() =>
           operation === 'list'
@@ -65,6 +79,7 @@ export function assistantsRoutes({ access, principal }: BusinessHttpContext) {
   const base = '/api/v1/projects/:projectId'
   return Layer.mergeAll(
     HttpRouter.add('GET', `${base}/assistants`, handle('list')),
+    HttpRouter.add('GET', `${base}/assistants/receipts/:requestId`, handle('receipt')),
     HttpRouter.add('GET', `${base}/assistants/settings`, handle('settings')),
     HttpRouter.add('GET', `${base}/assistants/choices`, handle('choices')),
     HttpRouter.add('POST', `${base}/assistants`, handle('create')),

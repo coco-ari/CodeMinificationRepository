@@ -1,3 +1,6 @@
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
+import { repositoryReceiptIntent } from '../../../../../../autoops/contracts/project-management-receipts.ts'
 import { StrictMode } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
@@ -5,12 +8,15 @@ import { render, stubGlobal } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
-import { installAutoOpsHost } from './hostConfig'
+import { installAutoOpsHost } from './hostConfig';
+import { readPendingProjectWrite } from "./projectDirectory";
 import type { ProjectRepositoryConnection, ProjectRepositoryDetails } from './projectRepositories'
 import '../index.css'
 
-function setup({ manage = true, lost = false, inUse = false, denied = false } = {}) {
+function setup({ manage = true, lost = false, inUse = false, denied = false, receiptMode = 'completed' as 'completed' | 'missing' | 'mismatch' } = {}) {
   window.sessionStorage.clear()
+  let receiptState = receiptMode
+  const receiptQueries: string[] = []
   let lose = lost,
     revision = 7,
     deny = denied,
@@ -61,6 +67,16 @@ function setup({ manage = true, lost = false, inUse = false, denied = false } = 
   installAutoOpsHost(bootstrap(), window.location.origin)
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), window.location.origin).pathname
+    if (path.includes('/repositories/receipts/')) {
+      receiptQueries.push(path)
+      if (receiptState === 'missing') return Response.json(null)
+      const requestId = decodeURIComponent(path.split('/').at(-1)!), original = writes.find(write => write.body.requestId === requestId)
+      if (!original || !receipts.has(requestId)) return Response.json(null)
+      const targetId = /\/repositories\/([^/]+)(?:\/remove)?$/.exec(original.path)?.[1] ?? null
+      const operation = original.path.endsWith('/remove') ? 'remove-repository' as const : 'save-repository' as const
+      const digest = bytesToHex(sha256(new TextEncoder().encode(repositoryReceiptIntent('repo-user', operation, targetId, original.body))))
+      return Response.json({ state: 'completed', actorId: 'repo-user', projectId: project.id, requestId, operation, saved: true, available: !deny, createdAt: '2026-10-27T00:00:00Z', publicIntent: { algorithm: 'sha256', digest: receiptState === 'mismatch' ? '0'.repeat(64) : digest }, ...(!deny ? { result: receipts.get(requestId) } : {}) })
+    }
     if (path.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
     if (path.endsWith('/workspace/authoring'))
       return Response.json({
@@ -155,6 +171,8 @@ function setup({ manage = true, lost = false, inUse = false, denied = false } = 
     writes,
     items,
     receipts,
+    receiptQueries,
+    setReceiptMode: (value: typeof receiptState) => { receiptState = value },
     revoke: () => {
       deny = true
     },
@@ -206,8 +224,8 @@ it('窄短窗口创建项目连接仅保存仓库与凭证，关闭后恢复添�
   })
 })
 
-it('编辑连接保留凭证引用，丢失响应按原请求核对且不重复创建', async () => {
-  const f = setup({ lost: true })
+it.each(['missing', 'mismatch'] as const)("仓库原owner GET %s 保留凭证引用和原请求，再GET恢复不重POST", async (receiptMode) => {
+  const f = setup({ lost: true, receiptMode })
   using _fetch = stubGlobal('fetch', f.fetch)
   await using screen = await render(<App />, { router: '/projects?projectId=repo-project' })
   const edit = screen.getByRole('button', { name: '编辑仓库 业务仓库', exact: true })
@@ -216,11 +234,21 @@ it('编辑连接保留凭证引用，丢失响应按原请求核对且不重复�
   await page
     .getByRole('textbox', { name: 'HTTPS 仓库地址', exact: true })
     .fill('https://isolated.invalid/changed.git')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect.element(dialog.getByRole("button", { name: "重试", exact: true })).toBeEnabled()
+  await expect.element(dialog.getByRole("button", { name: "取消", exact: true })).toBeDisabled()
+  expect(f.writes).toHaveLength(1);
+  expect(readPendingProjectWrite()?.body).toEqual(f.writes[0]?.body);
+  expect(f.receiptQueries).toHaveLength(1)
+  f.setReceiptMode('completed')
+  await dialog.getByRole("button", { name: "重试", exact: true }).click();
+  await expect.element(dialog).not.toBeInTheDocument()
   await expect.element(edit).toHaveFocus()
-  expect(f.writes).toHaveLength(2)
-  expect(f.writes[0]).toEqual(f.writes[1])
+  expect(f.receiptQueries).toHaveLength(2)
+  expect(f.receiptQueries[1]).toBe(f.receiptQueries[0])
+  expect(readPendingProjectWrite()).toBeNull()
+  expect(f.writes).toHaveLength(1)
   expect(f.writes[0]?.body.value).toEqual({
     name: '业务仓库',
     url: 'https://isolated.invalid/changed.git',
@@ -313,4 +341,4 @@ it('未被使用的连接可移除，结果刷新后焦点返回添加仓库入�
   await expect.element(screen.getByRole('button', { name: '添加仓库', exact: true })).toHaveFocus()
   expect(f.items).toHaveLength(0)
   expect(f.writes[0]?.body).toEqual({ requestId: expect.any(String), expectedRevision: 7 })
-})
+});

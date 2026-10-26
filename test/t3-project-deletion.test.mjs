@@ -121,3 +121,27 @@ test('删除审计失败回滚墓碑和成员范围；原生明确非空可恢�
     assert.equal(d.beginProjectDeletion('creator',f.project,input(),empty).state,'blocked')
   } finally {db.close()}
 })
+
+
+test('显式续办仅接受本人原项目删除意图，重新核对引用与当前权限，不消费新的删除请求', t => {
+  const f=fixture(t),d=f.directory,command=input('accepted-resume')
+  const intent={operation:'project.delete',projectId:f.project,publicIntent:{expectedRevision:1}}
+  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,empty),{code:'PROJECT_DELETE_RECEIPT_NOT_FOUND'})
+  d.beginProjectDeletion('creator',f.project,command,empty)
+  assert.equal(d.receipt('creator',command.requestId).canResume,true)
+  assert.throws(() => d.resumeProjectDeletion('admin',command.requestId,intent,empty),{code:'PROJECT_DELETE_RECEIPT_NOT_FOUND'})
+  for(const forged of [{...intent,projectId:'another-project'},{...intent,publicIntent:{expectedRevision:2}}])
+    assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,forged,empty),{code:'PROJECT_REQUEST_CONFLICT'})
+  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,{...intent,operation:'environment.delete'},empty),{code:'PROJECT_INPUT_INVALID'})
+  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,() => [{kind:'late-reference',count:1,message:'新增引用'}]),{code:'PROJECT_DELETE_BLOCKED'})
+  assert.equal(d.receipt('creator',command.requestId).state,'pending')
+  f.users[0].kind='external'
+  assert.equal(d.receipt('creator',command.requestId).canResume,false)
+  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,empty),{code:'PROJECT_DELETE_FORBIDDEN'})
+  delete f.users[0].kind
+  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,() => {f.users[0].kind='external';return []}),{code:'PROJECT_DELETE_FORBIDDEN'})
+  delete f.users[0].kind
+  assert.deepEqual(d.resumeProjectDeletion('creator',command.requestId,intent,empty),{projectId:f.project,command})
+  d.completeProjectDeletion('creator',f.project,command)
+  assert.deepEqual(d.resumeProjectDeletion('creator',command.requestId,intent,() => assert.fail('已完成续办不能重查或重做删除')),{projectId:f.project,command})
+})

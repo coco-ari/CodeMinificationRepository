@@ -1,3 +1,6 @@
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
+import { projectAssistantReceiptIntent } from '../../../../../../autoops/contracts/project-management-receipts.ts'
 import { StrictMode } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
@@ -6,11 +9,14 @@ import { SidebarProvider } from '~/components/ui/sidebar'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
 import { installAutoOpsHost } from './hostConfig'
+import { readPendingProjectWrite } from './projectDirectory'
 import type { AssistantPreset, AssistantChoices } from './projectAssistants'
 import '../index.css'
 
-function setup({ lost = false, conflict = false, manage = true, denied = false } = {}) {
+function setup({ lost = false, conflict = false, manage = true, denied = false, receiptMode = 'completed' as 'completed' | 'missing' | 'mismatch' } = {}) {
   window.sessionStorage.clear()
+  let receiptState = receiptMode
+  const receiptQueries: string[] = []
   let lose = lost, reject = conflict
   const writes: Array<{ path: string; body: Record<string, any> }> = [], receipts = new Map<string, unknown>()
   const project = { id: 'config-project', name: '配置验收项目', description: '', revision: 1, createdBy: 'config-user', createdAt: '2026-10-26T00:00:00Z', environments: [{ id: 'test', name: '测试环境', revision: 1 }, { id: 'production', name: '生产环境', revision: 1 }] }
@@ -22,13 +28,22 @@ function setup({ lost = false, conflict = false, manage = true, denied = false }
   installAutoOpsHost(bootstrap(), window.location.origin)
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), window.location.origin).pathname
+    if (path.includes('/assistants/receipts/')) {
+      receiptQueries.push(path)
+      if (receiptState === 'missing') return Response.json(null)
+      const requestId = decodeURIComponent(path.split('/').at(-1)!), original = writes.find(write => write.body.requestId === requestId)
+      if (!original || !receipts.has(requestId)) return Response.json(null)
+      const target = original.body.target, operation = original.path.endsWith('/assistant-allocations') ? `allocation.save:${target.kind}:${target.id}` : `preset.save:${original.path.endsWith('/assistants') ? 'new' : original.path.split('/').at(-1)}`
+      const digest = bytesToHex(sha256(new TextEncoder().encode(projectAssistantReceiptIntent(operation, original.body))))
+      return Response.json({ state: 'completed', actorId: 'config-user', projectId: project.id, requestId, operation, saved: true, available: true, createdAt: '2026-10-27T00:00:00Z', publicIntent: { algorithm: 'sha256', digest: receiptState === 'mismatch' ? '0'.repeat(64) : digest }, result: receipts.get(requestId) })
+    }
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as Record<string, any>
       writes.push({ path, body })
       if (reject) { reject = false; return Response.json({ code: 'PROJECT_DEFAULT_ASSISTANT_REQUIRED', error: '受限成员需要先分配有效默认助手' }, { status: 409 }) }
       let result = receipts.get(body.requestId)
       if (!result) {
-        if (path.endsWith('/assistant-allocations')) { result = { ...body, revision: 1 }; allocations.push(result as Record<string, unknown>) }
+        if (path.endsWith('/assistant-allocations')) { result = { assistantIds: body.assistantIds, defaultAssistantId: body.defaultAssistantId, revision: 1 }; allocations.push({ ...result as Record<string, unknown>, target: body.target }) }
         else if (path.endsWith('/members')) { Object.assign(members[0]!, body.value, { revision: 2, authorizationPending: false }); result = members[0] }
         else { const id = path.endsWith('/assistants') ? 'new-helper' : path.split('/').at(-1)!; const existing = presets.find(preset => preset.id === id); const preset = { ...body.value, id, projectId: project.id, revision: (existing?.revision ?? 0) + 1, createdBy: 'config-user', updatedAt: 'now' }; if (existing) Object.assign(existing, preset); else presets.push(preset); result = preset }
         receipts.set(body.requestId, result)
@@ -45,7 +60,7 @@ function setup({ lost = false, conflict = false, manage = true, denied = false }
     if (path.endsWith('/settings')) return Response.json({ project, members, candidates: [{ id: 'member', name: '待分配成员', kind: 'internal' }, { id: 'external', name: '外部账号', kind: 'external' }] })
     return Response.json({ items: [project] })
   })
-  return { fetch, writes, presets, choices, allocations, receipts }
+  return { fetch, writes, presets, choices, allocations, receipts, receiptQueries, setReceiptMode: (value: typeof receiptState) => { receiptState = value } }
 }
 function App() { return <StrictMode><SidebarProvider><ModuleSidebarProvider><ModuleSidebarOutlet /><AutoOpsProjectsPage /></ModuleSidebarProvider></SidebarProvider></StrictMode> }
 const choose = async (label: string, name: string) => { await page.getByRole('combobox', { name: label, exact: true }).click(); await page.getByRole('option', { name, exact: true }).click() }
@@ -98,19 +113,30 @@ it('默认助手缺失失败保留成员表单及错误，取消恢复焦点且�
   await expect.element(edit).toHaveFocus()
 })
 
-it('助手分配响应丢失自动核对同一请求，不重复授权，成员默认值完整发送', async () => {
-  const f = setup({ lost: true }); using _fetch = stubGlobal('fetch', f.fetch)
+it.each(['missing', 'mismatch'] as const)("助手分配原owner GET %s 时保持未知，再GET恢复只授权一次", async (receiptMode) => {
+  const f = setup({ lost: true, receiptMode }); using _fetch = stubGlobal('fetch', f.fetch)
   await using screen = await render(<App />, { router: '/projects?projectId=config-project' })
   const assign = screen.getByRole('button', { name: '分配助手给 待分配成员', exact: true })
   await expect.element(assign).toBeEnabled(); await assign.click()
   await page.getByRole('checkbox', { name: '资料分析', exact: true }).click()
   await choose('默认助手', '资料分析')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect.element(dialog.getByRole("button", { name: "重试", exact: true })).toBeEnabled()
+  await expect.element(dialog.getByRole("button", { name: "取消", exact: true })).toBeDisabled()
+  expect(f.writes).toHaveLength(1)
+  expect(f.writes[0]?.body).toMatchObject({ target: { kind: 'member', id: 'member' }, assistantIds: ['helper'], defaultAssistantId: 'helper',
+  });
+  expect(readPendingProjectWrite()?.body).toEqual(f.writes[0]?.body);
+  expect(f.receiptQueries).toHaveLength(1)
+  f.setReceiptMode('completed')
+  await dialog.getByRole("button", { name: "重试", exact: true }).click();
+  await expect.element(dialog).not.toBeInTheDocument()
   await expect.element(assign).toHaveFocus()
-  expect(f.writes).toHaveLength(2)
-  expect(f.writes[0]?.body).toEqual(f.writes[1]?.body)
-  expect(f.writes[0]?.body).toMatchObject({ target: { kind: 'member', id: 'member' }, assistantIds: ['helper'], defaultAssistantId: 'helper' })
+  expect(f.receiptQueries).toHaveLength(2)
+  expect(f.receiptQueries[1]).toBe(f.receiptQueries[0])
+  expect(readPendingProjectWrite()).toBeNull()
+  expect(f.writes).toHaveLength(1)
   expect(f.allocations).toHaveLength(1)
 })
 

@@ -51,6 +51,12 @@ export const DeleteDirectoryCommand = S.Struct({
   requestId: DirectoryId,
   expectedRevision: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1)),
 })
+export const ResumeProjectDeletionCommand = S.Struct({
+  operation: S.Literal('project.delete'),
+  projectId: DirectoryId,
+  publicIntent: S.Struct({ expectedRevision: DeleteDirectoryCommand.fields.expectedRevision }),
+})
+
 export interface DeletionBlocker {
   kind: string
   count: number
@@ -78,3 +84,64 @@ export interface ProjectWriteUnavailable {
   saved: true
   available: false
 }
+
+const ReceiptRevision = S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(0))
+const SavedRevision = S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1))
+const EnvironmentResult = S.Struct({ id: DirectoryId, name: Name, revision: SavedRevision })
+const ProjectResult = S.Struct({
+  id: DirectoryId,
+  name: Name,
+  description: S.String.check(S.isMaxLength(2000)),
+  revision: SavedRevision,
+  createdBy: DirectoryId,
+  createdAt: S.String.check(S.isMaxLength(100)),
+  environments: S.Array(EnvironmentResult),
+})
+const MemberResult = S.Struct({
+  ...MembershipDetails.fields,
+  name: Name,
+  kind: S.Literals(['internal', 'external']),
+  revision: SavedRevision,
+  authorizationPending: S.Boolean,
+})
+const DeletionResult = S.Struct({
+  deleted: S.Literal(true),
+  projectId: DirectoryId,
+  environmentId: S.optionalKey(DirectoryId),
+})
+export const DirectoryPublicIntent = S.Union([
+  S.Struct({ expectedRevision: ReceiptRevision, value: ProjectDetails }),
+  S.Struct({ expectedRevision: ReceiptRevision, value: EnvironmentDetails }),
+  S.Struct({ expectedRevision: ReceiptRevision, value: MembershipDetails }),
+  S.Struct({ expectedRevision: ReceiptRevision }),
+])
+export const DirectoryRequestReceipt = S.Struct({
+  state: S.Literals(['completed', 'pending', 'blocked']),
+  requestId: DirectoryId,
+  actorId: DirectoryId,
+  projectId: DirectoryId,
+  environmentId: S.NullOr(DirectoryId),
+  operation: S.String.check(
+    S.isPattern(
+      /^(?:project\.(?:create|save|delete)|environment\.delete|environment\.save:[A-Za-z0-9][A-Za-z0-9_-]{0,127}|member\.save:[A-Za-z0-9][A-Za-z0-9_-]{0,127})$/,
+    ),
+  ),
+  saved: S.Literal(true),
+  available: S.Boolean,
+  canResume: S.optionalKey(S.Boolean),
+  publicIntent: DirectoryPublicIntent,
+  createdAt: S.String.check(S.isMaxLength(100)),
+  // 这是当前原生投影的匹配证明，不是原同步调用的收据；GET 不执行补写。
+  nativeSynchronization: S.Literals(['current-verified', 'unverified', 'not-required']),
+  result: S.optionalKey(S.Union([ProjectResult, EnvironmentResult, MemberResult, DeletionResult])),
+  blockers: S.optionalKey(
+    S.Array(
+      S.Struct({
+        kind: S.String.check(S.isMaxLength(80)),
+        count: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(0), S.isLessThanOrEqualTo(9999)),
+        message: S.String.check(S.isMaxLength(160)),
+      }),
+    ).check(S.isMaxLength(24)),
+  ),
+})
+export type DirectoryRequestReceipt = typeof DirectoryRequestReceipt.Type

@@ -43,12 +43,35 @@ function setup() {
   let preview = clearPreview(),
     deleteStatus = 200,
     lost = 0,
-    refreshFailures = 0
+    refreshFailures = 0,
+    pendingDeletion = false,
+    resumeAllowed = true,
+    resumeLost = false
+  const resumeRequests: Array<{ path: string; body: unknown }> = []
+  const receiptQueries: string[] = [],
+    receipts = new Map<string, object>();
   const requests: Array<{ path: string; body: Record<string, unknown>; method: string }> = []
   const removed = vi.fn(),
     denied = vi.fn()
   const fetcher = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(url)
+    const path = String(url);
+    if (path.endsWith('/resume') && init?.method === 'POST') {
+      resumeRequests.push({ path, body: JSON.parse(String(init.body)) })
+      const id = decodeURIComponent(path.split('/').at(-2)!)
+      const prior = receipts.get(id) as Record<string, unknown>
+      receipts.set(id, { ...prior, state: 'completed', canResume: false, available: true, result: { deleted: true, projectId: target.projectId } })
+      if (resumeLost) { resumeLost = false; throw new TypeError('继续删除响应丢失') }
+      return Response.json(receipts.get(id))
+    }
+    if (path.includes("/projects/receipts/")) {
+      receiptQueries.push(path);
+      if (lost > 0) {
+        lost--;
+        return Response.json(null);
+      }
+      const value = receipts.get(decodeURIComponent(path.split("/").at(-1)!)) as Record<string, unknown> | undefined
+      return Response.json(value?.state === 'pending' ? { ...value, canResume: resumeAllowed } : value ?? null);
+    }
     if (path.endsWith('/deletion-preview')) return Response.json(preview)
     if (path.endsWith('/autoops/bootstrap')) {
       if (refreshFailures-- > 0)
@@ -60,7 +83,28 @@ function setup() {
         path,
         method: init.method,
         body: JSON.parse(String(init.body)) as Record<string, unknown>,
-      })
+      });
+      const body = requests.at(-1)!.body;
+      const environment = /\/environments\/([^/]+)$/.exec(path)?.[1] ?? null;
+      receipts.set(String(body.requestId), {
+        state: pendingDeletion ? 'pending' : 'completed',
+        ...(pendingDeletion ? { canResume: true } : {}),
+        requestId: body.requestId,
+        actorId: "removal-owner",
+        projectId: target.projectId,
+        environmentId: environment,
+        operation: environment ? "environment.delete" : "project.delete",
+        saved: true,
+        available: !pendingDeletion,
+        publicIntent: { expectedRevision: body.expectedRevision },
+        nativeSynchronization: "not-required",
+        createdAt: "2026-10-27T00:00:00Z",
+        ...(pendingDeletion ? {} : { result: {
+          deleted: true,
+          projectId: target.projectId,
+          ...(environment ? { environmentId: environment } : {}),
+        } }),
+      });
       if (lost-- > 0) throw new TypeError('隔离删除丢失响应')
       if (deleteStatus !== 200)
         return Response.json(
@@ -77,6 +121,8 @@ function setup() {
   return {
     fetcher,
     requests,
+    receiptQueries,
+    resumeRequests,
     removed,
     denied,
     setPreview: (value: Preview) => {
@@ -91,6 +137,9 @@ function setup() {
     failRefresh: () => {
       refreshFailures = 1
     },
+    pendingDeletion: () => { pendingDeletion = true; lost = 1 },
+    loseResume: () => { resumeLost = true },
+    revokeResume: () => { resumeAllowed = false },
   }
 }
 type Fixture = ReturnType<typeof setup>
@@ -221,7 +270,7 @@ it('删除时撤权 403 关闭旧对象并通知授权刷新，不继续提交�
   expect(f.requests).toHaveLength(1)
 })
 
-it('连续丢失响应保留原 DELETE 并锁定关闭，核对原请求始终使用同一 requestId', async () => {
+it("删除响应丢失后原收据null锁定关闭，再核对只GET同一requestId", async () => {
   const f = setup()
   f.lose(2)
   using _fetch = stubGlobal('fetch', f.fetcher)
@@ -234,14 +283,15 @@ it('连续丢失响应保留原 DELETE 并锁定关闭，核对原请求始终�
   await expect.element(page.getByRole('dialog')).toBeVisible()
   const original = readPendingProjectWrite()
   expect(original?.method).toBe('DELETE')
-  expect(f.requests).toHaveLength(2)
+  expect(f.requests).toHaveLength(1);
+  expect(f.receiptQueries).toHaveLength(1)
   await page.getByRole('button', { name: '核对原请求', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
-  expect(f.requests).toHaveLength(3)
-  expect(f.requests.map((value) => value.body)).toEqual([
-    original!.body,
-    original!.body,
-    original!.body,
+  expect(f.requests).toHaveLength(1)
+  expect(f.requests[0]!.body).toEqual(original!.body);
+  expect(f.receiptQueries).toEqual([
+    `/api/agent-demo/t3/api/v1/projects/receipts/${original!.body.requestId}`,
+    `/api/agent-demo/t3/api/v1/projects/receipts/${original!.body.requestId}`,
   ])
   expect(readPendingProjectWrite()).toBeNull()
 })
@@ -301,4 +351,52 @@ it('预检晚到响应在取消后不复活旧弹窗，禁用管理入口不能�
     .element(screen.getByRole('button', { name: `管理项目 ${target.name}` }))
     .toBeDisabled()
   expect(f.requests).toHaveLength(0)
+});
+
+
+it('原删除确认为待继续后显式恢复，恢复断线仅GET核对并恢复入口焦点', async () => {
+  const f = setup()
+  f.pendingDeletion()
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(<App f={f} />)
+  const trigger = screen.getByRole('button', { name: `管理项目 ${target.name}` })
+  await open()
+  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await expect.element(page.getByRole('button', { name: '继续删除', exact: true })).toBeEnabled()
+  expect(f.requests).toHaveLength(1)
+  expect(f.resumeRequests).toHaveLength(0)
+  expect(f.receiptQueries).toHaveLength(1)
+  f.loseResume()
+  await page.getByRole('button', { name: '继续删除', exact: true }).click()
+  await expect.element(page.getByRole('button', { name: '核对原请求', exact: true })).toBeEnabled()
+  expect(f.requests).toHaveLength(1)
+  expect(f.resumeRequests).toHaveLength(1)
+  const original = f.requests[0]!.body
+  expect(f.resumeRequests[0]).toEqual({ path: `/api/agent-demo/t3/api/v1/projects/receipts/${original.requestId}/resume`, body: { operation: 'project.delete', projectId: target.projectId, publicIntent: { expectedRevision: original.expectedRevision } } })
+  expect(readPendingProjectWrite()?.body.requestId).toBe(original.requestId)
+  await page.getByRole('button', { name: '核对原请求', exact: true }).click()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  await expect.element(trigger).toHaveFocus()
+  expect(f.receiptQueries).toHaveLength(3)
+  expect(f.resumeRequests).toHaveLength(1)
+  expect(f.requests).toHaveLength(1)
+  expect(f.removed).toHaveBeenCalledOnce()
+})
+
+it('已显示继续删除后当前授权撤回，点击前GET复核拒绝恢复写入并保留原请求', async () => {
+  const f = setup()
+  f.pendingDeletion()
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using _screen = await render(<App f={f} />)
+  await open()
+  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await expect.element(page.getByRole('button', { name: '继续删除', exact: true })).toBeEnabled()
+  f.revokeResume()
+  await page.getByRole('button', { name: '继续删除', exact: true }).click()
+  await expect.element(page.getByRole('button', { name: '核对原请求', exact: true })).toBeEnabled()
+  expect(f.resumeRequests).toHaveLength(0)
+  expect(f.requests).toHaveLength(1)
+  expect(f.receiptQueries).toHaveLength(2)
+  expect(readPendingProjectWrite()?.body.requestId).toBe(f.requests[0]!.body.requestId)
+  expect(f.removed).not.toHaveBeenCalled()
 })

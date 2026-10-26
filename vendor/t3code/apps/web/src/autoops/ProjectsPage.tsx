@@ -35,6 +35,8 @@ import {
   prepareProjectMutation,
   readPendingProjectWrite,
   submitProjectWrite,
+  recoverProjectWrite,
+  PendingProjectDeletion,
   refreshProjectHost,
   type DirectoryProject,
   type ProjectSettings,
@@ -79,6 +81,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   const mcpTrigger = useRef<HTMLButtonElement | null>(null)
   const [removalTarget, setRemovalTarget] = useState<ProjectRemovalTarget | null>(null)
   const [removalLocked, setRemovalLocked] = useState(false)
+  const [removalCanResume, setRemovalCanResume] = useState(false)
   const removalReturn = useRef<HTMLButtonElement | null>(null)
   const refreshButton = useRef<HTMLButtonElement | null>(null)
   const [nodeScope, setNodeScope] = useState<{ scope: 'platform' } | { scope: 'project'; projectId: string; environmentId: string } | null>(null)
@@ -181,14 +184,19 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       if (!original) throw new Error('没有可重试的保存')
       let result: Record<string, unknown>
       try {
-        result = await submitProjectWrite(original)
+        result = retry ? await recoverProjectWrite(original) : await submitProjectWrite(original)
       } catch (cause) {
-        if (!(cause instanceof AutoOpsRequestError) || !cause.uncertain) throw cause
-        result = await submitProjectWrite(original)
+        if (retry || !(cause instanceof AutoOpsRequestError) || !cause.uncertain) throw cause
+        result = await recoverProjectWrite(original)
       }
       if (!alive.current) return
       setPending(null)
-      toastManager.add({ type: 'success', title: '已保存' })
+      const unavailable = result.saved === true && result.available === false
+      const entryUnverified = result.nativeSynchronization === 'unverified'
+      toastManager.add({
+        type: unavailable || entryUnverified ? 'info' : 'success',
+        title: unavailable ? '操作已保存，当前对象不可访问' : entryUnverified ? '已保存，运行入口待核对' : '已保存',
+      })
       try {
         await refreshProjectHost()
       } catch (cause) {
@@ -210,6 +218,20 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
     } catch (cause) {
       if (!alive.current) return
       setPending(readPendingProjectWrite())
+      if (cause instanceof PendingProjectDeletion && cause.canResume) {
+        removalReturn.current = refreshButton.current
+        setRemovalCanResume(true)
+        setRemovalTarget({ ...cause.target, name: projects.find(project => project.id === cause.target.projectId)?.name ?? '原项目' })
+        setEditor(null)
+        setError(null)
+        return
+      }
+      if (isAutoOpsAccessError(cause)) {
+        setEditor(null)
+        setSettings(null)
+        setProjects([])
+        void refreshProjectHost().catch(() => {})
+      }
       setError(cause instanceof Error ? cause.message : '保存未完成')
     } finally {
       if (alive.current) setBusy(false)
@@ -223,6 +245,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   }, [loading, explicit, focusDirectory])
   const beginRemoval = (target: ProjectRemovalTarget, button: HTMLButtonElement) => {
     removalReturn.current = button
+    setRemovalCanResume(false)
     setRemovalTarget(target)
   }
   const current = projects.find((project) => project.id === explicit)
@@ -505,7 +528,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       </div>
       {removalTarget ? <ProjectRemovalDialog
         key={`${removalTarget.projectId}:${removalTarget.environmentId ?? 'project'}`}
-        target={removalTarget} finalFocus={removalReturn}
+        target={removalTarget} finalFocus={removalReturn} initialCanResume={removalCanResume}
         onLockChange={setRemovalLocked}
         onClose={() => setRemovalTarget(null)}
         onAccessDenied={(cause) => {
@@ -514,11 +537,13 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
         }}
         onRemoved={() => {
           removalReturn.current = refreshButton.current
+          setPending(readPendingProjectWrite())
+          setRemovalTarget(null)
           if (removalTarget.environmentId) {
-            setRemovalTarget(null)
             void load(true)
           } else {
             focusDirectory.current = true
+            if (!explicit) void load()
             go()
           }
         }}

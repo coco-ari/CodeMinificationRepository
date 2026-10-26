@@ -15,6 +15,30 @@ function memoryStorage(): Storage {
       values.delete(key)
     },
     clear: () => values.clear(),
+  };
+}
+function receipt(
+  original: {
+    actorId?: string;
+    body: { requestId: string; expectedRevision: number } & Record<string, unknown>;
+  },
+  patch: Record<string, unknown> = {},
+) {
+  const { requestId, ...publicIntent } = original.body;
+  return {
+    state: "completed",
+    requestId,
+    actorId: original.actorId,
+    projectId: "p",
+    environmentId: null,
+    operation: "project.delete",
+    saved: true,
+    available: true,
+    publicIntent,
+    createdAt: "2026-10-27T00:00:00Z",
+    nativeSynchronization: "not-required",
+    result: { deleted: true, projectId: "p" },
+    ...patch,
   }
 }
 const bootstrap = (csrfToken = 'delete-csrf') => ({
@@ -40,16 +64,16 @@ afterEach(() => {
   vi.resetModules()
 })
 
-it('删除收据保存 method、范围和修订，模块重开仍按原 DELETE 与 CSRF 提交并清理成功收据', async () => {
+it("删除未知收据保存 method、范围和修订，模块重开只GET原收据而不重发DELETE", async () => {
   const directory = await import('./projectDirectory')
   const original = directory.prepareProjectMutation(
     '/api/v1/projects/p/environments/test',
     4,
     {},
     'DELETE',
-  )
-  expect(original.body).toMatchObject({ expectedRevision: 4, requestId: expect.any(String) })
-  expect(original.body).not.toHaveProperty('value')
+  );
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new TypeError("隔离原响应丢失")));
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
   vi.resetModules()
   const reopened = await import('./projectDirectory')
   const { installAutoOpsHost } = await import('./hostConfig')
@@ -57,39 +81,41 @@ it('删除收据保存 method、范围和修订，模块重开仍按原 DELETE �
   expect(reopened.readPendingProjectWrite()).toEqual(original)
   const fetcher = vi
     .fn()
-    .mockResolvedValue(Response.json({ deleted: true, projectId: 'p', environmentId: 'test' }))
+    .mockResolvedValue(Response.json(
+        receipt(original, {
+          environmentId: "test",
+          operation: "environment.delete",
+          result: { deleted: true, projectId: 'p', environmentId: 'test' },
+        }),
+      ),
+    )
   vi.stubGlobal('fetch', fetcher)
   expect(await reopened.submitProjectWrite(original)).toMatchObject({ deleted: true })
   expect(fetcher).toHaveBeenCalledExactlyOnceWith(
-    '/api/agent-demo/t3/api/v1/projects/p/environments/test',
+    `/api/agent-demo/t3/api/v1/projects/receipts/${original.body.requestId}`,
     expect.objectContaining({
-      method: 'DELETE',
-      body: JSON.stringify(original.body),
-      headers: expect.objectContaining({ 'X-Demo-CSRF': 'delete-csrf' }),
-    }),
-  )
+      method: "GET" }),
+  );
+  expect(fetcher.mock.calls[0]?.[1].body).toBeUndefined()
   expect(reopened.readPendingProjectWrite()).toBeNull()
 })
 
-it('断线保留删除原请求并阻止跨项目新操作，显式核对不更换 requestId 或执行 POST', async () => {
+it("断线保留删除原请求并阻止跨项目新操作，显式核对不更换requestId或执行DELETE", async () => {
   const directory = await import('./projectDirectory')
   const original = directory.prepareProjectMutation('/api/v1/projects/p', 2, {}, 'DELETE')
   const fetcher = vi
     .fn()
     .mockRejectedValueOnce(new TypeError('隔离断线'))
-    .mockResolvedValueOnce(Response.json({ deleted: true, projectId: 'p' }))
+    .mockResolvedValueOnce(Response.json(receipt(original)))
   vi.stubGlobal('fetch', fetcher)
   await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
-  expect(fetcher).toHaveBeenCalledTimes(1)
   expect(directory.readPendingProjectWrite()).toEqual(original)
   expect(() => directory.prepareProjectMutation('/api/v1/projects/other', 1, {}, 'DELETE')).toThrow(
     '请先核对上一次保存结果',
   )
-  await directory.submitProjectWrite(directory.readPendingProjectWrite()!)
-  expect(fetcher.mock.calls.map(([, init]) => ({ method: init.method, body: init.body }))).toEqual([
-    { method: 'DELETE', body: JSON.stringify(original.body) },
-    { method: 'DELETE', body: JSON.stringify(original.body) },
-  ])
+  await directory.recoverProjectWrite(directory.readPendingProjectWrite()!)
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(["DELETE", "GET"]);
+  expect(fetcher.mock.calls[1]?.[1].body).toBeUndefined()
   expect(directory.readPendingProjectWrite()).toBeNull()
 })
 
@@ -151,5 +177,347 @@ it('删除等待期间登录上下文变化拒绝迟到结果，不交付删除�
   installAutoOpsHost(bootstrap('renewed-csrf'), 'https://work.test')
   resolve(Response.json({ deleted: true, projectId: 'p' }))
   await rejected
+  expect(directory.readPendingProjectWrite()).toEqual(original);
+});
+
+it("未知删除再次核对只能 GET 原收据，null 不能放开原请求或再次 DELETE", async () => {
+  const directory = await import("./projectDirectory");
+  const original = directory.prepareProjectMutation("/api/v1/projects/p", 2, {}, "DELETE");
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("隔离原删除响应丢失"))
+    .mockResolvedValueOnce(Response.json(null));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(["DELETE", "GET"]);
+  expect(fetcher.mock.calls[1]?.[0]).toBe(
+    `/api/agent-demo/t3/api/v1/projects/receipts/${original.body.requestId}`,
+  );
+  expect(fetcher.mock.calls[1]?.[1].body).toBeUndefined();
+  expect(directory.readPendingProjectWrite()).toEqual(original);
+});
+
+it.each([
+  { actorId: "other-actor" },
+  { projectId: "other-project" },
+  { environmentId: "other-env" },
+  { operation: "project.save" },
+  { publicIntent: { expectedRevision: 99 } },
+  { saved: false },
+  { result: { deleted: true, projectId: "other-project" } },
+  { nativeSynchronization: "unverified" },
+])("原收据的操作者、scope、参数或结果被改动时保持未知且不再发送写入：%j", async (patch) => {
+  const directory = await import("./projectDirectory");
+  const original = directory.prepareProjectMutation("/api/v1/projects/p", 2, {}, "DELETE");
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("原响应丢失"))
+    .mockResolvedValueOnce(Response.json(receipt(original, patch)));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+  await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({
+    code: "PROJECT_RECEIPT_MISMATCH",
+    uncertain: true,
+  });
+  expect(directory.readPendingProjectWrite()).toEqual(original);
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(["DELETE", "GET"]);
+});
+
+it.each([401, 403, 404, 503])("原收据读取 %s 不能当原写入失败，仍保留原标识", async (status) => {
+  const directory = await import("./projectDirectory");
+  const original = directory.prepareProjectMutation("/api/v1/projects/p", 2, {}, "DELETE");
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("原响应丢失"))
+      .mockResolvedValueOnce(Response.json({ error: "当前无法核对" }, { status })),
+  );
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+  await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({ status });
+  expect(directory.readPendingProjectWrite()).toEqual(original);
+});
+
+it("原删除pending仅保留核对入口，明确blocked才解锁并显示已拒绝事实", async () => {
+  const directory = await import("./projectDirectory");
+  const original = directory.prepareProjectMutation("/api/v1/projects/p", 2, {}, "DELETE");
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("原响应丢失"))
+      .mockResolvedValueOnce(
+        Response.json(receipt(original, { state: "pending", result: undefined })),
+      )
+      .mockResolvedValueOnce(
+        Response.json(receipt(original, { state: "blocked", result: undefined })),
+      ),
+  );
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+  await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({
+    code: "PROJECT_REQUEST_PENDING",
+    uncertain: true,
+  });
+  expect(directory.readPendingProjectWrite()).toEqual(original);
+  await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({
+    code: "PROJECT_DELETE_BLOCKED",
+    status: 409,
+    uncertain: false,
+  });
   expect(directory.readPendingProjectWrite()).toBeNull()
+});
+
+it("原项目保存撤权只交付本人已保存事实，原生入口未核验不得包装成就绪", async () => {
+  const directory = await import("./projectDirectory");
+  const original = directory.prepareProjectWrite("/api/v1/projects/p/settings", 2, {
+    name: "原项目",
+    description: "",
+  });
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("原响应丢失"))
+    .mockResolvedValueOnce(
+      Response.json(
+        receipt(original, {
+          operation: "project.save",
+          available: false,
+          result: undefined,
+          nativeSynchronization: "unverified",
+        }),
+      ),
+    );
+  vi.stubGlobal("fetch", fetcher);
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+  expect(await directory.recoverProjectWrite(original)).toEqual({ saved: true, available: false });
+  expect(directory.readPendingProjectWrite()).toBeNull();
+});
+
+it.each(["unverified", "current-verified"])(
+  "原创建保存事实的运行入口状态只沿后端公开核验交付：%s",
+  async (nativeSynchronization) => {
+    const directory = await import("./projectDirectory");
+    const original = directory.prepareProjectWrite("/api/v1/projects", 0, {
+      name: "原新项目",
+      description: "",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError("原响应丢失"))
+        .mockResolvedValueOnce(
+          Response.json(
+            receipt(original, {
+              operation: "project.create",
+              nativeSynchronization,
+              result: {
+                id: "p",
+                name: "原新项目",
+                description: "",
+                revision: 1,
+                createdBy: "deletion-protocol-user",
+                createdAt: "2026-10-27T00:00:00Z",
+                environments: [],
+              },
+            }),
+          ),
+        ),
+    );
+    await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+    expect(await directory.recoverProjectWrite(original)).toMatchObject({
+      id: "p",
+      nativeSynchronization,
+    });
+    expect(directory.readPendingProjectWrite()).toBeNull();
+  },
+);
+
+it('仓库未知结果转原owner GET，缺失仍不能再POST或解除原请求', async () => {
+  const directory = await import('./projectDirectory')
+  const original = directory.prepareProjectWrite('/api/v1/projects/p/repositories/repo', 2, { name: '项目仓库', url: 'https://github.com/example/repo.git' })
+  const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('原响应丢失')).mockResolvedValueOnce(Response.json(null))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ code: 'PROJECT_REQUEST_UNCONFIRMED', uncertain: true })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'GET'])
+  expect(fetcher.mock.calls[1]?.[0]).toBe(`/api/agent-demo/t3/api/v1/projects/p/repositories/receipts/${original.body.requestId}`)
+  expect(directory.readPendingProjectWrite()).toEqual(original)
+})
+
+it("原收据读取期间登录上下文刷新，迟到GET不能解锁或交付其他上下文结果", async () => {
+  const directory = await import("./projectDirectory");
+  const { installAutoOpsHost } = await import("./hostConfig");
+  const original = directory.prepareProjectMutation("/api/v1/projects/p", 2, {}, "DELETE");
+  let deliver!: (response: Response) => void;
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("原响应丢失"))
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          deliver = resolve;
+        }),
+    );
+  vi.stubGlobal("fetch", fetcher);
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true });
+  const checking = directory.recoverProjectWrite(original);
+  const rejected = expect(checking).rejects.toMatchObject({ name: "AbortError" });
+  installAutoOpsHost(bootstrap("changed-csrf"), "https://work.test");
+  deliver(Response.json(receipt(original)));
+  await rejected;
+  expect(directory.readPendingProjectWrite()).toEqual(original);
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(["DELETE", "GET"]);
+});
+
+it("既有用户隔离记录缺发送标记时只GET，不能升级为新写请求", async () => {
+  const directory = await import("./projectDirectory");
+  const { autoOpsStorage, autoOpsStorageKey } = await import("./hostConfig");
+  const legacy = {
+    path: "/api/v1/projects/p",
+    method: "DELETE" as const,
+    body: { requestId: "old-request", expectedRevision: 2 },
+  };
+  autoOpsStorage(window.sessionStorage).setItem(
+    autoOpsStorageKey("project-directory:pending"),
+    JSON.stringify(legacy),
+  );
+  const original = directory.readPendingProjectWrite()!;
+  const fetcher = vi.fn().mockResolvedValue(Response.json(receipt(original)));
+  vi.stubGlobal("fetch", fetcher);
+  expect(await directory.submitProjectWrite(original)).toMatchObject({ deleted: true });
+  expect(fetcher.mock.calls[0]?.[1].method).toBe("GET");
+  expect(directory.readPendingProjectWrite()).toBeNull();
+});
+
+
+it('损坏或跨操作者的本地原记录不能被新UUID覆盖', async () => {
+  const directory = await import('./projectDirectory')
+  const { autoOpsStorage, autoOpsStorageKey } = await import('./hostConfig')
+  const fetcher = vi.fn()
+  vi.stubGlobal('fetch', fetcher)
+  for (const raw of ['not-json', JSON.stringify({ actorId: 'another', path: '/api/v1/projects/p', body: { requestId: 'original-id', expectedRevision: 1 } })]) {
+    autoOpsStorage(window.sessionStorage).setItem(autoOpsStorageKey('project-directory:pending'), raw)
+    expect(() => directory.prepareProjectWrite('/api/v1/projects', 0, { name: '不能覆盖' })).toThrow('请先核对上一次保存结果')
+    expect(autoOpsStorage(window.sessionStorage).getItem(autoOpsStorageKey('project-directory:pending'))).toBe(raw)
+  }
+  expect(fetcher).not.toHaveBeenCalled()
+})
+
+it('仓库原owner真实指纹fixture在无subtle的HTTP能力下GET恢复，参数或scope冲突仍未知', async () => {
+  vi.resetModules()
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost({ ...bootstrap(), principal: { id: 'admin', displayName: '原仓库管理员' } }, 'https://work.test')
+  const directory = await import('./projectDirectory')
+  const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto)
+  vi.stubGlobal('crypto', { getRandomValues })
+  const original = directory.prepareProjectWrite('/api/v1/projects/p/repositories', 0, { name: '项目仓库', url: 'https://github.com/example/repo.git' })
+  const received = { state: 'completed', actorId: 'admin', projectId: 'p', requestId: original.body.requestId, operation: 'save-repository', saved: true, available: true, createdAt: '2026-10-27T00:00:00Z', publicIntent: { algorithm: 'sha256', digest: 'cc9f80c505fbb2dbd1c709d15562ddcb12e5b0c5aaff27535a49b8e4c3ff058f' }, result: { requestId: original.body.requestId, revision: 1, repository: { id: 'repo', name: '项目仓库', url: 'https://github.com/example/repo.git' } } }
+  const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('原响应丢失')).mockResolvedValueOnce(Response.json({ ...received, actorId: 'another' })).mockResolvedValueOnce(Response.json({ ...received, publicIntent: { algorithm: 'sha256', digest: '0'.repeat(64) } })).mockResolvedValueOnce(Response.json(received))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  for (let i = 0; i < 2; i++) {
+    await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({ code: 'PROJECT_RECEIPT_MISMATCH', uncertain: true })
+    expect(directory.readPendingProjectWrite()).toEqual(original)
+  }
+  expect(await directory.recoverProjectWrite(original)).toMatchObject({ revision: 1, repository: { id: 'repo' } })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'GET', 'GET', 'GET'])
+  expect(directory.readPendingProjectWrite()).toBeNull()
+})
+
+it('仓库原保存后撤权只确认本人已保存事实，不交付仓库配置或再次写入', async () => {
+  vi.resetModules()
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost({ ...bootstrap(), principal: { id: 'admin', displayName: '原仓库管理员' } }, 'https://work.test')
+  const directory = await import('./projectDirectory')
+  const original = directory.prepareProjectWrite('/api/v1/projects/p/repositories', 0, { name: '项目仓库', url: 'https://github.com/example/repo.git' })
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new TypeError('原响应丢失')).mockResolvedValueOnce(Response.json({ state: 'completed', actorId: 'admin', projectId: 'p', requestId: original.body.requestId, operation: 'save-repository', saved: true, available: false, createdAt: '2026-10-27T00:00:00Z', publicIntent: { algorithm: 'sha256', digest: 'cc9f80c505fbb2dbd1c709d15562ddcb12e5b0c5aaff27535a49b8e4c3ff058f' } })))
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  expect(await directory.recoverProjectWrite(original)).toEqual({ saved: true, available: false })
+  expect(directory.readPendingProjectWrite()).toBeNull()
+})
+
+it('项目助手分配沿原owner GET核完整原命令，null和摘要冲突不会重复授权', async () => {
+  const directory = await import('./projectDirectory')
+  const { createHash } = await import('node:crypto')
+  const original = directory.prepareProjectMutation('/api/v1/projects/p/assistant-allocations', 0, { target: { kind: 'member', id: 'member' }, assistantIds: ['helper'], defaultAssistantId: 'helper' })
+  const encoded = JSON.stringify(original.body, (_key, value) => value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)
+  const received = { state: 'completed', actorId: original.actorId, projectId: 'p', requestId: original.body.requestId, operation: 'allocation.save:member:member', saved: true, available: true, createdAt: '2026-10-27T00:00:00Z', publicIntent: { algorithm: 'sha256', digest: createHash('sha256').update(encoded).digest('hex') }, result: { revision: 1, assistantIds: ['helper'], defaultAssistantId: 'helper' } }
+  const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('原响应丢失')).mockResolvedValueOnce(Response.json(null)).mockResolvedValueOnce(Response.json({ ...received, publicIntent: { algorithm: 'sha256', digest: '0'.repeat(64) } })).mockResolvedValueOnce(Response.json(received))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({ code: 'PROJECT_REQUEST_UNCONFIRMED' })
+  await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({ code: 'PROJECT_RECEIPT_MISMATCH' })
+  expect(await directory.recoverProjectWrite(original)).toMatchObject({ assistantIds: ['helper'], defaultAssistantId: 'helper' })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'GET', 'GET', 'GET'])
+  expect(fetcher.mock.calls[3]?.[0]).toBe(`/api/agent-demo/t3/api/v1/projects/p/assistants/receipts/${original.body.requestId}`)
+  expect(directory.readPendingProjectWrite()).toBeNull()
+})
+
+
+it('服务端确认待完成删除后仅显式继续原请求，响应丢失回到GET且不重发DELETE', async () => {
+  const directory = await import('./projectDirectory')
+  const original = directory.prepareProjectMutation('/api/v1/projects/p', 2, {}, 'DELETE')
+  const pendingReceipt = receipt(original, { state: 'pending', available: false, canResume: true, result: undefined })
+  const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('原删除响应丢失'))
+    .mockResolvedValueOnce(Response.json(pendingReceipt))
+    .mockResolvedValueOnce(Response.json(pendingReceipt))
+    .mockRejectedValueOnce(new TypeError('继续删除响应丢失'))
+    .mockResolvedValueOnce(Response.json(receipt(original)))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  await expect(directory.recoverProjectWrite(original)).rejects.toMatchObject({ code: 'PROJECT_REQUEST_PENDING', canResume: true })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['DELETE', 'GET'])
+  await expect(directory.resumeProjectDeletion(original)).rejects.toMatchObject({ uncertain: true })
+  expect(directory.readPendingProjectWrite()).toEqual(original)
+  expect(fetcher.mock.calls[3]?.[0]).toBe(`/api/agent-demo/t3/api/v1/projects/receipts/${original.body.requestId}/resume`)
+  expect(JSON.parse(fetcher.mock.calls[3]?.[1].body)).toEqual({ operation: 'project.delete', projectId: 'p', publicIntent: { expectedRevision: 2 } })
+  expect(await directory.recoverProjectWrite(original)).toMatchObject({ deleted: true })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['DELETE', 'GET', 'GET', 'POST', 'GET'])
+  expect(directory.readPendingProjectWrite()).toBeNull()
+})
+
+it.each(['missing', 'pending-unavailable', 'mismatched'] as const)('继续删除前的%s原收据不能授权任何恢复写入', async (mode) => {
+  const directory = await import('./projectDirectory')
+  const original = directory.prepareProjectMutation('/api/v1/projects/p', 2, {}, 'DELETE')
+  const response = mode === 'missing' ? null : receipt(original, { state: 'pending', result: undefined, canResume: mode === 'mismatched', ...(mode === 'mismatched' ? { projectId: 'another' } : {}) })
+  const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('原响应丢失')).mockResolvedValueOnce(Response.json(response))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  await expect(directory.resumeProjectDeletion(original)).rejects.toMatchObject({ uncertain: true })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['DELETE', 'GET'])
+  expect(directory.readPendingProjectWrite()).toEqual(original)
+})
+
+it('继续原删除收到当前权限拒绝仍保留原请求，下一步只核对GET', async () => {
+  const directory = await import('./projectDirectory')
+  const original = directory.prepareProjectMutation('/api/v1/projects/p', 2, {}, 'DELETE')
+  const pendingReceipt = receipt(original, { state: 'pending', available: false, canResume: true, result: undefined })
+  const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('原响应丢失'))
+    .mockResolvedValueOnce(Response.json(pendingReceipt))
+    .mockResolvedValueOnce(Response.json({ code: 'PROJECT_FORBIDDEN', error: '当前权限不足' }, { status: 403 }))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  await expect(directory.resumeProjectDeletion(original)).rejects.toMatchObject({ code: 'PROJECT_FORBIDDEN' })
+  expect(directory.readPendingProjectWrite()).toEqual(original)
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['DELETE', 'GET', 'POST'])
+})
+
+
+it('显式继续原删除成功后核同scope收据清理原记录；已完成时仅GET不再恢复写入', async () => {
+  const directory = await import('./projectDirectory')
+  const original = directory.prepareProjectMutation('/api/v1/projects/p', 2, {}, 'DELETE')
+  const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('原响应丢失'))
+    .mockResolvedValueOnce(Response.json(receipt(original, { state: 'pending', available: false, canResume: true, result: undefined })))
+    .mockResolvedValueOnce(Response.json(receipt(original)))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  expect(await directory.resumeProjectDeletion(original)).toMatchObject({ deleted: true, projectId: 'p' })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['DELETE', 'GET', 'POST'])
+  expect(directory.readPendingProjectWrite()).toBeNull()
+  const next = directory.prepareProjectMutation('/api/v1/projects/p', 3, {}, 'DELETE')
+  fetcher.mockRejectedValueOnce(new TypeError('原响应丢失')).mockResolvedValueOnce(Response.json(receipt(next)))
+  await expect(directory.submitProjectWrite(next)).rejects.toMatchObject({ uncertain: true })
+  expect(await directory.resumeProjectDeletion(next)).toMatchObject({ deleted: true })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['DELETE', 'GET', 'POST', 'DELETE', 'GET'])
 })

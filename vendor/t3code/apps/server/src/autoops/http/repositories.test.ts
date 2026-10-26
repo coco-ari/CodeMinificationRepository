@@ -27,6 +27,7 @@ import {
   initializeAutoOpsAccessSchema,
 } from '../../../../../../../agent-demo/t3-adapters/access.mjs'
 import { repositoriesRoutes } from './repositories.ts'
+import { repositoryReceiptIntent, type RepositoryRequestReceipt } from '../../../../../../../autoops/contracts/project-management-receipts.ts'
 
 function setup() {
   const dataDir = mkdtempSync(join(tmpdir(), 'assistant-http-')),
@@ -279,4 +280,149 @@ it('分支读取等待期间注销登录，不返回迟到分支内容', async (
   const response = await reading
   expect(response.status).toBe(401)
   expect(await response.text()).not.toContain('private-branch-marker')
+})
+
+
+it('仓库已保存原请求可通过本人只读收据恢复，不重新写入或借目录推断', async () => {
+  await using f = setup()
+  const response = await f.handle(f.request('/repositories', create))
+  expect(response.status).toBe(200)
+  const result = await response.json()
+  const receipt = await f.handle(
+    f.request('/repositories/receipts/' + create.requestId, undefined, 'admin', false),
+  )
+  expect(receipt.status, await receipt.clone().text()).toBe(200)
+  expect(await receipt.json()).toMatchObject({
+    state: 'completed',
+    saved: true,
+    available: true,
+    actorId: 'admin',
+    projectId: 'project',
+    requestId: create.requestId,
+    operation: 'save-repository',
+    result,
+  })
+  expect(f.authoring.repositories('project', 'admin').revision).toBe(1)
+})
+
+it('仓库收据核对创建、编辑、工作区选择和删除的精确原指纹，读取不再写入', async () => {
+  await using f = setup()
+  const hash = (
+    operation: 'save-repository' | 'remove-repository' | 'configure-source',
+    id: string | null,
+    input: unknown,
+  ) =>
+    createHash('sha256')
+      .update(repositoryReceiptIntent('admin', operation, id, input))
+      .digest('hex')
+  const created = (await (await f.handle(f.request('/repositories', create))).json()) as {
+    repository: { id: string }
+  }
+  const id = created.repository.id
+  const first = (await (
+    await f.handle(f.request('/repositories/receipts/' + create.requestId))
+  ).json()) as RepositoryRequestReceipt
+  expect(first.publicIntent).toEqual({
+    algorithm: 'sha256',
+    digest: 'cc9f80c505fbb2dbd1c709d15562ddcb12e5b0c5aaff27535a49b8e4c3ff058f',
+  })
+  const changed = { ...create, value: { ...create.value, name: '篡改名称' } }
+  expect((await f.handle(f.request('/repositories', changed))).status).toBe(409)
+  expect(first.publicIntent.digest).not.toBe(hash('save-repository', null, changed))
+  const edit = {
+    requestId: 'edit-repository',
+    expectedRevision: 1,
+    value: {
+      name: ' 更新名称 ',
+      url: 'https://github.com/example/updated.git',
+      credentialId: 'credential-reference',
+    },
+  }
+  const edited = await f.handle(f.request('/repositories/' + id, edit))
+  expect(edited.status).toBe(200)
+  const saved = await edited.json()
+  expect(
+    await (await f.handle(f.request('/repositories/receipts/' + edit.requestId))).json(),
+  ).toMatchObject({ publicIntent: { digest: hash('save-repository', id, edit) }, result: saved })
+  const configure = {
+    mountPath: 'src/web',
+    ref: 'workbench',
+    id,
+    expectedRevision: 2,
+    requestId: 'configure-source',
+    refKind: 'branch',
+    role: 'frontend',
+  }
+  const configured = await f.handle(f.request(`/repositories/${id}/workspace`, configure))
+  expect(configured.status, await configured.clone().text()).toBe(200)
+  expect(
+    await (await f.handle(f.request('/repositories/receipts/' + configure.requestId))).json(),
+  ).toMatchObject({
+    operation: 'configure-source',
+    publicIntent: { digest: hash('configure-source', id, configure) },
+    result: await configured.json(),
+  })
+  f.authoring.removeSource(
+    'project',
+    id,
+    { requestId: 'detach-source', expectedRevision: 3 },
+    'admin',
+  )
+  const remove = { requestId: 'remove-repository', expectedRevision: 4 }
+  const removed = await f.handle(f.request(`/repositories/${id}/remove`, remove))
+  expect(removed.status).toBe(200)
+  expect(
+    await (await f.handle(f.request('/repositories/receipts/' + remove.requestId))).json(),
+  ).toMatchObject({
+    operation: 'remove-repository',
+    publicIntent: { digest: hash('remove-repository', id, remove) },
+    result: await removed.json(),
+  })
+  expect(f.authoring.repositories('project', 'admin').revision).toBe(5)
+  expect(
+    await (await f.handle(f.request('/repositories/receipts/detach-source'))).json(),
+  ).toBeNull()
+})
+
+it('仓库收据隔离操作者和项目，撤权后只返回本人已保存事实，关闭和失去登录不伪造空结果', async () => {
+  await using f = setup()
+  expect((await f.handle(f.request('/repositories', create))).status).toBe(200)
+  const path = '/repositories/receipts/' + create.requestId
+  expect(await (await f.handle(f.request(path, undefined, 'reader'))).json()).toBeNull()
+  expect(
+    await (await f.handle(f.request(path, undefined, 'admin', true, 'other-project'))).json(),
+  ).toBeNull()
+  expect(await (await f.handle(f.request('/repositories/receipts/missing'))).json()).toBeNull()
+  expect((await f.handle(f.request('/repositories/receipts/%21'))).status).toBe(400)
+  expect((await f.handle(f.request(path, undefined, 'missing'))).status).toBe(401)
+  f.catalog.users[0]!.role = 'member'
+  const masked = await (await f.handle(f.request(path))).json()
+  expect(masked).toMatchObject({
+    saved: true,
+    available: false,
+    actorId: 'admin',
+    requestId: create.requestId,
+  })
+  expect(masked).not.toHaveProperty('result')
+  expect(JSON.stringify(masked)).not.toContain(create.value.url)
+  f.catalog.users[0]!.role = 'admin'
+  const original = f.authoring.repositoryReceipt.bind(f.authoring)
+  const spy = vi.spyOn(f.authoring, 'repositoryReceipt').mockImplementationOnce((...args) => {
+    const result = original(...args)
+    f.catalog.users[0]!.role = 'member'
+    return result
+  })
+  expect(await (await f.handle(f.request(path))).json()).toMatchObject({ available: false })
+  spy.mockRestore()
+  f.catalog.users[0]!.role = 'admin'
+  vi.spyOn(f.authoring, 'repositoryReceipt').mockImplementationOnce((...args) => {
+    const result = original(...args)
+    f.sessions.prepare('DELETE FROM sessions WHERE uid=?').run('admin')
+    return result
+  })
+  expect((await f.handle(f.request(path))).status).toBe(401)
+  await f.authoring.close()
+  expect(() => f.authoring.repositoryReceipt('project', create.requestId, 'admin')).toThrow(
+    '工作区资料服务已停止',
+  )
 })

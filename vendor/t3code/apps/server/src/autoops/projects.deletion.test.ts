@@ -44,6 +44,7 @@ vi.mock(import('../../../../../../agent-demo/t3-adapters/access.mjs'), async (or
 }))
 import {
   deleteBusinessProject,
+  resumeBusinessProjectDeletion,
   synchronizeProject,
   projectSynchronizationReferences,
 } from './projects.ts'
@@ -160,7 +161,7 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
       )
     }),
   )
-  it.effect('真实原生归档会话不被强制级联删除，业务目录恢复管理并保留拒绝收据', () =>
+  it.effect('原请求受理后新增真实原生归档会话，显式续办仍拒绝级联删除并恢复管理', () =>
     Effect.gen(function* () {
       const f = yield* resource
       const projects = yield* ProjectService.ProjectService
@@ -173,6 +174,8 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
         workspaceRoot: join(f.dataDir, 'native-workspace'),
         scripts: [],
       })
+      const command = { requestId: 'delete-original', expectedRevision: 1 }
+      f.directory.beginProjectDeletion('actor', f.project.id, command, () => [])
       const at = DateTime.makeUnsafe('2026-01-01T00:00:00.000Z'),
         provider = ProviderInstanceId.make('codex')
       const payload: OrchestrationV2AppThread = {
@@ -214,11 +217,21 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
       const input = {
         actorId: 'actor',
         projectId: f.project.id,
-        command: { requestId: 'delete-original', expectedRevision: 1 },
+        command,
         directory: f.directory,
         inspect: () => [],
       }
-      const failure = yield* deleteBusinessProject(input).pipe(Effect.flip)
+      const failure = yield* resumeBusinessProjectDeletion({
+        actorId: 'actor',
+        requestId: command.requestId,
+        intent: {
+          operation: 'project.delete',
+          projectId: f.project.id,
+          publicIntent: { expectedRevision: command.expectedRevision },
+        },
+        directory: f.directory,
+        inspect: input.inspect,
+      }).pipe(Effect.flip)
       assert.equal((failure as { code: string }).code, 'PROJECT_DELETE_BLOCKED')
       assert.equal(f.directory.settings('actor', f.project.id).project.revision, 3)
       const projection = yield* ProjectionStore.ProjectionStoreV2
@@ -312,11 +325,29 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
         f.directory.beginProjectDeletion('actor', f.project.id, input.command, () => []).state,
         'pending',
       )
+      assert.equal(f.directory.receipt('actor', input.command.requestId)?.state, 'pending')
+      assert.equal(f.directory.receipt('actor', input.command.requestId)?.canResume, true)
       db.exec('DROP TRIGGER reject_completion')
-      assert.deepEqual(yield* deleteBusinessProject(input), {
+      const resume = {
+        actorId: 'actor',
+        requestId: input.command.requestId,
+        intent: {
+          operation: 'project.delete',
+          projectId: f.project.id,
+          publicIntent: { expectedRevision: 1 },
+        },
+        directory: f.directory,
+        inspect: () => [],
+      }
+      assert.deepEqual(yield* resumeBusinessProjectDeletion(resume), {
         deleted: true,
         projectId: f.project.id,
       })
+      assert.deepEqual(yield* resumeBusinessProjectDeletion(resume), {
+        deleted: true,
+        projectId: f.project.id,
+      })
+      assert.equal(f.directory.receipt('actor', input.command.requestId)?.state, 'completed')
       const sql = yield* SqlClient.SqlClient
       const events = yield* sql<{
         n: number

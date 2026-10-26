@@ -109,3 +109,88 @@ test('无有效默认助手时不能保存新的受限授权，原待分配边�
   assert.throws(() => f.directory.saveMember('creator', 'existing', assignment('no-default', { canAdjustChat: false })), { code: 'PROJECT_DEFAULT_ASSISTANT_REQUIRED' })
   assert.equal(f.directory.settings('creator', 'existing').members.find(row => row.userId === 'member').authorizationPending, true)
 })
+
+test('同actor只读原收据含严格意图与范围，环境及成员结果固定，重开不新增审计或收据', t => {
+  const f = fixture(t)
+  const commands = [
+    ['create-receipt', null, f.directory.create('creator', project('create-receipt')), 'project.create', project('create-receipt')],
+    ['save-receipt', null, f.directory.saveProject('creator', 'existing', { requestId: 'save-receipt', expectedRevision: 1, value: { name: '已保存配置', description: '原意图' } }), 'project.save', { requestId: 'save-receipt', expectedRevision: 1, value: { name: '已保存配置', description: '原意图' } }],
+  ]
+  const envCommand = { requestId: 'new-env-receipt', expectedRevision: 0, value: { name: '新环境原意图' } }
+  const environment = f.directory.saveEnvironment('creator', 'existing', null, envCommand)
+  commands.push(['new-env-receipt', null, environment, 'environment.save:new', envCommand])
+  const rename = { requestId: 'rename-env-receipt', expectedRevision: 1, value: { name: '更新环境' } }
+  commands.push(['rename-env-receipt', environment.id, f.directory.saveEnvironment('creator', 'existing', environment.id, rename), 'environment.save:' + environment.id, rename])
+  const member = assignment('member-receipt', { role: 'developer' })
+  commands.push(['member-receipt', null, f.directory.saveMember('creator', 'existing', member), 'member.save:member', member])
+  const db = new DatabaseSync(join(f.dataDir, 'project-directory', 'state.sqlite'))
+  try {
+    const counts = () => ['directory_receipts', 'directory_audit', 'directory_deletions'].map(table => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n)
+    const before = counts()
+    for (const [requestId, environmentId, result, operation, command] of commands) {
+      const receipt = f.directory.receipt('creator', requestId)
+      assert.deepEqual(receipt.publicIntent, { expectedRevision: command.expectedRevision, value: command.value })
+      assert.equal(receipt.actorId, 'creator');assert.equal(receipt.requestId, requestId);assert.equal(receipt.operation, operation)
+      assert.equal(receipt.environmentId, environmentId);assert.equal(receipt.state, 'completed');assert.equal(receipt.available, true)
+      assert.deepEqual(receipt.result, result)
+      assert.equal(receipt.projectId, operation === 'project.create' ? result.id : 'existing')
+      assert.equal(receipt.nativeSynchronization, operation.startsWith('project.') ? 'unverified' : 'not-required')
+      assert.equal(f.directory.receipt('admin', requestId), null, '平台管理员也不能读取他人原收据')
+    }
+    assert.deepEqual(counts(), before)
+    const original = f.directory.receipt('creator', 'create-receipt')
+    f.directory.close();f.open()
+    assert.deepEqual(f.directory.receipt('creator', 'create-receipt'), original)
+    assert.equal(f.directory.receipt('creator', 'missing'), null)
+    assert.throws(() => f.directory.receipt('creator', '../forged'), { code: 'PROJECT_INPUT_INVALID' })
+  } finally { db.close() }
+})
+
+test('当前撤权仅保留本人原保存事实和提交意图，不返回项目或成员详情；账号停用拒绝全部收据', t => {
+  const f = fixture(t), original = assignment('accepted-member', { role: 'developer' })
+  f.directory.saveMember('creator', 'existing', original)
+  f.directory.saveMember('admin', 'existing', { ...assignment('another-admin-receipt', { userId: 'admin', role: 'project_admin', environmentIds: [] }), expectedRevision: 0 })
+  f.directory.saveMember('admin', 'existing', assignment('revoke-receipt-actor', { userId: 'creator', role: 'reader', environmentIds: [] }))
+  const receipt = f.directory.receipt('creator', original.requestId)
+  assert.equal(receipt.saved, true);assert.equal(receipt.available, false);assert.equal(receipt.state, 'completed')
+  assert.deepEqual(receipt.publicIntent, { expectedRevision: original.expectedRevision, value: original.value })
+  assert.equal(Object.hasOwn(receipt, 'result'), false)
+  f.users.find(user => user.id === 'creator').status = 'disabled'
+  assert.throws(() => f.directory.receipt('creator', original.requestId), { code: 'PROJECT_ACTOR_FORBIDDEN' })
+})
+
+test('删除收据只读区分pending、blocked、实际deleted，墓碑原actor仍得到最小事实', t => {
+  const f = fixture(t), created = f.directory.create('creator', project('empty-receipt-project'))
+  const command = { requestId: 'delete-receipt-project', expectedRevision: 1 }
+  f.directory.beginProjectDeletion('creator', created.id, command, () => [])
+  assert.equal(f.directory.receipt('creator', command.requestId).state, 'pending')
+  assert.equal(f.directory.receipt('creator', command.requestId).result, undefined)
+  f.directory.blockProjectDeletion('creator', created.id, command, [{ kind: 'native-threads', count: 1, message: '仍有私有及归档会话' }])
+  const blocked = f.directory.receipt('creator', command.requestId)
+  assert.equal(blocked.state, 'blocked');assert.equal(blocked.available, true);assert.equal(blocked.blockers.length, 1)
+  const remove = { requestId: 'actual-delete-receipt-project', expectedRevision: 3 }
+  f.directory.beginProjectDeletion('creator', created.id, remove, () => [])
+  f.directory.completeProjectDeletion('creator', created.id, remove)
+  const receipt = f.directory.receipt('creator', remove.requestId)
+  assert.equal(receipt.state, 'completed');assert.equal(receipt.available, false)
+  assert.deepEqual(receipt.result, { deleted: true, projectId: created.id })
+  assert.equal(f.directory.receipt('admin', remove.requestId), null)
+  const environment = f.directory.saveEnvironment('creator', 'existing', null, { requestId: 'empty-env-receipt', expectedRevision: 0, value: { name: '待删除环境' } })
+  f.directory.deleteEnvironment('creator', 'existing', environment.id, { requestId: 'delete-env-receipt', expectedRevision: 1 }, () => [])
+  const envReceipt = f.directory.receipt('creator', 'delete-env-receipt')
+  assert.equal(envReceipt.environmentId, environment.id);assert.equal(envReceipt.operation, 'environment.delete')
+  assert.deepEqual(envReceipt.publicIntent, { expectedRevision: 1 })
+  assert.deepEqual(envReceipt.result, { deleted: true, projectId: 'existing', environmentId: environment.id })
+})
+
+test('损坏或注入的原参数/结果拒绝恢复，不返回秘密或以空收据掩盖损坏', t => {
+  const f = fixture(t), command = project('corrupt-receipt'), created = f.directory.create('creator', command)
+  const db = new DatabaseSync(join(f.dataDir, 'project-directory', 'state.sqlite'))
+  try {
+    db.prepare('UPDATE directory_receipts SET payload=? WHERE request_id=?').run(JSON.stringify({ ...command, secret: 'fictional-never-return' }), command.requestId)
+    assert.throws(() => f.directory.receipt('creator', command.requestId), { code: 'PROJECT_RECEIPT_INVALID', status: 503 })
+    db.prepare('UPDATE directory_receipts SET payload=?,result=? WHERE request_id=?').run(JSON.stringify(command), JSON.stringify({ ...created, id: 'another-project' }), command.requestId)
+    assert.throws(() => f.directory.receipt('creator', command.requestId), { code: 'PROJECT_RECEIPT_INVALID', status: 503 })
+    assert.equal(f.directory.receipt('admin', command.requestId), null)
+  } finally { db.close() }
+})

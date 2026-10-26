@@ -14,13 +14,26 @@ import type { BusinessHttpContext } from './context.ts'
 import { responseError } from './responses.ts'
 
 export function repositoriesRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'list' | 'refs' | 'save' | 'remove' | 'workspace') =>
+  const handle = (operation: 'list' | 'refs' | 'save' | 'remove' | 'workspace' | 'receipt') =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
       const parts = new URL(request.url, 'http://localhost').pathname.split('/')
       const project = yield* Effect.try(() => decodeURIComponent(parts[4] ?? ''))
       const repositoryId = parts[6] ? yield* Effect.try(() => decodeURIComponent(parts[6]!)) : null
+      if (operation === 'receipt') {
+        yield* Effect.try(() => access.refresh(current))
+        const service = yield* Effect.try(() => configuredWorkspaceManagement(access))
+        const requestId = yield* Effect.try(() => decodeURIComponent(parts[7] ?? ''))
+        yield* Effect.try(() => service.authoring.repositoryReceipt(project, requestId, current.id))
+        const value = yield* Effect.try(() => {
+          access.refresh(current)
+          return service.authoring.repositoryReceipt(project, requestId, current.id)
+        })
+        return HttpServerResponse.jsonUnsafe(value, {
+          headers: { 'cache-control': 'private, no-store' },
+        })
+      }
       const read = operation === 'list' || operation === 'refs'
       const action = read
         ? 'repository.read'
@@ -111,6 +124,7 @@ export function repositoriesRoutes({ access, principal }: BusinessHttpContext) {
   const base = '/api/v1/projects/:projectId/repositories'
   return Layer.mergeAll(
     HttpRouter.add('GET', base, handle('list')),
+    HttpRouter.add('GET', `${base}/receipts/:requestId`, handle('receipt')),
     HttpRouter.add('GET', `${base}/:repositoryId/refs`, handle('refs')),
     HttpRouter.add('POST', base, handle('save')),
     HttpRouter.add('POST', `${base}/:repositoryId`, handle('save')),

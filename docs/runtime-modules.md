@@ -1268,3 +1268,55 @@ B4 准备真实项目管理员/只读身份回归时，另发现已存节点原�
 根代理审查又发现提前完整读取共享 profile 会使损坏配置阻断既有 self，改为仅有界读取合法授权键提示，真实准入继续归原 profile/runtime/authorize。键名随 profile 更新只增记忆，撤回和删除后不重新泄漏；未知且从未见过的删除/非法 profile 键无法推断，明确保留此边界，不以未知名称阻断自用。第二轮独立审发现完整 loader 先阻塞 FIFO，后续 fallback 无法到达；两个公开子进程红测分别超时，原 profile open 加 NONBLOCK 后由既有 stat 拒绝非普通文件，2/2 通过。提示读取同样采用 canonical 路径、NOFOLLOW/NONBLOCK、普通文件、不可组/全局写、64KiB 上限和严格 UTF-8，不读取模型/技能目录来决定 self 是否可用。
 
 冻结 v3 `.deployment/c6-execution-parent-v1/formal-client-fix-v3/manifest.json` SHA256 `16c52640f3665b312781c746f36bd937b4cdbb5a3652c5334d2a60e9eb2a1d9e`；关联 48/48，根代理独立两个测试文件 20/20、随后完整客户 87/87，客户类型、构建、离仓 ZIP 冒烟和 294 模块边界通过。正式 ZIP SHA256 `eaf854417fb9fb46c512e21ebb75e23d85d5a256fa084a974a90a68a066faa15`，三个实际 source map 与冻结源码逐字一致。四类状态为代码完成、上述自动测试通过、完整 CI 待验、新客户包未部署、真实共享业务未验。此前 V5 十项 OS/十二模型目录证明的是旧客户包；须用本次修复后的 CI 固定包重新核验后再进行实际共享推理，辅助 parent 和离线测试不计业务通过。
+
+账号长用户名按新独占 v4 真实复验通过：同原账号和实际 577 发行，四布局 86 步，layoutAccepted=true、longUsernameVisualAccepted=true、unknown 非 GET 为零。只放行同 origin、无查询参数、合法且有界 OTLP 结构的 T3 `/api/agent-demo/t3/api/observability/v1/traces`，客户端、网关及原生 trace collector 调用链已核实，其他业务 POST 继续阻断。实际捕获一批/126 spans 的分类计数；该版没有保存遥测响应状态，未补称 204。v2/v3 原失败和脱敏信息不足均保留；新 result SHA256 `c2a532a9725b0a9fb0da182cbef24599dc04ac1fb966e754c40b58be5f0da499`，证据 `.deployment/real-ui-geometry-5775655e-evidence-v4/`。只读 owner 另核原六 UUID 请求和六审计行、enabled/revision6 保持，本次零账号写。核心任务前后仍三步，等待另记，未宣称减少操作。此子项四类状态通过，账号后台撤回仍待验。
+
+E1/E3 首次 manager 只读入口失败且 cases=0，另正常登录 bootstrap 确认真身份和项目管理员范围，排除账号/权限。原因是验收器将 authoring 的 `/api/v1/projects/:id/workspace` 当 WorkspaceOverview；页面实际入口为 `/autoops/projects/:id/workspaces`。新独占准备版修正路径和 DTO 并补红绿，不改产品或原失败；完整配置页仍待真实验收。
+
+B4 新独占 v3 已真实通过，同原 owned 空节点正常解绑后，以新 UUID 绑定，实际 HTTP200 后只丢客户端回复，由同 UUID GET 恢复且全程一次 POST。三项收据 GET 负例为 reader403、平台管理员读取 manager 原收据200/null、manager 篡改环境200/null；reader 绑定/解绑及跨项目请求均拒绝。随后平台撤回、最小节点投影、manager 原收据当前授权投影、正常解绑/撤销/删除和原事实精确保留通过。五个旧通过阶段仅引用原证据，十个新阶段实际完成，旧 v2 失败字节不改。25 项脚本回归由根代理独立复跑，不能替代这些实际 HTTP 结果。根独立证据 `.deployment/b4-real-5775655e-v3-root-independent-v1.json`，实际 state SHA256 `4652b6d3d11eb835f0d4fd72e0505b60c3bb5081a86d9b29c5e3fb1e672cdcb5`，HTTP SHA256 `ea7e2070f3207257d4e8fa2a9f8b8bc5d14453b26882f3c7754f5f40cdada406`。本角色与原收据子项四类状态通过；真实物理 Agent 断线和其余整页仍继续 D5/E1。
+
+## 10a466d7 固定发行与数据保留（2026-10-27）
+
+正式客户环境过滤修复固定为 `10a466d7c058bf517aa29d65c512fd409d25ba20`，[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40378716789)及[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40378716779)均通过。Node 852/2 跳过、原生 254/2 跳过及三个过滤入口 2/3/3、Web 639/639、客户 87/87；客户新增用例确实进入完整 CI。新发行源码 29496 文件、依赖 601 条及 19 个关键实际 source map 已独立核对，上传包 SHA256 `ad57d90fe1ff589383c654405ccc8acdbeaf3046832fe32ea65a0e5f2b619a99`、发行清单 `70bf4fa3164ebf2cec5ebc6c683c5704152bc1808b3ab3750d8a08a5aa2f8616`、正式客户 ZIP `e5a63008665c76e556d5e3513ec8fcdaefc52fea29970c3294aaacc0bbd3616a`。之前本机构建 ZIP 仅为候选证明，不冒充本次正式包。
+
+stable1 在候选启动前的停止阶段被完整数据守卫拒绝，按原流程恢复 577，未恢复数据库。只读逐项重建证明：两个刚完成的平台会话在有序停止时记录 provider-session.updated/stopped；恢复后四个客户线程重新附着只改变 updatedAt，相应六行只还原时间字段即可重建原 SHA。该失败未保存精确 drain 时刻快照，因此不把恢复后的比较冒称失败瞬间原文。失败现场、停止事件及独立恢复核对均保留，没有放宽守卫、回写旧行或停止原全局 Agent。
+
+新鲜 stable2 基线沿同一候选和同一严格守卫通过 Worker/Web 两阶段。实际 Web392645、launcher392503、native392515，工作目录为 `/home/tao/autoops-agent-demo/releases/t3-confirmed-10a466d7`，原 Node24.22.0 与 DATA_DIR 保持。独立结果 `.deployment/switch-10a466d7-stable2-evidence/live-10a466d7-independent-v2.json` SHA256 `8fecfe2cea5289ce7966d5b053af25264c481aa0cf3fd1e0f34848137839562c` 核对完整发行、实际 PID/cwd/exe、公开和回环健康、页面及两个 Worker 字节、新鲜基线文件/密钥/账号五表、首次释放完整行、原 12 任务/9 版本及原 Agent59368。此前按引用合法回收的旧目录不要求恢复；本次没有空库初始化、重复接管、备份或恢复数据。
+
+同一正式客户包随后通过真实 Linux 10 项 OS 边界、实际 Codex app-server 的提供者 12 模型目录、grok-4.6/medium、仅 c6-curated-proof 技能启用及未选仓库技能排除；容器已停止。本次没有模型推理、共享或读取秘密，`sharedBusinessAccepted=false`。根独立复核索引 `.deployment/selected-10a466d7-root-independent-v1.json` SHA256 `ff5efc5367dd12ce15a273596999a5c5bc4faed27e84d9718890cbd47c51af4b`。C6 四状态为代码完成、完整自动测试通过、新包部署生效、真实共享业务仍待验。
+
+## 低权限真实 MCP 与活动停用（2026-10-27）
+
+577 的真实 reader 新私有线程 `8710b6ec-52d1-414f-827b-e40ce096397e` 通过同一固定预设实际读取 Redis/MySQL/SSH 三类 marker，同轮、同环境和各连接修订匹配；同一原输入再请求其他环境连接实际工具拒绝。此前三个参数篡改各自正常返回模型 403、强度 403、预设修订 409，未创建绑定或命令；新用例仅引用这些已确认事实，不重发旧负例。最初验收器把 MCP 管理 GET 的项目动作拒绝误当工具跨环境拒绝，原失败保留，新证据以实际工具结果判断。state `.deployment/mcp-reader-real-5775655e-v4-evidence/actual-reader/state.json` SHA256 `93ea3ebcf6d131b9590457587508fe19829d09740b7214a348b53939970e2794`；公共预设、项目和成员/分配事实保持原值。此子项真实问答通过，完整角色矩阵和共享仍待验。
+
+首次活动停用验收器失败且没有配置写：进度仅含 outputOmitted=true 的投影，实际原 turn-item 正文已有 marker，因此触发器没有停用。只读以原 orchestration.getTurnItem 核对相同线程/轮次/item 排除模型未读到 marker，旧失败不改；新增适配器仅通过原 RPC 有界补读这些同源详情。13 文件独占工具及相关 20 项红绿回归冻结后，在 10 新线程 `d706ef2a-6fa8-464b-8c9b-caf437fa7ed7` 真正完成 query、Redis revision6 首读、正常停用 revision7 和原 GET 收据确认；之后同原 input `58a32fae-7cff-4fc2-b353-3306892da7df`、同轮后续两次工具均实际拒绝“环境连接已经停用”。原轮完成后正常恢复 enabled/revision8，原 GET completed、配置/原 lastTest 与公共项目事实均保持。
+
+实际 state `.deployment/mcp-withdraw-real-10a466d7-v5-evidence/state.json` SHA256 `bbdc4fab0b34ff4cab5588cb67b138b779f746af4c03b17b1931aa9ad3540415`，根独立复核同上一索引。这证明活动任务的后续请求即时拒绝，不证明已经发送的请求之迟到响应被阻断；后者仍须单独实际验证，不能据此结束 B5/B6。账号撤回新用例已正常停用 owned reader revision5→6并取得原完成收据，但随后 HTTP401 错误码断言失败，原线程、请求和失败现场均保留；须先核原后台终态再正常恢复，不能把该失败算通过或重放原问答。
+
+## 项目配置原收据与删除续办（2026-10-27，实施中）
+
+影响分析沿 ProjectsPage/ProjectRemovalDialog → 共用 projectDirectory.submitProjectWrite → 项目目录/仓库资料/助手 owner → 原生 ProjectService。该 helper 同时服务仓库、项目助手和分配，不能只改项目目录后让其他配置永久失去恢复。最小红测在未知 DELETE 后点击恢复，预期 DELETE/GET，实际 DELETE/DELETE；检查排除 apiClient 自动重试，确认是 UI 显式再次提交。三个 owner 均已有自身持久收据，缺少只读公开 GET；新增 GET 保留原 actor/范围/公开参数核对，仓库及助手只返回原参数摘要，撤权后仅给本人最小保存事实。没有另建授权库或跨模块读写数据库。
+
+另一红测为原生删除事件已提交、业务 complete 失败：原请求确实已经受理，稳定原生 commandId 也存在，排除没有接收原删除；正常启动仅同步活动项目、不扫描 pending 删除，原 GET 因而正确保持 pending。新增显式 POST 原 requestId/resume，仅继续同 actor 已接受的项目删除；4KiB 实际流上限、原 project/expectedRevision、当前删除授权、各 owner 新引用与 force:false 原生检查全部复核。GET 零写；再次继续使用同一原生命令，测试确认最终只有一条 project.deleted，新增归档/私有会话阻止删除而不删除会话。撤权、跨 actor、篡改及正文读取期间会话失效分别有负例。create/save 仍沿已有正常启动同步，GET 只标当前投影 current-verified 或 unverified，不伪造原同步收据。
+
+后端 15 文件冻结 `.deployment/project-directory-receipts/backend-freeze-v1/manifest.json` SHA256 `436e8336e470296e3c7cb2ae1d45c969fd29f970cd4fe128a9752b92eb8b95a7`。关联 Node 41/41、原生 HTTP 与真实 ProjectService 33/33、adapter/native 严格类型及 295 源边界通过；根代理另独立复跑四个 HTTP/真实 ProjectService 文件 33/33、四个 Node 文件 37/37。上述是真实 SQLite/原生服务自动回归，不是服务器业务验收。Web 的未知只 GET、页面重开及原删除显式继续仍在收尾；四类状态保持新增代码实施中、部分自动测试通过、未部署、真实业务待验。
+
+Web 随后完成 8 文件冻结，manifest SHA256 `469929767a964925ee03cc26a7e57743ee29967656bac69625a926524787071c`；请求与关联单测 54/54、Web 严格类型及 client/五个测试定向 lint 通过，根独立两个单测文件 52/52。两个既有 UI 文件定向 lint 返回 9 条诊断，未宣称全 lint 通过，基线对照另保留。36 个浏览器场景待 Linux CI，未在 macOS 启动浏览器；新发行和真实配置写入待验。代码四状态改为完成、上述自动回归通过而浏览器/完整 CI 待验、未部署、真实业务待验。
+
+同账号、权限、已加载对象及合法输入条件下，点击、填写、菜单展开和选择各计一次，自动 GET/刷新/打开恢复 Dialog 不计动作；实际等待尚未测，未宣称耗时或步骤减少。
+
+| 核心任务 | 修改前完整步骤 | 修改后完整步骤 | 次数与恢复 |
+| --- | --- | --- | --- |
+| 编辑项目、环境或仓库 | 点击编辑/添加 → 填写名称或地址 → 保存 | 相同三步 | 均 3；未知后自动 GET，仍未知再点重试只 GET，共 4 |
+| 成员助手分配 | 分配助手 → 勾选助手 → 展开默认助手 → 选择助手 → 保存 | 相同五步 | 均 5；仍未知再点重试只 GET，共 6 |
+| 删除空项目/环境 | 展开菜单 → 删除 → 确认删除 | 相同三步 | 均 3；未知前可能自动重发 DELETE，现只 GET；仍未知点核对，共 4 |
+| 已受理 pending 项目删除 | 无独立续办，不能可靠完成 | 上述三步 → 继续删除，自动先 GET 再原 resume | 共 4，明确多一次继续；续办回复丢失后核对只 GET，共 5 |
+| 重开页面恢复已退出活动目录的 pending 项目 | 不能从活动目录继续，重试可能再次 DELETE | 重试 → 原 GET 自动打开原 Dialog → 继续删除 | 两次用户操作；保留原 UUID，不读新预检，不与不可完成旧流程比较减少次数 |
+
+用户保留输入、真实错误、焦点及恢复入口，未知不再触发重复创建/授权/删除；开发者复用三个 owner 的公开合同和共用请求入口，明确一次发送及每种恢复状态；Agent 沿原语义按钮、标签和错误码区分未知、已保存不可见、运行入口未核及可继续删除，无需从目录猜结果。验证命令为 `pnpm --dir vendor/t3code/apps/web exec vp test run src/autoops/projectDirectory.test.ts src/autoops/projectAssistants.test.ts src/autoops/apiClient.test.ts --project unit`，54/54；浏览器成功、失败及恢复场景仍等待完整 Linux CI，截图未用作交互证明。
+
+账号失败后的恢复另开独占 v6：只读确认原 run completed 后，原停用 UUID 仅 GET，再以新 enable UUID 正常恢复 revision6→7并查原完成收据，账号原 ID 和其他公开字段完全相同；旧 v5 state SHA 不变。实际 `.deployment/account-reader-recovery-v6-actual-evidence-v1/state.json` SHA256 `5ece40e21c5322f12e48b9101d5a7bbad17165b9c100bc5c85b40d8a27f0817c`。原生 HTTP 会先将失效 AutoOps Cookie 包装为 ServerAuthInvalidCredentialError，所以公开合同实际为 HTTP401/请先登录/AUTOOPS_REQUEST_FAILED，原脚本期望内部 UNAUTHENTICATED 错误码不成立。原后台八次工具失败亦已只读核对为精确授权失效结构，而非网络故障；旧 Cookie 已随失败进程丢失，因此仍不能追填完整会话撤权通过，继续新用例验证。
+
+共享电脑首次正常配置使用三个独立非平台管理员账号和三个新 owned 项目。提供者通过新正式 CLI 正常配对、登记来源并发布真实 self/shared 目录；精确来源为 device a7e27fe5-a026-4daf-85c4-dc80b988abef、workspace92512d3e-e468-4b4c-9d51-affa11b0ecc7/revision1、source8824b5e9-c08c-4929-9a97-9df0d7c4cf7a。运维文件只在本次正式 CI、真实 OS10、原生12模型和 profile digest 一致后追加这一来源许可，不开放其他来源；许可前该来源实际返回 CUSTOMER_SHARED_ISOLATION_UNVERIFIED。未捕获到启动时短暂原生子进程的只读观察器明确记录零样本，不冒称实际环境键检查通过；正式 CLI 的真实子进程过滤自动回归与 CI 证据单独保留。
+
+随后提供者正常共享到 target4aa68b32-86ab-4982-bbfa-5d2814974971，独立项目管理员设置 reader 默认、加入接收者并分配，真实运行目录保留 grok-4.6/medium 与唯一 c6-curated-proof。管理员未分配拒绝、低权限参数篡改、跨项目及使用者设备管理拒绝通过；林晓/陈一未变。以上仅证明正常配置和准入。首次业务在原 launch command3190c7a0-95fb-40ce-b3bb-3ab12c8a0f61、thread0195d75c-3e75-4cbd-807a-e3ec8baf82e6 未取得明确结果后停止，没有 message/附件/推理；正在只读查询原结果，不重发 launch。证据 `.deployment/c6-actual-10a466d7-evidence-v1/`，完整共享模型、附件、技能、断线与撤回仍未通过，记录失败不代表该项完成。

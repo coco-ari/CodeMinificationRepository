@@ -19,6 +19,30 @@ export const projectSynchronizationReferences = (project: string): DeletionBlock
     : []
 }
 
+/** 只证明当前原生投影匹配已保存目标；不代替原同步收据，也不执行补写。 */
+export const inspectProjectSynchronization = Effect.fn('AutoOps.inspectProjectSynchronization')(
+  (project: { readonly id: string; readonly name: string }) =>
+    Effect.gen(function* () {
+      const dataDir = process.env.AUTOOPS_T3_DATA_DIR
+      const model = process.env.AUTOOPS_T3_MODEL || process.env.AGENT_DEMO_MODEL
+      if (!dataDir?.trim() || !model?.trim()) return 'unverified' as const
+      const projects = yield* ProjectService.ProjectService
+      const path = yield* Path.Path
+      const current = yield* projects.getById(ProjectId.make(project.id), { includeDeleted: true })
+      if (Option.isNone(current)) return 'unverified' as const
+      const value = current.value
+      return value.id === project.id &&
+        value.deletedAt === null &&
+        value.title === project.name &&
+        value.workspaceRoot === path.resolve(dataDir, 't3', 'workspaces', project.id) &&
+        value.defaultModelSelection?.instanceId === 'codex' &&
+        value.defaultModelSelection.model === model &&
+        value.autoPull === false
+        ? ('current-verified' as const)
+        : ('unverified' as const)
+    }).pipe(Effect.catchCause(() => Effect.succeed('unverified' as const))),
+)
+
 /** 项目创建与事件仍归原生服务，业务目录只限定根目录及项目元数据。 */
 export const synchronizeProject = Effect.fn('AutoOps.synchronizeProject')(
   (project: { readonly id: string; readonly name: string; readonly revision?: number }) =>
@@ -165,6 +189,33 @@ export const deleteBusinessProject = Effect.fn('AutoOps.deleteBusinessProject')(
     })),
   )
 })
+
+/** 显式继续已受理的原删除；引用、身份和命令仍由原 owner 与原生服务裁决。 */
+export const resumeBusinessProjectDeletion = Effect.fn('AutoOps.resumeBusinessProjectDeletion')(
+  function* (input: {
+    actorId: string
+    requestId: string
+    intent: unknown
+    directory: ProjectDirectory
+    inspect: ProjectDeletionInspection
+  }) {
+    const accepted = yield* Effect.try(() =>
+      input.directory.resumeProjectDeletion(
+        input.actorId,
+        input.requestId,
+        input.intent,
+        (project) => [...input.inspect(project), ...projectSynchronizationReferences(project)],
+      ),
+    )
+    return yield* deleteBusinessProject({
+      actorId: input.actorId,
+      projectId: accepted.projectId,
+      command: accepted.command,
+      directory: input.directory,
+      inspect: input.inspect,
+    })
+  },
+)
 
 export const initializeProjects = Effect.gen(function* () {
   if (!isAutoOpsEnabled()) return

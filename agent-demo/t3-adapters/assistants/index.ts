@@ -5,6 +5,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import * as S from 'effect/Schema'
 import * as DateTime from 'effect/DateTime'
 import * as C from '../../../autoops/contracts/assistants.ts'
+import * as R from '../../../autoops/contracts/project-management-receipts.ts'
 import { DirectoryId } from '../../../autoops/contracts/project-directory.ts'
 import type { ProjectMembership } from '../../../autoops/contracts/runtime.ts'
 import type { CustomerRegistry } from '../customer-registry.mjs'
@@ -455,6 +456,78 @@ export function createAssistantDirectory(options: Options) {
     requireProviderAccess(actor: string, id?: string) {
       if (id !== undefined) ownedPreset(actor, id)
       else requireProvider(actor)
+    },
+    projectReceipt(
+      actor: string,
+      project: string,
+      requestId: string,
+    ): R.ProjectAssistantRequestReceipt | null {
+      if (closed) fail(503, 'ASSISTANTS_CLOSED', '助手目录已停止')
+      decode(DirectoryId, actor)
+      decode(DirectoryId, project)
+      decode(DirectoryId, requestId)
+      const row = db
+        .prepare(
+          'SELECT * FROM assistant_receipts WHERE request_id=? AND actor_id=? AND project_id=?',
+        )
+        .get(requestId, actor, project)
+      if (!row || !/^(?:preset\.save:|allocation\.save:)/.test(String(row.operation))) return null
+      let available = true
+      try {
+        manage(actor, project)
+      } catch (error) {
+        const status = (error as { status?: number }).status
+        if (status !== 403 && status !== 404) throw error
+        available = false
+      }
+      try {
+        const operation = String(row.operation)
+        const encoded = String(row.payload)
+        const payload = JSON.parse(encoded)
+        if (
+          payload.requestId !== requestId ||
+          R.projectAssistantReceiptIntent(operation, payload) !== encoded
+        )
+          throw new Error('invalid intent')
+        const isPreset = operation.startsWith('preset.save:')
+        const result = isPreset
+          ? S.decodeUnknownSync(R.ProjectAssistantPreset, { onExcessProperty: 'error' })(
+              JSON.parse(String(row.result)),
+            )
+          : S.decodeUnknownSync(R.ProjectAssistantAllocation, { onExcessProperty: 'error' })(
+              JSON.parse(String(row.result)),
+            )
+        if (result.revision !== payload.expectedRevision + 1) throw new Error('invalid revision')
+        if (isPreset) {
+          const preset = result as R.ProjectAssistantRequestReceipt['result'] & {
+            id: string
+            projectId: string
+          }
+          if (
+            preset.projectId !== project ||
+            (operation !== 'preset.save:new' && preset.id !== operation.slice('preset.save:'.length))
+          )
+            throw new Error('invalid preset')
+        } else if (operation !== `allocation.save:${payload.target.kind}:${payload.target.id}`)
+          throw new Error('invalid target')
+        return S.decodeUnknownSync(R.ProjectAssistantRequestReceipt, { onExcessProperty: 'error' })({
+          state: 'completed',
+          requestId,
+          actorId: actor,
+          projectId: project,
+          operation,
+          saved: true,
+          available,
+          createdAt: String(row.created_at),
+          publicIntent: {
+            algorithm: 'sha256',
+            digest: createHash('sha256').update(encoded).digest('hex'),
+          },
+          ...(available ? { result } : {}),
+        })
+      } catch {
+        return fail(503, 'ASSISTANT_RECEIPT_INVALID', '原助手收据无法核对，请保留原请求稍后恢复')
+      }
     },
     providedReceipt(actor: string, requestId: string): C.ProvidedAssistantReceipt {
       requireProvider(actor)

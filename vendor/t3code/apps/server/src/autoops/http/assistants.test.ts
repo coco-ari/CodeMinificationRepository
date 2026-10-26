@@ -17,6 +17,7 @@ const mock = vi.hoisted(() => ({ directory: undefined as AssistantDirectoryServi
 vi.mock(import('../../../../../../../agent-demo/t3-adapters/access.mjs'), async original => ({ ...await original(), configuredAutoOpsAssistantDirectory: () => mock.directory! }))
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../../../../../../../agent-demo/t3-adapters/access.mjs'
 import { assistantsRoutes } from './assistants.ts'
+import { projectAssistantReceiptIntent, type ProjectAssistantRequestReceipt } from '../../../../../../../autoops/contracts/project-management-receipts.ts'
 
 function setup() {
   const dataDir = mkdtempSync(join(tmpdir(), 'assistant-http-')), sessions = new DatabaseSync(':memory:'), bindings = new DatabaseSync(':memory:')
@@ -32,7 +33,7 @@ function setup() {
     authenticateHttpRequest: (request: { headers: Record<string, string> }) => Effect.succeed({ sessionId: AuthSessionId.make(request.headers['x-test-session'] ?? 'missing'), subject: 'test', method: 'bearer-access-token', scopes: [] }),
   } as unknown as EnvironmentAuth.EnvironmentAuth['Service'])))), { disableLogger: true })
   const request = (suffix = '/assistants', body?: unknown, user = 'admin', csrf = true, project = 'project') => new Request(`http://localhost/api/v1/projects/${project}${suffix}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'x-test-session': user, ...(csrf ? { 'x-demo-csrf': 'test-csrf' } : {}), 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
-  return { access, request, handle: app.handler, async [Symbol.asyncDispose]() { await app.dispose(); directory.close(); sessions.close(); bindings.close(); rmSync(dataDir, { recursive: true, force: true }); mock.directory = undefined } }
+  return { access, directory, catalog, sessions, request, handle: app.handler, async [Symbol.asyncDispose]() { await app.dispose(); directory.close(); sessions.close(); bindings.close(); rmSync(dataDir, { recursive: true, force: true }); mock.directory = undefined } }
 }
 const value = { name: '资料助手', description: '', instructions: '', enabled: true, configuration: { agentId: 'a-project', executionBinding: { kind: 'platform' }, workspaceType: 'internal', environmentId: null, visibility: 'private', model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: null }, skillIds: [] } }
 const create = { requestId: 'create-assistant', expectedRevision: 0, value }
@@ -63,4 +64,135 @@ it('身份、CSRF、管理和跨项目边界在消费正文前拒绝，不返回
   expect((await f.handle(f.request('/assistants', undefined, 'reader', true, 'another'))).status).toBe(404)
   expect((await f.handle(f.request('/assistants', { ...create, ownerId: 'reader' }))).status).toBe(400)
   expect(await (await f.handle(f.request('/assistants/settings'))).json()).toMatchObject({ presets: [], allocations: [] })
+})
+
+
+it('项目助手和分配已保存原请求可通过本人只读收据恢复', async () => {
+  await using f = setup()
+  const response = await f.handle(f.request('/assistants', create))
+  expect(response.status).toBe(200)
+  const preset = (await response.json()) as { id: string }
+  const receipt = await f.handle(
+    f.request('/assistants/receipts/' + create.requestId, undefined, 'admin', false),
+  )
+  expect(receipt.status, await receipt.clone().text()).toBe(200)
+  expect(await receipt.json()).toMatchObject({
+    state: 'completed',
+    saved: true,
+    available: true,
+    actorId: 'admin',
+    projectId: 'project',
+    requestId: create.requestId,
+    operation: 'preset.save:new',
+    result: preset,
+  })
+  const assign = {
+    requestId: 'assign-reader',
+    expectedRevision: 0,
+    target: { kind: 'member', id: 'reader' },
+    assistantIds: [preset.id],
+    defaultAssistantId: preset.id,
+  }
+  const assigned = await f.handle(f.request('/assistant-allocations', assign))
+  expect(assigned.status).toBe(200)
+  const allocation = await assigned.json()
+  expect(
+    await (await f.handle(f.request('/assistants/receipts/' + assign.requestId))).json(),
+  ).toMatchObject({ operation: 'allocation.save:member:reader', result: allocation })
+})
+
+it('助手收据绑定精确预设、分配目标和修订，篡改同ID不能被原成功确认', async () => {
+  await using f = setup()
+  const digest = (operation: string, input: unknown) =>
+    createHash('sha256').update(projectAssistantReceiptIntent(operation, input)).digest('hex')
+  const preset = (await (await f.handle(f.request('/assistants', create))).json()) as { id: string }
+  const first = (await (
+    await f.handle(f.request('/assistants/receipts/' + create.requestId))
+  ).json()) as ProjectAssistantRequestReceipt
+  expect(first.publicIntent).toEqual({
+    algorithm: 'sha256',
+    digest: digest('preset.save:new', create),
+  })
+  const changed = { ...create, value: { ...value, instructions: '篡改正文' } }
+  expect((await f.handle(f.request('/assistants', changed))).status).toBe(409)
+  expect(first.publicIntent.digest).not.toBe(digest('preset.save:new', changed))
+  const edit = {
+    ...create,
+    requestId: 'edit-preset',
+    expectedRevision: 1,
+    value: { ...value, instructions: '保存的私有说明' },
+  }
+  const saved = await f.handle(f.request('/assistants/' + preset.id, edit))
+  expect(saved.status).toBe(200)
+  expect(
+    await (await f.handle(f.request('/assistants/receipts/' + edit.requestId))).json(),
+  ).toMatchObject({
+    operation: 'preset.save:' + preset.id,
+    publicIntent: { digest: digest('preset.save:' + preset.id, edit) },
+    result: await saved.json(),
+  })
+  const assign = {
+    requestId: 'assign-reader',
+    expectedRevision: 0,
+    target: { kind: 'member', id: 'reader' },
+    assistantIds: [preset.id],
+    defaultAssistantId: preset.id,
+  }
+  const assigned = await f.handle(f.request('/assistant-allocations', assign))
+  expect(assigned.status).toBe(200)
+  const receipt = (await (
+    await f.handle(f.request('/assistants/receipts/' + assign.requestId))
+  ).json()) as ProjectAssistantRequestReceipt
+  expect(receipt).toMatchObject({
+    operation: 'allocation.save:member:reader',
+    publicIntent: { digest: digest('allocation.save:member:reader', assign) },
+    result: await assigned.json(),
+  })
+  const otherTarget = { ...assign, target: { kind: 'member', id: 'admin' } }
+  expect((await f.handle(f.request('/assistant-allocations', otherTarget))).status).toBe(409)
+  expect(receipt.publicIntent.digest).not.toBe(digest('allocation.save:member:admin', otherTarget))
+  expect(f.directory.settings('admin', 'project').allocations).toHaveLength(1)
+})
+
+it('助手原收据不暴露其他操作者或项目，撤权与晚到登录失败保留安全事实', async () => {
+  await using f = setup()
+  expect((await f.handle(f.request('/assistants', create))).status).toBe(200)
+  const path = '/assistants/receipts/' + create.requestId
+  expect(await (await f.handle(f.request(path, undefined, 'reader'))).json()).toBeNull()
+  expect(
+    await (await f.handle(f.request(path, undefined, 'admin', true, 'other-project'))).json(),
+  ).toBeNull()
+  expect(await (await f.handle(f.request('/assistants/receipts/missing'))).json()).toBeNull()
+  expect((await f.handle(f.request('/assistants/receipts/%21'))).status).toBe(400)
+  expect((await f.handle(f.request(path, undefined, 'missing'))).status).toBe(401)
+  f.catalog.users[0]!.role = 'member'
+  const masked = await (await f.handle(f.request(path))).json()
+  expect(masked).toMatchObject({
+    saved: true,
+    available: false,
+    actorId: 'admin',
+    requestId: create.requestId,
+  })
+  expect(masked).not.toHaveProperty('result')
+  expect(JSON.stringify(masked)).not.toContain(value.name)
+  f.catalog.users[0]!.role = 'admin'
+  const original = f.directory.projectReceipt.bind(f.directory)
+  const spy = vi.spyOn(f.directory, 'projectReceipt').mockImplementationOnce((...args) => {
+    const result = original(...args)
+    f.catalog.users[0]!.role = 'member'
+    return result
+  })
+  expect(await (await f.handle(f.request(path))).json()).toMatchObject({ available: false })
+  spy.mockRestore()
+  f.catalog.users[0]!.role = 'admin'
+  vi.spyOn(f.directory, 'projectReceipt').mockImplementationOnce((...args) => {
+    const result = original(...args)
+    f.sessions.prepare('DELETE FROM sessions WHERE uid=?').run('admin')
+    return result
+  })
+  expect((await f.handle(f.request(path))).status).toBe(401)
+  f.directory.close()
+  expect(() => f.directory.projectReceipt('admin', 'project', create.requestId)).toThrow(
+    '助手目录已停止',
+  )
 })

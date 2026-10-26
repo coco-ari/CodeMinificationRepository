@@ -377,6 +377,20 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       fail(409, 'PROJECT_REQUEST_CONFLICT', '原请求已用于其他配置')
     return { value, previous: undefined }
   }
+  function acceptedProjectDeletion(actor: string, requestId: string) {
+    active(actor)
+    decode(C.DirectoryId, requestId)
+    const row = db
+      .prepare(
+        'SELECT * FROM directory_deletions WHERE request_id=? AND actor_id=? AND environment_id IS NULL',
+      )
+      .get(requestId, actor)
+    if (!row) return fail(404, 'PROJECT_DELETE_RECEIPT_NOT_FOUND', '没有本人的已受理项目删除请求')
+    deletionAuthority(actor, String(row.project_id))
+    if (row.state !== 'pending' && row.state !== 'deleted')
+      return fail(409, 'PROJECT_DELETE_NOT_PENDING', '原项目删除已被阻止，不能继续执行')
+    return row
+  }
   function deletionAudit(actor: string, project: string, operation: string, subject: string) {
     db.prepare(
       'INSERT INTO directory_audit(actor_id,project_id,operation,subject_id,created_at) VALUES(?,?,?,?,?)',
@@ -390,8 +404,183 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       blockers: JSON.parse(String(row.blockers)) as C.DeletionBlocker[],
     }
   }
+  function receiptValue<T extends S.ConstraintDecoder<unknown>>(
+    schema: T,
+    input: unknown,
+  ): T['Type'] {
+    try {
+      return S.decodeUnknownSync(schema, { onExcessProperty: 'error' })(input)
+    } catch {
+      return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求事实不可核对，请保留原请求')
+    }
+  }
+  function requestReceipt(actor: string, requestId: string): C.DirectoryRequestReceipt | null {
+    active(actor)
+    decode(C.DirectoryId, requestId)
+    const saved = db
+      .prepare('SELECT * FROM directory_receipts WHERE request_id=? AND actor_id=?')
+      .get(requestId, actor)
+    const deletion = db
+      .prepare('SELECT * FROM directory_deletions WHERE request_id=? AND actor_id=?')
+      .get(requestId, actor)
+    if (!saved && !deletion) return null
+    if (saved && deletion)
+      return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求事实冲突，请保留原请求')
+    const row = (saved ?? deletion)!
+    const project = String(row.project_id)
+    const operation = saved
+      ? String(saved.operation)
+      : deletion!.environment_id === null
+        ? 'project.delete'
+        : 'environment.delete'
+    let payload:
+      | typeof C.CreateProjectCommand.Type
+      | typeof C.SaveEnvironmentCommand.Type
+      | typeof C.SaveMemberCommand.Type
+      | typeof C.DeleteDirectoryCommand.Type
+    try {
+      const schema = deletion
+        ? C.DeleteDirectoryCommand
+        : operation === 'project.create' || operation === 'project.save'
+          ? C.CreateProjectCommand
+          : operation.startsWith('environment.save:')
+            ? C.SaveEnvironmentCommand
+            : operation.startsWith('member.save:')
+              ? C.SaveMemberCommand
+              : undefined
+      if (!schema) return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求操作不可核对')
+      payload = receiptValue(schema, JSON.parse(String(row.payload)))
+    } catch {
+      return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求参数不可核对')
+    }
+    if (payload.requestId !== requestId)
+      return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求标识不可核对')
+    const environment = deletion
+      ? deletion.environment_id === null
+        ? null
+        : String(deletion.environment_id)
+      : operation.startsWith('environment.save:')
+        ? operation.slice('environment.save:'.length) === 'new' && payload.expectedRevision === 0
+          ? null
+          : operation.slice('environment.save:'.length)
+        : null
+    let available = true
+    try {
+      permitted(
+        actor,
+        project,
+        operation.startsWith('member.') ? 'project.members.manage' : 'project.manage',
+      )
+    } catch (error) {
+      if (![403, 404].includes((error as { status?: number }).status ?? 0)) throw error
+      available = false
+    }
+    const { requestId: _requestId, ...publicIntent } = payload
+    let result: unknown
+    if (saved) {
+      try {
+        result = JSON.parse(String(saved.result))
+        const value = result as { id?: string; userId?: string; revision?: number }
+        if (
+          value.revision !== payload.expectedRevision + 1 ||
+          ((operation === 'project.create' || operation === 'project.save') &&
+            value.id !== project) ||
+          (environment !== null && value.id !== environment) ||
+          (operation.startsWith('member.save:') &&
+            (value.userId !== operation.slice('member.save:'.length) ||
+              !('value' in payload) ||
+              !payload.value ||
+              typeof payload.value !== 'object' ||
+              !('userId' in payload.value) ||
+              value.userId !== payload.value.userId))
+        )
+          return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求结果范围不可核对')
+      } catch {
+        return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求结果不可核对')
+      }
+    } else if (deletion!.state === 'deleted') {
+      // 删除后目录可见性已经消失；本人原收据只证明最小删除事实。
+      result = {
+        deleted: true,
+        projectId: project,
+        ...(environment === null ? {} : { environmentId: environment }),
+      }
+    }
+    let blockers: C.DeletionBlocker[] | undefined
+    if (available && deletion?.state === 'blocked') {
+      try {
+        blockers = (JSON.parse(String(deletion.blockers)) as C.DeletionBlocker[]).slice(0, 24)
+      } catch {
+        return fail(503, 'PROJECT_RECEIPT_INVALID', '原删除阻止事实不可核对')
+      }
+    }
+    let canResume: boolean | undefined
+    if (deletion?.state === 'pending' && environment === null) {
+      try {
+        deletionAuthority(actor, project)
+        canResume = true
+      } catch (error) {
+        const status = (error as { status?: number }).status
+        if (status !== 403 && status !== 404) throw error
+        canResume = false
+      }
+    }
+    return receiptValue(C.DirectoryRequestReceipt, {
+      state: saved || deletion!.state === 'deleted' ? 'completed' : deletion!.state,
+      requestId,
+      actorId: actor,
+      projectId: project,
+      environmentId: environment,
+      operation,
+      saved: true,
+      available,
+      publicIntent,
+      createdAt: String(row.created_at),
+      nativeSynchronization:
+        operation === 'project.create' || operation === 'project.save'
+          ? 'unverified'
+          : 'not-required',
+      ...((available || deletion?.state === 'deleted') && result !== undefined ? { result } : {}),
+      ...(blockers ? { blockers } : {}),
+      ...(canResume === undefined ? {} : { canResume }),
+    })
+  }
   return {
     catalog,
+    receipt: requestReceipt,
+    requireProjectDeletionResumeAccess(actor: string, requestId: string) {
+      acceptedProjectDeletion(actor, requestId)
+    },
+    resumeProjectDeletion(
+      actor: string,
+      requestId: string,
+      input: unknown,
+      inspect: (project: string) => C.DeletionBlocker[],
+    ) {
+      return transaction.run(() => {
+        const row = acceptedProjectDeletion(actor, requestId)
+        const value = decode(C.ResumeProjectDeletionCommand, input)
+        let command: typeof C.DeleteDirectoryCommand.Type
+        try {
+          command = receiptValue(C.DeleteDirectoryCommand, JSON.parse(String(row.payload)))
+        } catch {
+          return fail(503, 'PROJECT_RECEIPT_INVALID', '原删除意图无法核对，请保留原请求')
+        }
+        if (
+          value.projectId !== row.project_id ||
+          command.requestId !== requestId ||
+          value.publicIntent.expectedRevision !== command.expectedRevision
+        )
+          return fail(409, 'PROJECT_REQUEST_CONFLICT', '继续删除的范围或原意图不一致')
+        if (row.state === 'pending') {
+          const blockers = inspectDeletion(value.projectId, null, () => inspect(value.projectId))
+          if (blockers.length) return blocked(blockers)
+          // 各 owner 的只读检查可能触发同步撤权；原步骤继续前重新核对当前权限。
+          deletionAuthority(actor, value.projectId)
+        }
+        return { projectId: value.projectId, command }
+      })
+    },
     requireDeletionAccess(actor: string, project: string) {
       deletionAuthority(actor, project)
     },

@@ -7,7 +7,7 @@ import { EllipsisIcon } from 'lucide-react'
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from '~/components/ui/menu'
 import { toastManager } from '~/components/ui/toast'
 import { autoOpsRequest, AutoOpsRequestError, isAutoOpsAccessError } from './apiClient'
-import { prepareProjectMutation, readPendingProjectWrite, refreshProjectHost, submitProjectWrite } from './projectDirectory'
+import { prepareProjectMutation, readPendingProjectWrite, refreshProjectHost, submitProjectWrite, recoverProjectWrite, resumeProjectDeletion, PendingProjectDeletion } from './projectDirectory'
 
 export type ProjectRemovalTarget = {
   projectId: string
@@ -35,9 +35,10 @@ export function ProjectRemovalAction({target, disabled, onSelect}: {
   </Menu>
 }
 
-export function ProjectRemovalDialog({ target, finalFocus, onClose, onRemoved, onLockChange, onAccessDenied }: {
+export function ProjectRemovalDialog({ target, finalFocus, initialCanResume = false, onClose, onRemoved, onLockChange, onAccessDenied }: {
   target: ProjectRemovalTarget
   finalFocus: ComponentProps<typeof DialogPopup>['finalFocus']
+  initialCanResume?: boolean
   onClose(): void
   onRemoved(): void
   onLockChange(value: boolean): void
@@ -50,6 +51,7 @@ export function ProjectRemovalDialog({ target, finalFocus, onClose, onRemoved, o
   const [pending, setPending] = useState(readPendingProjectWrite)
   const [attempt, setAttempt] = useState(0)
   const [confirmed, setConfirmed] = useState(false)
+  const [canResume, setCanResume] = useState(initialCanResume)
   const alive = useRef(true)
   const submitting = useRef(false)
   const path = pathFor(target)
@@ -64,6 +66,12 @@ export function ProjectRemovalDialog({ target, finalFocus, onClose, onRemoved, o
     const controller = new AbortController()
     setLoading(true)
     setError(null)
+    const original = readPendingProjectWrite()
+    // 已接受的删除只核原收据，不以活动目录的新预检替换原操作。
+    if (original?.method === 'DELETE' && original.path === path) {
+      setLoading(false)
+      return () => controller.abort()
+    }
     void autoOpsRequest<Preview>(`${path}/deletion-preview`, {label: '删除预检', signal: controller.signal})
       .then((result) => { if (!controller.signal.aborted) setPreview(result) })
       .catch((cause: unknown) => {
@@ -84,15 +92,16 @@ export function ProjectRemovalDialog({ target, finalFocus, onClose, onRemoved, o
     submitting.current = true
     setBusy(true)
     setError(null)
+    setCanResume(false)
     try {
       const original = pending ?? prepareProjectMutation(path, target.revision, {}, 'DELETE')
       if (original.path !== path || original.method !== 'DELETE') throw new Error('请先核对另一项配置保存结果')
       setPending(original)
       let result: Record<string, unknown>
-      try { result = await submitProjectWrite(original) }
+      try { result = pending ? await (canResume ? resumeProjectDeletion(original) : recoverProjectWrite(original)) : await submitProjectWrite(original) }
       catch (cause) {
-        if (!(cause instanceof AutoOpsRequestError) || !cause.uncertain) throw cause
-        result = await submitProjectWrite(original)
+        if (pending || !(cause instanceof AutoOpsRequestError) || !cause.uncertain) throw cause
+        result = await recoverProjectWrite(original)
       }
       if (!alive.current) return
       setPending(null)
@@ -107,6 +116,7 @@ export function ProjectRemovalDialog({ target, finalFocus, onClose, onRemoved, o
     } catch (cause) {
       if (!alive.current) return
       setPending(readPendingProjectWrite())
+      setCanResume(cause instanceof PendingProjectDeletion && cause.canResume)
       if (isAutoOpsAccessError(cause)) {
         callbacks.current.onAccessDenied(cause)
         callbacks.current.onClose()
@@ -129,7 +139,7 @@ export function ProjectRemovalDialog({ target, finalFocus, onClose, onRemoved, o
         </SettingsSection> : null}
         {changed ? <p role="alert" className="text-sm">配置已更新，请取消并刷新后重新确认。</p> : null}
         {error ? <p role="alert" className="break-words text-sm">{error}</p> : null}
-        {pending ? <p role="status" className="text-sm">删除结果尚待确认，请核对原请求。</p> : null}
+        {pending ? <p role="status" className="text-sm">{canResume ? '原删除尚未完成，请继续原删除。' : '删除结果尚待确认，请核对原请求。'}</p> : null}
         {!loading && !pending && !confirmed ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAttempt((value) => value + 1)}>刷新引用</Button> : null}
         {confirmed ? <Button variant="outline" disabled={busy} onClick={() => {
           setBusy(true)
@@ -141,7 +151,7 @@ export function ProjectRemovalDialog({ target, finalFocus, onClose, onRemoved, o
       <DialogFooter>
         <Button variant="outline" disabled={busy || !!pending} onClick={close}>{confirmed ? '关闭' : '取消'}</Button>
         <Button variant="destructive" disabled={busy || confirmed || (!pending && !canRemove)} onClick={() => void remove()}>
-          {busy ? <Spinner size="sm" /> : null}{pending ? '核对原请求' : '确认删除'}
+          {busy ? <Spinner size="sm" /> : null}{pending ? (canResume ? '继续删除' : '核对原请求') : '确认删除'}
         </Button>
       </DialogFooter>
     </DialogPopup>

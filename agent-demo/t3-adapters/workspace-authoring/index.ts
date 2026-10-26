@@ -1,5 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- 资料模块在独立 Node 边界管理事务和文件，T3 仅调用公开接口。
 import { randomUUID } from 'node:crypto'
+import * as S from 'effect/Schema'
+import { RepositoryRequestReceipt, RepositoryReceiptResult } from '../../../autoops/contracts/project-management-receipts.ts'
 import {
   mkdirSync,
   readFileSync,
@@ -1112,6 +1114,64 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           return { revision: advance(projectId) }
         },
       )
+    },
+    repositoryReceipt(
+      projectId: string,
+      requestId: string,
+      actorId: string,
+    ): RepositoryRequestReceipt | null {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已停止')
+      id(projectId)
+      id(actorId)
+      const row = db
+        .prepare(
+          'SELECT * FROM authoring_receipts WHERE project_id=? AND request_id=? AND actor_id=?',
+        )
+        .get(projectId, id(requestId), actorId)
+      if (
+        !row ||
+        !['save-repository', 'remove-repository', 'configure-source'].includes(text(row, 'operation'))
+      )
+        return null
+      let available = true
+      try {
+        authorize(
+          projectId,
+          actorId,
+          row.operation === 'configure-source' ? 'manage' : 'source-manage',
+        )
+      } catch (error) {
+        const status = (error as { status?: number }).status
+        if (status !== 403 && status !== 404) throw error
+        available = false
+      }
+      try {
+        const operation = text(row, 'operation') as RepositoryRequestReceipt['operation']
+        const result = S.decodeUnknownSync(RepositoryReceiptResult, { onExcessProperty: 'error' })(
+          JSON.parse(text(row, 'result')),
+        )
+        if (
+          result.requestId !== requestId ||
+          (operation === 'save-repository' && (!result.repository || result.source)) ||
+          (operation === 'configure-source' && (!result.source || result.repository)) ||
+          (operation === 'remove-repository' && (result.repository || result.source))
+        )
+          throw new Error('invalid result')
+        return S.decodeUnknownSync(RepositoryRequestReceipt, { onExcessProperty: 'error' })({
+          state: 'completed',
+          requestId,
+          actorId,
+          projectId,
+          operation,
+          saved: true,
+          available,
+          createdAt: text(row, 'created_at'),
+          publicIntent: { algorithm: 'sha256', digest: text(row, 'fingerprint') },
+          ...(available ? { result } : {}),
+        })
+      } catch {
+        return fail(503, 'REPOSITORY_RECEIPT_INVALID', '原仓库收据无法核对，请保留原请求稍后恢复')
+      }
     },
     receipt(
       projectId: string,
