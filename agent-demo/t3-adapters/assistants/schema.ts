@@ -29,4 +29,27 @@ export const migrations: readonly Migration[] = [
     ) STRICT;
   `,
   },
+  {
+    version: 2,
+    name: '提供者助手共享与分配修订',
+    sql: `
+    ALTER TABLE assistant_presets ADD COLUMN provider_id TEXT;
+    CREATE INDEX assistant_provider_presets ON assistant_presets(provider_id);
+    CREATE TABLE assistant_provider_shares (
+      assistant_id TEXT NOT NULL REFERENCES assistant_presets(id), project_id TEXT NOT NULL,
+      enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), revision INTEGER NOT NULL CHECK(revision>=1),
+      source_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY(assistant_id,project_id)
+    ) STRICT;
+    CREATE INDEX assistant_share_projects ON assistant_provider_shares(project_id,enabled);
+    CREATE TABLE assistant_allocation_sources (
+      project_id TEXT NOT NULL, target_kind TEXT NOT NULL CHECK(target_kind IN ('member','role')),
+      target_id TEXT NOT NULL, assistant_id TEXT NOT NULL REFERENCES assistant_presets(id),
+      allocation_revision INTEGER NOT NULL CHECK(allocation_revision>=1),
+      preset_revision INTEGER NOT NULL CHECK(preset_revision>=1), share_revision INTEGER,
+      source_json TEXT NOT NULL,
+      PRIMARY KEY(project_id,target_kind,target_id,assistant_id,allocation_revision)
+    ) STRICT;
+    `,
+  },
 ]

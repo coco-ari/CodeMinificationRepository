@@ -1101,7 +1101,21 @@ export function deriveEffectiveComposerModelState(input: {
   threadModelSelection: ModelSelection | null | undefined;
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
+  /** 宿主固定来源时保留实际选择；目录失效由发送入口明确拒绝。 */
+  preserveModelSelection?: boolean;
 }): EffectiveComposerModelState {
+  if (input.preserveModelSelection) {
+    const instance = input.selectedInstanceId;
+    const selected = instance
+      ? (input.draft?.modelSelectionByProvider?.[instance] ??
+        (input.threadModelSelection?.instanceId === instance ? input.threadModelSelection : null) ??
+        (input.projectModelSelection?.instanceId === instance ? input.projectModelSelection : null))
+      : null;
+    return {
+      selectedModel: selected?.model ?? "",
+      modelOptions: providerSelectionsFromModelSelection(selected),
+    };
+  }
   const baseModelCandidate =
     input.threadModelSelection?.model ?? input.projectModelSelection?.model ?? null;
   const preserveThreadModel =

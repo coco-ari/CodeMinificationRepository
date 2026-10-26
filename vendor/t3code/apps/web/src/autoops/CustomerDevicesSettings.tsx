@@ -4,7 +4,7 @@ import {
   ModuleSidebarItem,
   ModuleSidebarEmpty,
 } from "./ModuleWorkspace";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { isAutoOpsAccessError } from "./apiClient";
 import {
   CopyIcon,
@@ -14,6 +14,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react";
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import {
   Dialog,
   DialogPopup,
@@ -28,7 +29,6 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "~/components/ui/empty";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "~/components/ui/menu";
 import { Spinner } from "~/components/ui/spinner";
-import { autoOpsAreaAvailable } from "./projectNavigation.logic";
 import { toastManager } from "~/components/ui/toast";
 import {
   customerRequest,
@@ -46,7 +46,7 @@ export function AutoOpsCustomerDevicesPage() {
   const host = readAutoOpsHost();
   return (
     <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-customer-devices>
-      {!autoOpsAreaAvailable("devices", host) ? (
+      {host?.customerAgentsEnabled !== true ? (
         <>
           <ModuleHeader title="我的电脑" />
           <ModuleSidebar label="个人电脑">
@@ -54,7 +54,7 @@ export function AutoOpsCustomerDevicesPage() {
           </ModuleSidebar>
         </>
       ) : null}
-      {autoOpsAreaAvailable("devices", host) && host ? (
+      {host?.customerAgentsEnabled === true ? (
         <CustomerDevicesContent key={host.principal.id} />
       ) : (
         <Empty>
@@ -70,7 +70,34 @@ export function AutoOpsCustomerDevicesPage() {
   );
 }
 
-function CustomerDevicesContent() {
+function DeviceHeader({
+  embedded,
+  title,
+  actions,
+}: {
+  embedded: boolean;
+  title: string;
+  actions: ReactNode;
+}) {
+  return embedded ? (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h2 className="text-sm font-medium">电脑与登记目录</h2>
+      <div className="flex items-center gap-2">{actions}</div>
+    </div>
+  ) : (
+    <ModuleHeader title={title} actions={actions} />
+  );
+}
+function DeviceBody({ embedded, children }: { embedded: boolean; children: ReactNode }) {
+  return embedded ? (
+    <div className="min-w-0">{children}</div>
+  ) : (
+    <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+      {children}
+    </ScrollArea>
+  );
+}
+export function CustomerDevicesContent({ embedded = false }: { embedded?: boolean }) {
   const host = readAutoOpsHost()!;
   const [query, setQuery] = useState("");
   const requiresSecureConnection = window.location.protocol === "http:" &&
@@ -233,9 +260,13 @@ function CustomerDevicesContent() {
       toastManager.add({ type: "error", title: "复制失败，请手动选择文本" });
     }
   };
+  const visibleDevices = devices.filter((device) =>
+    device.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+  );
   return (
     <>
-      <ModuleHeader
+      <DeviceHeader
+        embedded={embedded}
         title="我的电脑"
         actions={
           <>
@@ -265,17 +296,21 @@ function CustomerDevicesContent() {
           </>
         }
       />
-      <ModuleSidebar
+      {embedded ? (
+        <Input
+          aria-label="搜索电脑"
+          placeholder="搜索电脑"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      ) : null}
+      {!embedded ? <ModuleSidebar
         label="个人电脑"
         search={{ value: query, onChange: setQuery, label: "搜索电脑" }}
       >
         <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
           <div className="px-[var(--sidebar-content-inset)]">
-            {devices
-              .filter((device) =>
-                device.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
-              )
-              .map((device) => (
+            {visibleDevices.map((device) => (
                 <ModuleSidebarItem
                   key={device.id}
                   label={device.label}
@@ -298,7 +333,7 @@ function CustomerDevicesContent() {
         <p className="px-4 py-3 text-xs text-sidebar-muted-foreground">
           个人账号 · 所有项目的已登记电脑
         </p>
-      </ModuleSidebar>
+      </ModuleSidebar> : null}
       {readErrors.length ? (
         <p
           className="shrink-0 border-b border-border/60 px-3 py-2 text-sm text-destructive"
@@ -307,7 +342,7 @@ function CustomerDevicesContent() {
           {readErrors.join("；")}
         </p>
       ) : null}
-      <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+      <DeviceBody embedded={embedded}>
         <div className="flex min-h-full min-w-0 flex-col">
           {loading ? (
             <div
@@ -327,9 +362,15 @@ function CustomerDevicesContent() {
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
+          ) : embedded && visibleDevices.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>没有匹配的电脑</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <ul className="divide-y divide-border/60" aria-label="我的电脑">
-              {devices.map((device) => (
+              {(embedded ? visibleDevices : devices).map((device) => (
                 <li key={device.id} className="flex min-w-0 items-center gap-3 px-3 py-2.5">
                   <LaptopIcon className="size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
@@ -420,7 +461,7 @@ function CustomerDevicesContent() {
             </ul>
           )}
         </div>
-      </ScrollArea>
+      </DeviceBody>
       <Dialog
         open={pairing !== null}
         onOpenChange={(open) => {

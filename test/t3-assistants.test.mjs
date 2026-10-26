@@ -37,6 +37,7 @@ function fixture(t) {
     manage: (actor, project) => access.requireProjectActionForActor(actor, project, 'project.manage'),
     validate: questionConfigurationPolicy(ports),
     choices: (actor, project) => questionConfigurationChoices(ports, actor, project),
+    providers: { registry: () => registry, displayName: actor => catalog.users.find(user => user.id === actor)?.name ?? '提供者' },
     validateTarget(project, target) { if (project !== 'project' || target.kind === 'member' && !catalog.users.some(user => user.id === target.id)) throw Object.assign(new Error('目标无效'), { code: 'TARGET_INVALID' }) },
   })
   open()
@@ -163,6 +164,8 @@ test('用户来源只使用登记能力中的模型和技能，目录身份保�
   const preset = f.assistants.save('admin', 'project', null, save('self-preset', details({ configuration })))
   rmSync(join(f.dataDir, 't3/models-catalog.json'))
   assert.deepEqual(f.assistants.validateSelection('admin', 'project', select(preset)), select(preset))
+  assert.throws(() => f.assistants.assign('admin', 'project', allocate('share-without-isolation', [preset.id], null, { kind: 'role', id: 'developer' })), {code:'ASSISTANT_PROVIDER_SHARE_REQUIRED'})
+  f.assistants.shareProvided('admin',preset.id,'project',{requestId:'provider-consent',expectedRevision:0,enabled:true})
   f.assistants.assign('admin', 'project', allocate('share-without-isolation', [preset.id], null, { kind: 'role', id: 'developer' }))
   const other = f.assistants.catalog('developer', 'project')
   assert.equal(other.items[0].available, false)

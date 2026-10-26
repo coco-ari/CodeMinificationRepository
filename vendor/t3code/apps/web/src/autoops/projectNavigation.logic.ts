@@ -5,7 +5,7 @@ export const AUTOOPS_AREAS = [
   { id: 'workspaces', label: '工作区', icon: 'folder', path: '/workspaces', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'deployments', label: '部署', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'deployment.read', manage: 'server', sidebar: true },
   { id: 'projects', label: '项目管理', icon: 'folderSettings', path: '/projects', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'devices', label: '我的电脑', icon: 'laptop', path: '/devices', scope: 'global', common: false, enabled: 'customer-agents', read: 'owner', manage: 'owner', sidebar: true },
+  { id: 'assistants', label: '助手', icon: 'bot', path: '/assistants', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
 ] as const
 
@@ -26,7 +26,7 @@ export interface NavigationHost {
 export function autoOpsAreaAvailable(areaId: AutoOpsArea, host: NavigationHost | undefined, projectId = ''): boolean {
   if (!host?.principal.id) return false
   const area = AUTOOPS_AREAS.find((entry) => entry.id === areaId)
-  if (!area || (area.enabled === 'customer-agents' && host.customerAgentsEnabled !== true)) return false
+  if (!area) return false
   if (area.scope === 'global') return true
   const project = host.projects.find((entry) => entry.id === projectId)
   if (!project) return false
@@ -93,12 +93,13 @@ export function resolveAutoOpsRouteProjectId(
 }
 
 export function autoOpsAreaFromPath(pathname: string): AutoOpsArea {
+  if (pathname === '/devices' || pathname.startsWith('/devices/')) return 'assistants'
   return AUTOOPS_AREAS.find((area) => area.path !== '/' &&
     (pathname === area.path || pathname.startsWith(`${area.path}/`)))?.id ?? 'chat'
 }
 
 const CONTROL_ROUTES = new Set([
-  'settings', 'projects', 'workspaces', 'deployments', 'skills', 'devices', 'usage', 'pull-requests',
+  'settings', 'projects', 'workspaces', 'deployments', 'skills', 'assistants', 'devices', 'usage', 'pull-requests',
   'connect', 'connect-agent', 'pair', 'welcome', 'new', 'api', 'autoops',
 ])
 
@@ -226,6 +227,12 @@ export function createAutoOpsProjectNavigation(options: {
       const params = new URLSearchParams({ projectId })
       if (area === 'skills') {
         for (const [key, value] of skillNavigationSearch(search, host)) params.set(key, value)
+      }
+      if (area === 'assistants' && search && typeof search === 'object') {
+        const view = search instanceof URLSearchParams
+          ? search.get('assistantView')
+          : (search as Record<string, unknown>).assistantView
+        if (view === 'project' || view === 'provided') params.set('assistantView', view)
       }
       const query = params.toString()
       if (area !== 'chat') return `/${area}?${query}`

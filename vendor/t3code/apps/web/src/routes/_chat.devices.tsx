@@ -1,6 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { ProjectId } from "@t3tools/contracts";
-import { AutoOpsCustomerDevicesPage } from "../autoops/CustomerDevicesSettings";
 
 export const Route = createFileRoute("/_chat/devices")({
   validateSearch: (search: Record<string, unknown>): { projectId?: ProjectId } => ({
@@ -9,5 +8,10 @@ export const Route = createFileRoute("/_chat/devices")({
       ? { projectId: ProjectId.make(typeof search.projectId === "string" ? search.projectId : "") }
       : {}),
   }),
-  component: AutoOpsCustomerDevicesPage,
+  beforeLoad: ({ search }) => {
+    const project = Object.hasOwn(search, "projectId")
+      ? `&projectId=${encodeURIComponent(search.projectId ?? "")}`
+      : "";
+    throw redirect({ href: `/assistants?assistantView=provided${project}`, replace: true });
+  },
 });

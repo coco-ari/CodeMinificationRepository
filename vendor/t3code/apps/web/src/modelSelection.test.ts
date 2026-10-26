@@ -577,6 +577,35 @@ describe("instance-scoped model selection", () => {
     expect(dispatch.modelOptionsForDispatch).toBeUndefined();
   });
 
+  it.each(["codex", "customer-fixture-codex"])("AutoOps 固定 %s 已选模型下线时保留原选择，不取目录首项", instance => {
+    const instanceId = ProviderInstanceId.make(instance);
+    const driver = ProviderDriverKind.make("codex");
+    const chosen = createModelSelection(instanceId, "removed-selected-model", [{ id: "reasoningEffort", value: "high" }]);
+    const state = deriveEffectiveComposerModelState({
+      draft: { activeProvider: instanceId, modelSelectionByProvider: { [instanceId]: chosen } },
+      providers: [provider({ provider: driver, instanceId, models: ["surviving-first-model"] })],
+      selectedProvider: driver, selectedInstanceId: instanceId,
+      threadModelSelection: chosen, projectModelSelection: null,
+      settings: settingsWithProviderInstances(), preserveModelSelection: true,
+    });
+    expect(state.selectedModel).toBe("removed-selected-model");
+    expect(state.modelOptions?.[instanceId]).toEqual(chosen.options);
+  });
+
+  it("AutoOps 客户来源没有本机模型选择时不继承平台或其他来源的默认模型", () => {
+    const id = ProviderInstanceId.make("customer-fixture-codex");
+    const state = deriveEffectiveComposerModelState({
+      draft: { activeProvider: id, modelSelectionByProvider: {} },
+      providers: [provider({ instanceId: id, models: ["local-first-model"] })],
+      selectedProvider: ProviderDriverKind.make("codex"), selectedInstanceId: id,
+      threadModelSelection: createModelSelection(ProviderInstanceId.make("codex"), "platform-default"),
+      projectModelSelection: createModelSelection(ProviderInstanceId.make("codex"), "other-default"),
+      settings: settingsWithProviderInstances(), preserveModelSelection: true,
+    });
+    expect(state.selectedModel).toBe("");
+    expect(state.modelOptions).toBeNull();
+  });
+
   it("preserves an explicit draft OpenCode selection while the catalog is empty", () => {
     const instanceId = ProviderInstanceId.make("opencode_work");
     const driver = ProviderDriverKind.make("opencode");

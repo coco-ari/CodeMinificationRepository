@@ -39,6 +39,7 @@ import { Route as ChatProjectsRouteImport } from './routes/_chat.projects'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatDevicesRouteImport } from './routes/_chat.devices'
 import { Route as ChatDeploymentsRouteImport } from './routes/_chat.deployments'
+import { Route as ChatAssistantsRouteImport } from './routes/_chat.assistants'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
@@ -192,6 +193,11 @@ const ChatDeploymentsRoute = ChatDeploymentsRouteImport.update({
   path: '/deployments',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatAssistantsRoute = ChatAssistantsRouteImport.update({
+  id: '/assistants',
+  path: '/assistants',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatDraftDraftIdRoute = ChatDraftDraftIdRouteImport.update({
   id: '/draft/$draftId',
   path: '/draft/$draftId',
@@ -212,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
+  '/assistants': typeof ChatAssistantsRoute
   '/deployments': typeof ChatDeploymentsRoute
   '/devices': typeof ChatDevicesRoute
   '/new': typeof ChatNewRoute
@@ -244,6 +251,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
+  '/assistants': typeof ChatAssistantsRoute
   '/deployments': typeof ChatDeploymentsRoute
   '/devices': typeof ChatDevicesRoute
   '/new': typeof ChatNewRoute
@@ -279,6 +287,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
+  '/_chat/assistants': typeof ChatAssistantsRoute
   '/_chat/deployments': typeof ChatDeploymentsRoute
   '/_chat/devices': typeof ChatDevicesRoute
   '/_chat/new': typeof ChatNewRoute
@@ -315,6 +324,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/welcome'
+    | '/assistants'
     | '/deployments'
     | '/devices'
     | '/new'
@@ -347,6 +357,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/welcome'
+    | '/assistants'
     | '/deployments'
     | '/devices'
     | '/new'
@@ -381,6 +392,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/welcome'
+    | '/_chat/assistants'
     | '/_chat/deployments'
     | '/_chat/devices'
     | '/_chat/new'
@@ -631,6 +643,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatDeploymentsRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/assistants': {
+      id: '/_chat/assistants'
+      path: '/assistants'
+      fullPath: '/assistants'
+      preLoaderRoute: typeof ChatAssistantsRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/draft/$draftId': {
       id: '/_chat/draft/$draftId'
       path: '/draft/$draftId'
@@ -649,6 +668,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface ChatRouteChildren {
+  ChatAssistantsRoute: typeof ChatAssistantsRoute
   ChatDeploymentsRoute: typeof ChatDeploymentsRoute
   ChatDevicesRoute: typeof ChatDevicesRoute
   ChatNewRoute: typeof ChatNewRoute
@@ -662,6 +682,7 @@ interface ChatRouteChildren {
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
+  ChatAssistantsRoute: ChatAssistantsRoute,
   ChatDeploymentsRoute: ChatDeploymentsRoute,
   ChatDevicesRoute: ChatDevicesRoute,
   ChatNewRoute: ChatNewRoute,

@@ -1,4 +1,4 @@
-import { questionCanAdjust, questionSendDisabledReason } from '~/autoops/questionConfiguration';
+import { questionCanAdjust, questionModelDisabledReason, questionSendDisabledReason } from '~/autoops/questionConfiguration';
 import { customerInstanceId, customerProviderAvailability } from "~/autoops/customerAgents";
 import { customerComposerText } from "~/autoops/customerComposerText";
 import { customerFilesKey, useCustomerFileSearch } from "~/autoops/customerFiles";
@@ -1721,7 +1721,12 @@ function useComposerProviderModel(
     lockedInstanceId,
   } = input;
   const draftModelState = useComposerDraftModelState(threadRef);
-  const providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry> = sortProviderInstanceEntries(
+  const host = readAutoOpsHost();
+  const target = input.businessScope?.executionBinding;
+  const fixedInstanceId = host
+    ? target?.kind === "customer" ? customerInstanceId(target) : ProviderInstanceId.make(host.fixedModel.instanceId)
+    : null;
+  const entries: ReadonlyArray<ProviderInstanceEntry> = sortProviderInstanceEntries(
     customerProviderAvailability(
       applyProviderInstanceSettings(
         deriveProviderInstanceEntries(providerStatuses),
@@ -1731,14 +1736,17 @@ function useComposerProviderModel(
       input.businessScope,
     ),
   );
+  const providerInstanceEntries = fixedInstanceId
+    ? entries.filter(entry => entry.instanceId === fixedInstanceId)
+    : entries;
   const selection = resolveComposerProviderSelection({
     entries: providerInstanceEntries,
-    candidateInstanceIds,
+    candidateInstanceIds: fixedInstanceId ? [fixedInstanceId] : candidateInstanceIds,
     lockedProvider,
     lockedInstanceId,
   });
   const selectedInstanceId =
-    selection.selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
+    selection.selectedProviderEntry?.instanceId ?? fixedInstanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
   const selectedProvider: ProviderDriverKind =
     selection.selectedProviderEntry?.driverKind ?? selection.requestedDriverKind;
   const modelState = deriveEffectiveComposerModelState({
@@ -1749,6 +1757,7 @@ function useComposerProviderModel(
     threadModelSelection,
     projectModelSelection,
     settings,
+    preserveModelSelection: host !== undefined,
   });
   const selectedProviderModels = selection.selectedProviderEntry?.models ?? NO_PROVIDER_MODELS;
   const composerProviderState = getComposerProviderState({
@@ -2286,8 +2295,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderEntry?.snapshot,
     selectedModel,
   );
+  const fixedModelSendBlockReason = isAutoOpsHosted()
+    ? questionModelDisabledReason({ instanceId: selectedInstanceId, model: selectedModel,
+      ...(composerModelOptions?.[selectedInstanceId] ? { options: composerModelOptions[selectedInstanceId] } : {}) }, selectedProviderModels)
+    : null;
   const sendDisabledReason =
     questionSendDisabledReason(autoOpsThreadScope) ?? externalSendDisabledReason ??
+    fixedModelSendBlockReason ??
     (multipleModelSelections?.length === 0 ? "请至少选择一个模型。" : null) ??
     (activePendingProgress
       ? attachmentBlockReason
@@ -2721,7 +2735,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [
           ...builtInSlashCommandItems.filter(
-            (item) => item.command !== "model" || autoOpsFeature("modelSelection"),
+            (item) => item.command !== "model" || canAdjustQuestion && autoOpsFeature("modelSelection"),
           ),
           ...visibleProviderSlashCommandItems,
           ...skillItems,
@@ -6351,7 +6365,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, []);
 
   const openModelPicker = () => {
-    if (!autoOpsFeature("modelSelection")) return;
+    if (!canAdjustQuestion || !autoOpsFeature("modelSelection")) return;
     if (composerControlsHidden) {
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -6589,8 +6603,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )
             : null,
         providerAvailable:
-          multipleModelSelections !== null ||
-          (!noProviderAvailable && providerSendBlockReason === null),
+          fixedModelSendBlockReason === null && (multipleModelSelections !== null ||
+          (!noProviderAvailable && providerSendBlockReason === null)),
         selectedProvider,
         selectedModel,
         selectedProviderModels,
@@ -6611,6 +6625,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }),
     [
       canAdjustQuestion,
+      fixedModelSendBlockReason,
       stashCurrentPromptStable,
       restoreStashEntryStable,
       activeThread,

@@ -50,6 +50,7 @@ export function configuredAutoOpsAssistantDirectory() {
     manage: (actor, project) => access.requireProjectActionForActor(actor, project, 'project.manage'),
     validate: questionConfigurationPolicy(capabilityPorts),
     choices: (actor, project) => questionConfigurationChoices(capabilityPorts, actor, project),
+    providers: { registry: () => access.customerRegistry, displayName: actor => directory.catalog.users.find(user => user.id === actor)?.name ?? '不可用提供者' },
     validateTarget(project, target) {
       if (!directory.catalog.projects.some(item => item.id === project) || (target.kind === 'role' ? !isProjectRole(target.id) : !directory.catalog.users.some(user => user.id === target.id && (user.status === undefined || user.status === 'active')))) fail(400, 'ASSISTANT_TARGET_INVALID', '分配对象不属于当前可用账号或固定角色')
     },

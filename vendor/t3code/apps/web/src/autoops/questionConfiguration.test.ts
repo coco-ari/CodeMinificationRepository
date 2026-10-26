@@ -1,4 +1,4 @@
-import { ProviderInstanceId } from '@t3tools/contracts'
+import { ProviderInstanceId, type ServerProvider } from '@t3tools/contracts'
 import type { AssistantSelection } from '../../../../../../autoops/contracts/assistants.ts'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import type { AssistantPreset } from './projectAssistants'
@@ -57,6 +57,17 @@ const bootstrap = (adjust = false) => ({
       },
     },
   ],
+})
+it('模型或思考档位退出真实目录时明确阻断，目录恢复后原选择重新可用', async () => {
+  const { questionModelDisabledReason } = await import('./questionConfiguration')
+  const selection = { instanceId: ProviderInstanceId.make('customer-fixture-codex'), model: 'actual-model', options: [{id: 'reasoningEffort', value: 'high'}] }
+  const models: ServerProvider['models'] = [{slug: 'actual-model', name: '本机模型', isCustom: false, capabilities: { optionDescriptors: [{ id: 'reasoningEffort', label: '思考强度', type: 'select', options: [{ id: 'high', label: '高' }] }] }}]
+  expect(questionModelDisabledReason(selection, models)).toBeNull()
+  expect(questionModelDisabledReason(selection, [])).toContain('所选模型暂不可用')
+  expect(questionModelDisabledReason(selection, [{...models[0]!, capabilities: {}}])).toContain('所选思考强度暂不可用')
+  expect(questionModelDisabledReason(selection, [{...models[0]!, capabilities: {optionDescriptors: [{id: 'reasoningEffort', type: 'select', label: '思考强度', options: [{id: 'low', label: '低'}]}]}}])).toContain('所选思考强度暂不可用')
+  expect(questionModelDisabledReason({...selection, model: ''}, models)).toContain('请选择所选运行器提供的模型')
+  expect(questionModelDisabledReason(selection, models)).toBeNull()
 })
 function storage(): Storage {
   const values = new Map<string, string>()

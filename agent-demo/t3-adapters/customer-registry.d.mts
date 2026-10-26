@@ -4,6 +4,10 @@ import type { DatabaseSync } from 'node:sqlite';
 /** Internal only: never serialize a device principal or put it in logs. */
 export interface CustomerDevicePrincipal { deviceId: string; ownerId: string; tokenHash: string }
 export interface CustomerRegistry {
+  /** 可信组合端口；用户接口必须先裁决本人或有效共享。 */
+  sourceOwner(target: CustomerExecutionBinding): {ownerId:string;projectId:string};
+  describeSource(ownerId:string,target:CustomerExecutionBinding): import('../../autoops/contracts/assistants.ts').ProvidedAssistantSource;
+  listSources(ownerId:string): import('../../autoops/contracts/assistants.ts').ProvidedAssistantSource[];
   deletionReferences(projectId: string, environmentId?: string): import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
   createPairing(ownerId: string, input?: {label?: string}): {pairingCode: string; expiresAt: string};
   consumePairing(pairingCode: string, input: {label: string; platform?: string; connectorVersion?: string}): {device: CustomerDevice; deviceToken: string};

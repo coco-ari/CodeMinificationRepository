@@ -152,11 +152,12 @@ export function questionConfigurationPolicy(ports: Ports) {
         return fail('CUSTOMER_CONTEXT_UNSUPPORTED', '此运行来源尚未支持平台资料、环境及共享会话')
       const registry = ports.customers(),
         target = value.executionBinding
-      const owner = registry
-        .listRegisteredDevices()
-        .find((device) => device.id === target.deviceId)?.ownerId
-      if (owner !== actor)
-        return fail('CUSTOMER_SHARED_ISOLATION_UNVERIFIED', '此运行器尚未通过跨用户执行隔离验证')
+      const source = registry.sourceOwner(target)
+      if (source.ownerId !== actor || source.projectId !== projectId)
+        return fail(
+          'CUSTOMER_SHARED_ISOLATION_UNVERIFIED',
+          '此运行器尚未通过跨用户或跨项目执行隔离验证',
+        )
       if (value.model.instanceId !== `customer-${target.deviceId}-${target.runtimeId}`)
         return fail('CUSTOMER_RUNTIME_MISMATCH', '模型不属于此助手的运行器')
       registry.validateTarget(actor, projectId, target)

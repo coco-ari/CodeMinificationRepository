@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
 import {
   ChevronDownIcon,
+  BotIcon,
   FolderGit2Icon,
-  LaptopIcon,
   MessageSquareIcon,
   RocketIcon,
   SparklesIcon,
@@ -42,7 +42,7 @@ const areaIcons = {
   folder: FolderGit2Icon,
   rocket: RocketIcon,
   sparkles: SparklesIcon,
-  laptop: LaptopIcon,
+  bot: BotIcon,
   folderSettings: FolderGit2Icon,
 }
 const areas = AUTOOPS_AREAS.map((area) => ({ ...area, icon: areaIcons[area.icon] }))
@@ -121,7 +121,10 @@ export function ProjectAreaTopbar() {
       autoOpsProjectHref(
         area,
         nextProjectId,
-        area === 'skills' && currentArea === 'skills' ? location.search : undefined,
+        (area === 'skills' && currentArea === 'skills') ||
+          (area === 'assistants' && currentArea === 'assistants')
+          ? location.search
+          : undefined,
       ),
     )
   }

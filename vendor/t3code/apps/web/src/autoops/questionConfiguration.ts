@@ -1,4 +1,4 @@
-import { ProviderInstanceId, type ModelSelection } from '@t3tools/contracts'
+import { ProviderInstanceId, type ModelSelection, type ServerProvider } from '@t3tools/contracts'
 import type { AssistantSelection } from '../../../../../../autoops/contracts/assistants.ts'
 import { readAutoOpsHost } from './hostSnapshot'
 import type { AutoOpsThreadScope } from './threadScopes'
@@ -28,6 +28,22 @@ export function questionCanAdjust(scope: AutoOpsThreadScope | undefined) {
       'chat.configure'
     ] === true
   )
+}
+/** 目录变化只阻止本次发送，不把已选模型或思考档位替换为其他值。 */
+export function questionModelDisabledReason(
+  selection: ModelSelection,
+  models: ServerProvider['models'],
+): string | null {
+  if (!selection.model) return '请选择所选运行器提供的模型。'
+  const model = models.find(model => model.slug === selection.model)
+  if (!model) return '所选模型暂不可用，请等待目录恢复或手动选择。'
+  const effort = selection.options?.find(option => option.id === 'reasoningEffort')?.value
+  if (effort !== undefined) {
+    const descriptor = model.capabilities?.optionDescriptors?.find(option => option.id === 'reasoningEffort')
+    if (descriptor?.type !== 'select' || !descriptor.options.some(option => option.id === effort))
+      return '所选思考强度暂不可用，请等待目录恢复或手动选择。'
+  }
+  return null
 }
 export function questionSendDisabledReason(scope: AutoOpsThreadScope | undefined) {
   const host = readAutoOpsHost()

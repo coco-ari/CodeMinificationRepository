@@ -150,7 +150,11 @@ export function ConversationWorkspaceControl({
           ) : null}
           {readAutoOpsHost()?.customerAgentsEnabled ? (
             <MenuItem
-              onClick={() => void navigate({ href: autoOpsProjectHref("devices", projectId) })}
+              onClick={() =>
+                void navigate({
+                  href: autoOpsProjectHref("assistants", projectId, { assistantView: "provided" }),
+                })
+              }
             >
               连接我的电脑…
             </MenuItem>

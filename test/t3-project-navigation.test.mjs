@@ -247,32 +247,34 @@ test('工作区项目 ID 的特殊字符保持完整编码，用户键不会发�
 })
 
 
-test('我的电脑是独立个人模块，入口和直链共用开关，不依赖当前项目角色', () => {
+test('助手统一入口保留个人与项目管理，电脑旧深链归到同一模块', () => {
   const owner = { principal: { id: 'alice' }, customerAgentsEnabled: true, projects: [
     { id: 'project-a', membership: { workspaceAccess: 'external', role: 'external' } },
   ] }
-  assert.equal(autoOpsAreaAvailable('devices', owner, 'project-a'), true)
-  assert.equal(autoOpsAreaAvailable('devices', owner, 'removed-project'), true)
-  assert.equal(autoOpsAreaAvailable('devices', { ...owner, projects: [] }), true)
-  assert.equal(autoOpsAreaAvailable('devices', { ...owner, customerAgentsEnabled: false }), false)
-  assert.equal(autoOpsAreaAvailable('devices', undefined), false)
+  assert.equal(autoOpsAreaAvailable('assistants', owner, 'project-a'), true)
+  assert.equal(autoOpsAreaAvailable('assistants', owner, 'removed-project'), true)
+  assert.equal(autoOpsAreaAvailable('assistants', { ...owner, projects: [] }), true)
+  assert.equal(autoOpsAreaAvailable('assistants', { ...owner, customerAgentsEnabled: false }), true)
+  assert.equal(autoOpsAreaAvailable('assistants', undefined), false)
   assert.equal(autoOpsAreaAvailable('deployments', owner, 'project-a'), false)
   assert.equal(autoOpsAreaAvailable('deployments', { ...owner, projects: [{ id: 'project-a', capabilities: { 'deployment.read': true }, membership: { workspaceAccess: 'internal', role: 'project_admin' } }] }, 'project-a'), true)
-  assert.equal(autoOpsAreaFromPath('/devices'), 'devices')
+  assert.equal(autoOpsAreaFromPath('/devices'), 'assistants')
+  assert.equal(autoOpsAreaFromPath('/assistants'), 'assistants')
   assert.equal(normalizeAutoOpsChatHref('/devices/other'), null)
-  const definition = AUTOOPS_AREAS.find(area => area.id === 'devices')
+  assert.equal(normalizeAutoOpsChatHref('/assistants/other'), null)
+  const definition = AUTOOPS_AREAS.find(area => area.id === 'assistants')
   assert.equal(definition.scope, 'global')
   assert.equal(definition.common, false)
   assert.equal(definition.sidebar, true)
 })
 
-test('电脑模块切项目只更新返回上下文，不保留资源命令或改绑已有对话', () => {
+test('助手模块切项目仅保留分类，不保留资源命令或改绑已有对话', () => {
   const f = fixture()
   f.chatOwners.set('/env/thread-a', 'project-a')
   f.store.rememberChatLocation('project-a', '/env/thread-a')
-  assert.equal(f.store.projectHref('devices', 'project-a', { deviceId: 'other', action: 'revoke' }), '/devices?projectId=project-a')
+  assert.equal(f.store.projectHref('assistants', 'project-a', { assistantView:'provided', deviceId: 'other', action: 'revoke' }), '/assistants?projectId=project-a&assistantView=provided')
   f.store.selectProject('project-b')
-  assert.equal(f.store.projectHref('devices', 'project-b'), '/devices?projectId=project-b')
+  assert.equal(f.store.projectHref('assistants', 'project-b'), '/assistants?projectId=project-b')
   assert.equal(f.store.projectHref('chat', 'project-a'), '/env/thread-a')
   assert.equal(f.store.projectHref('chat', 'project-b'), '/?projectId=project-b')
 })

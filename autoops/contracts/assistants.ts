@@ -2,6 +2,7 @@ import * as S from 'effect/Schema'
 import { DirectoryCommand, DirectoryId } from './project-directory.ts'
 import { Name } from './index.ts'
 import { ProjectRole } from './project-access.ts'
+import type { CustomerCapabilities } from './runtime.ts'
 
 export const RunnerReferenceId = S.String.check(S.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/))
 export const AssistantSource = S.Union([
@@ -62,6 +63,49 @@ export interface AssistantPreset extends AssistantDetails {
   revision: number
   createdBy: string
   updatedAt: string
+  providedBy?: { id: string; name: string; sourceProjectId: string }
+}
+
+export const ShareProvidedAssistantCommand = S.Struct({
+  ...DirectoryCommand.fields,
+  enabled: S.Boolean,
+})
+export interface ProvidedAssistantShare {
+  assistantId: string
+  /** 共享目标与运行来源的登记项目分别保存，不修改来源身份。 */
+  projectId: string
+  enabled: boolean
+  revision: number
+}
+export interface ProvidedAssistantSource {
+  executionBinding: Extract<QuestionConfiguration['executionBinding'], { kind: 'customer' }>
+  sourceProjectId: string
+  deviceName: string
+  workspaceName: string
+  deviceStatus: 'active' | 'disabled' | 'revoked'
+  workspaceStatus: 'active' | 'revoked'
+  online: boolean
+  capabilities: CustomerCapabilities | null
+}
+export interface ProvidedAssistantSettings {
+  items: Array<{ preset: AssistantPreset; shares: ProvidedAssistantShare[] }>
+  sources: ProvidedAssistantSource[]
+}
+export interface ProvidedAssistantReceipt {
+  requestId: string
+  operation: string
+  projectId: string
+  /** 客户端核对原意图，不能把同 ID 的其他参数误认成当前请求成功。 */
+  payload: unknown
+  result: AssistantPreset | ProvidedAssistantShare
+}
+export interface ProjectProvidedAssistants {
+  items: Array<
+    AssistantAvailability & {
+      source: ProvidedAssistantSource
+      share: ProvidedAssistantShare | null
+    }
+  >
 }
 export interface AssistantSelection {
   assistantId: string

@@ -141,6 +141,30 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       return principal
     },
     listDevices(ownerId) { owner(ownerId); return db.prepare('SELECT * FROM customer_devices WHERE owner_id=? ORDER BY created_at DESC').all(ownerId).map(publicDevice) },
+    // 只供可信助手组合查询来源身份；不是面向用户的全局设备目录。
+    sourceOwner(target) {
+      const binding = normalizeExecutionBinding(target)
+      if (binding.kind !== 'customer') fail(400,'CUSTOMER_TARGET_REQUIRED','请选择客户工作区')
+      const device = deviceRow(binding.deviceId), workspace = workspaceRow(binding.deviceId,binding.registeredWorkspaceId)
+      if (!device || !workspace || workspace.binding_revision !== binding.workspaceBindingRevision || workspace.runtime_id !== binding.runtimeId)
+        fail(404,'CUSTOMER_WORKSPACE_NOT_FOUND','运行来源不存在或登记身份已改变')
+      return {ownerId:device.owner_id,projectId:workspace.project_id}
+    },
+    describeSource(ownerId,target) {
+      const binding = normalizeExecutionBinding(target)
+      if (binding.kind !== 'customer') fail(400,'CUSTOMER_TARGET_REQUIRED','请选择客户工作区')
+      const device = ownedDevice(ownerId,binding.deviceId), workspace = workspaceRow(binding.deviceId,binding.registeredWorkspaceId)
+      if (!workspace || workspace.owner_id !== ownerId || workspace.binding_revision !== binding.workspaceBindingRevision || workspace.runtime_id !== binding.runtimeId)
+        fail(404,'CUSTOMER_WORKSPACE_NOT_FOUND','运行来源不存在或不属于当前提供者')
+      const snapshot = db.prepare('SELECT snapshot_json,updated_at FROM customer_capabilities WHERE device_id=? AND workspace_id=? AND runtime_id=? AND binding_revision=?').get(binding.deviceId,binding.registeredWorkspaceId,binding.runtimeId,binding.workspaceBindingRevision)
+      return {executionBinding:binding,sourceProjectId:workspace.project_id,deviceName:device.label,workspaceName:workspace.label,
+        deviceStatus:device.status,workspaceStatus:workspace.status,online:publicDevice(device).online,
+        capabilities:snapshot?{...JSON.parse(snapshot.snapshot_json),updatedAt:new Date(snapshot.updated_at).toISOString()}:null}
+    },
+    listSources(ownerId) {
+      owner(ownerId)
+      return db.prepare('SELECT * FROM customer_workspaces WHERE owner_id=? ORDER BY created_at,id').all(ownerId).map(workspace=>this.describeSource(ownerId,{kind:'customer',deviceId:workspace.device_id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:workspace.binding_revision,runtimeId:workspace.runtime_id}))
+    },
     listWorkspaces(ownerId, projectId) {
       owner(ownerId)
       if (projectId !== undefined) requireProjectForUser(ownerId, id(projectId, '项目ID'))
