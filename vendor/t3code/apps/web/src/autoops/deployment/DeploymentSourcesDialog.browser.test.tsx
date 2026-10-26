@@ -56,6 +56,11 @@ describe('部署 Git 来源', () => {
       )
     }
     await using screen = await render(<Harness />)
+    await expect
+      .element(page.getByRole('combobox', { name: '前端仓库版本类型', exact: true }))
+      .toHaveTextContent('默认分支')
+    await page.getByRole('combobox', { name: '前端仓库版本类型', exact: true }).click()
+    await page.getByRole('option', { name: '分支', exact: true }).click()
     await page.getByRole('textbox', { name: '前端仓库版本引用' }).fill('release-candidate')
     await page.getByRole('textbox', { name: '包内构建目录', exact: true }).fill('apps/web')
     await page.getByRole('button', { name: '生成部署包', exact: true }).click()
@@ -89,14 +94,19 @@ describe('部署 Git 来源', () => {
         onGenerate={onGenerate}
       />,
     )
+    await expect
+      .element(page.getByRole('combobox', { name: '前端仓库版本类型', exact: true }))
+      .toHaveTextContent('默认分支')
+    await page.getByRole('combobox', { name: '前端仓库版本类型', exact: true }).click()
+    await page.getByRole('option', { name: '分支', exact: true }).click()
     await page.getByRole('textbox', { name: '前端仓库版本引用' }).fill('release-candidate')
     await page.getByRole('textbox', { name: '构建上下文', exact: true }).fill('.')
     await page.getByRole('textbox', { name: '包内构建目录', exact: true }).fill('apps/web')
     await page.getByRole('button', { name: '生成部署包', exact: true }).click()
     expect(onGenerate).toHaveBeenCalledExactlyOnceWith(
       [
-        { sourceId: 'web', refKind: 'branch', ref: 'release-candidate' },
-        { sourceId: 'shared', refKind: 'default', ref: '' },
+        { sourceId: 'web', refKind: 'branch', ref: 'release-candidate', mountPath: 'repo-1' },
+        { sourceId: 'shared', refKind: 'default', ref: '', mountPath: 'repo-2' },
       ],
       [{ service: 'frontend', root: '.', workingDirectory: 'apps/web' }],
     )
@@ -120,6 +130,8 @@ describe('部署 Git 来源', () => {
         onGenerate={onGenerate}
       />,
     )
+    await page.getByRole('combobox', { name: '前端仓库版本类型', exact: true }).click()
+    await page.getByRole('option', { name: '分支', exact: true }).click()
     const reference = page.getByRole('textbox', { name: '前端仓库版本引用' })
     await reference.fill('')
     await page.getByRole('button', { name: '生成部署包', exact: true }).click()
@@ -130,4 +142,39 @@ describe('部署 Git 来源', () => {
     expect(onOpenChange).not.toHaveBeenCalled()
     await expect.element(reference).toHaveValue('release-candidate')
   })
+})
+
+it('部署目录独立填写，清空子目录后提交完整仓库，不混入连接参数', async () => {
+  const onGenerate = vi.fn().mockResolvedValue(true)
+  await using screen = await render(
+    <DeploymentSourcesDialog
+      open
+      sources={sources.slice(0, 1)}
+      disabled={false}
+      error={null}
+      finalFocus={false}
+      submissionNotice={null}
+      onOpenChange={() => {}}
+      onGenerate={onGenerate}
+    />,
+  )
+  await expect
+    .element(page.getByRole('textbox', { name: '前端仓库部署挂载目录', exact: true }))
+    .toHaveValue('repository')
+  await expect
+    .element(page.getByRole('combobox', { name: '前端仓库版本类型', exact: true }))
+    .toHaveTextContent('默认分支')
+  await page.getByRole('textbox', { name: '前端仓库部署挂载目录', exact: true }).fill('deploy-code')
+  await page
+    .getByRole('textbox', { name: '前端仓库部署仓库子目录', exact: true })
+    .fill('packages/web')
+  await page.getByRole('textbox', { name: '前端仓库部署仓库子目录', exact: true }).fill('')
+  await page.getByRole('textbox', { name: '构建上下文', exact: true }).fill('deploy-code')
+  await page.getByRole('button', { name: '生成部署包', exact: true }).click()
+  expect(onGenerate).toHaveBeenCalledExactlyOnceWith(
+    [{ sourceId: 'web', refKind: 'default', ref: '', mountPath: 'deploy-code' }],
+    [{ service: 'frontend', root: 'deploy-code', workingDirectory: '.' }],
+  )
+  expect(sources[0]?.mountPath).toBe('apps/web')
+  expect(screen.container.querySelector('[data-module-error]')).toBeNull()
 })

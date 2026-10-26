@@ -112,7 +112,7 @@ describe('部署写请求公开接口', () => {
       configKey: 'config',
       requestId: 'original-request',
       sourceSelection: {
-        sources: [{ sourceId: 'repo', refKind: 'branch', ref: 'release' }],
+        sources: [{ sourceId: 'repo', refKind: 'branch', ref: 'release', mountPath: 'repository' }],
         contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }],
       },
     }).catch((error) => error)

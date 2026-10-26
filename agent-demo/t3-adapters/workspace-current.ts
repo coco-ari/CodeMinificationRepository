@@ -20,6 +20,8 @@ import type {
   WorkspaceRepositorySource,
 } from '../../autoops/contracts/workspace-authoring.ts'
 import type { WorkspaceTask } from '../../autoops/contracts/workspaces.ts'
+import { decodeContract } from '../../autoops/contracts/index.ts'
+import { DeploymentRepositorySelection } from '../../autoops/contracts/project-repositories.ts'
 
 type Authoring = ReturnType<typeof createWorkspaceAuthoring>
 type Credentials = ReturnType<typeof createProjectCredentialService>
@@ -620,21 +622,52 @@ export function createCurrentWorkspace({
           !Array.isArray(input.sources) ||
           !input.sources.length ||
           input.sources.length > 32 ||
+          input.sources.some(
+            (value) => !value || typeof value !== 'object' || Array.isArray(value),
+          ) ||
           new Set(input.sources.map((value) => value.sourceId)).size !== input.sources.length
         )
           fail(400, 'WORKSPACE_DEPLOYMENT_SOURCES_INVALID', '请选择唯一的部署仓库来源')
-        const current = authoring.overview(project, actor)
+        const current = authoring.repositories(project, actor)
         const sources = input.sources.map((selection) => {
-          const source = current.sources.find((value) => value.id === selection.sourceId)
+          let usage
+          try {
+            usage = decodeContract(DeploymentRepositorySelection, selection)
+          } catch {
+            return fail(
+              400,
+              'WORKSPACE_DEPLOYMENT_SOURCES_INVALID',
+              '请完整选择部署仓库的版本、挂载及子目录，不接受连接或凭证字段',
+            )
+          }
+          const source = current.items.find((value) => value.id === usage.sourceId)
           if (!source) return fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '部署仓库来源不存在')
           const selected = {
             ...source,
-            ...(selection.refKind ? { refKind: selection.refKind } : {}),
-            ...(selection.ref !== undefined ? { ref: selection.ref } : {}),
+            role: 'other' as const,
+            refKind: usage.refKind,
+            ref: usage.ref,
+            mountPath: usage.mountPath.normalize('NFC'),
+            ...(usage.sourcePath ? { sourcePath: usage.sourcePath.normalize('NFC') } : {}),
           }
           git.validateRepositorySource(selected)
           return selected
         })
+        if (
+          sources.some((source, index) =>
+            sources
+              .slice(index + 1)
+              .some(
+                (other) =>
+                  source.mountPath === '.' ||
+                  other.mountPath === '.' ||
+                  source.mountPath === other.mountPath ||
+                  source.mountPath.startsWith(other.mountPath + '/') ||
+                  other.mountPath.startsWith(source.mountPath + '/'),
+              ),
+          )
+        )
+          fail(400, 'WORKSPACE_DEPLOYMENT_SOURCES_INVALID', '部署仓库挂载目录不能重叠')
         if (
           !Array.isArray(input.contexts) ||
           !input.contexts.length ||

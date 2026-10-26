@@ -539,6 +539,11 @@ describe('Java 服务、位置与直接发布', () => {
         finalFocus={false}
       />,
     )
+    await expect
+      .element(page.getByRole('combobox', { name: '订单仓库版本类型', exact: true }))
+      .toHaveTextContent('默认分支')
+    await page.getByRole('combobox', { name: '订单仓库版本类型', exact: true }).click()
+    await page.getByRole('option', { name: '分支', exact: true }).click()
     await page
       .getByRole('textbox', { name: '订单仓库版本引用', exact: true })
       .fill('release-candidate')
@@ -549,8 +554,15 @@ describe('Java 服务、位置与直接发布', () => {
       service: 'backend',
       configKey: target.configKey,
       sourceSelection: {
-        sources: [{ sourceId: sources[0]!.id, refKind: 'branch', ref: 'release-candidate' }],
-        contexts: [{ service: 'backend', root: 'apps/order', workingDirectory: '.' }],
+        sources: [
+          {
+            sourceId: sources[0]!.id,
+            mountPath: 'repository',
+            refKind: 'branch',
+            ref: 'release-candidate',
+          },
+        ],
+        contexts: [{ service: 'backend', root: 'repository', workingDirectory: '.' }],
       },
     })
   })
@@ -567,7 +579,14 @@ describe('Java 服务、位置与直接发布', () => {
         createdAt: '2026-10-25T00:00:00Z',
         config: target.config,
         sourceSelection: {
-          sources: [{ sourceId: sources[0]!.id, refKind: 'branch', ref: 'running-branch' }],
+          sources: [
+            {
+              sourceId: sources[0]!.id,
+              mountPath: 'apps/order',
+              refKind: 'branch',
+              ref: 'running-branch',
+            },
+          ],
           contexts: context,
         },
       }
@@ -575,7 +594,14 @@ describe('Java 服务、位置与直接发布', () => {
         serviceId: target.serviceId,
         environmentId: target.environmentId,
         configKey: 'source-key',
-        sources: [{ sourceId: sources[0]!.id, refKind: 'tag' as const, ref: 'saved-tag' }],
+        sources: [
+          {
+            sourceId: sources[0]!.id,
+            mountPath: 'apps/order',
+            refKind: 'tag' as const,
+            ref: 'saved-tag',
+          },
+        ],
         contexts: context,
       }
       await using screen = await render(
@@ -620,8 +646,13 @@ describe('Java 服务、位置与直接发布', () => {
       environmentId: target.environmentId,
       configKey: 'source-key',
       sources: [
-        { sourceId: sources[0]!.id, refKind: 'branch' as const, ref: 'release' },
-        { sourceId: 'removed-shared', refKind: 'default' as const, ref: '' },
+        {
+          sourceId: sources[0]!.id,
+          mountPath: 'apps/order',
+          refKind: 'branch' as const,
+          ref: 'release',
+        },
+        { sourceId: 'removed-shared', mountPath: 'shared', refKind: 'default' as const, ref: '' },
       ],
       contexts: [{ service: 'backend' as const, root: 'apps/order', workingDirectory: '.' }],
     }
@@ -654,7 +685,14 @@ describe('Java 服务、位置与直接发布', () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceSelection: {
-          sources: [{ sourceId: sources[0]!.id, refKind: 'branch', ref: 'release' }],
+          sources: [
+            {
+              sourceId: sources[0]!.id,
+              mountPath: 'repository',
+              refKind: 'default',
+              ref: '',
+            },
+          ],
           contexts: defaultSource.contexts,
         },
       }),
@@ -668,7 +706,14 @@ describe('Java 服务、位置与直接发布', () => {
       serviceId: service.id,
       environmentId: 'test',
       configKey: 'source-key',
-      sources: [{ sourceId: sources[0]!.id, refKind: 'branch' as const, ref: 'saved-release' }],
+      sources: [
+        {
+          sourceId: sources[0]!.id,
+          mountPath: 'apps/order',
+          refKind: 'branch' as const,
+          ref: 'saved-release',
+        },
+      ],
       contexts: [{ service: 'backend' as const, root: 'apps/order', workingDirectory: '.' }],
     }
     await using screen = await render(
@@ -688,7 +733,14 @@ describe('Java 服务、位置与直接发布', () => {
     await page.getByRole('button', { name: '保存来源配置', exact: true }).click()
     expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
       configKey: 'source-key',
-      sources: [{ sourceId: sources[0]!.id, refKind: 'branch', ref: 'release-next' }],
+      sources: [
+        {
+          sourceId: sources[0]!.id,
+          mountPath: 'apps/order',
+          refKind: 'branch',
+          ref: 'release-next',
+        },
+      ],
       contexts: source.contexts,
     })
   })

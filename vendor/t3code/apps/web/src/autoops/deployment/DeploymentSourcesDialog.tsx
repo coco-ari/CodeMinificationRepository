@@ -16,10 +16,15 @@ import { Label } from '~/components/ui/label'
 import { Spinner } from '~/components/ui/spinner'
 import type {
   WorkspaceDeploymentSourceInput,
-  WorkspaceRepositorySource,
+  ProjectRepositoryConnection,
 } from '../workspaceAuthoring'
 import type { WorkspaceBuildContext } from '../workspaces'
-import { DeploymentSourceFields } from './DeploymentSourceFields'
+import {
+  DeploymentSourceFields,
+  initialDeploymentSource,
+  updateDeploymentSource,
+  validDeploymentSourceDirectories,
+} from './DeploymentSourceFields'
 
 type SourceSelection = WorkspaceDeploymentSourceInput['sources'][number]
 
@@ -43,7 +48,7 @@ export function DeploymentSourcesDialog({
   open: boolean
   onOpenChange: (value: boolean) => void
   finalFocus: ComponentProps<typeof DialogPopup>['finalFocus']
-  sources: WorkspaceRepositorySource[]
+  sources: ProjectRepositoryConnection[]
   disabled: boolean
   error: string | null
   submissionNotice: ReactNode
@@ -62,32 +67,40 @@ export function DeploymentSourcesDialog({
     if (open && !pendingRequest) {
       setSelection(
         Object.fromEntries(
-          sources.map((source) => [
+          sources.map((source, index) => [
             source.id,
-            { sourceId: source.id, refKind: source.refKind, ref: source.ref },
+            initialDeploymentSource(source, index, sources.length),
           ]),
         ),
       )
-      const frontend =
-        sources.find((source) => source.role === 'frontend') ??
-        (sources.length === 1 ? sources[0] : undefined)
       setContexts([
-        { service: 'frontend', root: frontend?.mountPath ?? '.', workingDirectory: '.' },
+        {
+          service: 'frontend',
+          root: sources.length === 1 ? 'repository' : '.',
+          workingDirectory: '.',
+        },
       ])
       setLocalError(null)
     }
   }
   const unavailable = disabled || pending || (pendingRequest && canRetryPending)
-  const selectSource = (source: WorkspaceRepositorySource, checked: boolean) =>
+  const selectSource = (source: ProjectRepositoryConnection, checked: boolean) =>
     setSelection((current) => {
       const next = { ...current }
       if (checked)
-        next[source.id] = { sourceId: source.id, refKind: source.refKind, ref: source.ref }
+        next[source.id] = initialDeploymentSource(
+          source,
+          sources.findIndex((item) => item.id === source.id),
+          sources.length,
+        )
       else delete next[source.id]
       return next
     })
   const updateSource = (sourceId: string, change: Partial<SourceSelection>) =>
-    setSelection((current) => ({ ...current, [sourceId]: { ...current[sourceId]!, ...change } }))
+    setSelection((current) => ({
+      ...current,
+      [sourceId]: updateDeploymentSource(current[sourceId]!, change),
+    }))
   const updateContext = (
     service: WorkspaceBuildContext['service'],
     field: 'root' | 'workingDirectory',
@@ -107,6 +120,10 @@ export function DeploymentSourcesDialog({
     }
     if (chosen.some((source) => source.refKind !== 'default' && !source.ref?.trim())) {
       setLocalError('请填写所选分支、标签或完整提交 SHA。')
+      return
+    }
+    if (chosen.some((source) => !validDeploymentSourceDirectories(source))) {
+      setLocalError('请填写有效的部署挂载目录和仓库子目录。')
       return
     }
     setPending(true)
@@ -173,8 +190,9 @@ export function DeploymentSourcesDialog({
                                   {
                                     service,
                                     root:
-                                      sources.find((source) => source.role === service)
-                                        ?.mountPath ?? '.',
+                                      (sources.length === 1
+                                        ? selection[sources[0]!.id]?.mountPath
+                                        : undefined) ?? '.',
                                     workingDirectory: '.',
                                   },
                                 ]

@@ -1,4 +1,5 @@
 import type { WorkspaceBuildContext } from './workspaces.ts'
+import type { DeploymentRepositorySelection } from './project-repositories.ts'
 
 export type WorkspaceSourceRole = 'frontend' | 'backend' | 'shared' | 'documentation' | 'other'
 export type WorkspaceRepositoryRefKind = 'default' | 'branch' | 'tag' | 'commit'
@@ -200,7 +201,7 @@ export interface WorkspaceInputCapture {
 }
 export interface WorkspaceDeploymentSourceInput {
   requestId: string
-  sources: Array<{ sourceId: string; refKind?: WorkspaceRepositoryRefKind; ref?: string }>
+  sources: DeploymentRepositorySelection[]
   contexts: WorkspaceBuildContext[]
 }
 export interface WorkspaceDeploymentSourceCapture {

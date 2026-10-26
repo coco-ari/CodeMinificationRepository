@@ -16,7 +16,7 @@ import {
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 import { Spinner } from '~/components/ui/spinner'
-import type { WorkspaceRepositorySource } from '../workspaceAuthoring'
+import type { ProjectRepositoryConnection } from '../workspaceAuthoring'
 import {
   DeploymentSourceFields,
   DeploymentSourceNotice,
@@ -424,7 +424,7 @@ export function ServiceSourceDialog({
   onAccessDenied?: ((cause: unknown) => void) | undefined
   service: DeploymentService
   environmentName?: string
-  sources: WorkspaceRepositorySource[]
+  sources: ProjectRepositoryConnection[]
   source?: DeploymentServiceSource | undefined
   busy: boolean
   error: string | null
@@ -533,7 +533,7 @@ export function ReleaseDialog({
   serverName: string
   environmentName: string
   packages: WorkspaceRelease[]
-  sources?: WorkspaceRepositorySource[]
+  sources?: ProjectRepositoryConnection[]
   defaultSource?: DeploymentServiceSource | undefined
   sourcesError?: string | null
   onAccessDenied?: ((cause: unknown) => void) | undefined

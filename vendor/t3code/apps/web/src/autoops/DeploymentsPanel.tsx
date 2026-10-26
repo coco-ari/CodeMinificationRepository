@@ -29,7 +29,7 @@ import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
 import { randomUUID } from '~/lib/utils'
 import { readAutoOpsHost } from './hostConfig'
 import type { WorkspaceRelease } from './workspaces'
-import type { WorkspaceRepositorySource } from './workspaceAuthoring'
+import type { ProjectRepositoryConnection } from './workspaceAuthoring'
 import {
   createDeploymentTarget,
   saveDeploymentService,
@@ -139,7 +139,7 @@ export function DeploymentsPanel({
 }: {
   projectId: string
   packages: WorkspaceRelease[]
-  sources: WorkspaceRepositorySource[]
+  sources: ProjectRepositoryConnection[]
   sourcesError: string | null
   navigation: ReactNode
   packageActions: PackageActions | null

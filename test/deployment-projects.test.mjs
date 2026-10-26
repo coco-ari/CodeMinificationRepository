@@ -78,12 +78,12 @@ test('共享节点显式绑定，解绑保护现有目标且不改其他项目',
 test('服务来源按环境独立保存，重复请求和迟到修改不覆盖，不能混用服务类型', async t => {
   const f = await fixture(t)
   const service = await f.projects.saveService('p-one', mutation({ name: '后端', kind: 'java', module: '.' }))
-  const source = mutation({ serviceId: service.id, environmentId: 'test', sources: [{ sourceId: 'repo-one', refKind: 'branch', ref: 'main' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] })
+  const source = mutation({ serviceId: service.id, environmentId: 'test', sources: [{ sourceId: 'repo-one', refKind: 'branch', ref: 'main', mountPath: 'repository' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] })
   const saved = await f.projects.saveServiceSource('p-one', source)
   assert.deepEqual(await f.projects.saveServiceSource('p-one', source), saved)
   assert.equal(f.projects.serviceSource('p-one', service.id, 'prod'), null)
-  await assert.rejects(f.projects.saveServiceSource('p-one', mutation({ ...source, sources: [{ sourceId: 'repo-two' }] })), { status: 409 })
-  const updated = await f.projects.saveServiceSource('p-one', mutation({ ...source, configKey: saved.configKey, sources: [{ sourceId: 'repo-two' }] }))
+  await assert.rejects(f.projects.saveServiceSource('p-one', mutation({ ...source, sources: [{ sourceId: 'repo-two', refKind: 'default', ref: '', mountPath: 'repository' }] })), { status: 409 })
+  const updated = await f.projects.saveServiceSource('p-one', mutation({ ...source, configKey: saved.configKey, sources: [{ sourceId: 'repo-two', refKind: 'default', ref: '', mountPath: 'repository' }] }))
   assert.notEqual(updated.configKey, saved.configKey)
   await assert.rejects(f.projects.saveServiceSource('p-one', mutation({ ...source, configKey: updated.configKey, contexts: [{ service: 'frontend', root: '.', workingDirectory: '.' }] })), { status: 400 })
   await assert.rejects(f.projects.saveServiceSource('p-two', source), { status: 404 })
@@ -118,7 +118,7 @@ test('映射版本升级保留原静态服务、目标和旧请求，重复初�
 test('旧发行真实项目模块可在扩展后数据副本上初始化，保留新增服务来源和幂等收据', async t => {
   const f = await fixture(t)
   const service = await f.projects.saveService('p-one', mutation({name:'回滚保留服务',kind:'java',module:'.'}))
-  await f.projects.saveServiceSource('p-one', mutation({serviceId:service.id,environmentId:'test',sources:[{sourceId:'repo-one',refKind:'tag',ref:'v1.0'}],contexts:[{service:'backend',root:'.',workingDirectory:'.'}]}))
+  await f.projects.saveServiceSource('p-one', mutation({serviceId:service.id,environmentId:'test',sources:[{sourceId:'repo-one',refKind:'tag',ref:'v1.0', mountPath: 'repository' }],contexts:[{service:'backend',root:'.',workingDirectory:'.'}]}))
   // 固定旧发行真实字节随测试保存，浅克隆也执行同一份回滚兼容程序。
   const previous = await readFile(new URL('./fixtures/deployment-projects-27fa5b34/deployment-projects.mjs', import.meta.url))
   assert.equal(createHash('sha256').update(previous).digest('hex'), 'a462431a6b44997327aff46a94fea550b64a0345be6638c685c0d849f12c1ad3')
@@ -186,7 +186,7 @@ async function selectionFixture(t, options) {
   const f = await fixture(t, options)
   const service = await f.projects.saveService('p-one', mutation({ name: '持久源码服务', kind: 'java', module: '.' }))
   const targetId = await f.projects.createTarget('p-one', mutation({ serviceId: service.id, environmentId: 'test', serverId: f.server.id, config: {} }))
-  const input = mutation({ projectId: 'p-one', targetId, configKey: f.deployment.configKey(targetId), sourceSelection: { sources: [{ sourceId: 'repo-one', refKind: 'branch', ref: 'main' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] } })
+  const input = mutation({ projectId: 'p-one', targetId, configKey: f.deployment.configKey(targetId), sourceSelection: { sources: [{ sourceId: 'repo-one', refKind: 'branch', ref: 'main', mountPath: 'repository' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] } })
   const bytes = Buffer.from('隔离的持久源码档案'), file = path.join(f.root, 'captured.zip')
   await writeFile(file, bytes)
   const archive = { file, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, revision: 'a'.repeat(40), commitSubject: '固定源码' }
@@ -331,7 +331,7 @@ for (const operation of ['create-target', 'update-target', 'service-source']) te
   const targetId = await f.projects.createTarget('p-one', create)
   const update = mutation({ config: { profile: 'test' }, configKey: f.deployment.configKey(targetId) })
   await f.projects.updateTarget('p-one', targetId, update)
-  const source = mutation({ serviceId: service.id, environmentId: 'test', sources: [{ sourceId: 'repo-one', refKind: 'branch', ref: 'main' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] })
+  const source = mutation({ serviceId: service.id, environmentId: 'test', sources: [{ sourceId: 'repo-one', refKind: 'branch', ref: 'main', mountPath: 'repository' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] })
   const saved = await f.projects.saveServiceSource('p-one', source)
   const input = operation === 'create-target' ? create : operation === 'update-target' ? update : source
   const submit = value => operation === 'create-target' ? f.projects.createTarget('p-one', value) : operation === 'update-target' ? f.projects.updateTarget('p-one', targetId, value) : f.projects.saveServiceSource('p-one', value)
@@ -343,7 +343,7 @@ for (const operation of ['create-target', 'update-target', 'service-source']) te
   assert.equal(f.projects.snapshot('p-one').targets.length, 1)
   assert.equal(f.deployment.effectiveConfig(targetId).module, 'backend')
   assert.deepEqual(f.projects.serviceSource('p-one', service.id, 'test'), latest)
-  const changed = operation === 'service-source' ? { ...input, sources: [{ sourceId: 'repo-two' }] } : { ...input, config: { profile: 'changed' } }
+  const changed = operation === 'service-source' ? { ...input, sources: [{ sourceId: 'repo-two', refKind: 'default', ref: '', mountPath: 'repository' }] } : { ...input, config: { profile: 'changed' } }
   await assert.rejects(submit(changed), { status: 409, code: 'DEPLOYMENT_REQUEST_CONFLICT' })
   await assert.rejects(submit({ ...input, actor: { id: 'another-manager' } }), { status: 409, code: 'DEPLOYMENT_REQUEST_CONFLICT' })
   allowed = false
@@ -357,7 +357,7 @@ test('旧配置修改收据保留严格参数校验，不以新增指纹绕过�
   const targetId = await f.projects.createTarget('p-one', create)
   const update = mutation({ config: { profile: 'test' }, configKey: f.deployment.configKey(targetId) })
   await f.projects.updateTarget('p-one', targetId, update)
-  const source = mutation({ serviceId: service.id, environmentId: 'test', sources: [{ sourceId: 'repo-one' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] })
+  const source = mutation({ serviceId: service.id, environmentId: 'test', sources: [{ sourceId: 'repo-one', refKind: 'default', ref: '', mountPath: 'repository' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }] })
   const saved = await f.projects.saveServiceSource('p-one', source)
   await f.repository.store.change(state => {
     for (const receipt of state.autoopsDeploymentBindings.projects[0].mutationRequests) delete receipt.submissionFingerprint
@@ -367,5 +367,5 @@ test('旧配置修改收据保留严格参数校验，不以新增指纹绕过�
   assert.deepEqual(await f.projects.saveServiceSource('p-one', source), saved)
   await assert.rejects(f.projects.createTarget('p-one', { ...create, config: { profile: 'changed' } }), { status: 409 })
   await assert.rejects(f.projects.updateTarget('p-one', targetId, { ...update, config: { profile: 'changed' } }), { status: 409 })
-  await assert.rejects(f.projects.saveServiceSource('p-one', { ...source, sources: [{ sourceId: 'repo-two' }] }), { status: 409 })
+  await assert.rejects(f.projects.saveServiceSource('p-one', { ...source, sources: [{ sourceId: 'repo-two', refKind: 'default', ref: '', mountPath: 'repository' }] }), { status: 409 })
 })

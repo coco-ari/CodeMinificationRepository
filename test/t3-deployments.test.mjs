@@ -266,7 +266,7 @@ test('独立 Git 源码包无需日常工作区版本，清单固定多仓提交
     })
     return {sourceVersionId:version.id,contexts:[{service:'frontend',root:'.',workingDirectory:'app'}]}
   }
-  const input = {requestId,sources:[{sourceId:'app'},{sourceId:'shared'}],contexts:[{service:'frontend',root:'.',workingDirectory:'app'}]}
+  const input = {requestId,sources:[{sourceId:'app', refKind: 'default', ref: '', mountPath: 'app' },{sourceId:'shared', refKind: 'default', ref: '', mountPath: 'app' }],contexts:[{service:'frontend',root:'.',workingDirectory:'app'}]}
   const completed = await finish(f.workspaceStore,'p-one',f.workspaceStore.startSourcePackages('p-one',input,prepare,principal.id))
   assert.equal(f.workspaceStore.startSourcePackages('p-one',input,prepare,principal.id).id,completed.id)
   const pack = f.workspaceStore.overview('p-one').releases.find(value=>value.id===completed.releaseId)
@@ -379,7 +379,7 @@ test('发布默认来源按项目环境校验，一次确认后后台固定源�
   let workspaceStore
   const sources = [{id:'source-one',mountPath:'app'}]
   const management = {
-    overview(){ return {sources} },
+    authoring: { repositories(){ return { items: sources } } },
     startDeploymentPackages(projectId,input,actorId) {
       return workspaceStore.startSourcePackages(projectId,input,async ({materializeCache})=> {
         const version = await materializeCache({cacheKey:'automatic-source',source:{repositories:[{path:'app',commit:'a'.repeat(40)}],documents:[]}}, async ({root})=> {
@@ -396,24 +396,26 @@ test('发布默认来源按项目环境校验，一次确认后后台固定源�
   workspaceStore = f.workspaceStore
   const service = (await f.request('/services','POST',{name:'自动发布',kind:'java',module:'.',requestId:randomUUID()})).body.service
   const target = (await f.request('/targets','POST',{serviceId:service.id,environmentId:'env-one',serverId:r.server.server.id,config:{kind:'java'},requestId:randomUUID()})).body.target
-  const selection = {sources:[{sourceId:'source-one',refKind:'branch',ref:'release'}],contexts:[{service:'backend',root:'app',workingDirectory:'.'}],requestId:randomUUID()}
+  const selection = {sources:[{sourceId:'source-one',refKind:'branch',ref:'release', mountPath: 'app' }],contexts:[{service:'backend',root:'app',workingDirectory:'.'}],requestId:randomUUID()}
   const saved = (await f.request(`/services/${service.id}/sources/env-one`,'PUT',selection)).body.source
   assert.equal(saved.sources[0].ref,'release')
   await assert.rejects(f.request(`/services/${service.id}/sources/env-two`,'PUT',selection),{status:403})
-  await assert.rejects(f.request(`/services/${service.id}/sources/env-one`,'PUT',{...selection,requestId:randomUUID(),sources:[{sourceId:'other-project'}]}),{status:404})
+  await assert.rejects(f.request(`/services/${service.id}/sources/env-one`,'PUT',{...selection,requestId:randomUUID(),sources:[{sourceId:'other-project', refKind: 'default', ref: '', mountPath: 'app' }]}),{status:404})
   const submission={targetId:target.id,action:'deploy',service:'backend',configKey:target.configKey,requestId:randomUUID()}
   const task=(await f.request('/tasks','POST',submission)).body.task
   assert.equal(task.status,'preparing')
   assert.equal((await f.request('/tasks','POST',submission)).body.task.id,task.id)
   const explicitSubmission = {...submission,requestId:randomUUID(),sourceSelection:{sources:selection.sources,contexts:selection.contexts}}
   const explicitTask = (await f.request('/tasks','POST',explicitSubmission)).body.task
-  await f.request(`/services/${service.id}/sources/env-one`,'PUT',{...selection,requestId:randomUUID(),configKey:saved.configKey,sources:[{sourceId:'source-one',refKind:'branch',ref:'next'}]})
+  for (const change of [{ mountPath: 'changed-mount' }, { sourcePath: 'changed-subdirectory' }])
+    await assert.rejects(f.request('/tasks','POST',{...explicitSubmission,sourceSelection:{...explicitSubmission.sourceSelection,sources:[{...selection.sources[0],...change}]}}),{status:409})
+  await f.request(`/services/${service.id}/sources/env-one`,'PUT',{...selection,requestId:randomUUID(),configKey:saved.configKey,sources:[{sourceId:'source-one',refKind:'branch',ref:'next', mountPath: 'app' }]})
   assert.equal((await f.request('/tasks','POST',submission)).body.task.id,task.id)
   sources.splice(0)
   assert.equal((await f.request('/tasks','POST',submission)).body.task.id,task.id)
   assert.equal((await f.request('/tasks','POST',explicitSubmission)).body.task.id,explicitTask.id)
   await assert.rejects(f.request('/tasks','POST',{...submission,configKey:'b'.repeat(64)}),{status:409})
-  await assert.rejects(f.request('/tasks','POST',{...explicitSubmission,sourceSelection:{...explicitSubmission.sourceSelection,sources:[{sourceId:'source-one',refKind:'branch',ref:'changed'}]}}),{status:409})
+  await assert.rejects(f.request('/tasks','POST',{...explicitSubmission,sourceSelection:{...explicitSubmission.sourceSelection,sources:[{sourceId:'source-one',refKind:'branch',ref:'changed', mountPath: 'app' }]}}),{status:409})
   await f.store.close()
   await f.reopen()
   const result=(await f.request(`/tasks/${task.id}`)).body.task
@@ -459,7 +461,7 @@ test('宿主停止接单时已成功固定的源码按原持久收据继续归�
   const gate = new Promise(resolve => { continuePackaging = resolve })
   const sources = [{id:'source-one',mountPath:'app'}]
   const port = {
-    overview(){ return {sources} },
+    authoring: { repositories(){ return { items: sources } } },
     startDeploymentPackages(projectId,input,actorId) {
       return workspaceStore.startSourcePackages(projectId,input,async ({materializeCache})=> {
         enteredPackaging(); await gate
@@ -476,7 +478,7 @@ test('宿主停止接单时已成功固定的源码按原持久收据继续归�
   management = createWorkspaceManagement({access:{requireWorkspaceReader(){},requireWorkspaceActor(){}},store:workspaceStore,authoring:{},credentials:{},git:{}})
   const service = (await f.request('/services','POST',{name:'排空发布',kind:'java',module:'.',requestId:randomUUID()})).body.service
   const target = (await f.request('/targets','POST',{serviceId:service.id,environmentId:'env-one',serverId:r.server.server.id,config:{kind:'java'},requestId:randomUUID()})).body.target
-  const submission = {targetId:target.id,action:'deploy',service:'backend',configKey:target.configKey,requestId:randomUUID(),sourceSelection:{sources:[{sourceId:'source-one',refKind:'branch',ref:'release'}],contexts:[{service:'backend',root:'app',workingDirectory:'.'}]}}
+  const submission = {targetId:target.id,action:'deploy',service:'backend',configKey:target.configKey,requestId:randomUUID(),sourceSelection:{sources:[{sourceId:'source-one',refKind:'branch',ref:'release', mountPath: 'app' }],contexts:[{service:'backend',root:'app',workingDirectory:'.'}]}}
   const task = (await f.request('/tasks','POST',submission)).body.task
   await packaging
   management.stopAccepting(); workspaceStore.stopAccepting(); f.store.stopAccepting()
@@ -510,9 +512,9 @@ test('目标运行观测只返回安全字段，服务端时间判定过期且�
 test('默认来源已保存后仓库移除和目录变化不阻断原请求核对，仍拒绝撤权和新请求', async t => {
   const sources = [{ id: 'source-one' }]
   let reads = 0
-  const f = await fixture(t, { workspaceManagement: { overview() { reads++; return { sources } } } })
+  const f = await fixture(t, { workspaceManagement: { authoring: { repositories() { reads++; return { items: sources } } } } })
   const service = (await f.request('/services', 'POST', { name: '来源收据', kind: 'java', module: '.', requestId: randomUUID() })).body.service
-  const input = { sources: [{ sourceId: 'source-one', refKind: 'branch', ref: 'main' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }], requestId: randomUUID() }
+  const input = { sources: [{ sourceId: 'source-one', refKind: 'branch', ref: 'main', mountPath: 'app' }], contexts: [{ service: 'backend', root: '.', workingDirectory: '.' }], requestId: randomUUID() }
   const route = `/services/${service.id}/sources/env-one`
   const saved = (await f.request(route, 'PUT', input)).body.source
   sources.splice(0)
@@ -520,7 +522,7 @@ test('默认来源已保存后仓库移除和目录变化不阻断原请求核�
   await f.reopen()
   assert.deepEqual((await f.request(route, 'PUT', input)).body.source, saved)
   assert.equal(reads, 1, '核对已接受请求不重新读取已移除仓库')
-  await assert.rejects(f.request(route, 'PUT', { ...input, sources: [{ sourceId: 'source-other' }] }), { status: 409, code: 'DEPLOYMENT_REQUEST_CONFLICT' })
+  await assert.rejects(f.request(route, 'PUT', { ...input, sources: [{ sourceId: 'source-other', refKind: 'default', ref: '', mountPath: 'app' }] }), { status: 409, code: 'DEPLOYMENT_REQUEST_CONFLICT' })
   await assert.rejects(f.request(route, 'PUT', { ...input, requestId: randomUUID() }), { status: 404, code: 'DEPLOYMENT_SOURCE_NOT_FOUND' })
   await assert.rejects(f.request(route, 'PUT', input, { ...principal, allowed: [] }), { status: 403 })
 })

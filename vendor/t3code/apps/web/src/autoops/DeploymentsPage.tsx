@@ -34,7 +34,7 @@ import { useAutoOpsProjectId } from './projectNavigation'
 import { DeploymentsPanel } from './DeploymentsPanel'
 import { WorkspaceTasksDialog, WorkspaceSubmissionNotice } from './WorkspaceActions'
 import { DeploymentSourcesDialog } from './deployment'
-import { loadAuthoring, type WorkspaceRepositorySource } from './workspaceAuthoring'
+import { loadProjectRepositories, type ProjectRepositoryConnection } from './projectRepositories'
 import {
   cancelWorkspaceTask,
   workspacePackageUrl,
@@ -131,7 +131,7 @@ function ProjectDeployments({
   const [actionError, setError] = useState<string | null>(null)
   const [mutationBusy, setBusy] = useState(false)
   const [dialog, setDialog] = useState<'packages' | 'tasks' | null>(null)
-  const [sources, setSources] = useState<WorkspaceRepositorySource[]>([])
+  const [sources, setSources] = useState<ProjectRepositoryConnection[]>([])
   const [sourcesError, setSourcesError] = useState<string | null>(null)
   const [sourceAccessDenied, setSourceAccessDenied] = useState(false)
   const revokeSourceAccess = useCallback((cause: unknown) => {
@@ -176,11 +176,10 @@ function ProjectDeployments({
   useEffect(() => {
     const controller = new AbortController()
     const principal = readAutoOpsHost()?.principal.id
-    void loadAuthoring(projectId, controller.signal)
+    void loadProjectRepositories(projectId, controller.signal)
       .then((value) => {
         if (controller.signal.aborted || readAutoOpsHost()?.principal.id !== principal) return
-        if (value.projectId !== projectId) throw new Error('源码来源返回了其他项目，已停止显示。')
-        setSources(value.sources)
+        setSources(value.items)
         setSourcesError(null)
         setSourceAccessDenied(false)
       })

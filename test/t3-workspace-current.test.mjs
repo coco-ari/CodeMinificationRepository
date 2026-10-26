@@ -18,6 +18,7 @@ import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-m
 import { handleWorkspaceAuthoringRequest } from '../agent-demo/t3-adapters/workspace-authoring-http.ts'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
 import { createBusinessRunInputs } from '../agent-demo/t3-adapters/thread-inputs.ts'
+import { validateRepositorySource as validateGitSource } from '../agent-demo/t3-adapters/workspace-git.ts'
 import { renderBusinessPdf } from '../agent-demo/t3-adapters/business-documents.mjs'
 
 const projectId = 'p-test'
@@ -163,7 +164,7 @@ async function fixture(t) {
   // 只替换远端传输端口；授权、捕获、SQLite、原件、工作区任务及打包 Worker 均使用真实实现。
   const git = {
     validateRepositorySource(source) {
-      return source
+      return validateGitSource(source)
     },
     async resolveRepositoryRef(source, credential, signal) {
       signal.throwIfAborted()
@@ -174,7 +175,12 @@ async function fixture(t) {
           status: 502,
           code: 'WORKSPACE_GIT_FAILED',
         })
-      const { commit } = await repository(source.role)
+      const { commit } = await repository(
+        source.url
+          .split('/')
+          .at(-1)
+          .replace(/\.git$/, ''),
+      )
       return {
         sourceId: source.id,
         commit,
@@ -188,7 +194,12 @@ async function fixture(t) {
       calls.fetch.push({ sourceId: source.id, commit, credential: credential?.password })
       if (control.beforeFetch) await control.beforeFetch(source)
       signal.throwIfAborted()
-      const repo = await repository(source.role)
+      const repo = await repository(
+        source.url
+          .split('/')
+          .at(-1)
+          .replace(/\.git$/, ''),
+      )
       assert.equal(commit, repo.commit)
       await cp(repo.directory, target, { recursive: true, force: false, errorOnExist: true })
       if (control.lfsPointer)
@@ -546,7 +557,10 @@ test('部署源码独立排队固定多仓，ZIP保留选定上下文且不夹�
   f.control.beforeResolve = () => gate.promise
   const input = {
     requestId: 'deployment-multi',
-    sources: [{ sourceId: front.id }, { sourceId: back.id }],
+    sources: [
+      { sourceId: front.id, refKind: 'default', ref: '', mountPath: front.mountPath },
+      { sourceId: back.id, refKind: 'default', ref: '', mountPath: back.mountPath },
+    ],
     contexts: [
       { service: 'frontend', root: '.', workingDirectory: 'apps/web' },
       { service: 'backend', root: 'services/api', workingDirectory: '.' },
@@ -1157,7 +1171,7 @@ test('部署解析失败和固定提交抓取失败在原任务持久终态后�
   }
   const resolving = {
     requestId: 'deployment-resolve-failed',
-    sources: [{ sourceId: source.id }],
+    sources: [{ sourceId: source.id, refKind: 'default', ref: '', mountPath: source.mountPath }],
     contexts,
   }
   const first = f.service.startDeploymentPackages(projectId, resolving, owner)
@@ -1183,7 +1197,14 @@ test('部署解析失败和固定提交抓取失败在原任务持久终态后�
   const repository = await f.repository('frontend')
   const fetching = {
     requestId: 'deployment-fetch-failed',
-    sources: [{ sourceId: source.id, refKind: 'commit', ref: repository.commit }],
+    sources: [
+      {
+        sourceId: source.id,
+        refKind: 'commit',
+        ref: repository.commit,
+        mountPath: source.mountPath,
+      },
+    ],
     contexts,
   }
   const second = f.service.startDeploymentPackages(projectId, fetching, owner)
@@ -1268,7 +1289,7 @@ test('旧部署failed记录通过GET或原POST核对收敛捕获，保留原任�
   ]) {
     const input = {
       requestId: `legacy-deployment-${resolution}-${method}`,
-      sources: [{ sourceId: source.id }],
+      sources: [{ sourceId: source.id, refKind: 'default', ref: '', mountPath: source.mountPath }],
       contexts: [{ service: 'frontend', root: 'apps/web', workingDirectory: '.' }],
     }
     const previous = await legacyDeploymentFailure(f, input, resolution)
@@ -1307,7 +1328,7 @@ test('部署正在运行时重复核对不释放捕获，缺少任务或解析�
   }
   const input = {
     requestId: 'deployment-running',
-    sources: [{ sourceId: source.id }],
+    sources: [{ sourceId: source.id, refKind: 'default', ref: '', mountPath: source.mountPath }],
     contexts: [{ service: 'frontend', root: 'apps/web', workingDirectory: '.' }],
   }
   const task = f.service.startDeploymentPackages(projectId, input, owner)
@@ -1364,7 +1385,7 @@ test('跨API复用原请求时失败部署不释放活跃Agent捕获或其他任
   const source = await f.source('frontend')
   const input = {
     requestId: 'deployment-reused-by-agent',
-    sources: [{ sourceId: source.id }],
+    sources: [{ sourceId: source.id, refKind: 'default', ref: '', mountPath: source.mountPath }],
     contexts: [{ service: 'frontend', root: 'apps/web', workingDirectory: '.' }],
   }
   const failed = await legacyDeploymentFailure(f, input, 'resolved')
@@ -1480,5 +1501,91 @@ test('工作区 HTTP 只保存项目仓库使用配置，拒绝 URL 凭证和跨
     (error) => error.status === 404,
   )
   assert.equal(f.authoring.overview(projectId, owner).sources[0].ref, 'workspace-only')
+  assert.equal(f.calls.fetch.length, 0)
+})
+
+test('只登记项目连接即可独立固定部署源码，不创建或读取工作区使用配置', async (t) => {
+  const f = await fixture(t)
+  const connection = f.authoring.saveRepository(
+    projectId,
+    null,
+    {
+      ...f.mutation(),
+      value: { name: '仅用于部署', url: 'https://github.com/fixtures/frontend.git' },
+    },
+    owner,
+  ).repository
+  await f.upload('docs/private.md', '不能进入部署包的资料')
+  assert.deepEqual(f.authoring.overview(projectId, owner).sources, [])
+  const input = {
+    requestId: 'repository-only-deployment',
+    sources: [
+      {
+        sourceId: connection.id,
+        refKind: 'branch',
+        ref: 'deployment-only',
+        mountPath: 'repository',
+      },
+    ],
+    contexts: [{ service: 'frontend', root: 'repository', workingDirectory: '.' }],
+  }
+  const task = f.service.startDeploymentPackages(projectId, input, owner)
+  const result = await f.finish(task)
+  assert.equal(result.status, 'completed', result.error)
+  const release = f.store
+    .overview(projectId)
+    .releases.find((value) => value.id === result.releaseId)
+  const files = Object.keys(
+    unzipSync(Buffer.from(f.store.packageFile(projectId, release.id, 'frontend').bytes)),
+  )
+  assert(files.includes('README.md'))
+  assert(!files.some((file) => file.includes('private.md')))
+  assert.deepEqual(f.authoring.overview(projectId, owner).sources, [])
+  assert.equal(
+    f.authoring.captureByRequest(projectId, input.requestId, owner).sources[0].ref,
+    'deployment-only',
+  )
+  assert.equal(f.service.startDeploymentPackages(projectId, input, owner).id, task.id)
+  const tampered = { ...input, sources: [{ ...input.sources[0], mountPath: 'changed' }] }
+  assert.throws(() => f.service.startDeploymentPackages(projectId, tampered, owner), {
+    status: 409,
+  })
+})
+
+test('独立部署选源拒绝跨项目、连接篡改和目录重叠，不请求远端', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const back = await f.source('backend')
+  const selection = { sourceId: source.id, refKind: 'default', ref: '', mountPath: 'app' }
+  const contexts = [{ service: 'frontend', root: '.', workingDirectory: '.' }]
+  for (const [change, code] of [
+    [{ sourceId: 'foreign-repository' }, 'WORKSPACE_SOURCE_NOT_FOUND'],
+    [{ url: 'https://github.com/fixtures/other.git' }, 'WORKSPACE_DEPLOYMENT_SOURCES_INVALID'],
+    [{ credentialId: 'foreign-credential' }, 'WORKSPACE_DEPLOYMENT_SOURCES_INVALID'],
+    [{ ref: 'hidden-branch' }, 'WORKSPACE_REF_INVALID'],
+  ]) {
+    const task = f.service.startDeploymentPackages(
+      projectId,
+      { requestId: randomUUID(), sources: [{ ...selection, ...change }], contexts },
+      owner,
+    )
+    const failed = await f.finish(task)
+    assert.equal(failed.status, 'failed')
+    assert.equal(failed.failureCode, code)
+  }
+  const overlapped = f.service.startDeploymentPackages(
+    projectId,
+    {
+      requestId: randomUUID(),
+      sources: [
+        selection,
+        { sourceId: back.id, refKind: 'default', ref: '', mountPath: 'app/nested' },
+      ],
+      contexts,
+    },
+    owner,
+  )
+  assert.equal((await f.finish(overlapped)).failureCode, 'WORKSPACE_DEPLOYMENT_SOURCES_INVALID')
+  assert.equal(f.calls.resolve.length, 0)
   assert.equal(f.calls.fetch.length, 0)
 })

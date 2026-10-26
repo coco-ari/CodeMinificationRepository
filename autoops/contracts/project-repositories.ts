@@ -16,3 +16,11 @@ export const ConfigureRepositoryWorkspace = S.Struct({
   mountPath: S.String.check(S.isMinLength(1), S.isMaxLength(800)),
   sourcePath: S.optionalKey(S.String.check(S.isMaxLength(800))),
 })
+export const DeploymentRepositorySelection = S.Struct({
+  sourceId: DirectoryId,
+  refKind: S.Literals(['default', 'branch', 'tag', 'commit']),
+  ref: S.String.check(S.isMaxLength(200)),
+  mountPath: S.String.check(S.isMinLength(1), S.isMaxLength(800)),
+  sourcePath: S.optionalKey(S.String.check(S.isMinLength(1), S.isMaxLength(800))),
+})
+export type DeploymentRepositorySelection = typeof DeploymentRepositorySelection.Type

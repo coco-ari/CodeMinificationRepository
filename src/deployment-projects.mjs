@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { HttpError, digest, requireText } from './security.mjs'
+import { decodeContract } from '../autoops/contracts/index.ts'
+import { DeploymentRepositorySelection } from '../autoops/contracts/project-repositories.ts'
 
 const fail = (status, code, message) => { throw Object.assign(new HttpError(status, message), { code }) }
 const copy = (value) => structuredClone(value)
@@ -10,9 +12,15 @@ const sourceRequestFields = input => ({ serviceId: input.serviceId, environmentI
 export function normalizeDeploymentSourceSelection(input, selected, validateConfig) {
   if (!Array.isArray(input.sources) || !input.sources.length || input.sources.length > 32) fail(400, 'DEPLOYMENT_SOURCE_INVALID', '请选择 1 至 32 个源码来源')
   const sources = input.sources.map(entry => {
-    const sourceId = requireText(entry?.sourceId, '源码来源', 128), refKind = entry.refKind || 'default', ref = entry.ref || ''
+    let value
+    try { value = decodeContract(DeploymentRepositorySelection, entry) } catch { return fail(400, 'DEPLOYMENT_SOURCE_INVALID', '请重新确认部署仓库的版本、挂载与子目录，不接受连接或凭证字段') }
+    const { sourceId, refKind, ref } = value
     if (!['default', 'branch', 'tag', 'commit'].includes(refKind) || typeof ref !== 'string' || ref.length > 512 || /[\x00-\x20]/.test(ref) || (refKind !== 'default' && !ref) || (refKind === 'commit' && !/^[a-f0-9]{40}$/.test(ref))) fail(400, 'DEPLOYMENT_SOURCE_INVALID', '源码版本选择无效')
-    return { sourceId, refKind, ref: refKind === 'default' ? '' : ref }
+    if (refKind === 'default' && ref !== '') fail(400, 'DEPLOYMENT_SOURCE_INVALID', '默认分支不能指定其他引用')
+    const mountPath = validateConfig({}, value.mountPath, selected.kind).module || '.'
+    const sourcePath = value.sourcePath === undefined ? undefined : validateConfig({}, value.sourcePath, selected.kind).module || '.'
+    if (mountPath === '.' || sourcePath === '.') fail(400, 'DEPLOYMENT_SOURCE_INVALID', '请使用仓库相对目录作为部署挂载；完整仓库不填写子目录')
+    return { sourceId, refKind, ref, mountPath, ...(sourcePath === undefined ? {} : { sourcePath }) }
   })
   if (new Set(sources.map(entry => entry.sourceId)).size !== sources.length) fail(400, 'DEPLOYMENT_SOURCE_INVALID', '源码来源不能重复')
   const role = selected.kind === 'static' ? 'frontend' : 'backend'

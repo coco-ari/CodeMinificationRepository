@@ -20,7 +20,7 @@ const uuid = (value, label) => { if (typeof value !== 'string' || !/^[a-f0-9-]{3
 const normalizedModule = (value) => value === '.' || !value ? '' : value
 const safeIdentity = (value) => value && pick(value, ['projectId', 'sourceVersionId', 'packageId', 'service', 'contentHash', 'repositories'])
 const safeActor = (value) => value && pick(value, ['id', 'displayName'])
-const safeSelection = value => value && ({ sources: value.sources.map(source => pick(source, ['sourceId', 'refKind', 'ref'])), contexts: value.contexts.map(context => pick(context, ['service', 'root', 'workingDirectory'])) })
+const safeSelection = value => value && ({ sources: value.sources.map(source => pick(source, ['sourceId', 'refKind', 'ref', 'mountPath', 'sourcePath'])), contexts: value.contexts.map(context => pick(context, ['service', 'root', 'workingDirectory'])) })
 function safeObservation(value, target) {
   if (!value || typeof value !== 'object' || value.targetId !== target.id) return null
   const statuses = ['created', 'restarting', 'running', 'removing', 'paused', 'exited', 'dead', 'missing', 'unknown', 'published', 'unpublished']
@@ -34,7 +34,14 @@ function safeObservation(value, target) {
 }
 function submissionFingerprint(projectId, input, actorId) {
   const selection = input.sourceSelection ? [
-    Array.isArray(input.sourceSelection.sources) ? input.sourceSelection.sources.map(source => [source?.sourceId, source?.refKind || 'default', source?.ref || '']) : input.sourceSelection.sources,
+    Array.isArray(input.sourceSelection.sources) ? input.sourceSelection.sources.map(source => {
+      const original = [source?.sourceId, source?.refKind || 'default', source?.ref || '']
+      // 既有收据仍按原已提交字段核对；新增使用配置必须整体固定，不能套用原请求改目录。
+      if (source?.mountPath !== undefined || source?.sourcePath !== undefined) original.push(source.mountPath, source.sourcePath ?? null)
+      const extra = source && Object.keys(source).filter(key => !['sourceId', 'refKind', 'ref', 'mountPath', 'sourcePath'].includes(key)).sort()
+      if (extra?.length) original.push(extra.map(key => [key, source[key]]))
+      return original
+    }) : input.sourceSelection.sources,
     Array.isArray(input.sourceSelection.contexts) ? input.sourceSelection.contexts.map(context => [context?.service, context?.root, context?.workingDirectory]) : input.sourceSelection.contexts,
   ] : null
   return sha(JSON.stringify([projectId, input.targetId, input.action, input.service, input.configKey, input.packageId || null, input.releaseId || null, selection, actorId]))
@@ -106,8 +113,8 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
 
   function validateSources(projectId, input, actorId) {
     if (!workspaceManagement) fail(503, 'DEPLOYMENT_SOURCE_UNAVAILABLE', '源码服务暂不可用')
-    const current = workspaceManagement.overview(projectId, actorId)
-    if (!Array.isArray(input.sources) || !input.sources.length || input.sources.some(entry => !current.sources.some(source => source.id === entry?.sourceId)))
+    const current = workspaceManagement.authoring.repositories(projectId, actorId)
+    if (!Array.isArray(input.sources) || !input.sources.length || input.sources.some(entry => !current.items.some(source => source.id === entry?.sourceId)))
       fail(404, 'DEPLOYMENT_SOURCE_NOT_FOUND', '发布源码不存在或已移除')
   }
   async function preparePackage(projectId, packageId, role, module) {

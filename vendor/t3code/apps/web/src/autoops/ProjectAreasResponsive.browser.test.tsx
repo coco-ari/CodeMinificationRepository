@@ -17,6 +17,7 @@ vi.mock(import('../localEnvironment'), () => ({ isLocalEnvironmentDisabled: () =
 const mocks = vi.hoisted(() => ({
   host: vi.fn(),
   authoring: vi.fn(),
+  repositories: vi.fn(),
   authoringSend: vi.fn(),
   workspace: vi.fn(),
   external: vi.fn(),
@@ -56,7 +57,7 @@ vi.mock(import('./workspaces'), async (original) => ({
   })),
   searchWorkspaceFiles: vi.fn(async () => ({ entries: [], truncated: false })),
 }))
-vi.mock(import('./projectRepositories'), async original => ({ ...await original(), loadProjectRepositories: vi.fn(async () => ({ revision: 1, items: [] })) }))
+vi.mock(import('./projectRepositories'), async original => ({ ...await original(), loadProjectRepositories: mocks.repositories }))
 vi.mock(import('./workspaceAuthoring'), async (original) => ({
   ...(await original()),
   loadAuthoring: mocks.authoring,
@@ -221,6 +222,7 @@ beforeEach(() => {
       },
     ],
   })
+  mocks.repositories.mockResolvedValue({ revision: 1, items: [{ id: 'source-one', name: '前端源码', url: 'https://github.com/example/frontend.git' }] })
   mocks.workspace.mockResolvedValue(workspace())
   mocks.authoring.mockResolvedValue({
     projectId: 'p-one',
@@ -432,7 +434,7 @@ describe('部署与源码包分别使用服务端写权限', () => {
       }
       const generate = page.getByRole('button', { name: '生成部署包', exact: true })
       await expect.element(generate).toBeEnabled()
-      mocks.authoring.mockRejectedValue(
+      mocks.repositories.mockRejectedValue(
         new AutoOpsRequestError('源码读取权限已撤回', 'FORBIDDEN', 403),
       )
       await generate.click()
@@ -693,3 +695,15 @@ for (const width of [390, 1440]) {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
   })
 }
+
+it('部署页只读取项目仓库目录，无工作区使用配置仍可生成源码包', async () => {
+  mocks.authoring.mockRejectedValue(new Error('此流程不应访问工作区资料'))
+  await using screen = await render(<AppSidebarLayout><AutoOpsDeploymentsPage /></AppSidebarLayout>, { router: '/deployments?projectId=p-one' })
+  const generate = page.getByRole('button', { name: '生成部署包', exact: true })
+  await expect.element(generate).toBeEnabled(); await generate.click()
+  await expect.element(page.getByRole('dialog', { name: '生成部署包', exact: true })).toBeVisible()
+  await expect.element(page.getByRole('textbox', { name: '前端源码部署挂载目录', exact: true })).toHaveValue('repository')
+  expect(mocks.authoring).not.toHaveBeenCalled()
+  expect(mocks.repositories).toHaveBeenCalled()
+  expect(screen.container.querySelector('[data-module-error]')).toBeNull()
+})
