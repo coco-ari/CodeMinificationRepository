@@ -1610,7 +1610,15 @@ export const layer: Layer.Layer<
             ? queuedRunActorCommand(access, businessEvents.value.read, input.run.threadId, input.run.id, input.run.userMessageId).pipe(Effect.mapError(turnStartFailure))
             : Effect.fail(turnStartFailure('业务运行缺少原生事件读取能力'))) : undefined;
           return yield* Effect.tryPromise({
-            try: (signal) => prepareBusinessRunContext(input.run.threadId, input.run.id, input.run.restartContinuationOfRunId, signal, input.run.userMessageId, editCommandId, input.modelSelection),
+            try: (signal) => prepareBusinessRunContext(
+              input.run.threadId,
+              input.run.id,
+              input.run.manualContinuationOfRunId ?? input.run.restartContinuationOfRunId,
+              signal,
+              input.run.userMessageId,
+              editCommandId,
+              input.modelSelection,
+            ),
             catch: turnStartFailure,
           });
         })).pipe(Effect.flatMap((businessContext) => Effect.gen(function* () {

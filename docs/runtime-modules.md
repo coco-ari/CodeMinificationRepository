@@ -1226,3 +1226,13 @@ B4 准备真实项目管理员/只读身份回归时，另发现已存节点原�
 节点修复 `449794ca` 正常推送后，质量 CI 通过；[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40362044288) 的 Web 637/638 通过，唯一失败是删除恢复用例的成功收据漏 `publicIntent`，新严格合同正确拒绝确认。失败日志 `.deployment/ci-449794ca-failed-runtime-full-v3.log` SHA256 `9da1c4cc14c4fde044dfec61d2280d43ef613b50b117dbb94f5e9596f592cdb3`，两候选原因与排除证据见 `.deployment/b4-ci-fixture-repro-v2.json`。仅补测试收据的原 serverId 参数，未放宽产品检查；22 项请求回归和 Web 严格类型复跑通过，Linux 同一浏览器用例及完整 CI 尚待复验。449 独占八步构建、源正文与全发行校验均过，但该发行没有部署。
 
 环境 MCP 已另启动真实模型验收：三连接读取实际执行、跨环境读取明确拒绝；原轮中断后更改 Redis 当前 DB 的原 scope 恢复未通过 `assert(read)`，四个配置写均有确定原结果，旧连接当前为 revision3/DB3，尚未还原。本轮失败保留，正在核对真实原输入与继续请求，未重跑整个入口或换模型/范围；它不计 B5/B6 整项完成。D1 跨角色/环境、D2 外部周期与撤权、共享、部署健康/版本链/回退和其余整页继续验收。
+
+## 手动继续沿原轮固定输入（2026-10-27）
+
+真实 `305af444` 线程 `b62a5f59-33ff-42ef-9c8f-19d860c8b2ee` 的第三轮已实际读取 Redis revision2/DB2 后中断；随后正常配置变为 revision3/DB3，第四轮手动继续完成但三次读取均失败。四个原配置收据确定、四轮均终态，原失败和原输入行完整保留。首先验证两类原因：冻结验收器确实发送了第三轮 `manualContinuationOfRunId`，真实时间线亦证明在原 query 完成、中断终态后才改配置，排除漏传及改动过早；只读核对原 MCP 输入仍完整可读，第四轮却无继承来源，原生最小红测确认该字段只用于准入校验，未持久到 run，业务准备又只读 restart 字段，因此误取当前输入。
+
+最小修改涉及合同、Orchestrator、RunExecutionService 及两个测试文件，另在现有 `test:runtime:server` 加入这五条回归的 CI 过滤入口：run 持久化已经校验的手动来源，业务准备共用原公开入口读取 manual 或 restart 来源，提供者自动重启字段语义不变。同线程、最新已执行轮、可信终态、当前调用者和权限门禁保留，没有历史修复入口或 SQL 迁移。冻结 `.deployment/mcp-original-scope-investigation-20261027-v1/freeze.json` SHA256 `d71611a23e367af96a0ca9d3be1e0e4ff9cffcad261a68fb528e8c301bb7e5df`，旧失败输入及两个原因验证见同目录 handoff、只读 owner 和公开 projection。
+
+新增红测 3 失败/2 通过，修复后 5/5；两个原生整文件 173/173，根代理独立复跑亦 173/173；相关真实 SQLite 输入、实际调用者及 MCP 44/44。合同/native/Web/adapter 严格类型、293 模块边界、目标 lint、Worker 构建及 `git diff --check` 通过。当前仅代码及自动回归完成，完整 CI、部署和新真实回归仍待验，不能将辅助 builder 证明当作原业务恢复成功。
+
+历史第四轮已成为最新执行轮，按现有安全门禁不能再接第三轮；保持原记录，不改 DB 或放宽门禁。新发行后须正常恢复本次隔离 Redis DB2 并测试新修订，创建全新源轮真实 query 和中断，再将当前配置改 DB3，立即手动接该最新源轮；实际工具必须沿同一 authoring/MCP 输入及原修订读 DB2 marker。该回归与历史失败分开，停用撤回、低权限和共享验收继续独立推进。

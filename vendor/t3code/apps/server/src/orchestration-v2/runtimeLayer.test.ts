@@ -6504,11 +6504,23 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
           createdBy: "user" as const,
           creationSource: "web" as const,
         });
+        for (const invalidSource of [RunId.make("manual-resume:other-thread"), queued.id]) {
+          const rejected = yield* orchestrator.dispatch({
+            ...resume(`invalid:${invalidSource}`),
+            manualContinuationOfRunId: invalidSource,
+          }).pipe(Effect.exit);
+          assert.equal(rejected._tag, "Failure");
+        }
         yield* orchestrator.dispatch(resume("first"));
         const after = yield* orchestrator.getThreadProjection(threadId);
         assert.lengthOf(after.runs, 3);
         assert.equal(after.runs[1]?.status, "queued");
         assert.equal(after.runs[2]?.status, "starting");
+        assert.equal(
+          after.runs[2]?.manualContinuationOfRunId,
+          source.id,
+          "手动恢复通过校验后必须持久保留原轮身份，不能改读新输入",
+        );
         assert.equal(
           (yield* orchestrator.dispatch(resume("second")).pipe(Effect.exit))._tag,
           "Failure",

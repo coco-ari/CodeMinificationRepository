@@ -57,6 +57,7 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
+import * as BusinessRunInputs from "../../../../../../agent-demo/t3-adapters/thread-inputs.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 
@@ -828,6 +829,55 @@ it.effect("rechecks run ownership immediately before calling the provider", () =
 
     assert.equal(yield* Ref.get(guardCalls), 2);
     assert.equal(yield* Ref.get(providerStarts), 0);
+  }).pipe(Effect.provide(layerRunExecutionTest)),
+);
+
+it.effect.each(["manual", "restart", "new"] as const)(
+  "业务输入准备沿%s来源，手动恢复不冒充提供者自动重启",
+  (kind) => Effect.gen(function* () {
+    const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
+    const source = RunId.make("run:original-fixed-environment");
+    const seen: Array<string | undefined> = [];
+    using _prepare = vi.spyOn(BusinessRunInputs, "prepareBusinessRunContext").mockImplementation(
+      async (_thread, _run, inherited) => {
+        seen.push(inherited);
+        return { key: "autoops_turn_input", text: `fixed:${inherited ?? "new"}` };
+      },
+    );
+    const started = yield* Deferred.make<ProviderAdapter.ProviderAdapterV2TurnInput>();
+    const threadId = ThreadId.make(`thread:business-input-${kind}`);
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const attemptId = RunAttemptId.make(`attempt:business-input-${kind}`);
+    const session = {
+      events: Stream.never,
+      startTurn: (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
+        Deferred.succeed(started, input),
+    } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+    yield* runExecution.startRootRun({
+      commandId: CommandId.make(`command:business-input-${kind}`),
+      appThread: { id: threadId } as OrchestrationV2AppThread,
+      providerSessionId: ProviderSessionId.make(`session:business-input-${kind}`),
+      session,
+      run: {
+        id: RunId.make(`run:business-input-${kind}`), threadId, ordinal: 1,
+        providerInstanceId,
+        ...(kind === "manual" ? { manualContinuationOfRunId: source } : {}),
+        ...(kind === "restart" ? { restartContinuationOfRunId: source } : {}),
+      } as OrchestrationV2Run,
+      rootNode: { id: NodeId.make(`node:business-input-${kind}`) } as OrchestrationV2ExecutionNode,
+      checkpointScope: { id: CheckpointScopeId.make(`checkpoint:business-input-${kind}`) } as OrchestrationV2CheckpointScope,
+      providerThread: { id: ProviderThreadId.make(`provider-thread:business-input-${kind}`), driver } as OrchestrationV2ProviderThread,
+      attempt: { id: attemptId, providerTurnId: null } as OrchestrationV2RunAttempt,
+      attemptId,
+      providerTurnOrdinal: 1,
+      message: { messageId: MessageId.make(`message:business-input-${kind}`), text: "继续原任务", attachments: [], createdBy: "user", creationSource: "web" },
+      modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
+      runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: process.cwd() },
+    });
+    const input = yield* Deferred.await(started);
+    assert.deepEqual(seen, [kind === "new" ? undefined : source]);
+    assert(input.appContext?.some(value => value.key === "autoops_turn_input" && value.text === `fixed:${kind === "new" ? "new" : source}`));
+    assert.equal(input.restartContinuationOfRunId, kind === "restart" ? source : undefined);
   }).pipe(Effect.provide(layerRunExecutionTest)),
 );
 
