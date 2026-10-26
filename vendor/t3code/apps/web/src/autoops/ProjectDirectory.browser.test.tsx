@@ -26,6 +26,8 @@ function setup({ manage = true, failFirst = false, loseResponse = false } = {}) 
     if (url.endsWith('/assistants/choices')) return Response.json({ agents: [], sources: [], platformSkills: [] })
     if (url.endsWith('/assistants/settings')) return Response.json({ presets: [], allocations: [] })
     if (url.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
+    if (url.endsWith('/repositories')) return Response.json({ revision: 0, items: [] })
+    if (url.endsWith('/workspace/credentials')) return Response.json({ credentials: [] })
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { requestId: string; value: { name: string } }
       bodies.push(body)

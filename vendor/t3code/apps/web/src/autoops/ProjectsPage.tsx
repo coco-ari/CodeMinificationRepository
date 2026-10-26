@@ -40,6 +40,7 @@ import {
   type ProjectSettings,
 } from './projectDirectory'
 
+import { ProjectRepositoryPanel } from './ProjectRepositoryPanel'
 import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
 import { ProjectConfigurationFields } from './ProjectConfigurationFields'
 import {
@@ -68,6 +69,7 @@ export function AutoOpsProjectsPage() {
   )
 }
 function ProjectsContent() {
+  const repositoryAddButton = useRef<HTMLButtonElement | null>(null)
   const host = useAutoOpsHost()
   const location = useLocation()
   const navigate = useNavigate()
@@ -185,6 +187,8 @@ function ProjectsContent() {
         go(result.id)
       else await load(true)
       if (alive.current) {
+        if (editor?.kind === 'repository' && editor.remove)
+          trigger.current = repositoryAddButton.current
         setConfigurationRevision((value) => value + 1)
         setEditor(null)
       }
@@ -404,6 +408,16 @@ function ProjectsContent() {
                 </SettingsGroup>
               </SettingsSection>
               {manageable && settings ? (
+                <ProjectRepositoryPanel
+                  key={settings.project.id}
+                  projectId={settings.project.id}
+                  revision={configurationRevision}
+                  disabled={busy || !!pending}
+                  onOpen={open}
+                  addButtonRef={repositoryAddButton}
+                />
+              ) : null}
+              {manageable && settings ? (
                 <ProjectConfigurationPanel
                   project={settings}
                   revision={configurationRevision}
@@ -426,17 +440,23 @@ function ProjectsContent() {
             <DialogTitle>
               {editor?.kind === 'create'
                 ? '创建项目'
-                : editor?.kind === 'environment'
-                  ? '环境'
-                  : editor?.kind === 'assistant'
-                    ? editor.id
-                      ? '编辑助手'
-                      : '添加助手'
-                    : editor?.kind === 'allocation'
-                      ? '分配助手'
-                      : editor?.kind === 'member'
-                        ? '成员权限'
-                        : '编辑项目'}
+                : editor?.kind === 'repository'
+                  ? editor.remove
+                    ? '移除仓库连接'
+                    : editor.id
+                      ? '编辑仓库'
+                      : '添加仓库'
+                  : editor?.kind === 'environment'
+                    ? '环境'
+                    : editor?.kind === 'assistant'
+                      ? editor.id
+                        ? '编辑助手'
+                        : '添加助手'
+                      : editor?.kind === 'allocation'
+                        ? '分配助手'
+                        : editor?.kind === 'member'
+                          ? '成员权限'
+                          : '编辑项目'}
             </DialogTitle>
           </DialogHeader>
           <DialogPanel>
@@ -523,7 +543,13 @@ function ProjectsContent() {
                   : undefined
               }
             >
-              {busy ? '正在保存…' : pending ? '重试' : '保存'}
+              {busy
+                ? '正在保存…'
+                : pending
+                  ? '重试'
+                  : editor?.kind === 'repository' && editor.remove
+                    ? '移除连接'
+                    : '保存'}
             </Button>
           </DialogFooter>
         </DialogPopup>

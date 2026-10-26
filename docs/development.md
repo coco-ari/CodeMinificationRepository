@@ -42,7 +42,7 @@
 | B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待实现 | [项目目录](../agent-demo/t3-adapters/project-directory/index.ts) 已将存量项目/环境/成员一次导入自有版本化数据库，授权读取当前事实；[页面](../vendor/t3code/apps/web/src/autoops/ProjectsPage.tsx) 已接入创建、基本信息、环境添加/编辑和成员状态。SQLite/HTTP 正反例已过，浏览器在 `23003b65` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40249611790) 通过；成员固定角色/环境覆盖、默认助手准入及分配表单已接 API，`9dc39661` 的[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40253068408) 全部交互通过；删除与引用处理、完整配置及真实发行待验。不切换独立后端或清空业务库 |
 | B2 | 项目仓库连接与工作区/部署分支配置分离 | 待实现 | [连接合同](../autoops/contracts/project-repositories.ts)、[authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 的 v3 升级及[原生项目 API](../vendor/t3code/apps/server/src/autoops/http/repositories.ts) 已拆分唯一连接与工作区引用，保留现有 ID/分支/捕获；分支查询不依赖工作区分支，原请求/撤回/凭证回归通过。集中页面、旧来源编辑入口切换及未加入工作区的仓库部署仍待完成；[本批证据](runtime-modules.md#项目仓库连接与工作区引用拆分2026-10-26) |
 | B3 | 项目凭证创建、替换、撤销及受控使用 | 已实现 | [credentials](../agent-demo/t3-adapters/credentials.ts)、[回归](../test/t3-workspace-credentials.test.mjs)；集中管理页面和真实私有仓库待补 |
-| B4 | 部署服务器登记、环境绑定、观察与撤销 | 已实现 | [deployment-servers](../agent-demo/t3-adapters/deployment-servers.mjs)、[回归](../test/t3-deployment-servers.test.mjs)；需按新角色接入环境设置并重验 |
+| B4 | 平台全局节点管理与项目已获准节点绑定 | 待实现 | [deployment-servers](../agent-demo/t3-adapters/deployment-servers.mjs) 已有登记、绑定、观察与撤销，但尚未区分平台管理员管理全局节点与项目管理员仅绑定本项目已获准节点；[历史回归](../test/t3-deployment-servers.test.mjs) 不代表新边界完成。新增成功、越权及异常回归见下表，集中入口与真实发行亦待验 |
 | B5 | 环境 MCP 唯一配置入口、只读连接、测试与停用 | 待实现 | 当前工具不等于 Server/MySQL/Redis 自助配置；需真实连接、凭证引用及环境同源裁决 |
 | B6 | 环境 MCP 随问答和环境授权使用、迟到结果与撤销 | 待实现 | 复用会话真实环境和 access，不能增加逐成员逐连接权限表；真实只读与跨环境负例待验 |
 | C1 | 平台/用户助手统一目录、预设与项目分配 | 待实现 | [助手模块](../agent-demo/t3-adapters/assistants/index.ts) 已接持久预设、角色/成员分配、项目 API 及真实能力准入；项目管理表单已接预设及分配，`9dc39661` CI 通过；唯一问答选择入口与原生执行合同已接，浏览器及现有自用来源映射仍待验 |
@@ -51,7 +51,7 @@
 | C4 | 电脑自用接入、文件、附件、可靠事件及恢复 | 已实现 | [customer-registry](../agent-demo/t3-adapters/customer-registry.mjs)、[customer-agent](../agent-demo/customer-agent)、[真实证据](runtime-modules.md#客户电脑文件引用2026-10-25)；迁入助手时保留 |
 | C5 | 提供者主动共享、管理员分配、撤回和实际调用者 | 待实现 | 当前仅所有者，缺共享/分配事实和受控用户执行合同；管理权不能代替提供者同意 |
 | C6 | 跨用户电脑会话、附件、工作目录及收据隔离 | 待验证 | 未有真实共享隔离证据；未验证前跨用户执行保持关闭，自用继续可用。若运行器无法落实隔离，只暂停该执行来源 |
-| D1 | 当前上传资料、源码同步、失败保留与每轮固定输入 | 已实现 | [workspace-current](../agent-demo/t3-adapters/workspace-current.ts)、[workspace-management](../agent-demo/t3-adapters/workspace-management.ts)、[当前资料验收](runtime-modules.md#当前资料与部署来源拆分2026-10-24)；新轮按目标改为读取已同步当前资料 |
+| D1 | 问答读取已同步当前资料、失败保留与每轮固定输入 | 待实现 | [workspace-current](../agent-demo/t3-adapters/workspace-current.ts)、[workspace-management](../agent-demo/t3-adapters/workspace-management.ts) 已有上传、同步与固定输入；尚需实现问答读取已同步当前资料，不因每轮发送重新访问远端 Git。[历史验收](runtime-modules.md#当前资料与部署来源拆分2026-10-24) 不代表该方案完成。新增成功、越权及异常回归见下表，真实问答待验 |
 | D2 | 内外部各一份当前内容、手动与定期更新 | 待实现 | 手动流程已接入；缺定期更新配置/调度与完整当前外部生命周期，不能自动确认待复核文件 |
 | D3 | 活动/排队/未知输入临时保护、终态释放和自动回收 | 待实现 | [authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 有原件回收，[thread-inputs](../agent-demo/t3-adapters/thread-inputs.ts) 有绑定；历史引用仍须按新规则释放及明确清理提示 |
 | D4 | 部署独立分支、固定 Commit、完整构建上下文源码包 | 已实现 | [deployments](../agent-demo/t3-adapters/deployments.mjs)、[源码回归](../test/deployment-workspace-source.test.mjs)；仓库连接拆分后复用、真实用户仓库打包待验 |
@@ -63,6 +63,13 @@
 | E4 | 真实只读 MCP、私有 Git、问答与共享运行器 | 待验证 | 使用隔离资料、连接与任务；凭据或执行隔离条件缺失仅阻塞相应项，继续独立工作 |
 | E5 | 隔离 Java/static 发布、重启/失败恢复/回退/断线 | 待验证 | 已授权 `192.168.31.157`；按现有运维规范核对目标、版本、数据及活动任务，不复用用户业务目标故障注入 |
 | E6 | 最终发行、健康/数据保留、完整 CI 与最终报告 | 待验证 | 每批提交、正常推送并检查 CI 后继续；全部已确认项具有相应实现和真实验收证据后才报告整体完成 |
+
+2026-10-26 状态纠正：B4、D1 整项均为待实现，已有部分能力和历史测试仅作为复用依据。保持当前实施顺序，不因本次纠正重排批次。以下用例须随对应实现增加并记录实际结果，目前均未作为新方案验收通过。
+
+| 项目 | 成功回归（待补） | 越权回归（待补） | 异常与恢复回归（待补） |
+| --- | --- | --- | --- |
+| B4 | 平台管理员登记与管理全局节点；项目管理员从本项目获准节点绑定环境并观察状态，撤销绑定后保留原任务收据 | 项目管理员不能新增、修改或删除全局节点，不能绑定未获准或其他项目节点；伪造项目、环境、节点 ID 及直接 HTTP 请求均拒绝 | 节点准入撤回、读取期间撤权、离线及连接失败明确反馈；未知写入按原收据恢复，不重复绑定，不回退到其他节点 |
+| D1 | 同步成功后连续发送多轮问答读取当前资料，远端 Git 请求次数不增加；手动或定期同步成功后下一新轮取得更新，原轮及恢复保持原输入 | 跨项目、跨环境、内外部范围伪造不能读取或固定他处当前资料；读取期间撤权与历史引用继续按实际调用者裁决 | 远端不可达及同步失败保留有效当前资料，问答不因远端故障重拉；无有效当前资料明确提示；同步与发送并发不读半成品，断线按原输入收据恢复 |
 
 ## 第三步：工作区来源与资料维护
 

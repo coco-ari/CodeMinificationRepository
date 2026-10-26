@@ -2,6 +2,10 @@ import type {
   MembershipDetails,
   ProjectSettings,
 } from '../../../../../../autoops/contracts/project-directory.ts'
+import type {
+  ProjectRepositoryDetails,
+  WorkspaceCredentialMetadata,
+} from '../../../../../../autoops/contracts/workspace-authoring.ts'
 import type { ProjectRole } from '../../../../../../autoops/contracts/project-access.ts'
 import type {
   AssistantSettings,
@@ -23,6 +27,16 @@ type Context = {
   choices: AssistantChoices
 }
 export type ProjectConfigurationEditor =
+  | {
+      kind: 'repository'
+      name: string
+      description: string
+      revision: number
+      id?: string
+      remove: boolean
+      value: ProjectRepositoryDetails
+      context: { credentials: WorkspaceCredentialMetadata[] }
+    }
   | {
       kind: 'assistant'
       name: string
@@ -62,9 +76,16 @@ export const emptyConfig = (): QuestionConfiguration => ({
 export const isConfigurationEditor = (value: {
   kind: string
 }): value is ProjectConfigurationEditor =>
-  ['assistant', 'allocation', 'member'].includes(value.kind)
+  ['assistant', 'allocation', 'member', 'repository'].includes(value.kind)
 export function configurationMutation(project: string, editor: ProjectConfigurationEditor) {
   const base = `/api/v1/projects/${encodeURIComponent(project)}`
+  if (editor.kind === 'repository') {
+    if (editor.remove && !editor.id) throw new Error('请选择要移除的仓库连接')
+    return {
+      path: `${base}/repositories${editor.id ? '/' + encodeURIComponent(editor.id) : ''}${editor.remove ? '/remove' : ''}`,
+      payload: editor.remove ? {} : { value: { ...editor.value, name: editor.name } },
+    }
+  }
   if (editor.kind === 'assistant')
     return {
       path: `${base}/assistants${editor.id ? '/' + encodeURIComponent(editor.id) : ''}`,

@@ -81,6 +81,61 @@ export function ProjectConfigurationFields({
   disabled: boolean
   onChange(editor: ProjectConfigurationEditor): void
 }) {
+  if (editor.kind === 'repository') {
+    if (editor.remove)
+      return <p className="text-sm">移除仓库连接“{editor.name}”？已固定任务保留原来源。</p>
+    return (
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="repository-name">名称</Label>
+          <Input
+            id="repository-name"
+            value={editor.name}
+            maxLength={200}
+            required
+            disabled={disabled}
+            autoFocus
+            onChange={(event) => onChange({ ...editor, name: event.target.value })}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="repository-url">HTTPS 仓库地址</Label>
+          <Input
+            id="repository-url"
+            type="url"
+            value={editor.value.url}
+            maxLength={2000}
+            required
+            disabled={disabled}
+            placeholder="https://github.com/team/repository.git"
+            onChange={(event) =>
+              onChange({ ...editor, value: { ...editor.value, url: event.target.value } })
+            }
+          />
+        </div>
+        <Choice
+          label="项目凭证"
+          value={editor.value.credentialId ?? 'none'}
+          disabled={disabled}
+          options={[
+            { id: 'none', name: '不使用凭证' },
+            ...editor.context.credentials.map((value) => ({
+              id: value.id,
+              name: value.name + (value.revoked ? ' · 已撤销' : ''),
+              disabled: value.revoked,
+            })),
+          ]}
+          onChange={(id) => {
+            const { credentialId: _credentialId, ...value } = editor.value
+            onChange({
+              ...editor,
+              value: { ...value, ...(id === 'none' ? {} : { credentialId: id }) },
+            })
+          }}
+        />
+      </div>
+    )
+  }
   if (editor.kind === 'member') {
     const value = editor.value,
       project = editor.context.project
