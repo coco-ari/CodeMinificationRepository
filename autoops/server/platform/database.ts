@@ -11,14 +11,13 @@ export interface Migration {
 export function openDatabase(filename: string, migrations: readonly Migration[]) {
   const db = new DatabaseSync(filename)
   try {
+    db.exec('PRAGMA busy_timeout=5000;')
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
       .all()
     if (tables.length && !tables.some((row) => row.name === 'schema_migrations'))
       throw new Error('数据目录不是新 AutoOps 数据库，拒绝自动迁移')
-    db.exec(
-      'PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;',
-    )
+    db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')
     db.exec('BEGIN IMMEDIATE')
     try {
       db.exec(

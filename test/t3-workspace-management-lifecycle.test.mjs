@@ -8,11 +8,15 @@ const tick = () => new Promise(resolve => setImmediate(resolve))
 function fixture(options = {}) {
   const source = { id: 'repo', name: '源码', role: 'frontend', url: 'https://github.com/example/fixture.git', refKind: 'branch', ref: 'main', mountPath: 'frontend' }
   const configurationHash = createHash('sha256').update(JSON.stringify(source)).digest('hex')
-  const version = { id: 'version-a', status: 'published', createdAt: '2026-10-23T00:00:00.000Z', source: { repositories: [{ sourceId: 'repo', configurationHash, commit: 'a'.repeat(40) }], authoringRevision: 1 } }
+  const version = { id: 'version-a', status: 'published', createdAt: '2026-10-23T00:00:00.000Z', source: { repositories: [{ sourceId: 'repo', path: 'frontend', configurationHash, commit: 'a'.repeat(40) }], authoringRevision: 1 } }
   const state = { readable: true, released: 0, authoringClosed: 0, credentialStopped: 0, credentialDrained: 0, credentialClosed: 0 }
-  const access = { requireWorkspaceReader() { if (!state.readable) throw Object.assign(new Error('测试读取权限已撤回'), { status: 403, code: 'FIXTURE_REVOKED' }) }, requireWorkspaceActor() {} }
+  const access = { requireWorkspaceInputReader() { this.requireWorkspaceReader() }, requireWorkspaceReader() { if (!state.readable) throw Object.assign(new Error('测试读取权限已撤回'), { status: 403, code: 'FIXTURE_REVOKED' }) }, requireWorkspaceActor() {} }
   const authoring = {
+    currentAdoptionProjects() { return [] },
+    currentAdoptionSources() { return [] },
+    recordSyncBatch(_project, values) { return values },
     overview() { return { projectId: 'project-a', revision: 1, sources: [source], entries: [], limits: {} } },
+    syncRecords() { return [{sourceId: source.id, configurationHash, versionId: version.id, status: 'synced', current: {sourceId: source.id, commit: 'a'.repeat(40), refKind: 'branch', ref: 'main', defaultRef: null, source, versionId: version.id}}] },
     capture() { return { id: 'capture-a', projectId: 'project-a', requestId: 'snapshot-a', revision: 1, sources: [], files: [], directories: [], resolution: 'resolved', resolvedRepositories: [], status: 'active' } },
     releaseCapture() { state.released++ },
     async close() { state.authoringClosed++; if (options.authoringCloseError) throw new Error('测试资料库关闭失败') },
@@ -24,6 +28,7 @@ function fixture(options = {}) {
   }
   const store = {
     overview() { return { internalVersions: [version] } },
+    getVersion() { return version },
     versionFile() { return { bytes: new TextEncoder().encode('测试正文'), name: 'README.md', mime: 'text/markdown' } },
     async whenIdle() {},
     taskForRequest() {},
@@ -87,7 +92,7 @@ test('物化结束仍保留原件，只有发布后的原任务持久终态才�
   await f.service.generate('project-a', { requestId: 'snapshot-a', expectedRevision: 1 }, 'actor-a')
   await materialized.promise; await tick()
   assert.equal(task.stage, 'publishing'); assert.equal(f.state.released, 0)
-  task.status = 'completed'; task.stage = 'completed'; idle.resolve()
+  task.status = 'completed'; task.stage = 'completed'; task.versionId = 'version-a'; idle.resolve()
   await tick(); assert.equal(f.state.released, 1)
   await f.service.close()
 })

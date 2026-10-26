@@ -19,6 +19,8 @@ import type {
   ProjectRepositoryConnection,
   WorkspaceRepositoryUsage,
   WorkspaceInputCapture,
+  WorkspaceInputRepository,
+  WorkspaceInputSelection,
   WorkspaceSourceSyncRecord,
   WorkspaceDeploymentSourceCapture,
   WorkspaceAuthoringCapture,
@@ -220,7 +222,19 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
     return row
   }
   function assertWritable(projectId: string, entryPath: string) {
-    if (sources(projectId).some((source) => overlaps(source.mountPath, entryPath)))
+    const configured = sources(projectId)
+    const current = db
+      .prepare('SELECT value FROM authoring_source_sync WHERE project_id=?')
+      .all(projectId)
+      .map((row) => JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord)
+      .flatMap((record) =>
+        record.versionId &&
+        record.current &&
+        configured.some((source) => source.id === record.sourceId)
+          ? [record.current.source]
+          : [],
+      )
+    if ([...configured, ...current].some((source) => overlaps(source.mountPath, entryPath)))
       fail(409, 'WORKSPACE_GIT_READ_ONLY', 'Git 挂载内容只读，请选择项目资料目录')
   }
   function ensureParents(projectId: string, entryPath: string) {
@@ -357,8 +371,10 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
     const result = transaction.run(() => {
       if (
         db
-          .prepare('SELECT 1 FROM authoring_captures WHERE project_id=? AND request_id=?')
-          .get(projectId, requestId)
+          .prepare(
+            'SELECT 1 FROM authoring_captures WHERE project_id=? AND request_id=? UNION ALL SELECT 1 FROM authoring_input_preparations WHERE project_id=? AND request_id=? LIMIT 1',
+          )
+          .get(projectId, requestId, projectId, requestId)
       )
         fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求标识已用于生成固定版本，请核对原任务')
       const previous = db
@@ -629,6 +645,18 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       .run(projectId, value.id, value.name, value.url, value.credentialId ?? null)
   function persistSource(projectId: string, value: WorkspaceRepositorySource) {
     const current = sources(projectId)
+    if (!current.some((source) => source.id === value.id)) {
+      // 新接入或重新添加不是旧current接管，显式移除的旧档案不能复活。
+      db.prepare('INSERT OR IGNORE INTO authoring_current_adoptions VALUES(?,?,?)').run(
+        projectId,
+        value.id,
+        now(),
+      )
+      db.prepare('DELETE FROM authoring_source_sync WHERE project_id=? AND source_id=?').run(
+        projectId,
+        value.id,
+      )
+    }
     if (!current.some((source) => source.id === value.id) && current.length >= 32)
       fail(413, 'WORKSPACE_SOURCE_LIMIT', '最多配置 32 个工作区仓库')
     if (
@@ -652,6 +680,118 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
     return { revision: advance(projectId), source: value }
   }
   const api = {
+    // 仅由组合根在升级时接管已有效事实，不向HTTP、模型或普通业务请求开放。
+    currentAdoptionProjects(): string[] {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      return db
+        .prepare(
+          'SELECT DISTINCT s.project_id FROM authoring_sources s WHERE NOT EXISTS(SELECT 1 FROM authoring_current_adoptions a WHERE a.project_id=s.project_id AND a.source_id=s.id)',
+        )
+        .all()
+        .map((row) => text(row, 'project_id'))
+    },
+    currentAdoptionSources(
+      projectId: string,
+    ): Array<{ source: WorkspaceRepositorySource; record?: WorkspaceSourceSyncRecord }> {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      return sources(id(projectId))
+        .filter(
+          (source) =>
+            !db
+              .prepare(
+                'SELECT 1 FROM authoring_current_adoptions WHERE project_id=? AND source_id=?',
+              )
+              .get(projectId, source.id),
+        )
+        .map((source) => {
+          const row = db
+            .prepare('SELECT value FROM authoring_source_sync WHERE project_id=? AND source_id=?')
+            .get(projectId, source.id)
+          return {
+            source,
+            ...(row ? { record: JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord } : {}),
+          }
+        })
+    },
+    adoptCurrentSources(
+      projectId: string,
+      selections: Array<{
+        sourceId: string
+        configurationHash: string
+        current?: WorkspaceInputRepository
+      }>,
+    ) {
+      if (closed || stopped) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务正在停止')
+      return transaction.run(() => {
+        const configured = sources(id(projectId))
+        for (const selected of selections) {
+          if (
+            db
+              .prepare(
+                'SELECT 1 FROM authoring_current_adoptions WHERE project_id=? AND source_id=?',
+              )
+              .get(projectId, id(selected.sourceId))
+          )
+            continue
+          const source = configured.find((value) => value.id === selected.sourceId)
+          if (!source || hash(JSON.stringify(source)) !== selected.configurationHash)
+            fail(409, 'WORKSPACE_CURRENT_ADOPTION_CONFLICT', '接管期间来源配置已改变，请重新核对')
+          const row = db
+            .prepare('SELECT value FROM authoring_source_sync WHERE project_id=? AND source_id=?')
+            .get(projectId, source.id)
+          const stored = row
+            ? (JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord)
+            : undefined
+          const previous =
+            stored?.configurationHash === selected.configurationHash ? stored : undefined
+          if (
+            selected.current &&
+            (!previous?.versionId || previous.versionId === selected.current.versionId)
+          ) {
+            if (
+              selected.current.sourceId !== source.id ||
+              hash(JSON.stringify(selected.current.source)) !== selected.configurationHash
+            )
+              fail(409, 'WORKSPACE_CURRENT_ADOPTION_CONFLICT', '接管的原来源身份不一致')
+            const value: WorkspaceSourceSyncRecord = {
+              ...(previous ?? {
+                sourceId: source.id,
+                configurationHash: selected.configurationHash,
+                requestId: `adopt:${selected.current.versionId}`,
+                status: 'synced',
+                updatedAt: now(),
+              }),
+              current: selected.current,
+              currentOrigin: previous?.versionId ? (previous.currentOrigin ?? 'sync') : 'snapshot',
+              versionId: selected.current.versionId,
+              commit: selected.current.commit,
+            }
+            db.prepare(
+              'INSERT INTO authoring_source_sync VALUES(?,?,?) ON CONFLICT(project_id,source_id) DO UPDATE SET value=excluded.value',
+            ).run(projectId, source.id, JSON.stringify(value))
+          } else if (previous?.versionId && !previous.current) {
+            fail(409, 'WORKSPACE_CURRENT_ADOPTION_CONFLICT', '接管期间当前版本已改变，请重新核对')
+          } else if (stored && !previous) {
+            // 升级前该配置没有有效当前版本，不能把另一配置的旧行变成新当前事实。
+            db.prepare('DELETE FROM authoring_source_sync WHERE project_id=? AND source_id=?').run(
+              projectId,
+              source.id,
+            )
+          }
+          db.prepare('INSERT INTO authoring_current_adoptions VALUES(?,?,?)').run(
+            projectId,
+            source.id,
+            now(),
+          )
+        }
+        return selections.flatMap((selected) => {
+          const row = db
+            .prepare('SELECT value FROM authoring_source_sync WHERE project_id=? AND source_id=?')
+            .get(projectId, selected.sourceId)
+          return row ? [JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord] : []
+        })
+      })
+    },
     repositories(projectId: string, actorId: string) {
       authorize(projectId, actorId, 'repository-read')
       return { revision: projectRevision(projectId), items: repositoryRows(projectId) }
@@ -759,6 +899,11 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           ),
           message: '仍有活动或未知固定输入',
         },
+        {
+          kind: 'workspace-preparing-inputs',
+          count: count('SELECT COUNT(*) AS n FROM authoring_input_preparations WHERE project_id=?'),
+          message: '仍有尚未交接的固定资料选择',
+        },
       ].filter((value) => value.count > 0)
     },
     removeSource(
@@ -773,6 +918,15 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '仓库来源不存在')
         // 已接受输入保留独立来源定义和提交，移除当前配置不改变任何历史输入。
         db.prepare('DELETE FROM authoring_sources WHERE project_id=? AND id=?').run(
+          projectId,
+          sourceId,
+        )
+        db.prepare('INSERT OR IGNORE INTO authoring_current_adoptions VALUES(?,?,?)').run(
+          projectId,
+          sourceId,
+          now(),
+        )
+        db.prepare('DELETE FROM authoring_source_sync WHERE project_id=? AND source_id=?').run(
           projectId,
           sourceId,
         )
@@ -1078,6 +1232,16 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         fail(404, 'WORKSPACE_CAPTURE_NOT_FOUND', '固定输入不存在或无权访问')
       return captureFrom(owned)
     },
+    capturedRepositoryMetadata(projectId: string, captureId: string, sourceId: string) {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      const captured = captureFrom(captureRow(projectId, captureId))
+      const source = captured.sources.find((value) => value.id === sourceId)
+      const resolved = captured.resolvedRepositories?.find((value) => value.sourceId === sourceId)
+      if (!source || !resolved)
+        fail(409, 'WORKSPACE_CURRENT_SOURCE_MISSING', '已同步源码的原来源身份不可核验')
+      // 只返回项目已同步源码的非秘密来源；不开放其他调用者的文档捕获。
+      return { source, resolved }
+    },
     captureByRequest(
       projectId: string,
       requestId: string,
@@ -1264,6 +1428,111 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已固定其他操作人或资料范围')
       return JSON.parse(text(row, 'value')) as WorkspaceInputCapture
     },
+    preparedInputByRequest(
+      projectId: string,
+      requestId: string,
+      actorId: string,
+      workspaceType: 'internal' | 'external',
+    ): WorkspaceInputCapture | null {
+      authorize(projectId, actorId, workspaceType === 'internal' ? 'read' : 'external-read')
+      const row = db
+        .prepare('SELECT * FROM authoring_input_preparations WHERE project_id=? AND request_id=?')
+        .get(projectId, requestIdentifier(requestId))
+      if (!row) return null
+      if (row.actor_id !== actorId || row.workspace_type !== workspaceType)
+        fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已固定其他操作人或资料范围')
+      return JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+    },
+    prepareInput(
+      projectId: string,
+      requestId: string,
+      actorId: string,
+      selection: WorkspaceInputSelection,
+    ): WorkspaceInputCapture {
+      authorize(
+        projectId,
+        actorId,
+        selection.workspaceType === 'internal' ? 'read' : 'external-read',
+        true,
+      )
+      requestIdentifier(requestId)
+      return transaction.run(() => {
+        const previous =
+          api.inputByRequest(projectId, requestId, actorId, selection.workspaceType) ??
+          api.preparedInputByRequest(projectId, requestId, actorId, selection.workspaceType)
+        if (previous) return previous
+        if (
+          db
+            .prepare('SELECT 1 FROM authoring_receipts WHERE project_id=? AND request_id=?')
+            .get(projectId, requestId)
+        )
+          fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已用于其他资料操作')
+        ensureProject(projectId)
+        let value: WorkspaceInputCapture
+        if (selection.workspaceType === 'external') {
+          if (
+            db
+              .prepare('SELECT 1 FROM authoring_captures WHERE project_id=? AND request_id=?')
+              .get(projectId, requestId)
+          )
+            fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已经固定内部资料')
+          value = {
+            id: randomUUID(),
+            projectId,
+            requestId,
+            workspaceType: 'external',
+            revision: 0,
+            createdAt: now(),
+            status: 'active',
+            repositories: [],
+            files: [],
+            directories: [],
+            externalVersionId: id(selection.versionId),
+          }
+        } else {
+          let captured = api.capture(projectId, selection.revision, actorId, requestId, {
+            sources: selection.repositories.map((value) => value.source),
+            documents: true,
+          })
+          if (captured.status !== 'active')
+            fail(410, 'WORKSPACE_CAPTURE_RELEASED', '原资料捕获已经释放')
+          if (captured.resolution === 'pending')
+            captured = api.freezeCaptureRepositories(
+              projectId,
+              captured.id,
+              selection.repositories.map(
+                ({ source: _source, versionId: _versionId, ...resolved }) => resolved,
+              ),
+              actorId,
+            )
+          value = {
+            id: captured.id,
+            projectId,
+            requestId,
+            workspaceType: 'internal',
+            revision: captured.revision,
+            createdAt: captured.createdAt,
+            status: 'active',
+            repositories: selection.repositories,
+            files: captured.files,
+            directories: captured.directories,
+            captureId: captured.id,
+            ...(selection.sourceErrors?.length ? { sourceErrors: selection.sourceErrors } : {}),
+            ...(selection.sourceWarnings?.length
+              ? { sourceWarnings: selection.sourceWarnings }
+              : {}),
+          }
+        }
+        db.prepare('INSERT INTO authoring_input_preparations VALUES(?,?,?,?,?)').run(
+          projectId,
+          requestId,
+          actorId,
+          selection.workspaceType,
+          JSON.stringify(value),
+        )
+        return structuredClone(value)
+      })
+    },
     saveInput(value: WorkspaceInputCapture, actorId: string): WorkspaceInputCapture {
       authorize(
         value.projectId,
@@ -1271,26 +1540,39 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         value.workspaceType === 'internal' ? 'read' : 'external-read',
         true,
       )
-      const previous = api.inputByRequest(
-        value.projectId,
-        value.requestId,
-        actorId,
-        value.workspaceType,
-      )
-      if (previous) {
-        if (JSON.stringify(previous) !== JSON.stringify(value))
-          fail(409, 'WORKSPACE_REQUEST_CONFLICT', '本轮资料输入已经固定')
-        return previous
-      }
-      db.prepare('INSERT INTO authoring_inputs VALUES(?,?,?,?,?,?)').run(
-        id(value.id),
-        value.projectId,
-        actorId,
-        requestIdentifier(value.requestId),
-        value.workspaceType,
-        JSON.stringify(value),
-      )
-      return structuredClone(value)
+      return transaction.run(() => {
+        const previous = api.inputByRequest(
+          value.projectId,
+          value.requestId,
+          actorId,
+          value.workspaceType,
+        )
+        if (previous) {
+          if (JSON.stringify(previous) !== JSON.stringify(value))
+            fail(409, 'WORKSPACE_REQUEST_CONFLICT', '本轮资料输入已经固定')
+          return previous
+        }
+        const prepared = api.preparedInputByRequest(
+          value.projectId,
+          value.requestId,
+          actorId,
+          value.workspaceType,
+        )
+        if (prepared && JSON.stringify(prepared) !== JSON.stringify(value))
+          fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已经固定另一份资料选择')
+        db.prepare('INSERT INTO authoring_inputs VALUES(?,?,?,?,?,?)').run(
+          id(value.id),
+          value.projectId,
+          actorId,
+          requestIdentifier(value.requestId),
+          value.workspaceType,
+          JSON.stringify(value),
+        )
+        db.prepare(
+          'DELETE FROM authoring_input_preparations WHERE project_id=? AND request_id=?',
+        ).run(value.projectId, value.requestId)
+        return structuredClone(value)
+      })
     },
     readInput(projectId: string, inputId: string, actorId: string): WorkspaceInputCapture {
       const row = db
@@ -1327,11 +1609,68 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         .all(projectId)
         .map((row) => JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord)
     },
-    recordSync(projectId: string, value: WorkspaceSourceSyncRecord, actorId: string) {
-      authorize(projectId, actorId, 'read', true)
-      db.prepare(
-        'INSERT INTO authoring_source_sync VALUES(?,?,?) ON CONFLICT(project_id,source_id) DO UPDATE SET value=excluded.value',
-      ).run(projectId, value.sourceId, JSON.stringify(value))
+    recordSyncBatch(
+      projectId: string,
+      values: WorkspaceSourceSyncRecord[],
+      actorId: string,
+    ): WorkspaceSourceSyncRecord[] {
+      authorize(projectId, actorId, 'manage', true)
+      return transaction.run(() => {
+        const configured = sources(projectId)
+        const applied = values.filter((value) => {
+          id(value.sourceId)
+          const source = configured.find((source) => source.id === value.sourceId)
+          if (!source || hash(JSON.stringify(source)) !== value.configurationHash) return false
+          const previous = db
+            .prepare('SELECT value FROM authoring_source_sync WHERE project_id=? AND source_id=?')
+            .get(projectId, value.sourceId)
+          return (
+            value.status === 'queued' ||
+            (previous &&
+              (JSON.parse(text(previous, 'value')) as WorkspaceSourceSyncRecord).requestId ===
+                value.requestId)
+          )
+        })
+        const effective = new Map(
+          db
+            .prepare('SELECT source_id,value FROM authoring_source_sync WHERE project_id=?')
+            .all(projectId)
+            .filter((row) => configured.some((source) => source.id === row.source_id))
+            .map((row) => [
+              text(row, 'source_id'),
+              JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord,
+            ]),
+        )
+        for (const value of applied) effective.set(value.sourceId, value)
+        const mounts: string[] = []
+        for (const value of effective.values()) {
+          if (!value.versionId) continue
+          if (
+            !value.current ||
+            value.current.versionId !== value.versionId ||
+            value.current.source.id !== value.sourceId
+          )
+            fail(
+              409,
+              'WORKSPACE_CURRENT_SOURCE_MISSING',
+              '当前源码身份未能固定，请先核对原同步版本',
+            )
+          const mount = value.current.source.mountPath
+          if (mounts.some((previous) => overlaps(previous, mount)))
+            fail(
+              409,
+              'WORKSPACE_CURRENT_SOURCE_CONFLICT',
+              '当前源码实际目录重叠，请核对来源后完整更新工作区',
+            )
+          mounts.push(mount)
+        }
+        // 完整候选一次发布；任一来源写入失败时回滚全部current指针。
+        for (const value of applied)
+          db.prepare(
+            'INSERT INTO authoring_source_sync VALUES(?,?,?) ON CONFLICT(project_id,source_id) DO UPDATE SET value=excluded.value',
+          ).run(projectId, value.sourceId, JSON.stringify(value))
+        return applied
+      })
     },
     deploymentInput(
       projectId: string,
@@ -1369,12 +1708,12 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       authorize(projectId, actorId, 'manage')
       const inputs = db
         .prepare(
-          "SELECT id,request_id,value FROM authoring_inputs WHERE project_id=? AND json_extract(value,'$.status')='active' ORDER BY id LIMIT 501",
+          "SELECT id,request_id,value,0 AS preparing FROM authoring_inputs WHERE project_id=? AND json_extract(value,'$.status')='active' UNION ALL SELECT json_extract(value,'$.id') AS id,request_id,value,1 AS preparing FROM authoring_input_preparations WHERE project_id=? ORDER BY id LIMIT 501",
         )
-        .all(projectId)
+        .all(projectId, projectId)
       const captures = db
         .prepare(
-          "SELECT c.id,c.request_id,COUNT(f.path) AS file_count FROM authoring_captures c LEFT JOIN authoring_capture_files f ON f.capture_id=c.id WHERE c.project_id=? AND c.status='active' AND NOT EXISTS(SELECT 1 FROM authoring_inputs i WHERE i.id=c.id) GROUP BY c.id ORDER BY c.id LIMIT 501",
+          "SELECT c.id,c.request_id,COUNT(f.path) AS file_count FROM authoring_captures c LEFT JOIN authoring_capture_files f ON f.capture_id=c.id WHERE c.project_id=? AND c.status='active' AND NOT EXISTS(SELECT 1 FROM authoring_inputs i WHERE i.id=c.id) AND NOT EXISTS(SELECT 1 FROM authoring_input_preparations p WHERE json_extract(p.value,'$.id')=c.id) GROUP BY c.id ORDER BY c.id LIMIT 501",
         )
         .all(projectId)
       return {
@@ -1383,7 +1722,11 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           return {
             inputId: value.id,
             requestId: value.requestId,
-            kind: value.requestId.startsWith('picker:') ? 'picker' : 'accepted-input',
+            kind: row.preparing
+              ? 'preparing-input'
+              : value.requestId.startsWith('picker:')
+                ? 'picker'
+                : 'accepted-input',
             fileCount: value.files.length,
             versionIds: [
               ...new Set([

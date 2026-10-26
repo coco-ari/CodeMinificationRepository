@@ -63,6 +63,22 @@
 
 用户在同一助手入口管理与使用真实来源，能识别撤回、无效参数和已保存事实；开发者复用现有字段、配置写合同与原生输入器，减少平行入口；AI Agent 通过同一带标签控件、实际参数和原请求接口识别结果，不能靠提供者身份取得平台权限。仅暂存候选导出后的服务/登记/实际调用者定向 46 项、HTTP 11 项、Web 4 组 64 项通过，完整类型、266 文件模块边界、实际 Web/Worker 构建通过；独立发行 10446 文件/81 动态依赖及真实 ZIP 冒烟保持原输入与重复请求。日志 `.deployment/assistants-index-*`。新增统一管理 11 个、实际 Composer 8 个浏览器场景仅写入 Linux 门禁，尚未实跑，不作为真实业务已验收。
 
+## 问答只读已同步当前资料（2026-10-26）
+
+本批沿 `thread-inputs → workspace-management → workspace-current → authoring/store`，问答 `captureAgentInput/captureAvailableInput` 只选已同步当前资料；Git resolve/fetch 只留在显式手动更新、独立生成和部署固定 Commit 流程。内部新轮固定当前源码与上传资料，外部新轮只选最近成功发布，pending_review 不可访问；原请求恢复固定原输入，不因新资料或分支变化改取最新。当前来源/实际提交、候选配置及更新警告分别保留，不把网络失败说成已确认远端最新。
+
+先复现 `.deployment/workspace-current-offline-before.log`：同步后连续两次问答把 resolve 从 1 增到 3。可能为同步缓存未保存：实际 published 与 current 元数据存在，排除；问答无条件走解析、可用缓存又被排除，调用计数支持根因。移除问答远端步骤后新增真实 owner/SQLite/Worker 与受控 Git 回归，明确不把受控 Git 当服务器网络实测。
+
+同一来源修改分支/挂载后原有效文件 404：旧按候选 configurationHash 查找排除了已同步资料，非文件删除或授权变化；现持久保留原有效来源、提交与目录，完整更新成功才切换。两来源原子发布注入第二条 SQL 写失败复现新旧内容混合，排除 Worker 半成品发布后，改为同事务 `recordSyncBatch`。有效目录互斥在完整当前集合上校验，冲突拒绝发布并保留旧内容；候选失败路径不得遮蔽另一来源已固定文件，实际 catalog.readForThread 红绿用例覆盖文件、目录、缺失路径错误与跨线程拒绝。旧 Git 实际目录迁走前保持只读，不能上传后被源码遮蔽。
+
+SQL v4 在保存最终输入前持久准备收据与原件引用：先保护选定版本，再同事务固定文档及来源选择。保存失败、跨实例重启、迟到取消和后来同步仍恢复原请求。存量 v3 的有效 published 来源按升级前精确匹配规则一次接管为当前指针，原子幂等、零 Git，不以重新同步或空状态初始化掩盖旧内容；显式移除/重新添加不会复活旧档案。固定任务仍有引用，完整终态回收继续 D3。
+
+双进程回归另暴露共享 SQLite 首次 schema 查询先于 busy_timeout，短暂锁即报 database locked。候选一为当前指针事务竞争，堆栈发生在迁移前构造阶段，排除；候选二为初读没有等待策略，由独立 child EXCLUSIVE 锁失败用例验证。基础设施仅前置既有 5 秒等待，不增加循环重试、不吞未知 schema/升级校验；确定性多进程及原升级/事务回归通过。
+
+影响仅 current/authoring 自有元数据、管理公开输入端口、实际资源读取与共享数据库初读等待及相应合同/回归。已有上传、同步、外部复核、部署来源与收据均保留，不创建新执行器。用户无需等待每轮远端 Git；开发者由唯一当前指针和准备收据维护一致性；AI Agent 按本轮固定来源、警告和明确错误判断资料，不误用候选目录或历史最新猜测。未改变用户按钮及操作步骤；同步/发送操作次数保持，网络等待改善仅有调用计数证明，实际网络时间待真实问答测量。
+
+本机 D1/current/实际资源相关 87 项、基础 SQLite/升级/事务/authoring/仓库相关 36 项通过（两集合不累加）；适配器、原生与纯后端类型、运行边界和 diff 检查通过。证据 `.deployment/workspace-current-*-before.log`、`workspace-current-catalog-related-after.log`、`database-open-lock-{before,after}.log`。仅暂存 D1 候选独立导出后 73 项定向、9 项真实原生资料 HTTP、全部运行类型、266 文件边界、实际 Web/Worker 构建及 10446 文件/81 动态依赖的 ZIP 冒烟通过，原输入及重复请求保持；完整 CI 继续核对（日志 `.deployment/current-index-*`）。真实发送、定期更新、服务器发行及全生命周期尚待相应批次，不把本批无 Git 单测当整体完成。
+
 ## 项目仓库连接与工作区引用拆分（2026-10-26）
 
 影响范围为已有资料模块的公共合同、存储升级/查询/写入、Git 查询编排和新增原生项目仓库 HTTP；凭证、Git 执行、资料捕获和部署源码包仍使用现有能力，无新增依赖、第二份连接目录或独立后端。核对所有 authoring_sources SQL，当前读写只归资料模块；已有不可变捕获不读取当前连接的可变字段。
@@ -204,7 +220,7 @@ B1 的引用保护盘点发现：新建项目第一次打开工作区会自动�
 
 本批仅导出已暂存候选，在独立目录完成适配器/原生/Web 类型、实际 Web 与 Worker 构建；最终发行包含 10445 文件及 81 个动态依赖包，独立 Worker 真实源码 ZIP 冒烟通过，原输入与重复请求均保持。最终驱动/可信终态定向 16 项通过；MySQL 双模式的 2 项真实协议用例另以隔离数据库显式执行通过，默认无目标时明确跳过。证据为 `.deployment/environment-mcp-index-final-{drivers,package,smoke}.log`，不混入尚未提交的助手与当前资料改动。新增浏览器和完整 CI 继续在推送后核对，真实产品问答与部署仍待验。
 
-`e71b4b94` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40280781540)通过；[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40280781503)的服务及原生门禁通过，Web 441 通过/2 失败，新增环境 MCP 交互通过。删除冲突提示已包含完整恢复文字，但断言只写前半句；删除后目录刷新失败时页脚与原生图标都有“关闭”，严格定位发现两个匹配，排除页面无关闭入口。只修断言为全文及分别核对两个关闭按钮，保留冲突禁删、目录重试、单次删除和焦点检查，`5d972114` 已正常推送待完整 CI 重跑；没有放宽业务权限或改生产交互。
+`e71b4b94` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40280781540)通过；[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40280781503)的服务及原生门禁通过，Web 441 通过/2 失败，新增环境 MCP 交互通过。删除冲突提示已包含完整恢复文字，但断言只写前半句；删除后目录刷新失败时页脚与原生图标都有“关闭”，严格定位发现两个匹配，排除页面无关闭入口。只修断言为全文及分别核对两个关闭按钮，保留冲突禁删、目录重试、单次删除和焦点检查，修正后的 `5d972114` [质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40283147965)与[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40283147836)均通过；没有放宽业务权限或改生产交互。
 
 ## 已实现模块
 

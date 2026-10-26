@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off -- 当前资料编排复用工作区队列，原件和固定源码仍由各自存储所有者管理。
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AutoOpsAccess } from './access.mjs'
@@ -18,6 +18,7 @@ import type {
   WorkspaceMaterialContent,
   WorkspaceCapturedFile,
   WorkspaceRepositorySource,
+  WorkspaceSourceSyncRecord,
 } from '../../autoops/contracts/workspace-authoring.ts'
 import type { WorkspaceTask } from '../../autoops/contracts/workspaces.ts'
 import { decodeContract } from '../../autoops/contracts/index.ts'
@@ -114,8 +115,10 @@ export function createCurrentWorkspace({
     status: 'queued' | 'syncing' | 'synced' | 'failed',
     versionId?: string,
     failureCode?: string,
+    origin: 'sync' | 'snapshot' = 'sync',
   ) {
     const configured = authoring.overview(project, actor).sources
+    const updates: WorkspaceSourceSyncRecord[] = []
     for (const source of captured.sources) {
       if (!configured.some((value) => value.id === source.id && digest(value) === digest(source)))
         continue
@@ -124,39 +127,53 @@ export function createCurrentWorkspace({
         .find((value) => value.sourceId === source.id)
       // 较早领取的任务不能把较新的请求状态覆盖回去。
       if (status !== 'queued' && previous?.requestId !== captured.requestId) continue
-      const commit = captured.resolvedRepositories?.find(
-        (value) => value.sourceId === source.id,
-      )?.commit
-      const sameConfiguration = previous?.configurationHash === digest(source)
-      const retainedVersion = versionId ?? (sameConfiguration ? previous?.versionId : undefined)
-      const retainedCommit = versionId ? commit : sameConfiguration ? previous?.commit : undefined
-      authoring.recordSync(
-        project,
-        {
-          sourceId: source.id,
-          configurationHash: digest(source),
-          requestId: captured.requestId,
-          status,
-          updatedAt: now(),
-          ...(retainedVersion ? { versionId: retainedVersion } : {}),
-          ...(retainedCommit ? { commit: retainedCommit } : {}),
-          ...(status === 'failed'
-            ? {
-                error: {
-                  code:
-                    failureCode && unavailableGitCodes.has(failureCode)
-                      ? failureCode
-                      : 'WORKSPACE_SYNC_FAILED',
-                  message: '同步失败，请重试。',
-                },
-              }
-            : {}),
-        },
-        actor,
-      )
-      if (versionId && status === 'synced')
-        store.retainVersion(project, versionId, `current:${source.id}`)
+      const current =
+        versionId && status === 'synced'
+          ? {
+              ...captured.resolvedRepositories!.find((value) => value.sourceId === source.id)!,
+              source,
+              versionId,
+            }
+          : previous?.versionId
+            ? repositoryForRecord(project, source.id, previous)
+            : undefined
+      updates.push({
+        sourceId: source.id,
+        configurationHash: digest(source),
+        requestId: captured.requestId,
+        status,
+        updatedAt: now(),
+        ...(current
+          ? {
+              current,
+              versionId: current.versionId,
+              commit: current.commit,
+              currentOrigin:
+                versionId && status === 'synced' ? origin : (previous?.currentOrigin ?? 'sync'),
+            }
+          : {}),
+        ...(status === 'failed'
+          ? {
+              error: {
+                code:
+                  failureCode &&
+                  (unavailableGitCodes.has(failureCode) ||
+                    failureCode === 'WORKSPACE_CURRENT_SOURCE_CONFLICT')
+                    ? failureCode
+                    : 'WORKSPACE_SYNC_FAILED',
+                message:
+                  failureCode === 'WORKSPACE_CURRENT_SOURCE_CONFLICT'
+                    ? '当前源码实际目录重叠，请核对来源后完整更新工作区'
+                    : '同步失败，请重试。',
+              },
+            }
+          : {}),
+      })
     }
+    const applied = authoring.recordSyncBatch(project, updates, actor)
+    for (const value of applied)
+      if (value.status === 'synced' && value.versionId)
+        store.retainVersion(project, value.versionId, `current:${value.sourceId}`)
   }
   async function resolveCapture(
     project: string,
@@ -189,6 +206,7 @@ export function createCurrentWorkspace({
           const value = reference
             ? await credentials.withCredential(actor, project, reference, resolve)
             : await resolve()
+          signal.throwIfAborted()
           resolved.push({ ...value, ...(reference ? { credentialVersion: reference } : {}) })
         }
         captured = authoring.freezeCaptureRepositories(project, captured.id, resolved, actor)
@@ -320,54 +338,102 @@ export function createCurrentWorkspace({
     if (value.status !== 'active') fail(410, 'WORKSPACE_INPUT_RELEASED', '本轮资料输入已释放')
     return value
   }
+  function repositoryForRecord(
+    project: string,
+    sourceId: string,
+    record: WorkspaceSourceSyncRecord,
+  ): WorkspaceInputRepository {
+    if (!record.versionId)
+      return fail(409, 'WORKSPACE_CURRENT_SOURCE_MISSING', '当前源码尚未取得完整版本')
+    const version = store.getVersion(project, record.versionId)
+    const fixed = version.source.repositories.find((value) => value.sourceId === sourceId)
+    if (version.status !== 'published' || !fixed)
+      return fail(409, 'WORKSPACE_CURRENT_SOURCE_MISSING', '当前源码版本或来源身份不可核验')
+    const original = record.current
+      ? { source: record.current.source, resolved: record.current }
+      : version.source.captureId
+        ? authoring.capturedRepositoryMetadata(project, version.source.captureId, sourceId)
+        : undefined
+    if (
+      !original ||
+      digest(original.source) !== fixed.configurationHash ||
+      original.source.mountPath !== fixed.path ||
+      original.resolved.commit !== fixed.commit
+    )
+      return fail(409, 'WORKSPACE_CURRENT_SOURCE_MISSING', '当前源码与原同步身份不一致')
+    const { source, resolved } = original
+    return {
+      sourceId,
+      commit: resolved.commit,
+      refKind: resolved.refKind,
+      ref: resolved.ref,
+      defaultRef: resolved.defaultRef,
+      ...(resolved.credentialVersion ? { credentialVersion: resolved.credentialVersion } : {}),
+      source,
+      versionId: version.id,
+    }
+  }
+  function adoptExistingCurrent(project: string) {
+    const pending = authoring.currentAdoptionSources(project)
+    if (!pending.length) return
+    // 严格沿升级前sourceViews的published顺序和身份规则，只在接管时选择一次。
+    const published = store
+      .overview(project)
+      .internalVersions.filter((value) => value.status === 'published')
+    const references: Array<{ versionId: string; reference: string }> = []
+    const selections = pending.map(({ source, record: stored }) => {
+      const configurationHash = digest(source)
+      const record = stored?.configurationHash === configurationHash ? stored : undefined
+      const legacy = record?.versionId
+        ? undefined
+        : published.find((version) =>
+            version.source.repositories.some(
+              (repository) =>
+                repository.sourceId === source.id &&
+                repository.configurationHash === configurationHash,
+            ),
+          )
+      const fixed = record?.versionId
+        ? record
+        : legacy
+          ? {
+              sourceId: source.id,
+              configurationHash,
+              requestId: `adopt:${legacy.id}`,
+              status: 'synced' as const,
+              updatedAt: legacy.createdAt,
+              versionId: legacy.id,
+            }
+          : undefined
+      const current = fixed ? repositoryForRecord(project, source.id, fixed) : undefined
+      if (current) {
+        const reference = `adoption:${digest([project, source.id, current.versionId])}`
+        store.retainVersion(project, current.versionId, reference)
+        references.push({ versionId: current.versionId, reference })
+      }
+      return { sourceId: source.id, configurationHash, ...(current ? { current } : {}) }
+    })
+    const adopted = authoring.adoptCurrentSources(project, selections)
+    for (const record of adopted)
+      if (record.versionId) {
+        const current = repositoryForRecord(project, record.sourceId, record)
+        store.retainVersion(project, current.versionId, `current:${record.sourceId}`)
+      }
+    for (const reference of references) store.releaseVersion(project, reference.reference)
+  }
   function availableRepositories(
     project: string,
     sources: WorkspaceRepositorySource[],
     actor: string,
   ): WorkspaceInputRepository[] {
     readPermission(project, actor)
-    const current = authoring.overview(project, actor)
+    adoptExistingCurrent(project)
     const records = authoring.syncRecords(project, actor)
     return sources.flatMap((source) => {
-      const configurationHash = digest(source)
-      if (
-        !current.sources.some(
-          (value) => value.id === source.id && digest(value) === configurationHash,
-        )
-      )
-        return []
-      const record = records.find(
-        (value) =>
-          value.sourceId === source.id &&
-          value.configurationHash === configurationHash &&
-          value.versionId,
-      )
+      const record = records.find((value) => value.sourceId === source.id && value.versionId)
       if (!record?.versionId) return []
-      const fixed = store
-        .getVersion(project, record.versionId)
-        .source.repositories.find(
-          (value) =>
-            value.sourceId === source.id &&
-            value.configurationHash === configurationHash &&
-            value.path === source.mountPath,
-        )
-      if (!fixed) return []
-      // 只沿用当前配置下已同步的完整源码；凭证与资料权限仍按当前授权核对。
-      const credentialVersion = source.credentialId
-        ? credentials.referenceVersion(actor, project, source.credentialId)
-        : undefined
-      return [
-        {
-          sourceId: source.id,
-          commit: fixed.commit,
-          refKind: source.refKind,
-          ref: source.ref,
-          defaultRef: null,
-          ...(credentialVersion ? { credentialVersion } : {}),
-          source,
-          versionId: record.versionId,
-        },
-      ]
+      // 待更新配置不替换有效当前指针；本地读取不重新取密或访问远端。
+      return [repositoryForRecord(project, source.id, record)]
     })
   }
   function inputFiles(project: string, inputId: string, actor: string): WorkspaceCapturedFile[] {
@@ -406,7 +472,9 @@ export function createCurrentWorkspace({
     const input = readInput(project, inputId, actor)
     if (input.files.some((file) => file.path === path) && input.captureId)
       return authoring.readCapturedFile(project, input.captureId, path, actor)
+    const file = inputFiles(project, inputId, actor).find((file) => file.path === path)
     if (
+      !file &&
       input.sourceErrors?.some(
         (source) => path === source.mountPath || path.startsWith(source.mountPath + '/'),
       )
@@ -414,12 +482,30 @@ export function createCurrentWorkspace({
       fail(
         503,
         'WORKSPACE_INPUT_SOURCE_UNAVAILABLE',
-        '本轮未取得此仓库源码；上传资料仍可读取，下一新轮将重新同步',
+        '本轮未取得此仓库源码；上传资料仍可读取，请先在工作区更新',
       )
-    const file = inputFiles(project, inputId, actor).find((file) => file.path === path)
     if (!file) fail(404, 'WORKSPACE_MATERIAL_NOT_FOUND', '本轮资料输入中没有此文件')
     const result = store.versionFile(project, file.revision, path)
     return { ...result, revision: file.revision, sha256: file.sha256 }
+  }
+  function preparationReferences(
+    value: Pick<WorkspaceInputCapture, 'requestId' | 'repositories' | 'externalVersionId'>,
+    actor: string,
+  ) {
+    return [
+      ...value.repositories.map((repository) => ({
+        versionId: repository.versionId,
+        reference: `preparation:${digest([actor, value.requestId, repository.sourceId, repository.versionId])}`,
+      })),
+      ...(value.externalVersionId
+        ? [
+            {
+              versionId: value.externalVersionId,
+              reference: `preparation:${digest([actor, value.requestId, value.externalVersionId])}`,
+            },
+          ]
+        : []),
+    ]
   }
   async function captureAgentInput(
     project: string,
@@ -436,100 +522,86 @@ export function createCurrentWorkspace({
       actor,
       digest(input),
       async (currentSignal) => {
-        if (input.workspaceType === 'external') {
-          const version = store
-            .overview(project)
-            .externalVersions.filter((value) => value.status === 'published')
-            .sort((a, b) =>
-              (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt),
-            )[0]
-          if (!version)
-            fail(409, 'WORKSPACE_EXTERNAL_UNAVAILABLE', '项目尚未发布可供外部访问的资料')
-          const value: WorkspaceInputCapture = {
-            id: randomUUID(),
-            projectId: project,
-            requestId: input.requestId,
-            workspaceType: 'external',
-            revision: 0,
-            createdAt: now(),
-            status: 'active',
-            repositories: [],
-            files: [],
-            directories: [],
-            externalVersionId: version.id,
+        let value = authoring.preparedInputByRequest(
+          project,
+          input.requestId,
+          actor,
+          input.workspaceType,
+        )
+        let candidateReferences: Array<{ versionId: string; reference: string }> = []
+        if (!value) {
+          if (input.workspaceType === 'external') {
+            const version = store
+              .overview(project)
+              .externalVersions.filter((value) => value.status === 'published')
+              .sort((a, b) =>
+                (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt),
+              )[0]
+            if (!version)
+              fail(409, 'WORKSPACE_EXTERNAL_UNAVAILABLE', '项目尚未发布可供外部访问的资料')
+            candidateReferences = preparationReferences(
+              { requestId: input.requestId, repositories: [], externalVersionId: version.id },
+              actor,
+            )
+            for (const reference of candidateReferences)
+              store.retainVersion(project, reference.versionId, reference.reference)
+            value = authoring.prepareInput(project, input.requestId, actor, {
+              workspaceType: 'external',
+              versionId: version.id,
+            })
+          } else {
+            const current = authoring.overview(project, actor)
+            const available = availableRepositories(project, current.sources, actor)
+            const records = authoring.syncRecords(project, actor)
+            const sourceErrors = current.sources
+              .filter((source) => !available.some((value) => value.sourceId === source.id))
+              .map((source) => ({
+                sourceId: source.id,
+                name: source.name,
+                mountPath: source.mountPath,
+                code: 'WORKSPACE_SOURCE_UNSYNCED',
+                message: '此仓库尚无完整当前资料，请先在工作区更新；上传资料仍可读取',
+              }))
+            const sourceWarnings = available.flatMap((repository) => {
+              const configured = current.sources.find(
+                (source) => source.id === repository.sourceId,
+              )!
+              const record = records.find((record) => record.sourceId === repository.sourceId)
+              if (digest(configured) === digest(repository.source) && record?.status === 'synced')
+                return []
+              return [
+                {
+                  sourceId: repository.sourceId,
+                  name: repository.source.name,
+                  mountPath: repository.source.mountPath,
+                  code:
+                    digest(configured) !== digest(repository.source)
+                      ? 'WORKSPACE_SOURCE_CONFIGURATION_PENDING'
+                      : (record?.error?.code ?? 'WORKSPACE_SOURCE_UPDATE_PENDING'),
+                  message: '当前读取上次已同步的来源与提交；待更新配置或失败更新尚未替换有效资料',
+                },
+              ]
+            })
+            candidateReferences = preparationReferences(
+              { requestId: input.requestId, repositories: available },
+              actor,
+            )
+            for (const reference of candidateReferences)
+              store.retainVersion(project, reference.versionId, reference.reference)
+            value = authoring.prepareInput(project, input.requestId, actor, {
+              workspaceType: 'internal',
+              revision: current.revision,
+              repositories: available,
+              sourceErrors,
+              sourceWarnings,
+            })
           }
-          store.retainVersion(project, version.id, `input:${value.id}`)
-          return authoring.saveInput(value, actor)
         }
-        let captured = authoring.capture(project, undefined, actor, input.requestId)
-        let versionId: string | undefined
-        let sourceErrors: WorkspaceInputCapture['sourceErrors']
-        let sourceWarnings: WorkspaceInputCapture['sourceWarnings']
-        let retainedRepositories: WorkspaceInputRepository[] = []
-        try {
-          captured = await resolveCapture(project, captured, actor, currentSignal, true)
-          if (captured.sources.length) {
-            const task = sourceTask(project, captured, actor, 'input')
-            const cancel = () => {
-              try {
-                store.cancelTask(project, task.id)
-              } catch {}
-            }
-            currentSignal.addEventListener('abort', cancel, { once: true })
-            if (currentSignal.aborted) cancel()
-            syncState(project, captured, actor, 'syncing')
-            try {
-              versionId = (
-                await completedTask(project, captured.requestId, actor, 'input', currentSignal)
-              ).versionId
-            } finally {
-              currentSignal.removeEventListener('abort', cancel)
-            }
-            syncState(project, captured, actor, 'synced', versionId)
-          }
-        } catch (error) {
-          currentSignal.throwIfAborted()
-          readPermission(project, actor)
-          const code = sourceFailureCode(error)
-          if (!code || !unavailableGitCodes.has(code)) throw error
-          syncState(project, captured, actor, 'failed', undefined, code)
-          retainedRepositories = availableRepositories(project, captured.sources, actor)
-          const issues = captured.sources.map((source) => ({
-            sourceId: source.id,
-            name: source.name,
-            mountPath: source.mountPath,
-            code,
-          }))
-          const available = new Set(retainedRepositories.map((repository) => repository.sourceId))
-          sourceErrors = issues
-            .filter((issue) => !available.has(issue.sourceId))
-            .map((issue) => ({
-              ...issue,
-              message: '源码更新失败，此仓库尚无可读取的同步内容；上传资料仍可读取',
-            }))
-          sourceWarnings = issues
-            .filter((issue) => available.has(issue.sourceId))
-            .map((issue) => ({
-              ...issue,
-              message: '源码更新失败，继续使用工作区已同步的内容；远端最新提交尚未确认',
-            }))
-        }
-        readPermission(project, actor)
-        const value: WorkspaceInputCapture = {
-          id: captured.id,
-          projectId: project,
-          requestId: input.requestId,
-          workspaceType: 'internal',
-          revision: captured.revision,
-          createdAt: captured.createdAt,
-          status: 'active',
-          repositories: versionId ? repositories(captured, versionId) : retainedRepositories,
-          files: captured.files,
-          directories: captured.directories,
-          captureId: captured.id,
-          ...(sourceErrors?.length ? { sourceErrors } : {}),
-          ...(sourceWarnings?.length ? { sourceWarnings } : {}),
-        }
+        // 准备收据先固定版本，重试不再读取最新指针；丢失原件时明确失败。
+        currentSignal.throwIfAborted()
+        readPermission(project, actor, value.workspaceType)
+        if (value.externalVersionId)
+          store.retainVersion(project, value.externalVersionId, `input:${value.id}`)
         for (const repository of value.repositories)
           store.retainVersion(
             project,
@@ -537,8 +609,8 @@ export function createCurrentWorkspace({
             `input:${value.id}:${repository.sourceId}`,
           )
         const saved = authoring.saveInput(value, actor)
-        const completed = store.taskForRequest(project, 'input', input.requestId, actor)
-        if (completed) store.releaseVersion(project, `task:${completed.id}`)
+        for (const reference of [...candidateReferences, ...preparationReferences(value, actor)])
+          store.releaseVersion(project, reference.reference)
         return saved
       },
       signal,
@@ -548,58 +620,67 @@ export function createCurrentWorkspace({
     project: string,
     input: WorkspaceAuthoringMutation,
     actor: string,
+    signal?: AbortSignal,
   ): Promise<WorkspaceTask> {
     access.requireWorkspaceActor(actor, project)
-    return track(project, input.requestId, actor, digest(input), async (signal) => {
-      let captured = authoring.captureByRequest(project, input.requestId, actor)
-      const previous = store.taskForRequest(project, 'sync', input.requestId, actor)
-      if (captured && captured.revision !== input.expectedRevision)
-        fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原同步请求已经固定其他资料修订')
-      if (previous) return previous
-      captured ??= authoring.capture(project, input.expectedRevision, actor, input.requestId, {
-        sources: authoring.overview(project, actor).sources,
-        documents: false,
-      })
-      try {
-        captured = await resolveCapture(project, captured, actor, signal, true)
-      } catch (error) {
-        // 只有失败已持久化且原任务确实不存在时才能释放；收据或授权未知时继续保护。
+    return track(
+      project,
+      input.requestId,
+      actor,
+      digest(input),
+      async (currentSignal) => {
+        let captured = authoring.captureByRequest(project, input.requestId, actor)
+        const previous = store.taskForRequest(project, 'sync', input.requestId, actor)
+        if (captured && captured.revision !== input.expectedRevision)
+          fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原同步请求已经固定其他资料修订')
+        if (previous) return previous
+        captured ??= authoring.capture(project, input.expectedRevision, actor, input.requestId, {
+          sources: authoring.overview(project, actor).sources,
+          documents: false,
+        })
         try {
-          const originalTask = store.taskForRequest(project, 'sync', input.requestId, actor)
-          const originalCapture = authoring.captureByRequest(project, input.requestId, actor)
-          if (
-            !originalTask &&
-            originalCapture?.status === 'active' &&
-            originalCapture.resolution === 'failed'
-          )
-            authoring.releaseCapture(project, originalCapture.id, actor)
-        } catch {
-          /* 收尾失败不覆盖原错误；原请求再次核对时继续尝试释放。 */
+          captured = await resolveCapture(project, captured, actor, currentSignal, true)
+          currentSignal.throwIfAborted()
+        } catch (error) {
+          // 只有失败已持久化且原任务确实不存在时才能释放；收据或授权未知时继续保护。
+          try {
+            const originalTask = store.taskForRequest(project, 'sync', input.requestId, actor)
+            const originalCapture = authoring.captureByRequest(project, input.requestId, actor)
+            if (
+              !originalTask &&
+              originalCapture?.status === 'active' &&
+              originalCapture.resolution === 'failed'
+            )
+              authoring.releaseCapture(project, originalCapture.id, actor)
+          } catch {
+            /* 收尾失败不覆盖原错误；原请求再次核对时继续尝试释放。 */
+          }
+          throw error
         }
-        throw error
-      }
-      const task = sourceTask(project, captured, actor, 'sync')
-      syncState(project, captured, actor, 'syncing')
-      const fixed = captured
-      const completion = completedTask(project, input.requestId, actor, 'sync')
-        .then((value) => {
-          syncState(project, fixed, actor, 'synced', value.versionId)
-          store.releaseVersion(project, `task:${value.id}`)
-        })
-        .catch((error: unknown) => {
-          try {
-            syncState(project, fixed, actor, 'failed', undefined, sourceFailureCode(error))
-          } catch {}
-        })
-        .finally(() => {
-          try {
-            authoring.releaseCapture(project, fixed.id, actor)
-          } catch {}
-        })
-      completions.add(completion)
-      void completion.finally(() => completions.delete(completion))
-      return task
-    })
+        const task = sourceTask(project, captured, actor, 'sync')
+        syncState(project, captured, actor, 'syncing')
+        const fixed = captured
+        const completion = completedTask(project, input.requestId, actor, 'sync')
+          .then((value) => {
+            syncState(project, fixed, actor, 'synced', value.versionId)
+            store.releaseVersion(project, `task:${value.id}`)
+          })
+          .catch((error: unknown) => {
+            try {
+              syncState(project, fixed, actor, 'failed', undefined, sourceFailureCode(error))
+            } catch {}
+          })
+          .finally(() => {
+            try {
+              authoring.releaseCapture(project, fixed.id, actor)
+            } catch {}
+          })
+        completions.add(completion)
+        void completion.finally(() => completions.delete(completion))
+        return task
+      },
+      signal,
+    )
   }
   async function captureDeploymentSource(
     project: string,
@@ -737,7 +818,8 @@ export function createCurrentWorkspace({
       captured.resolution === 'pending' ||
       captured.files.length ||
       captured.directories.length ||
-      authoring.inputByRequest(project, requestId, actor, 'internal')
+      authoring.inputByRequest(project, requestId, actor, 'internal') ||
+      authoring.preparedInputByRequest(project, requestId, actor, 'internal')
     )
       return false
     authoring.releaseCapture(project, captured.id, actor)
@@ -827,43 +909,9 @@ export function createCurrentWorkspace({
     }
     const current = authoring.overview(project, actor)
     const available = availableRepositories(project, current.sources, actor)
-    const requestId = `picker:${digest([actor, current.revision, available.map((value) => [value.source.id, value.versionId])])}`
-    const previous = authoring.inputByRequest(project, requestId, actor, 'internal')
-    if (previous) return readInput(project, previous.id, actor)
-    let captured = authoring.capture(project, current.revision, actor, requestId, {
-      sources: available.map((value) => value.source),
-      documents: true,
-    })
-    const resolved = available.map(
-      ({ source: _source, versionId: _versionId, ...resolved }) => resolved,
-    )
-    if (captured.resolution === 'pending')
-      captured = authoring.freezeCaptureRepositories(project, captured.id, resolved, actor)
-    const value: WorkspaceInputCapture = {
-      id: captured.id,
-      projectId: project,
-      requestId,
-      workspaceType: 'internal',
-      revision: captured.revision,
-      createdAt: captured.createdAt,
-      status: 'active',
-      repositories: available,
-      files: captured.files,
-      directories: captured.directories,
-      captureId: captured.id,
-      sourceErrors: current.sources
-        .filter((source) => !available.some((value) => value.source.id === source.id))
-        .map((source) => ({
-          sourceId: source.id,
-          name: source.name,
-          mountPath: source.mountPath,
-          code: 'WORKSPACE_SOURCE_UNSYNCED',
-          message: '此仓库当前没有可读取的同步内容',
-        })),
-    }
-    for (const repository of value.repositories)
-      store.retainVersion(project, repository.versionId, `input:${value.id}:${repository.sourceId}`)
-    return authoring.saveInput(value, actor)
+    const records = authoring.syncRecords(project, actor)
+    const requestId = `picker:${digest([actor, current.revision, available.map((value) => [value.sourceId, value.versionId]), records.map((value) => [value.sourceId, value.status, value.error?.code])])}`
+    return captureAgentInput(project, { workspaceType: 'internal', requestId }, actor)
   }
   async function generateCurrentExternal(
     project: string,
@@ -873,8 +921,10 @@ export function createCurrentWorkspace({
       expectedRevision?: number
     },
     actor: string,
+    signal?: AbortSignal,
   ) {
     access.requireProjectActionForActor(actor, project, 'workspace.external.publish')
+    signal?.throwIfAborted()
     const previous = store.taskForRequest(project, 'external', input.requestId, actor)
     if (previous) {
       const prepared = store.taskForRequest(
@@ -893,6 +943,7 @@ export function createCurrentWorkspace({
         fail(409, 'WORKSPACE_EXTERNAL_INPUT_MISSING', '原外部任务的固定输入不可用，请核对原收据')
       if (input.expectedRevision !== undefined && input.expectedRevision !== captured.revision)
         fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原外部请求已经固定其他资料修订')
+      signal?.throwIfAborted()
       return store.startExternal(
         project,
         {
@@ -912,10 +963,11 @@ export function createCurrentWorkspace({
       project,
       { requestId: `external-${digest(input.requestId)}`, workspaceType: 'internal' },
       actor,
+      signal,
     )
     if (input.expectedRevision !== undefined && input.expectedRevision !== captured.revision)
       fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原外部请求已经固定其他资料修订')
-    if (captured.sourceErrors?.length || captured.sourceWarnings?.length)
+    if (captured.sourceErrors?.length)
       fail(
         503,
         'WORKSPACE_EXTERNAL_SOURCE_UNAVAILABLE',
@@ -950,7 +1002,8 @@ export function createCurrentWorkspace({
       },
       actor,
     )
-    const task = await completedTask(project, sourceTaskId, actor, 'snapshot')
+    const task = await completedTask(project, sourceTaskId, actor, 'snapshot', signal)
+    signal?.throwIfAborted()
     return store.startExternal(
       project,
       {
@@ -964,32 +1017,49 @@ export function createCurrentWorkspace({
   function protectedCurrentVersions(project: string, actor: string) {
     const overview = store.overview(project)
     const configured = authoring.overview(project, actor).sources
-    const syncs = authoring.syncRecords(project, actor)
     const versions = [...access.workspaceVersionReferences(project)]
     const external = overview.externalVersions
       .filter((value) => value.status === 'published')
       .sort((a, b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt))[0]
     if (external) versions.push(external.id)
-    for (const source of configured) {
-      const synced = syncs.find(
-        (value) => value.sourceId === source.id && value.configurationHash === digest(source),
-      )
-      const version =
-        synced?.versionId ??
-        overview.internalVersions.find(
-          (value) =>
-            value.status === 'published' &&
-            value.source.repositories.some(
-              (repository) =>
-                repository.sourceId === source.id &&
-                repository.configurationHash === digest(source),
-            ),
-        )?.id
-      if (version) versions.push(version)
-    }
+    for (const current of availableRepositories(project, configured, actor))
+      versions.push(current.versionId)
     return [...new Set(versions)]
   }
+  for (const project of authoring.currentAdoptionProjects()) {
+    try {
+      adoptExistingCurrent(project)
+    } catch {
+      // 单个旧来源不可核验时不替换事实；所属项目读取时明确重试并返回真实错误。
+    }
+  }
   return {
+    recordGeneratedSourceUpdate(
+      project: string,
+      captured: WorkspaceAuthoringCapture,
+      actor: string,
+      status: Parameters<typeof syncState>[3],
+      versionId?: string,
+      failureCode?: string,
+    ) {
+      const records = authoring.syncRecords(project, actor)
+      const selected = captured.sources.filter((source) => {
+        const current = records.find((value) => value.sourceId === source.id)
+        return !current?.versionId || current.currentOrigin === 'snapshot'
+      })
+      syncState(
+        project,
+        { ...captured, sources: selected },
+        actor,
+        status,
+        versionId,
+        failureCode,
+        'snapshot',
+      )
+    },
+    currentRepositories(project: string, actor: string) {
+      return availableRepositories(project, authoring.overview(project, actor).sources, actor)
+    },
     captureAgentInput,
     captureCurrentInput: captureAgentInput,
     captureAvailableInput,
@@ -1004,13 +1074,6 @@ export function createCurrentWorkspace({
     inputTree(project: string, inputId: string, directory: string, actor: string) {
       if (directory && !safePath(directory)) fail(400, 'WORKSPACE_PATH_INVALID', '目录路径无效')
       const captured = readInput(project, inputId, actor)
-      if (
-        captured.sourceErrors?.some(
-          (source) =>
-            directory === source.mountPath || directory.startsWith(source.mountPath + '/'),
-        )
-      )
-        fail(503, 'WORKSPACE_INPUT_SOURCE_UNAVAILABLE', '本轮未取得此仓库源码；上传资料仍可读取')
       const prefix = directory ? directory + '/' : '',
         entries = new Map<
           string,
@@ -1033,6 +1096,19 @@ export function createCurrentWorkspace({
           size: rest.includes('/') ? 0 : file.size,
         })
       }
+      if (
+        !entries.size &&
+        !captured.repositories.some(
+          (repository) =>
+            directory === repository.source.mountPath ||
+            directory.startsWith(repository.source.mountPath + '/'),
+        ) &&
+        captured.sourceErrors?.some(
+          (source) =>
+            directory === source.mountPath || directory.startsWith(source.mountPath + '/'),
+        )
+      )
+        fail(503, 'WORKSPACE_INPUT_SOURCE_UNAVAILABLE', '本轮未取得此仓库源码；上传资料仍可读取')
       return {
         entries: [...entries.values()].sort((a, b) => a.path.localeCompare(b.path)).slice(0, 500),
         truncated: entries.size > 500,
@@ -1085,7 +1161,7 @@ export function createCurrentWorkspace({
       const captured = authoring.captureByRequest(project, request, actor)
       if (!captured) return null
       const input = authoring.inputByRequest(project, request, actor, 'internal')
-      const failure = input?.sourceErrors?.[0] ?? input?.sourceWarnings?.[0]
+      const failure = input?.sourceErrors?.[0]
       return {
         id: captured.id,
         resolution: failure ? ('failed' as const) : captured.resolution,

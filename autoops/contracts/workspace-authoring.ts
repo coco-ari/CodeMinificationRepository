@@ -99,6 +99,7 @@ export interface WorkspaceAuthoringOverview {
     status: 'unsynced' | 'queued' | 'syncing' | 'synced' | 'failed'
     versionId?: string
     commit?: string
+    currentSource?: WorkspaceRepositorySource
     createdAt?: string
     updatedAt?: string
     requestId?: string
@@ -199,6 +200,15 @@ export interface WorkspaceInputCapture {
   sourceErrors?: WorkspaceInputSourceIssue[]
   sourceWarnings?: WorkspaceInputSourceIssue[]
 }
+export type WorkspaceInputSelection =
+  | {
+      workspaceType: 'internal'
+      revision: number
+      repositories: WorkspaceInputRepository[]
+      sourceErrors?: WorkspaceInputSourceIssue[]
+      sourceWarnings?: WorkspaceInputSourceIssue[]
+    }
+  | { workspaceType: 'external'; versionId: string }
 export interface WorkspaceDeploymentSourceInput {
   requestId: string
   sources: DeploymentRepositorySelection[]
@@ -220,5 +230,7 @@ export interface WorkspaceSourceSyncRecord {
   updatedAt: string
   versionId?: string
   commit?: string
+  current?: WorkspaceInputRepository
+  currentOrigin?: 'sync' | 'snapshot'
   error?: { code: string; message: string }
 }

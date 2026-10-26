@@ -39,6 +39,14 @@ DROP TABLE authoring_sources;
 ALTER TABLE authoring_repository_usage RENAME TO authoring_sources;
 `,
 }
-export const authoringMigrations = [migration, currentInputs, repositoryConnections]
+const preparedInputs = {
+  version: 4,
+  name: '固定当前资料选择与原请求恢复',
+  sql: `
+CREATE TABLE authoring_input_preparations (project_id TEXT NOT NULL REFERENCES authoring_projects(project_id), request_id TEXT NOT NULL, actor_id TEXT NOT NULL, workspace_type TEXT NOT NULL CHECK(workspace_type IN ('internal','external')), value TEXT NOT NULL, PRIMARY KEY(project_id,request_id)) STRICT;
+CREATE TABLE authoring_current_adoptions (project_id TEXT NOT NULL REFERENCES authoring_projects(project_id), source_id TEXT NOT NULL, completed_at TEXT NOT NULL, PRIMARY KEY(project_id,source_id)) STRICT;
+`,
+}
+export const authoringMigrations = [migration, currentInputs, repositoryConnections, preparedInputs]
 export const openAuthoringDatabase = (filename: string) =>
   openDatabase(filename, authoringMigrations)

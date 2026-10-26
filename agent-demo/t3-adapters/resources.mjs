@@ -358,15 +358,17 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
         if (identity.inputId !== inputId && !(targetIndex >= 0 && targetIndex < currentIndex) && !referenceInputIds.includes(identity.inputId)) fail('不能读取后来轮次或不在本轮上下文中的资料输入')
         const selected = threadInput(threadId, identity.inputId, true, actorId)
         if (identity.projectId !== selected.capture.projectId) fail()
-        const unavailable = selected.capture.sourceErrors?.find(source => identity.relativePath === source.mountPath || identity.relativePath.startsWith(source.mountPath + '/'))
-        if (unavailable) throw new AutoOpsAccessError(503, 'WORKSPACE_INPUT_SOURCE_UNAVAILABLE', unavailable.message)
         const file = selected.files.find(file => file.path === path && file.type !== 'directory')
         if (file) {
           const content = await contents(file)
           threadInput(threadId, inputId, false, actorId); threadInput(threadId, identity.inputId, true, actorId)
           return { path, name: file.name, mime: file.mime, content, source: 'workspace_input', inputId: identity.inputId, capturedAt: selected.capture.createdAt, sourceUrl: file.sourceUrl }
         }
-        if (path !== selected.root && !entriesWithFolders(selected.files).some(entry => entry.path === path && entry.kind === 'directory')) fail()
+        if (path !== selected.root && !entriesWithFolders(selected.files).some(entry => entry.path === path && entry.kind === 'directory')) {
+          const unavailable = selected.capture.sourceErrors?.find(source => identity.relativePath === source.mountPath || identity.relativePath.startsWith(source.mountPath + '/'))
+          if (unavailable) throw new AutoOpsAccessError(503, 'WORKSPACE_INPUT_SOURCE_UNAVAILABLE', unavailable.message)
+          fail()
+        }
         return { path, kind: 'directory', sourceErrors: selected.capture.sourceErrors ?? [], sourceWarnings: selected.capture.sourceWarnings ?? [], entries: selected.files.filter(file => file.type !== 'directory' && file.path.startsWith(path + '/')).map(({ path, name, mime }) => ({ path, name, mime })) }
       }
       if(path.startsWith('autoops/skills/'))return readScopedSkillResourceForThread(process.env.AUTOOPS_T3_DATA_DIR,threadId,path,access)

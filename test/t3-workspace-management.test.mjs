@@ -478,9 +478,7 @@ test('多仓与产品运维资料固定为真实版本，显式服务上下文�
       .sourceStatus.find((entry) => entry.sourceId === frontend.id).status,
     'unsynced',
   )
-  assert.throws(() => f.service.currentFile(projectId, `${frontend.mountPath}/README.md`, owner), {
-    code: 'WORKSPACE_SOURCE_UNSYNCED',
-  })
+  assert.match(f.service.currentFile(projectId, `${frontend.mountPath}/README.md`, owner).bytes.toString(), /frontend 固定源码/u)
   assert.match(
     f.store.read(projectId, version.id, `${frontend.mountPath}/README.md`).contents,
     /frontend 固定源码/,

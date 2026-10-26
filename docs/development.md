@@ -51,7 +51,7 @@
 | C4 | 电脑自用接入、文件、附件、可靠事件及恢复 | 已实现 | [customer-registry](../agent-demo/t3-adapters/customer-registry.mjs)、[customer-agent](../agent-demo/customer-agent)、[真实证据](runtime-modules.md#客户电脑文件引用2026-10-25)；迁入助手时保留 |
 | C5 | 提供者主动共享、管理员分配、撤回和实际调用者 | 待验证 | [提供者事实](../agent-demo/t3-adapters/assistants/schema.ts)、[本人管理 HTTP](../vendor/t3code/apps/server/src/autoops/http/providedAssistants.ts) 已实现主动指定项目共享与撤回、管理者分配及修订复核，管理权不能代替本人同意；已保存后撤权只确认事实，原收据恢复不重复。服务/HTTP正反例通过；跨用户实际执行与真实身份验收继续 C6，不能将元数据配置当执行完成 |
 | C6 | 跨用户电脑会话、附件、工作目录及收据隔离 | 待实现 | 已核对 transport/session/runner 的 owner 仍基于自用前提，尚缺可信实际调用者范围、运行隔离 profile 与会话/附件/技能的完整隔离；原生 actor 及已有自用收据可复用。跨用户/跨项目执行保持明确拒绝，历史基线及共享事实测试不证明已完成；只暂停不具备隔离的执行来源，自用继续可用 |
-| D1 | 问答读取已同步当前资料、失败保留与每轮固定输入 | 待实现 | [workspace-current](../agent-demo/t3-adapters/workspace-current.ts)、[workspace-management](../agent-demo/t3-adapters/workspace-management.ts) 已有上传、同步与固定输入；尚需实现问答读取已同步当前资料，不因每轮发送重新访问远端 Git。[历史验收](runtime-modules.md#当前资料与部署来源拆分2026-10-24) 不代表该方案完成。新增成功、越权及异常回归见下表，真实问答待验 |
+| D1 | 问答读取已同步当前资料、失败保留与每轮固定输入 | 待验证 | [当前资料](../agent-demo/t3-adapters/workspace-current.ts) 已改为只读有效当前源，新轮零 Git resolve/fetch；[authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) v4 持久准备收据、原子当前指针与旧资料一次接管，失败/待切换保留原真实目录及提交。新增真实 owner/SQLite/Worker+受控 Git、越权、重启与工具读取回归 87 项通过，SQLite 并发及升级/事务相关 36 项通过；新完整 CI、浏览器和真实问答待验，[本批证据](runtime-modules.md#问答只读已同步当前资料2026-10-26) |
 | D2 | 内外部各一份当前内容、手动与定期更新 | 待实现 | 手动流程已接入；缺定期更新配置/调度与完整当前外部生命周期，不能自动确认待复核文件 |
 | D3 | 活动/排队/未知输入临时保护、终态释放和自动回收 | 待实现 | [authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 有原件回收，[thread-inputs](../agent-demo/t3-adapters/thread-inputs.ts) 有绑定；历史引用仍须按新规则释放及明确清理提示 |
 | D4 | 部署独立分支、固定 Commit、完整构建上下文源码包 | 已实现 | [deployments](../agent-demo/t3-adapters/deployments.mjs)、[源码回归](../test/deployment-workspace-source.test.mjs)；仓库连接拆分后复用、真实用户仓库打包待验 |
@@ -64,7 +64,7 @@
 | E5 | 隔离 Java/static 发布、重启/失败恢复/回退/断线 | 待验证 | 已授权 `192.168.31.157`；按现有运维规范核对目标、版本、数据及活动任务，不复用用户业务目标故障注入 |
 | E6 | 最终发行、健康/数据保留、完整 CI 与最终报告 | 待验证 | 每批提交、正常推送并检查 CI 后继续；全部已确认项具有相应实现和真实验收证据后才报告整体完成 |
 
-2026-10-26 状态纠正：B4、D1 最初均改为待实现，已有部分能力和历史测试仅作为复用依据。B4 随后在 `7110d150` 接完新方案并通过新增自动回归，现为待真实验证；D1 仍待实现。保持当前实施顺序，不因本次纠正重排批次。以下逐层补齐用例和实际证据；B4 新服务/HTTP 证据不代表页面与真实验收完成，D1 尚无新方案整项证据。
+2026-10-26 状态纠正：B4、D1 最初均改为待实现，已有部分能力和历史测试仅作为复用依据。B4 随后在 `7110d150` 接完新方案并通过新增自动回归，现为待真实验证；D1 随后已接入只读当前资料并通过新自动回归，现待完整 CI 及真实验证。保持当前实施顺序，不因本次纠正重排批次。以下逐层补齐用例和实际证据；B4 新服务/HTTP 证据不代表页面与真实验收完成，D1 的本机新方案证据已补，真实问答仍待验。
 
 | 项目 | 成功回归（待补） | 越权回归（待补） | 异常与恢复回归（待补） |
 | --- | --- | --- | --- |

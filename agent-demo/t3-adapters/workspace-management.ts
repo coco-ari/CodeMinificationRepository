@@ -10,7 +10,7 @@ import { createCurrentWorkspace } from './workspace-current.ts'
 import { createProjectCredentialService, type GitCredential } from './credentials.ts'
 import { createWorkspaceGit } from './workspace-git.ts'
 import { extractBusinessAttachment } from './business-documents.mjs'
-import type { WorkspaceAuthoringMutation, WorkspaceAuthoringOverview, WorkspaceMaterialContent, WorkspaceRepositorySource, WorkspaceRepositoryRefKind, WorkspaceResolvedRepository } from '../../autoops/contracts/workspace-authoring.ts'
+import type { WorkspaceAuthoringMutation, WorkspaceAuthoringCapture, WorkspaceAuthoringOverview, WorkspaceMaterialContent, WorkspaceRepositorySource, WorkspaceRepositoryRefKind, WorkspaceResolvedRepository } from '../../autoops/contracts/workspace-authoring.ts'
 import type { WorkspaceTask } from '../../autoops/contracts/workspaces.ts'
 
 type Authoring = ReturnType<typeof createWorkspaceAuthoring>
@@ -73,27 +73,26 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     return repositoryQuery(projectId, sourceId, actorId, (source, secret, signal, check) => git.repositoryHistory(git.validateRepositorySource({ ...source, refKind: selection.refKind, ref: selection.ref }), secret, signal, check))
   }
   function sourceViews(projectId: string, sources: WorkspaceRepositorySource[], currentActor: string) {
-    const versions = published(projectId)
-    return sources.map(source => {
-      const hash = configurationHash(source)
-      const synced = authoring.syncRecords?.(projectId, currentActor)?.find(record => record.sourceId === source.id && record.configurationHash === hash)
-      const version = synced?.versionId ? store.getVersion(projectId, synced.versionId) : versions.find(version => version.source.repositories.some(repository => repository.sourceId === source.id && repository.configurationHash === hash))
-      const repository = version?.source.repositories.find(repository => repository.sourceId === source.id && repository.configurationHash === hash)
-      return { source, version, repository }
+    const available = currentWorkspace.currentRepositories(projectId, currentActor)
+    return sources.map(configured => {
+      const current = available.find(value => value.sourceId === configured.id)
+      const version = current ? store.getVersion(projectId, current.versionId) : undefined
+      const repository = version?.source.repositories.find(value => value.sourceId === configured.id)
+      return {source: current?.source ?? configured, configured, version, repository}
     })
   }
   function overview(projectId: string, actorId: string): WorkspaceAuthoringOverview {
     permitRead(projectId, actorId)
     const current = authoring.overview(projectId, actorId)
-    const records = authoring.syncRecords?.(projectId, actorId) ?? []
+    const records = authoring.syncRecords(projectId, actorId)
     const latest = published(projectId).find(version => version.source.authoringRevision !== undefined)
-    return { ...current, ...(latest ? { publishedRevision: latest.source.authoringRevision! } : {}), hasUnpublishedChanges: latest?.source.authoringRevision !== current.revision, sourceStatus: sourceViews(projectId, current.sources, actorId).map(({ source, version, repository }) => {
-      const record = records.find(value => value.sourceId === source.id && value.configurationHash === configurationHash(source))
-      return { sourceId: source.id, status: record?.status ?? (version && repository ? 'synced' : 'unsynced'),
-        ...(version && repository ? { versionId: version.id, commit: repository.commit, createdAt: version.createdAt } : {}),
-        ...(record ? { updatedAt: record.updatedAt, requestId: record.requestId, ...(record.error ? { error: record.error } : {}) } : {}) }
+    return { ...current, ...(latest ? { publishedRevision: latest.source.authoringRevision! } : {}), hasUnpublishedChanges: latest?.source.authoringRevision !== current.revision, sourceStatus: sourceViews(projectId, current.sources, actorId).map(({ source, configured, version, repository }) => {
+      const record = records.find(value => value.sourceId === configured.id)
+      const pendingConfiguration = configurationHash(source) !== configurationHash(configured)
+      return { sourceId: configured.id, status: record?.configurationHash === configurationHash(configured) ? record.status : 'unsynced',
+        ...(version && repository ? { versionId: version.id, commit: repository.commit, currentSource: source, createdAt: version.createdAt } : {}),
+        ...(record ? { updatedAt: record.updatedAt, requestId: record.requestId, ...(record.error ? { error: record.error } : pendingConfiguration ? {error: {code: 'WORKSPACE_SOURCE_CONFIGURATION_PENDING', message: '配置尚未成功更新，继续使用上次已同步的来源和提交'}} : {}) } : {}) }
     }) }
-
   }
   function currentEntries(projectId: string, actorId: string) {
     const current = overview(projectId, actorId)
@@ -117,10 +116,11 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   }
   function sourceFile(projectId: string, path: string, actorId: string) {
     const current = overview(projectId, actorId)
-    const source = current.sources.find(source => path.startsWith(source.mountPath + '/'))
-    if (!source) return undefined
-    const match = sourceViews(projectId, [source], actorId)[0]
-    if (!match?.version) fail(404, 'WORKSPACE_SOURCE_UNSYNCED', '此源码来源尚未生成匹配当前配置的版本')
+    const match = sourceViews(projectId, current.sources, actorId).find(value => value.version && path.startsWith(value.source.mountPath + '/'))
+    if (!match?.version) {
+      if (current.sources.some(source => path.startsWith(source.mountPath + '/'))) fail(404, 'WORKSPACE_SOURCE_UNSYNCED', '此源码来源尚无完整当前资料，请先更新工作区')
+      return undefined
+    }
     const file = store.versionFile(projectId, match.version.id, path)
     const sha256 = createHash('sha256').update(file.bytes).digest('hex')
     return { ...file, path, revision: match.version.id, size: file.bytes.byteLength, sha256 }
@@ -168,11 +168,19 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     return { result: authoring.receipt(projectId, requestId, actorId), ...(task ? { task } : {}),
       ...(capture ? { capture: { id: capture.id, resolution: capture.resolution, ...(capture.resolutionError ? { resolutionError: capture.resolutionError } : {}) } } : externalPreparation ? { capture: externalPreparation } : {}) }
   }
-  function releaseAfterTask(projectId: string, captureId: string, requestId: string, actorId: string) {
+  function releaseAfterTask(projectId: string, captured: WorkspaceAuthoringCapture, requestId: string, actorId: string) {
     // 物化结束后仍须校验和持久化版本；只在原任务收据确认为终态后释放原件。
     const release = store.whenIdle().then(() => {
       const task = store.taskForRequest(projectId, 'snapshot', requestId, actorId)
-      if (task && !active(task)) authoring.releaseCapture(projectId, captureId, actorId)
+      if (!task || active(task) || task.status === 'completed' && !task.versionId) return
+      try {
+        currentWorkspace.recordGeneratedSourceUpdate(projectId, captured, actorId, task.status === 'completed' ? 'synced' : 'failed', task.versionId, task.failureCode)
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error && error.code === 'WORKSPACE_CURRENT_SOURCE_CONFLICT' ? error.code : undefined
+        try {currentWorkspace.recordGeneratedSourceUpdate(projectId, captured, actorId, 'failed', undefined, code)} catch {}
+        throw error
+      }
+      authoring.releaseCapture(projectId, captured.id, actorId)
     }).catch(() => { /* 授权、持久化或清理失败时保留原件保护，由原请求核对后释放。 */ })
     captureReleases.add(release)
     void release.finally(() => captureReleases.delete(release))
@@ -180,9 +188,10 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   async function prepare(projectId: string, input: WorkspaceAuthoringMutation, actorId: string, signal: AbortSignal) {
     let captured = authoring.capture(projectId, input.expectedRevision, actorId, input.requestId)
     const previous = store.taskForRequest(projectId, 'snapshot', input.requestId, actorId)
-    if (previous) { releaseAfterTask(projectId, captured.id, input.requestId, actorId); return previous }
+    if (previous) { releaseAfterTask(projectId, captured, input.requestId, actorId); return previous }
     if (captured.resolution === 'failed') fail(422, captured.resolutionError?.code ?? 'WORKSPACE_SOURCE_RESOLUTION_FAILED', captured.resolutionError?.message ?? '来源解析失败，请修改后重新生成')
     if (captured.status !== 'active') fail(409, 'WORKSPACE_CAPTURE_RELEASED', '此固定输入已经结束，请核对原任务')
+    currentWorkspace.recordGeneratedSourceUpdate(projectId, captured, actorId, 'queued')
     if (captured.resolution === 'pending') {
       try {
         const resolved: WorkspaceResolvedRepository[] = []
@@ -196,7 +205,7 @@ export function createWorkspaceManagement({ access, store, authoring, credential
         captured = authoring.freezeCaptureRepositories(projectId, captured.id, resolved, actorId)
       } catch (cause) {
         const code = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(cause.code) ? cause.code : 'WORKSPACE_SOURCE_RESOLUTION_FAILED'
-        try { authoring.failCaptureResolution(projectId, captured.id, { code, message: '来源解析失败' }, actorId); authoring.releaseCapture(projectId, captured.id, actorId) } catch { /* 撤权或关闭后保留原始输入保护，供之后核对。 */ }
+        try { currentWorkspace.recordGeneratedSourceUpdate(projectId, captured, actorId, 'failed', undefined, code); authoring.failCaptureResolution(projectId, captured.id, { code, message: '来源解析失败' }, actorId); authoring.releaseCapture(projectId, captured.id, actorId) } catch { /* 撤权或关闭后保留原始输入保护，供之后核对。 */ }
         throw cause
       }
     }
@@ -232,7 +241,8 @@ export function createWorkspaceManagement({ access, store, authoring, credential
       }
       access.requireWorkspaceActor(actorId, projectId)
     }, actorId)
-    releaseAfterTask(projectId, frozen.id, input.requestId, actorId)
+    currentWorkspace.recordGeneratedSourceUpdate(projectId, frozen, actorId, 'syncing')
+    releaseAfterTask(projectId, frozen, input.requestId, actorId)
     return task
   }
   function generate(projectId: string, input: WorkspaceAuthoringMutation, actorId: string): Promise<WorkspaceTask> {
