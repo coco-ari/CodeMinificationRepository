@@ -176,6 +176,7 @@ export class RemoteDeviceHub {
           if(frame.sharedExecutionVersion===1)connection.sharedExecutionVersion = 1;
           const registered=this.access.customerRegistry.listWorkspaces(principal.ownerId);
           for(const workspace of frame.workspaces)if(!registered.some(item=>item.deviceId===principal.deviceId&&item.projectId===workspace.projectId&&item.registeredWorkspaceId===workspace.registeredWorkspaceId&&item.workspaceBindingRevision===workspace.workspaceBindingRevision&&item.runtimeId===workspace.runtimeId))throw error('WORKSPACE_SCOPE','客户设备声明了未登记的工作区');
+          this.access.customerRegistry.markHeartbeat(principal,connectionEpoch,{connectorVersion:frame.connectorVersion});
           connection.hello=true;
           connection.connectorEpoch=frame.connectorEpoch;
           connection.sessions=new Map(frame.sessions.map(s=>[s.sessionId,s]));

@@ -60,6 +60,39 @@ test('connection epochs protect new connections from stale disconnects; offline 
   assert.equal(registry.listDevices('owner')[0].online,false)
 })
 
+test('当前连接记录真实版本，所有者读取新值且不会再次递增连接代次', t => {
+  const {registry} = fixture(t)
+  const paired = registry.consumePairing(registry.createPairing('owner').pairingCode,{label:'升级测试',connectorVersion:'0.1.0'})
+  const principal = registry.authenticateToken(paired.deviceToken)
+  const {connectionEpoch} = registry.markConnected(principal)
+  registry.markHeartbeat(principal,connectionEpoch,{connectorVersion:'0.4.0'})
+  const device = registry.listDevices('owner')[0]
+  assert.equal(device.connectorVersion,'0.4.0')
+  assert.equal(device.connectionEpoch,connectionEpoch)
+  registry.markHeartbeat(principal,connectionEpoch)
+  assert.equal(registry.listDevices('owner')[0].connectorVersion,'0.4.0')
+  assert.deepEqual(registry.listDevices('other'),[])
+})
+
+test('旧代次、已断开或撤证的连接不能改写当前版本，非法版本不覆盖有效值', t => {
+  const {registry} = fixture(t)
+  const paired = registry.consumePairing(registry.createPairing('owner').pairingCode,{label:'版本范围',connectorVersion:'0.1.0'})
+  const principal = registry.authenticateToken(paired.deviceToken)
+  const first = registry.markConnected(principal), second = registry.markConnected(principal)
+  registry.markHeartbeat(principal,second.connectionEpoch,{connectorVersion:'0.4.0'})
+  assert.throws(()=>registry.markHeartbeat({...principal,ownerId:'other'},second.connectionEpoch,{connectorVersion:'0.2.0'}),{code:'CUSTOMER_DEVICE_UNAUTHENTICATED'})
+  assert.throws(()=>registry.markHeartbeat(principal,first.connectionEpoch,{connectorVersion:'0.2.0'}),{code:'CUSTOMER_CONNECTION_REPLACED'})
+  assert.throws(()=>registry.markHeartbeat(principal,second.connectionEpoch,{connectorVersion:''}),{code:'INVALID_CUSTOMER_METADATA'})
+  assert.throws(()=>registry.markHeartbeat(principal,second.connectionEpoch,{connectorVersion:'x'.repeat(81)}),{code:'INVALID_CUSTOMER_METADATA'})
+  assert.equal(registry.listDevices('owner')[0].connectorVersion,'0.4.0')
+  registry.markDisconnected(paired.device.id,second.connectionEpoch)
+  assert.throws(()=>registry.markHeartbeat(principal,second.connectionEpoch,{connectorVersion:'0.2.0'}),{code:'CUSTOMER_CONNECTION_REPLACED'})
+  registry.markConnected(principal)
+  registry.revokeCredential('owner',paired.device.id)
+  assert.throws(()=>registry.markHeartbeat(principal,3,{connectorVersion:'0.2.0'}),{code:'CUSTOMER_DEVICE_UNAUTHENTICATED'})
+  assert.equal(registry.listDevices('owner')[0].connectorVersion,'0.4.0')
+})
+
 test('disabled devices retain recovery authentication, revoked credentials cannot reconnect', t => {
   const {registry,register} = fixture(t), entry = register()
   registry.markConnected(entry.principal)

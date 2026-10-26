@@ -1029,6 +1029,12 @@ macOS 定向 Node 22 项、Web 8 项、独立 ZIP 分发及真实本地 WebSocke
 
 ## 跨用户运行合同与真实 OS 验收（2026-10-26）
 
+### 连接程序版本按合法握手更新
+
+实际恢复的 Mac 客户包发送 `0.3.0`，中心却继续显示初次配对的 `0.1.0`。已核对旧包常量、当前 SDK 的 `0.4.0` 常量及真实 WS 握手，排除客户端发送旧值；根因是中心建立连接时不含版本，合法 HELLO 也未把版本交回登记所有者。修复复用 [customer-registry](../agent-demo/t3-adapters/customer-registry.mjs) 的当前代次 heartbeat 入口，由 [RemoteDeviceService](../vendor/t3code/apps/server/src/autoops/RemoteDeviceService.ts) 在合法握手后更新，不重新建连或增加代次。旧连接、重复握手、撤证和非法元数据均不能改写当前版本。
+
+原登记测试新增两项先失败，真实 SDK/WS 三项亦先复现旧值；修后关联 Node 53/53、原生 53/53及适配器、原生、客户严格类型通过，根代理另复跑真实 WS、登记与传输 13/13。证据 `.deployment/connector-version-fix/`。没有新增界面操作；用户仍通过原详情读取真实版本，开发与 Agent 复用同一登记合同。本修复尚待完整 CI、发行及真实新 HELLO 核验，不能将隔离握手测试计作实际客户升级完成。
+
 [共享范围合同](../autoops/contracts/shared-execution.ts) 固定实际调用者、提供者、业务及来源项目、线程/轮次、预设/共享/分配修订、真实能力修订、profile、目标、模型和技能。中心持久签发的 grant 与完整事实共同复核，公开标识或设备自报不能成为授权。断线后按原 command/grant 查原收据；撤回仅允许核对结果，不重发执行，旧连接程序没有共享协议也不能接收共享命令。模型、思考及技能来自隔离原生目录，不补平台默认；低权限不可篡改参数。项目管理员的可分配状态与自身可执行状态分别裁决，外部成员不能接入尚未证明外部资料隔离的共享目录。
 
 [本机显式 profile](../agent-demo/customer-agent/shared-docker-profile.ts) 使用固定镜像 ID、非 root、只读根和来源目录、独立 HOME/附件、只读配置/技能、网络禁用及资源限额；模型认证留在宿主私有 socket 通道。客户命令、容器和资料范围不能指定宿主秘密路径。首次能力发现禁用推理，后续真实模型仍逐次核对中心准入。[验证许可](../agent-demo/t3-adapters/shared-profile-approvals.ts) 仅接受运维固定的来源/profile 证据；管理页面或客户自报无权开启共享。共享文件管理界面当前明确不支持，既有本人文件管理保留，不能借 owner 替换为 provider 绕过。

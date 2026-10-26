@@ -280,10 +280,14 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       db.prepare('UPDATE customer_devices SET connected=1,connection_epoch=connection_epoch+1,last_seen_at=?,connector_version=COALESCE(?,connector_version) WHERE id=?').run(now(),input.connectorVersion ? text(input.connectorVersion,'连接程序版本',80) : null,device.id)
       const updated = publicDevice(deviceRow(device.id)); return {device:updated,connectionEpoch:updated.connectionEpoch}
     },
-    markHeartbeat(principal, connectionEpoch) {
+    markHeartbeat(principal, connectionEpoch, input = {}) {
       const device = devicePrincipal(principal)
       if (!Number.isSafeInteger(connectionEpoch) || connectionEpoch !== device.connection_epoch || !device.connected) fail(409,'CUSTOMER_CONNECTION_REPLACED','设备连接已被新连接替换')
-      db.prepare('UPDATE customer_devices SET last_seen_at=? WHERE id=? AND connection_epoch=?').run(now(),device.id,connectionEpoch)
+      object(input,['connectorVersion'])
+      const connectorVersion = input.connectorVersion === undefined ? null : text(input.connectorVersion,'连接程序版本',80)
+      // 合法握手只更新当前连接元数据，不重新建立连接或改变代次。
+      db.prepare('UPDATE customer_devices SET last_seen_at=?,connector_version=COALESCE(?,connector_version) WHERE id=? AND connection_epoch=? AND connected=1').run(now(),connectorVersion,device.id,connectionEpoch)
+      if (connectorVersion !== null && connectorVersion !== device.connector_version) for (const listener of listeners) listener()
     },
     markDisconnected(deviceId, connectionEpoch) { db.prepare('UPDATE customer_devices SET connected=0 WHERE id=? AND connection_epoch=?').run(id(deviceId,'设备ID'),connectionEpoch) },
     resetPresence() { db.exec('UPDATE customer_devices SET connected=0') },

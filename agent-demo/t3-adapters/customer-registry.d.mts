@@ -23,7 +23,7 @@ export interface CustomerRegistry {
   revokeCredential(ownerId: string, deviceId: string): CustomerDevice;
   revokeWorkspace(principal: CustomerDevicePrincipal, workspaceId: string): CustomerWorkspace;
   markConnected(principal: CustomerDevicePrincipal, input?: {connectorVersion?: string}): {device: CustomerDevice; connectionEpoch: number};
-  markHeartbeat(principal: CustomerDevicePrincipal, connectionEpoch: number): void;
+  markHeartbeat(principal: CustomerDevicePrincipal, connectionEpoch: number, input?: {connectorVersion?: string}): void;
   markDisconnected(deviceId: string, connectionEpoch: number): void;
   resetPresence(): void;
   listRegisteredDevices(): CustomerDevice[];
