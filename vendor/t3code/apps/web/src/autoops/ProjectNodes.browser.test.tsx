@@ -81,7 +81,7 @@ it('项目管理员在环境配置只绑定已准入节点，关闭后恢复环�
     await trigger.click()
     await expect.element(page.getByRole('button', { name: '接入节点', exact: true })).not.toBeInTheDocument()
     await page.getByRole('button', { name: '绑定已有节点', exact: true }).click()
-    await expect.element(page.getByRole('combobox', { name: '已有节点', exact: true })).toHaveTextContent('隔离的项目准入节点')
+    await expect.element(page.getByRole('combobox', { name: '已有节点', exact: true })).toHaveTextContent('隔离的项目准入节点 · 在线')
     await page.getByRole('button', { name: '确认绑定', exact: true }).click()
     await expect.element(page.getByText('隔离的项目准入节点', { exact: true })).toBeVisible()
     expect(f.writes).toEqual([{ path: '/api/agent-demo/t3/autoops/projects/node-project/deployments/servers/node-one/bind', body: { environmentId: 'test', requestId: expect.any(String) } }])

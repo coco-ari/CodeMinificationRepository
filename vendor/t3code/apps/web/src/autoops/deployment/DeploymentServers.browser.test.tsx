@@ -234,7 +234,7 @@ describe("部署节点管理", () => {
     const props = setup();
     await using screen = await render(<DeploymentServers {...props} />);
     await page.getByRole("button", { name: "绑定已有节点", exact: true }).click();
-    await expect.element(page.getByRole("combobox", { name: "已有节点", exact: true })).toHaveTextContent("共享节点");
+    await expect.element(page.getByRole("combobox", { name: "已有节点", exact: true })).toHaveTextContent("共享节点 · 在线");
     await page.getByRole("button", { name: "确认绑定", exact: true }).click();
     await vi.waitFor(() => expect(props.onChanged).toHaveBeenCalledOnce());
     expect(mocks.mutate.mock.calls[0]?.slice(0, 2)).toEqual([
