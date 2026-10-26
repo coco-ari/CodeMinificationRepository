@@ -1083,10 +1083,12 @@ v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3`
 
 真实 preflight 重现历史 `resumeThread` 命令在中心为 unknown，而原本机账本已经为 `failed/CUSTOMER_MANUALLY_RECONCILED`。原停止证据、本机只读查询、旧 PID 不存在、当前原会话 idle 且无 run/attempt/turn/目录占用，共同排除“需要再次人工停止”的解释。两个代码原因分别成立：[transport](../agent-demo/t3-adapters/customer-transport.mjs) 的执行投递列表排除 unknown，因此重连没有查询原收据；[RemoteDeviceService](../vendor/t3code/apps/server/src/autoops/RemoteDeviceService.ts) 和持久收据层又将 unknown 视为不可更新终态，因此即使原失败结果回传仍不收束。先保留 journal/原生失败测试，再最小修复。
 
-客户端显式声明原收据查询能力；中心只向当前认证设备、匹配原会话和代次、报告 idle 的连接发送原 `receiptQuery`。收束必须是当前连接实际发出过的查询，同 command/session/grant/epoch，且为无 result、明确人工确认停止的合法失败收据。未知命令不进入执行重放；其他失败、自报成功、外设备、旧连接、错误代次/范围均拒绝，原 completed/failed 终态不能改写。撤回后只核对原收据，不借此通过新执行准入。客户端仅在原本机会话 idle 且无活动轮次时为旧人工失败补查询响应的 epoch，不修改原账本。
+客户端显式声明原收据查询能力；中心只向当前认证设备、匹配原会话和代次、报告 idle 的连接发送原 `receiptQuery`。收束必须是当前连接实际发出过的查询，同 command/session/grant/epoch，且为无 result、明确人工确认停止的合法失败收据。未知命令不进入执行重放；其他失败、自报成功、外设备、旧连接、错误代次/范围均拒绝，原 completed/failed 终态不能改写。撤回后只核对原收据，不借此通过新执行准入。客户端仅在原本机会话 idle、无 run/attempt、无同会话在途命令或受管进程时为旧人工失败补查询响应的 epoch，不修改原账本；已经结束的历史 nativeTurnId 不作为仍在运行的证据。
 
 原生恢复 6 个场景、相关 Node 38 项、原生相关 54 项及客户/原生类型通过（定向集合重叠不累加）；完整客户 69 项全部通过。真实 WebSocket、实际 registry、协议解码和本机 SQLite 账本集成验证原命令数仍为 1、运行器启动数为 0、原无 epoch 的账本收据逐字不变。新测试见[原生恢复](../vendor/t3code/apps/server/src/autoops/RemoteDeviceService.receiptRecovery.test.ts)及[真实协议与账本](../agent-demo/customer-agent/receipt-recovery-integration.test.ts)。红证据 `/tmp/autoops-original-receipt-{journal,native}-before.log`；完整客户日志 `.deployment/original-receipt-recovery/all-customer-final.log`。
 
 修复收束原命令失败，不将整个 provider session 改为 idle；后续原线程仍受原生恢复和撤回门禁约束。真实旧设备还需用原身份和 state-dir 升级连接程序，经过正常 HELLO 和原查询回传后再核对中心结果，当前不能宣称历史业务已恢复。发行 preflight 只针对唯一已核实停止的历史原请求，按固定停止证据摘要和服务器原绑定、原生失败及零占用事实做精确隔离检查；原 unknown 行仍保持并逐字保护，报告 `pending-real-receipt-reconciliation/businessAccepted:false`，其他 unknown 继续阻断。没有改数据库、再次 resolve、伪造结果或发新执行来绕过。
 
 `2d963b58` 后续完整 Linux CI 已到浏览器 609 通过、3 失败（`40308750309`）。原成功保存焦点、身份 guard 及其他原失败场景已通过；剩余两项新增延迟刷新回归的拦截器漏去实际 `/api/agent-demo/t3` 网关前缀，因而没有真正挂起请求，已按同文件原 fetch 夹具的实际 URL 合同修正，未删除焦点断言。另一个撤回目录的完整选项名与 profile 修订不匹配时不同，已分别断言“隔离运行器 · 已不可用”和“原隔离运行器 · 已不可用”，仍保留原 profile/模型/技能、错误及零写入断言。原红日志 `.deployment/ci-2d963b58.log`；修后继续等待完整 CI，不能将 609 项通过代替整项完成。
+
+随后真实 WebSocket 扩展回归暴露历史轮次边界：人工停止后账本保留 nativeTurnId，旧查询条件误拒已空闲会话；单独移除这一条件又可能在同会话仍等待准入或建立进程时错误补出 epoch。原测试 1 通过、3 失败（`/tmp/autoops-original-receipt-activity-before.log`），定位到客户端查询条件与执行器缺少逐会话在途计数。现在按 session 独立计数，并同时检查 opening/runners；两条同会话准入分别结束不会提前清除活动标志，其他会话不阻断原收据。4 项真实 WS 场景及相关 Node 42 项、严格客户类型通过，保留原中心代次及授权校验。恢复专用运维入口另经实际包、真实 WS/registry/SQLite 验证无目录发现、无原生启动及无个人 HOME 写入；该隔离测试仍不代表真实旧设备收据已归并或自用升级完成。

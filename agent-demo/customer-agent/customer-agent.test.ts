@@ -277,6 +277,23 @@ test('中心准入等待期间提供者撤回本机目录，迟到许可不能�
     assert.equal(launched,0)
   } finally {await executor.close();f.close()}
 })
+test('同session两条准入在途命令分别结束，不提前清除活动标志也不阻断其他session',async()=>{
+  const f=fixture(),profilePath=join(realpathSync(f.root),'profile.json')
+  writeFileSync(profilePath,JSON.stringify({version:1,id:'readonly',revision:1,imageDigest:`sha256:${'a'.repeat(64)}`,skills:[],gateway:{url:'https://models.invalid/v1',authorizationEnv:'FIXTURE_ONLY_TOKEN'}}),{mode:0o600})
+  f.store.setSharedProfile(f.workspace.registeredWorkspaceId,profilePath)
+  const profile=(await loadSharedDockerProfile(profilePath)).descriptor,target={kind:'customer' as const,deviceId:'device-a',registeredWorkspaceId:f.workspace.registeredWorkspaceId,workspaceBindingRevision:1,runtimeId:'codex' as const}
+  const scope:SharedExecutionScope={grantId:'issued-fixture',actorId:'actual-caller',providerId:'provider',projectId:'caller-project',sourceProjectId:f.workspace.projectId,threadId:'caller-thread',runId:'session:session-a',assistantId:'selected-assistant',presetRevision:1,shareRevision:1,allocation:{kind:'member',id:'actual-caller',revision:1},capabilityRevision:'fixture-capability',profile,target,model:{instanceId:'customer-device-a-codex',model:'actual-model',reasoningEffort:'low'},skillIds:[]}
+  const gates=[Promise.withResolvers<void>(),Promise.withResolvers<void>()],entered=Promise.withResolvers<void>();let admissions=0,launched=0
+  const executor=new CustomerAgentExecutor({store:f.store,deviceId:'device-a',notify:()=>{},runnerFactory:async()=>{launched++;throw Error('本测试不得建立进程')},authorizeShared:async()=>{const index=admissions++;if(admissions===2)entered.resolve();await gates[index]!.promise;throw Error('准入夹具主动结束，不发起原生执行')}})
+  let first:Promise<unknown>|undefined,second:Promise<unknown>|undefined
+  try{
+    first=executor.execute({...command(f.workspace,'openSession','admission-one'),executionScope:scope})
+    second=executor.execute({...command(f.workspace,'openSession','admission-two'),executionScope:scope})
+    await entered.promise;assert.equal(executor.hasSessionActivity('session-a'),true);assert.equal(executor.hasSessionActivity('other-session'),false)
+    gates[0]!.resolve();await first;assert.equal(executor.hasSessionActivity('session-a'),true)
+    gates[1]!.resolve();await second;assert.equal(executor.hasSessionActivity('session-a'),false);assert.equal(launched,0)
+  }finally{for(const gate of gates)gate.resolve();await Promise.allSettled([first,second]);await executor.close();f.close()}
+})
 test('撤回本机隔离profile保留既有自用目录、身份及登记修订',()=>{
   const f=fixture(),profilePath=join(realpathSync(f.root),'profile.json')
   writeFileSync(profilePath,'{}',{mode:0o600})

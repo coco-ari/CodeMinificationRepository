@@ -36,6 +36,7 @@ export class CustomerAgentExecutor {
   private readonly providerThreads = new Map<string, unknown>();
   private readonly stopping = new Set<string>();
   private executing = 0;
+  private readonly executingSessions = new Map<string,number>();
   private readonly commands = new Set<Promise<CustomerAgentReceipt>>();
   private readonly shutdown = new AbortController();
   private readonly attachments: CustomerAttachmentCache | undefined;
@@ -168,9 +169,14 @@ export class CustomerAgentExecutor {
   }
   async execute(command: CustomerAgentCommand): Promise<CustomerAgentReceipt> {
     this.executing++;
+    this.executingSessions.set(command.sessionId,(this.executingSessions.get(command.sessionId)??0)+1);
     const task = this.executeCommand(command);
     this.commands.add(task);
-    try { return await task; } finally { this.executing--; this.commands.delete(task); }
+    try { return await task; } finally {
+      this.executing--; this.commands.delete(task);
+      const remaining=(this.executingSessions.get(command.sessionId)??1)-1;
+      if(remaining)this.executingSessions.set(command.sessionId,remaining);else this.executingSessions.delete(command.sessionId);
+    }
   }
   private async executeCommand(command: CustomerAgentCommand): Promise<CustomerAgentReceipt> {
     let nativeAttempted = false;
@@ -365,6 +371,10 @@ export class CustomerAgentExecutor {
   }
   hasActivity(): boolean {
     return this.executing > 0 || this.store.sessions().some((session) => session.state !== "idle" && this.runners.has(session.sessionId));
+  }
+  /** 原收据核对须排除同会话仍在准入、建立或受管的进程，其他会话不影响它。 */
+  hasSessionActivity(sessionId:string):boolean {
+    return (this.executingSessions.get(sessionId)??0)>0||this.opening.has(sessionId)||this.runners.has(sessionId);
   }
   async close(): Promise<void> {
     this.shutdown.abort();

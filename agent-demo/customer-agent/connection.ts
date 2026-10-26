@@ -159,8 +159,8 @@ export class CustomerAgentConnection {
             if (!this.ready) throw new Error('handshake required');
             const receipt=this.store.queryReceipt(frame.commandId,frame.sessionId,frame.grantId);
             const session=this.store.session(frame.sessionId);
-            // 老的人工核实失败可能未记录epoch；只在原本机会话确实idle时补查询响应，不改原持久收据。
-            const original=receipt?.state==='failed'&&receipt.error?.code==='CUSTOMER_MANUALLY_RECONCILED'&&receipt.result===undefined&&session?.state==='idle'&&!session.runId&&!session.attemptId&&!session.nativeTurnId
+            // 历史turn引用可以保留；只在原会话idle且无在途命令或受管进程时补查询响应，不改账本。
+            const original=receipt?.state==='failed'&&receipt.error?.code==='CUSTOMER_MANUALLY_RECONCILED'&&receipt.result===undefined&&session?.state==='idle'&&!session.runId&&!session.attemptId&&!this.executor.hasSessionActivity(frame.sessionId)
               ? {...receipt,runtimeEpoch:receipt.runtimeEpoch??session.runtimeEpoch}:receipt;
             this.enqueue(original ?? {type:'receipt',commandId:frame.commandId,sessionId:frame.sessionId,...(frame.grantId?{grantId:frame.grantId}:{}),state:'unknown',error:{code:'command_not_seen',message:'本机没有原命令收据，不能自动补发；请核查原任务'}});
             break;
