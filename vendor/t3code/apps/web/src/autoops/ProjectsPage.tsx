@@ -149,7 +149,6 @@ function ProjectsContent() {
         result = await submitProjectWrite(original)
       }
       if (!alive.current) return
-      setEditor(null)
       setPending(null)
       toastManager.add({ type: 'success', title: '已保存' })
       try {
@@ -164,6 +163,7 @@ function ProjectsContent() {
       )
         go(result.id)
       else await load()
+      if (alive.current) setEditor(null)
     } catch (cause) {
       if (!alive.current) return
       setPending(readPendingProjectWrite())
