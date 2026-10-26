@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- 仅以隔离 SQLite、账号和公开 owner 构造共享准入，不执行模型。
-import { afterEach, expect, it } from 'vite-plus/test'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -7,7 +7,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
-import { ProjectId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
+import { DEFAULT_SERVER_SETTINGS, ProjectId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
+import type { AutoOpsAccess } from '../../../../../../agent-demo/t3-adapters/access.mjs'
+import type { SettingsPreferences } from '../../../../../../agent-demo/t3-adapters/settings-preferences.mjs'
 import {
   createAutoOpsAccess,
   initializeAutoOpsAccessSchema,
@@ -22,10 +24,27 @@ import { ProviderInstanceAvailability } from '../provider/ProviderInstanceAvaila
 import { CurrentAutoOpsPrincipal } from './RequestScope.ts'
 import { RemoteDeviceService, type RemoteDeviceHub } from './RemoteDeviceService.ts'
 import { availabilityLayer } from './RemoteProviderRegistry.ts'
+import { forThread } from './personalSettings.ts'
+import { createSettingsPreferences } from '../../../../../../agent-demo/t3-adapters/settings-preferences.mjs'
+
+const configured = vi.hoisted(() => ({
+  access: undefined as AutoOpsAccess | undefined,
+  preferences: undefined as SettingsPreferences | undefined,
+}))
+vi.mock('../../../../../../agent-demo/t3-adapters/access.mjs', async (original) => ({
+  ...await original<typeof import('../../../../../../agent-demo/t3-adapters/access.mjs')>(),
+  configuredAutoOpsAccess: () => configured.access,
+}))
+vi.mock('../../../../../../agent-demo/t3-adapters/settings-preferences.mjs', async (original) => ({
+  ...await original<typeof import('../../../../../../agent-demo/t3-adapters/settings-preferences.mjs')>(),
+  configuredSettingsPreferences: () => configured.preferences,
+}))
 
 const cleanup: Array<() => void> = []
 afterEach(() => {
   for (const close of cleanup.splice(0).reverse()) close()
+  configured.access = undefined
+  configured.preferences = undefined
   delete process.env.AUTOOPS_CUSTOMER_AGENTS
 })
 
@@ -87,6 +106,9 @@ function fixture() {
     questions: () => directory,
   })
   const registry = access.customerRegistry
+  configured.access = access
+  configured.preferences = createSettingsPreferences({ db: bindings, env: {} })
+  cleanup.push(() => configured.preferences?.dispose())
   const paired = registry.consumePairing(registry.createPairing('provider').pairingCode, {
     label: '隔离设备',
   })
@@ -258,6 +280,7 @@ function fixture() {
     preset,
     actor,
     threadId,
+    projects,
     resolve,
   }
 }
@@ -268,6 +291,67 @@ it('真实提供者共享、独立管理员分配和当前profile合法时，原
   expect(f.directory.catalog('recipient', 'target').items[0]?.available).toBe(true)
   expect(await f.resolve()).toBe(true)
 })
+
+it('共享运行准备沿真实来源校验设备，但个人设置仍属于实际调用者', () => {
+  const f = fixture()
+  configured.preferences!.update('provider', { responseStreamingMode: 'paragraph' })
+  configured.preferences!.update('recipient', { responseStreamingMode: 'turn' })
+  const binding = f.access.getThreadBinding(f.threadId)!
+  expect(binding.ownerId).toBe('recipient')
+  expect(() => f.registry.validateTarget(binding.ownerId, binding.projectId, f.target))
+    .toThrow(expect.objectContaining({ code: 'CUSTOMER_DEVICE_NOT_FOUND' }))
+  expect(f.access.customerExecutionSource(f.threadId, binding.ownerId))
+    .toEqual({ ownerId: 'provider', projectId: 'source' })
+  for (const actor of ['provider', 'manager', 'platform', 'other'])
+    expect(() => f.access.customerExecutionSource(f.threadId, actor)).toThrow()
+  expect(forThread(f.threadId, DEFAULT_SERVER_SETTINGS)).toMatchObject({
+    responseStreamingMode: 'turn',
+    continueThreadsAfterServerUpdate: false,
+    compactIdleThreads: false,
+    autoResumeLimitedThreads: false,
+    snoozeLimitedThreads: false,
+  })
+})
+
+it('共享准备逐次核对原调用者的分配与提供者撤回，不以设备来源代替授权', () => {
+  const f = fixture()
+  expect(() => forThread(f.threadId, DEFAULT_SERVER_SETTINGS)).not.toThrow()
+  f.directory.assign('manager', 'target', {
+    requestId: 'settings-remove-allocation', expectedRevision: 1,
+    target: { kind: 'member', id: 'recipient' }, assistantIds: [], defaultAssistantId: null,
+  })
+  expect(() => forThread(f.threadId, DEFAULT_SERVER_SETTINGS)).toThrow()
+  f.directory.assign('manager', 'target', {
+    requestId: 'settings-restore-allocation', expectedRevision: 2,
+    target: { kind: 'member', id: 'recipient' }, assistantIds: [f.preset.id],
+    defaultAssistantId: f.preset.id,
+  })
+  expect(() => forThread(f.threadId, DEFAULT_SERVER_SETTINGS)).not.toThrow()
+  f.directory.shareProvided('provider', f.preset.id, 'target', {
+    requestId: 'settings-withdraw-share', expectedRevision: 1, enabled: false,
+  })
+  expect(() => forThread(f.threadId, DEFAULT_SERVER_SETTINGS)).toThrow()
+})
+
+it.each(['profile', 'membership', 'workspace', 'device', 'model'] as const)(
+  '共享准备独立拒绝失效%s，不读取提供者个人设置放行',
+  (cause) => {
+    const f = fixture()
+    expect(() => forThread(f.threadId, DEFAULT_SERVER_SETTINGS)).not.toThrow()
+    if (cause === 'profile') writeFileSync(f.approval, '[]', { mode: 0o600 })
+    if (cause === 'membership') {
+      const membership = f.projects.find((project) => project.id === 'target')!.memberships
+        .find((member) => member.userId === 'recipient')!
+      Reflect.set(membership, 'status', 'suspended')
+    }
+    if (cause === 'workspace') f.registry.revokeWorkspace(f.device, f.target.registeredWorkspaceId)
+    if (cause === 'device') f.registry.revokeCredential('provider', f.target.deviceId)
+    if (cause === 'model') f.registry.updateCapabilities(f.device, {
+      ...f.capability, revision: 'settings-model-removed', sharedProfile: { ...f.profile, models: [] },
+    })
+    expect(() => forThread(f.threadId, DEFAULT_SERVER_SETTINGS)).toThrow()
+  },
+)
 
 it('私有原thread不能让另一调用者或管理员继承recipient执行权，其他项目和实例也拒绝', async () => {
   const f = fixture()
@@ -400,7 +484,14 @@ it('原本人电脑自用保持来源项目与真实目录，不要求共享；�
     },
   })
   expect(await f.resolve('provider', { projectId: 'source', threadId: 'self-thread' })).toBe(true)
+  configured.preferences!.update('provider', { responseStreamingMode: 'turn' })
+  f.registry.markDisconnected(f.target.deviceId, f.epoch.connectionEpoch)
+  expect(forThread('self-thread', DEFAULT_SERVER_SETTINGS)).toMatchObject({
+    responseStreamingMode: 'turn', continueThreadsAfterServerUpdate: false,
+    compactIdleThreads: false, autoResumeLimitedThreads: false, snoozeLimitedThreads: false,
+  })
   f.registry.revokeWorkspace(f.device, f.target.registeredWorkspaceId)
+  expect(() => forThread('self-thread', DEFAULT_SERVER_SETTINGS)).toThrow()
   expect(await f.resolve('provider', { projectId: 'source', threadId: 'self-thread' })).toBe(false)
   expect(await f.resolve(null)).toBe(false)
 })

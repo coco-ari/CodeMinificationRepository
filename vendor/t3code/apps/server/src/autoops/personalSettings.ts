@@ -22,7 +22,8 @@ export const forThread = (threadId:string, settings:ServerSettings):ServerSettin
   const binding=access.getThreadBinding(threadId);
   if (!binding || binding.revokedAt || binding.compatibilityReadOnly) return {...settings,continueThreadsAfterServerUpdate:false,compactIdleThreads:false,autoResumeLimitedThreads:false,snoozeLimitedThreads:false};
   if (binding.executionBinding.kind === 'customer') {
-    access.customerRegistry.validateTarget(binding.ownerId,binding.projectId,binding.executionBinding,{requireOnline:false});
+    // 共享来源先核对实际调用者的当前授权，再由公开入口校验提供者原设备与目录。
+    access.customerExecutionSource(threadId,binding.ownerId);
     // These platform background workers cannot own the customer's process lifecycle.
     return {...forPrincipal(binding.ownerId,settings),continueThreadsAfterServerUpdate:false,compactIdleThreads:false,autoResumeLimitedThreads:false,snoozeLimitedThreads:false};
   }

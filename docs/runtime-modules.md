@@ -1404,3 +1404,23 @@ D2 撤权阶段已沿原 core state 正常完成：同 manager 正常启用新�
 独立现场证明 `.deployment/switch-955c661b-stable2-evidence/live-955c661b-independent-v1.json` SHA256 `032ad4100cf53d07a0056749c4f1b77f16529b8e8e0408c6aa841168238cf077`：实际web433679、launcher433525、native433537的cwd/Node/原DATA_DIR精确一致；公开HTML SHA256 `4fdc991cae09b7590710a3f25cb2e316b4c380869abce2566e870f5a37318bb4`与两个真实Web Worker逐字符合固定955发行，公开与回环健康均正常。基线全部当前档案、密钥、账号五表及完整resource-release表保持，原12任务SHA869bf640、9版本SHA5ee5884a和Agent59368身份保持；新鲜九类全局原生计数全0。没有数据库替换、恢复、备份、空库或账号重新接管。
 
 固定应用955的质量40406979523和运行40406979458均已通过，代码与自动测试状态不因文档提交改变。平台解码与MCP焦点部署现已生效；原未报告open人工恢复单项已验，C6真实推理和完整E1/E3矩阵继续待验，不把发行切换当这些业务通过。后续使用新实际PID与启动时点，旧410032/409885或恢复432498等配置只保留为历史证据，不能继续用于秘密加载或执行准入。
+
+## 原生短锁下项目删除的真实原收据恢复（2026-10-27）
+
+复用现行955的项目页、原生ProjectService与已部署删除续办，无产品改动。沿新owned名称acceptance.20261027.project-pending.v1正常创建项目fae20fad-23c5-4104-abca-e068cfa298ae，CREATE原UUID fa5b4046-4ddc-4820-9af1-7be889128446。真实native SQLite持BEGIN IMMEDIATE九秒，仅锁不改行；唯一DELETE原UUID b41de849-c447-4672-b2fe-48b1d34adfd6在5077ms返回503/PROJECT_DELETE_PENDING。页面显示pending并只GET同原UUID，9013ms锁自然ROLLBACK、total_changes=0；解锁后用户明确继续原删除，恰一条关联native project.deleted，未重发DELETE或新建第二项目。
+
+同条件步骤前后保持11：用户名、密码、登录；创建、名称、说明、保存；展开菜单、删除、确认；显式继续。业务写为正常create/DELETE/resume三次、两原UUID，六次原收据观察，等待独立记录（pending+UI GET9209ms、最终关闭817ms），未声称减少步骤。reader原GET返回null、原resume404，管理员错意图409，owner事实未被这些拒绝改变。真实失败可见并继续原请求，开发复用同owner合同，Agent用明确状态和原UUID核结果，没有向产品添加内部操作。
+
+实际原件 `.deployment/project-delete-pending-ui-955-actual-evidence-v1/project-delete-pending-ui-20261027-v1-evidence/result.json` SHA256 `8dc7dad984af97fc7d8ec76bd845b87acb7e3d6ef2671ccd3d80bafe2da07ff7`，索引3468a4ba；parent436123/Node436136/锁436239及本批browser均gone，after九类活动、计划、更新、客户lease/events均0。根以正常原管理员只GET两个原UUID，再查原项目404及D123项目/成员/公共预设/分配完整关系指纹，独立证据SHA256 `acc4d6dde37d789a7d59e0cf3b2e88049055b5a54dbb23bcfe3c705e5cefd054`，与原97f5记录一致。旧4487项目未重建，未作整个data目录全量审计。四类状态为原代码完成、相关自动测试通过、现行955生效、该原生锁/pending/原收据/显式续办单项真实通过；B1其他组合与整项验收继续。
+
+## 新共享问答的准备归属缺陷与最小修复（2026-10-27）
+
+固定955上线后，新owned正式0.4.1连接器434151正常hello，三方正常登录verify真实通过：提供者主动共享的原收据、独立管理员分配、recipient实际grok-4.6/medium与curated技能目录，未分配管理员拒绝、参数篡改403、跨项目不可见404、使用权不含设备管理权404分别记录，GET与准入不算模型执行。新casePrefix独立于原f59及旧v2，原配置只按当前GET和原提供者收据引用，不复制旧请求或重发原问题。
+
+首次新正例沿原binding、launch、附件单次上传与dispatch正常执行。线程eeac05da-cdda-4964-b14a-67c7aec84c04、消息d98409be-8be4-4ff3-b8c7-c44d134f12a6，recipient附件读取正对照及provider原生授权Failure已真实通过；模型准备最终失败CUSTOMER_DEVICE_NOT_FOUND，不能把这些前置当完整C6通过。正常recipient HTTP投影5f749466与双账本证明 `.deployment/c6-positive-955-v3-01-actual-evidence-v1/complete-owned-ledgers.json` SHA256 `ab78bddf9a1906776e5cf4cab7789f2eb52e7b1398d3f7a08c1b6304e1be3e31` 核唯一run自然failed、只有openSession/ensureThread两命令且完整收据已归并，没有startTurn，原源码未变。本机session为idle、锁/events0。native run.startedAt实际非空（22:35:40.275），22:35:40.297结束；原生准备生命周期开始不能视为模型推理开始。
+
+双账本最初辅助断言raw收据相等失败；实际仅openSession.result.cwd按CustomerEventValidation改为customer URI、ensureThread经固定合同补四个默认字段。已只读列完整差分，并按固定955源码逐字段重建准入投影后完整deepStrictEqual；没有忽略任意结果字段或声称raw相同。第二个辅助错误假定native startedAt必须null，也保留原版本，改据真实字段和无startTurn事实区分。11份公开原件索引SHA256 `34739c76b772d3cb65ab22b165f1ae68bdb1036622606ecac20fe2cfe499eca0`，不含Cookie/网关key/设备凭据或原环境。原f59人工失败完整恢复仍独立有效。
+
+缺陷先比较两个可验证原因：① RunExecutionService准备先调用personalSettings.forThread，它把binding.ownerId=实际recipient与目标项目直接传给设备registry.validateTarget；设备本属provider，真实共享fixture精确复现CUSTOMER_DEVICE_NOT_FOUND；②后续Adapter取技能的scope若丢失也可能错用recipient，但该处已取scope.providerId且执行在个人设置之后，独立settings红测即可复现，排除此原因。最小改动仅personalSettings一个调用，改用已有公开access.customerExecutionSource(threadId,binding.ownerId)，复核当前实际调用者的共享/分配/profile及提供者设备和原目录。个人偏好仍读取recipient，平台四个后台开关仍禁用，不放宽registry设备归属或继承provider权限。
+
+复用真实共享/独立管理员/recipient fixture新增回归，原红2失败/6通过保留；修复后关联Native五文件145项、Node四文件35项、server类型通过，根独立Registry12项通过。未分配/撤回、profile、成员身份、设备/目录、模型失效分别拒绝，自用离线个人设置保留。冻结 `.deployment/c6-preparation-owner-20261027-v1/freeze-v1/manifest.json` SHA256 `a9c33a7fc0151c0cf952d25b87416f8180b9958b4087f36186c958ef0c687861`。两文件完整格式检查在HEAD基线本已失败，证据另存；本批未全文件格式化，diff检查通过。此修复代码和相关自动检查完成，完整CI、发行生效及新真实模型复验待完成；原eeac问题和全部收据保留，未重发或替换成成功。
