@@ -16,6 +16,7 @@ import { createWorkspaceStore } from '../agent-demo/t3-adapters/workspaces.mjs'
 import { createWorkspaceAuthoring } from '../agent-demo/t3-adapters/workspace-authoring/index.ts'
 import { createProjectCredentialService } from '../agent-demo/t3-adapters/credentials.ts'
 import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-management.ts'
+import { createManagedWorkspaceUpdates } from '../agent-demo/t3-adapters/workspace-update-runtime.ts'
 import { createCurrentWorkspace } from '../agent-demo/t3-adapters/workspace-current.ts'
 import { handleWorkspaceAuthoringRequest } from '../agent-demo/t3-adapters/workspace-authoring-http.ts'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
@@ -215,7 +216,9 @@ async function fixture(t, initialization) {
     },
   }
   const service = createWorkspaceManagement({ access, store, authoring, credentials, git })
+  const updates = createManagedWorkspaceUpdates({ dataDir, access, store, service })
   t.after(async () => {
+    await updates.close()
     await service.close()
     await store.close()
     sessionDb.close()
@@ -237,6 +240,7 @@ async function fixture(t, initialization) {
       bytes,
       service,
       store,
+      updates,
     })
   }
   const mutation = () => request(authoring.overview(projectId, owner).revision)
@@ -1786,6 +1790,80 @@ async function legacyDeploymentFailure(f, input, resolution) {
   )
   return f.finish(task)
 }
+
+test('部署来源维护按真实过期任务和原输入身份归还pin，撤权不借管理员且非部署引用继续保护', async t => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const input = {requestId:'maintenance-deployment',sources:[{sourceId:source.id,refKind:'default',ref:'',mountPath:source.mountPath}],contexts:[{service:'frontend',root:source.mountPath,workingDirectory:'.'}]}
+  const done = await f.finish(f.service.startDeploymentPackages(projectId,input,owner))
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(done.status,'completed')
+  const original = f.authoring.deploymentInput(projectId,input.requestId,sha(JSON.stringify(input)),owner)
+  assert.ok(original)
+  const reference = `deployment:${original.id}`
+  assert.ok(f.store.planCleanupVersions(projectId,[original.versionId],owner).reasons[original.versionId].some(value=>value.reference===reference))
+  assert.deepEqual(f.store.packageCleanupCandidates([]),[])
+  t.mock.timers.enable({apis:['Date'],now:Date.now()+8*24*60*60*1000})
+  const candidate = f.store.packageCleanupCandidates([]).find(value=>value.taskId===done.id)
+  assert.ok(candidate)
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance({...candidate,actorId:'second'}),false)
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance({...candidate,taskId:'different-task'}),false)
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance({...candidate,sourceVersionId:'different-version'}),false)
+  const preparing = f.authoring.prepareInput(projectId,'maintenance-unrelated-input',owner,{workspaceType:'internal',revision:f.mutation().expectedRevision,repositories:original.repositories})
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance(candidate),false)
+  f.authoring.saveInput(preparing,owner)
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance(candidate),false)
+  f.authoring.releaseInput(projectId,preparing.id,owner)
+  const scope = f.memberships.find(value=>value.userId===owner)
+  scope.status='disabled'
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance(candidate),true)
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance(candidate),true)
+  scope.status='active'
+  assert.ok(!f.store.planCleanupVersions(projectId,[original.versionId],owner).reasons[original.versionId].some(value=>value.reference===reference))
+  assert.equal(f.store.getVersion(projectId,original.versionId).id,original.versionId)
+  assert.equal(f.store.overview(projectId).releases.find(value=>value.id===done.releaseId).id,done.releaseId)
+})
+
+test('部署来源维护遇到本项目活动准备或收据读取故障保持pin，准备终止并恢复事实后才归还', async t => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const input = {requestId:'maintenance-preparation-guard',sources:[{sourceId:source.id,refKind:'default',ref:'',mountPath:source.mountPath}],contexts:[{service:'frontend',root:source.mountPath,workingDirectory:'.'}]}
+  const done = await f.finish(f.service.startDeploymentPackages(projectId,input,owner))
+  await new Promise(resolve=>setImmediate(resolve))
+  const original = f.authoring.deploymentInput(projectId,input.requestId,sha(JSON.stringify(input)),owner)
+  const reference = `deployment:${original.id}`
+  t.mock.timers.enable({apis:['Date'],now:Date.now()+8*24*60*60*1000})
+  const candidate = f.store.packageCleanupCandidates([]).find(value=>value.taskId===done.id)
+  assert.ok(candidate)
+  const resolving = deferred(), gate = deferred(), cancellation = new AbortController()
+  f.control.beforeResolve = async () => {resolving.resolve();await gate.promise}
+  const preparing = f.service.sync(projectId,f.mutation(),owner,cancellation.signal)
+  await resolving.promise
+  try {assert.equal(f.service.releaseDeploymentSourceForMaintenance(candidate),false)} finally {cancellation.abort();gate.resolve()}
+  await assert.rejects(preparing)
+  const read = f.authoring.withDeploymentSourceMaintenanceReceipt
+  f.authoring.withDeploymentSourceMaintenanceReceipt = () => {throw new Error('隔离原收据读取失败')}
+  assert.throws(()=>f.service.releaseDeploymentSourceForMaintenance(candidate),/隔离原收据读取失败/u)
+  assert.ok(f.store.planCleanupVersions(projectId,[original.versionId],owner).reasons[original.versionId].some(value=>value.reference===reference))
+  f.authoring.withDeploymentSourceMaintenanceReceipt = read
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance(candidate),true)
+})
+
+test('部署任务确定失败但固定输入交接收据未知时保持部署来源pin，不用过期代替原请求事实', async t => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const input = {requestId:'maintenance-unknown-input',sources:[{sourceId:source.id,refKind:'default',ref:'',mountPath:source.mountPath}],contexts:[{service:'frontend',root:source.mountPath,workingDirectory:'.'}]}
+  f.authoring.saveDeploymentInput = () => {throw Object.assign(new Error('隔离部署输入收据丢失'),{code:'FIXTURE_DEPLOYMENT_INPUT_UNKNOWN'})}
+  const done = await f.finish(f.service.startDeploymentPackages(projectId,input,owner))
+  await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(done.status,'failed')
+  const captured = f.authoring.captureByRequest(projectId,input.requestId,owner)
+  t.mock.timers.enable({apis:['Date'],now:Date.now()+8*24*60*60*1000})
+  const candidate = f.store.packageCleanupCandidates([]).find(value=>value.taskId===done.id)
+  assert.ok(candidate)
+  assert.equal(f.service.releaseDeploymentSourceForMaintenance(candidate),false)
+  assert.ok(f.store.planCleanupVersions(projectId,[candidate.sourceVersionId],owner).reasons[candidate.sourceVersionId].some(value=>value.reference===`deployment:${captured.id}`))
+})
 
 test('旧部署failed记录通过GET或原POST核对收敛捕获，保留原任务标识和失败事实', async (t) => {
   const f = await fixture(t)

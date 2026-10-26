@@ -366,6 +366,16 @@ B1 的引用保护盘点发现：新建项目第一次打开工作区会自动�
 - 工作区页面只组合路由、任务和表单；[WorkspaceFileBrowser](../vendor/t3code/apps/web/src/autoops/WorkspaceFileBrowser.tsx) 适配原生文件浏览与固定版本读取，workspaceViewState 仅供工作区内部共享阅读偏好。技能页面保留选择、对话框与导航，[useSkillLibraryCatalog](../vendor/t3code/apps/web/src/autoops/useSkillLibraryCatalog.ts) 负责目录读取、变更与撤权；旧页面写入结果不能覆盖新页面状态。
 - [BusinessRuntime](../vendor/t3code/apps/server/src/autoops/BusinessRuntime.ts) 在现有 Effect 宿主中装配业务生命周期，[business-runtime.mjs](../agent-demo/t3-adapters/business-runtime.mjs) 只协调各模块公开停止/关闭端口。初始化失败同样释放已取得资源；已停止的配置实例不会被惰性读取重新创建。具体排空策略及验收见下表与关闭测试。
 
+## 部署临时包与捕获引用回收（2026-10-26）
+
+工作区包按原任务、请求、操作者及固定源码版本查询七天前的明确终态候选；部署引擎拥有版本链与活动引用，中心源码归档继续保留恢复所需原包。仅下载包、明确失败包及不再被引用的部署缓存可以回收，当前资料、其他输入、排队、活动或未知结果继续保护；不会因用户撤权而借管理员重新读取私有资料。捕获所有者从原收据同步核对精确身份并归还部署 pin；缺少方法、读取失败、异步或非 true 证明均保留整批，删除前重新读取部署引用。已退休候选不再阻塞下一轮。
+
+归档逻辑删除和物理删除分别持久记录，失败逐项重试；登记失败留下的受控 ZIP/临时残件仅在超过保留期、没有活动/未知任务和版本链保护时清理。原任务、清单和请求收据保留；包回收后下载明确返回 410，重试原请求不会重新打包或改用最新源码。项目删除预检继续计入未物理回收的包及退休版本。
+
+复现先覆盖归档删除失败、捕获证明 false/抛错/Promise、操作者撤权、连续两轮旧候选阻塞及未知输入交接；对应最小修复与回归位于 source-archives、workspaces、deployments 及 current/authoring 公开维护口。`node --test --test-concurrency=1 test/deployment-capture-maintenance.test.mjs test/deployment-package-retention.test.mjs test/t3-deployments.test.mjs test/t3-workspace-package-retention.test.mjs` 在整合分支 31/31 通过；current 中三项真实所有者/SQLite/Worker 用例验证精确匹配、非部署引用、准备中和未知收据保护。旧部署排空测试仅补齐 D1 新公开查询口，不改变测试目标。日志保存在本机 `.deployment/d6-fourth-integrated.log` 和 `.deployment/deployment-source-maintenance-after.log`。
+
+用户保留原请求及恢复链，开发者通过两个所有者的同步公开合同维护引用，Agent 从原收据及明确 410 判断结果。本批没有界面步骤变化。完整 CI、服务器时间触发、真实 Java/static 发布和恢复仍待验，以上本机真实所有者组合不能代替线上业务验收。
+
 ## 工作区来源与资料维护验收
 
 本节属于第三步新增能力，不改写第二步已完成基线。产品定义维护在[工作台设计](../examples/project-workbench-design.md#仓库来源与日常资料维护)。

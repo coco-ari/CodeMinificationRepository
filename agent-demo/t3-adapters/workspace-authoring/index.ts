@@ -23,6 +23,7 @@ import type {
   WorkspaceInputSelection,
   WorkspaceSourceSyncRecord,
   WorkspaceDeploymentSourceCapture,
+  WorkspaceDeploymentSourceMaintenanceCandidate,
   WorkspaceAuthoringCapture,
   WorkspaceAuthoringMutation,
   WorkspaceAuthoringOverview,
@@ -1686,6 +1687,69 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       if (row.actor_id !== actorId || row.fingerprint !== fingerprint)
         fail(409, 'WORKSPACE_REQUEST_CONFLICT', '部署请求已经固定其他来源或构建上下文')
       return JSON.parse(text(row, 'value')) as WorkspaceDeploymentSourceCapture
+    },
+    // 仅供来源所有者核对已确认终态的维护操作；不借当前成员授权，也不向传输层公开。
+    withDeploymentSourceMaintenanceReceipt(
+      candidate: WorkspaceDeploymentSourceMaintenanceCandidate,
+      release: (
+        input: WorkspaceDeploymentSourceCapture,
+        capture: WorkspaceAuthoringCapture,
+      ) => boolean,
+    ): boolean {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      id(candidate.projectId)
+      id(candidate.actorId)
+      requestIdentifier(candidate.requestId)
+      return transaction.run(() => {
+        const row = db
+          .prepare('SELECT * FROM authoring_deployment_inputs WHERE project_id=? AND request_id=?')
+          .get(candidate.projectId, candidate.requestId)
+        if (!row || row.actor_id !== candidate.actorId) return false
+        const input = JSON.parse(text(row, 'value')) as WorkspaceDeploymentSourceCapture
+        if (
+          input.projectId !== candidate.projectId ||
+          input.requestId !== candidate.requestId ||
+          input.versionId !== candidate.sourceVersionId
+        )
+          return false
+        const owned = captureRow(candidate.projectId, input.id)
+        if (owned.actor_id !== candidate.actorId) return false
+        const captured = captureFrom(owned)
+        if (
+          captured.resolution !== 'resolved' ||
+          captured.files.length ||
+          captured.directories.length
+        )
+          return false
+        const used = db
+          .prepare(
+            `
+          SELECT 1 FROM authoring_inputs i WHERE project_id=? AND coalesce(json_extract(i.value,'$.status'),'unknown')<>'released' AND
+            (id=? OR request_id=? OR json_extract(i.value,'$.captureId')=? OR EXISTS(SELECT 1 FROM json_each(i.value,'$.repositories') r WHERE json_extract(r.value,'$.versionId')=?))
+          UNION ALL
+          SELECT 1 FROM authoring_input_preparations p WHERE project_id=? AND
+            (json_extract(p.value,'$.id')=? OR request_id=? OR json_extract(p.value,'$.captureId')=? OR EXISTS(SELECT 1 FROM json_each(p.value,'$.repositories') r WHERE json_extract(r.value,'$.versionId')=?))
+          LIMIT 1
+        `,
+          )
+          .get(
+            candidate.projectId,
+            input.id,
+            candidate.requestId,
+            input.id,
+            input.versionId,
+            candidate.projectId,
+            input.id,
+            candidate.requestId,
+            input.id,
+            input.versionId,
+          )
+        if (used || !release(input, captured)) return false
+        db.prepare(
+          "UPDATE authoring_captures SET status='released' WHERE project_id=? AND id=?",
+        ).run(candidate.projectId, input.id)
+        return true
+      })
     },
     saveDeploymentInput(
       value: WorkspaceDeploymentSourceCapture,

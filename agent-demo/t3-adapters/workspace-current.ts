@@ -13,6 +13,7 @@ import type {
   WorkspaceAuthoringMutation,
   WorkspaceDeploymentSourceInput,
   WorkspaceDeploymentSourceCapture,
+  WorkspaceDeploymentSourceMaintenanceCandidate,
   WorkspaceInputCapture,
   WorkspaceInputRepository,
   WorkspaceMaterialContent,
@@ -1187,6 +1188,83 @@ export function createCurrentWorkspace({
     releaseDeploymentSource(project: string, inputId: string, actor: string) {
       access.requireProjectActionForActor(actor, project, 'source.generate')
       store.releaseVersion(project, `deployment:${inputId}`)
+    },
+    releaseDeploymentSourceForMaintenance(
+      candidate: WorkspaceDeploymentSourceMaintenanceCandidate,
+    ): boolean {
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        ['projectId', 'requestId', 'actorId', 'taskId', 'sourceVersionId'].some(
+          (key) =>
+            typeof candidate[key as keyof typeof candidate] !== 'string' ||
+            !candidate[key as keyof typeof candidate] ||
+            candidate[key as keyof typeof candidate].length > 512,
+        )
+      )
+        fail(400, 'WORKSPACE_DEPLOYMENT_MAINTENANCE_INVALID', '部署来源维护身份无效')
+      const preparing = () =>
+        [...works.keys()].some((key) => JSON.parse(key)[0] === candidate.projectId)
+      const eligible = () =>
+        store
+          .packageCleanupCandidates([])
+          .some((value) =>
+            ['projectId', 'requestId', 'actorId', 'taskId', 'sourceVersionId'].every(
+              (key) =>
+                value[key as keyof typeof value] === candidate[key as keyof typeof candidate],
+            ),
+          )
+      if (preparing() || !eligible()) return false
+      return authoring.withDeploymentSourceMaintenanceReceipt(candidate, (input, captured) => {
+        const tasks = store.overview(candidate.projectId).tasks
+        const task = tasks.find((value) => value.id === candidate.taskId)
+        if (
+          !task ||
+          task.type !== 'packages' ||
+          task.requestId !== candidate.requestId ||
+          !['completed', 'failed', 'interrupted'].includes(task.status) ||
+          tasks.some(
+            (value) =>
+              value.requestId === candidate.requestId &&
+              ['queued', 'running'].includes(value.status),
+          ) ||
+          preparing() ||
+          !eligible()
+        )
+          return false
+        const version = store.getVersion(candidate.projectId, candidate.sourceVersionId)
+        if (
+          version.cachePurpose !== 'deployment' ||
+          version.status !== 'published' ||
+          version.source.documents?.length ||
+          captured.sources.length !== input.repositories.length ||
+          version.source.repositories.length !== input.repositories.length
+        )
+          return false
+        for (const repository of input.repositories) {
+          const source = captured.sources.find((value) => value.id === repository.sourceId)
+          const resolved = captured.resolvedRepositories?.find(
+            (value) => value.sourceId === repository.sourceId,
+          )
+          const fixed = version.source.repositories.find(
+            (value) => value.sourceId === repository.sourceId,
+          )
+          if (
+            !source ||
+            !resolved ||
+            !fixed ||
+            repository.versionId !== version.id ||
+            digest(source) !== digest(repository.source) ||
+            resolved.commit !== repository.commit ||
+            fixed.commit !== repository.commit ||
+            fixed.path !== source.mountPath ||
+            fixed.configurationHash !== digest(source)
+          )
+            return false
+        }
+        store.releaseVersion(candidate.projectId, `deployment:${input.id}`)
+        return true
+      })
     },
     planCleanupVersions(project: string, versionIds: string[], actor: string) {
       access.requireProjectActionForActor(actor, project, 'workspace.cleanup')

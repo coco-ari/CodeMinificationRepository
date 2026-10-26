@@ -56,7 +56,7 @@
 | D3 | 活动/排队/未知输入临时保护、终态释放和自动回收 | 待实现 | [authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 有原件回收，[thread-inputs](../agent-demo/t3-adapters/thread-inputs.ts) 有绑定；历史引用仍须按新规则释放及明确清理提示 |
 | D4 | 部署独立分支、固定 Commit、完整构建上下文源码包 | 已实现 | [deployments](../agent-demo/t3-adapters/deployments.mjs)、[源码回归](../test/deployment-workspace-source.test.mjs)；仓库连接拆分后复用、真实用户仓库打包待验 |
 | D5 | 版本链、配置快照、原包恢复、失败恢复与收据 | 待验证 | [DeploymentService](../src/deployment.mjs)、[Agent](../agent/main.mjs) 已有核心；[适配记录](runtime-modules.md#main-部署核心适配2026-10-25) 尚缺新增 Java/static 隔离目标完整真实验收 |
-| D6 | 部署包按版本链/活动引用保留、临时包自动回收 | 待实现 | 复用 [SourceArchives](../src/source-archives.mjs) 引用保护；需核对中心工作区包与部署归档的生命周期和失败/仅下载回收 |
+| D6 | 部署包按版本链/活动引用保留、临时包自动回收 | 待验证 | [工作区包所有者](../agent-demo/t3-adapters/workspaces.mjs)、[部署协调](../agent-demo/t3-adapters/deployments.mjs) 与 [SourceArchives](../src/source-archives.mjs) 已接实际引用、七天保留、清理重试及原收据；真实捕获所有者在操作者撤权后同步归还精确引用，未知或非 true 证明保留本批。31 项包/部署组合与 3 项所有者维护回归通过，完整 CI 和服务器实际部署/回收待验；[本批证据](runtime-modules.md#部署临时包与捕获引用回收2026-10-26) |
 | E1 | 集中项目配置、环境页与统一助手整页交互 | 待实现 | 项目目录的基本页面已复用锁定 T3 外壳、SettingsGroup/SettingsRow 和 Dialog；成员分配、仓库/凭证、环境 MCP/服务器与统一助手整页仍待补齐，不能据此宣称集中配置完成 |
 | E2 | 新角色成功/拒绝/撤回、参数篡改、共享与跨环境 | 待验证 | 每批增加真实服务/接口及关键交互负例，旧角色测试不能作为新规则验收 |
 | E3 | 浅深色、桌面/窄短窗、长数据、滚动、键盘与焦点 | 待验证 | 现有公共壳有历史证据；新页面逐流程自动化及整页实测，记录前后全部操作次数 |

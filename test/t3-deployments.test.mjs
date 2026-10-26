@@ -529,7 +529,7 @@ test('宿主停止接单时已成功固定的源码按原持久收据继续归�
   }
   const f = await fixture(t,{workspaceManagement:port}), r = await records(f)
   workspaceStore = f.workspaceStore
-  management = createWorkspaceManagement({access:{requireWorkspaceReader(){},requireWorkspaceActor(){}},store:workspaceStore,authoring:{},credentials:{},git:{}})
+  management = createWorkspaceManagement({access:{requireWorkspaceReader(){},requireWorkspaceActor(){}},store:workspaceStore,authoring:{currentAdoptionProjects(){return []}},credentials:{},git:{}})
   const service = (await f.request('/services','POST',{name:'排空发布',kind:'java',module:'.',requestId:randomUUID()})).body.service
   const target = (await f.request('/targets','POST',{serviceId:service.id,environmentId:'env-one',serverId:r.server.server.id,config:{kind:'java'},requestId:randomUUID()})).body.target
   const submission = {targetId:target.id,action:'deploy',service:'backend',configKey:target.configKey,requestId:randomUUID(),sourceSelection:{sources:[{sourceId:'source-one',refKind:'branch',ref:'release', mountPath: 'app' }],contexts:[{service:'backend',root:'app',workingDirectory:'.'}]}}

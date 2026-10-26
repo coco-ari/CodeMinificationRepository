@@ -222,6 +222,13 @@ export interface WorkspaceDeploymentSourceCapture {
   repositories: WorkspaceInputRepository[]
   contexts: WorkspaceBuildContext[]
 }
+export interface WorkspaceDeploymentSourceMaintenanceCandidate {
+  projectId: string
+  requestId: string
+  actorId: string
+  taskId: string
+  sourceVersionId: string
+}
 export interface WorkspaceSourceSyncRecord {
   sourceId: string
   configurationHash: string
