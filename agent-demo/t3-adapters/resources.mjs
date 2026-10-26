@@ -319,7 +319,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       }
       return {entries}
     },
-    requireContext(threadId, context, actorId) {
+    requireContext(threadId, context, actorId, claim) {
       let allowed
       for (const record of context?.records || []) if (record.kind === 'mention') {
         assertPath(record.path)
@@ -338,7 +338,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
             catch (error) { if (error.code !== 'WORKSPACE_INPUT_NOT_FOUND') throw error }
           }
           if (!selected || !(record.path === selected.root || entriesWithFolders(selected.files).some(entry => entry.path === record.path))) fail()
-          access.retainInputReference(threadId, identity.inputId, selected.actorId, actorId)
+          access.retainInputReference(threadId, identity.inputId, selected.actorId, actorId, claim)
           continue
         }
         allowed ??= entriesWithFolders(forThread(threadId, false, actorId))

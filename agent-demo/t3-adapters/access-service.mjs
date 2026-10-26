@@ -2,6 +2,7 @@ import { assertQuestionBinding, nativeQuestionModel } from './assistants/index.t
 import { createProjectAccess } from './project-access.mjs'
 import { createCustomerRegistry, normalizeExecutionBinding, requireCustomerAgentsEnabled } from './customer-registry.mjs'
 import { createAccessIdentity, initializeAccessIdentitySchema } from './access-identity.mjs'
+import { createAccessInputLifecycle, initializeInputLifecycleSchema } from './access-input-lifecycle.mjs'
 import { projectAccessBootstrap } from './access-bootstrap.mjs'
 
 // 业务授权拥有线程和附件的业务绑定，原生运行与事件仍由 T3 管理。
@@ -108,6 +109,7 @@ export function initializeAutoOpsAccessSchema(db) {
   } catch (error) { db.exec('ROLLBACK TO autoops_actor_upgrade; RELEASE autoops_actor_upgrade'); throw error }
   if (!db.prepare('PRAGMA table_info(t3_attachment_access)').all().some((column) => column.name === 'metadata_json'))
     db.exec('ALTER TABLE t3_attachment_access ADD COLUMN metadata_json TEXT')
+  initializeInputLifecycleSchema(db)
 }
 
 export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry, deploymentEnabled, configuration, questions }) {
@@ -115,6 +117,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
   const { refresh } = identity
+  const inputLifecycle = createAccessInputLifecycle({db:bindingDb,fail,identifier,now})
   const { membershipForUser, requireProjectActionForUser, requireEnvironmentQueryForUser, requireWorkspaceManagerForUser, requireCredentialActor, requireDeploymentActor, requireDeploymentAction: deploymentActionForUser, projectCapabilities, requireDeploymentNodeManagerForUser } = createProjectAccess({ catalog, fail, deploymentEnabled })
   const customerRegistry = suppliedCustomerRegistry || createCustomerRegistry({
     db: bindingDb, now,
@@ -480,6 +483,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       bindingDb.prepare("INSERT INTO t3_request_actors VALUES(?,?,'queued-run.edit',?,?,?) ON CONFLICT(command_id) DO NOTHING").run(commandId, threadId, runId, current.id, new Date(now()).toISOString())
       const stored = this.getQueuedEditActor(threadId, commandId, runId)
       if (!stored || stored.actorId !== current.id) fail(409, 'MESSAGE_ACTOR_CONFLICT', '原编辑请求已属于其他调用者或任务')
+      inputLifecycle.armWorkspaceVersionResource(threadId)
     },
     getQueuedEditActor(threadId, commandId, runId) {
       const row = bindingDb.prepare("SELECT actor_id FROM t3_request_actors WHERE command_id=? AND thread_id=? AND target_id=? AND kind='queued-run.edit'").get(identifier(commandId, '命令ID'), identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
@@ -500,6 +504,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
         const previous = bindingDb.prepare('SELECT * FROM t3_message_actors WHERE command_id=? OR (thread_id=? AND message_id=?)').all(commandId, threadId, messageId)
         if (previous.some(row => row.thread_id !== threadId || row.message_id !== messageId || row.command_id !== commandId || row.actor_id !== current.id)) fail(409, 'MESSAGE_ACTOR_CONFLICT', '消息已固定其他调用者或原请求')
         bindingDb.prepare('INSERT INTO t3_message_actors VALUES(?,?,?,?,?) ON CONFLICT(thread_id,message_id) DO NOTHING').run(threadId, messageId, commandId, current.id, new Date(now()).toISOString())
+        inputLifecycle.armWorkspaceVersionResource(threadId)
         bindingDb.exec('COMMIT')
       } catch (error) { bindingDb.exec('ROLLBACK'); throw error }
     },
@@ -529,11 +534,30 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       return bindingDb.prepare('SELECT i.*,b.project_id,b.environment_id FROM t3_thread_inputs i JOIN t3_thread_bindings b ON b.thread_id=i.thread_id WHERE i.thread_id=? AND i.run_id=?').all(identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
         .map(row => ({ threadId: row.thread_id, runId: row.run_id, projectId: row.project_id, environmentId: row.environment_id || null, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at }))
     },
+    inputResourceSnapshot: inputLifecycle.inputResourceSnapshot,
+    workspaceVersionResourceSnapshot:inputLifecycle.workspaceVersionResourceSnapshot,
+    releaseWorkspaceVersionResource:inputLifecycle.releaseWorkspaceVersionResource,
+    recordNativeInputTurn(threadId,providerTurnId) {
+      const input=this.listThreadInputs(threadId).at(0)
+      if(!input?.actorVerified) fail(409,'THREAD_INPUT_MISSING','原生子轮缺少可信原输入，不能改读最新资料')
+      const {binding}=this.requireToolThread(threadId,input.actorId)
+      inputLifecycle.recordNativeInputTurn(threadId,providerTurnId,binding.projectId,input.inputId,input.inputOwnerId,input.actorId)
+      return {projectId:binding.projectId,inputId:input.inputId,inputOwnerId:input.inputOwnerId,workspaceType:binding.workspaceType??'internal'}
+    },
+    recordRunInputRequest(threadId,runId,requestId,actorId) {
+      const {binding}=this.requireToolThread(threadId,actorId)
+      return inputLifecycle.recordRunInputRequest(threadId,runId,binding.projectId,requestId,actorId,binding.workspaceType??'internal')
+    },
+    completeRunInputRequest: inputLifecycle.completeRunInputRequest,
+    inputPreparationCandidates: inputLifecycle.inputPreparationCandidates,
+    inputRequestThreads: inputLifecycle.inputRequestThreads,
+    inputResourceCandidates: inputLifecycle.inputResourceCandidates,
+    withInputResourceSnapshot: inputLifecycle.withInputResourceSnapshot,
     nativeSubagentRunReferenced(threadId, runId) {
       return Boolean(bindingDb.prepare('SELECT 1 FROM t3_native_subagent_bindings n JOIN t3_thread_inputs i ON i.thread_id=n.child_thread_id WHERE n.parent_thread_id=? AND i.run_id=? LIMIT 1').get(identifier(threadId, '会话ID'), identifier(runId, '任务ID')))
     },
     workspaceVersionReferences(projectId) {
-      return bindingDb.prepare('SELECT DISTINCT workspace_version_id AS id FROM t3_thread_bindings WHERE project_id=? AND workspace_version_id IS NOT NULL').all(identifier(projectId, '项目ID')).map(row => row.id)
+      return bindingDb.prepare('SELECT DISTINCT b.workspace_version_id AS id FROM t3_thread_bindings b WHERE b.project_id=? AND b.workspace_version_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM t3_workspace_version_resource_releases r WHERE r.thread_id=b.thread_id AND r.version_id=b.workspace_version_id)').all(identifier(projectId, '项目ID')).map(row => row.id)
     },
     deletionReferences(projectId, environmentId) {
       const count = Number(bindingDb.prepare(`SELECT COUNT(*) AS n FROM t3_thread_bindings WHERE project_id=? AND revoked_at IS NULL${environmentId === undefined ? '' : ' AND environment_id=?'}`).get(projectId,...(environmentId === undefined ? [] : [environmentId]))?.n ?? 0)
@@ -548,10 +572,9 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       const current = refresh(principal)
       return current.role === 'admin' && current.kind !== 'external' || (catalog.removedProjectAudience?.(projectId) ?? []).includes(current.id)
     },
-    retainInputReference(threadId, inputId, actorId, callerId) {
-      this.requireToolThread(threadId, callerId)
-      identifier(inputId, '资料输入ID'); identifier(actorId, '用户ID')
-      bindingDb.prepare('INSERT INTO t3_thread_input_references VALUES(?,?,?,?) ON CONFLICT(thread_id,input_id) DO NOTHING').run(threadId, inputId, actorId, new Date(now()).toISOString())
+    retainInputReference(threadId, inputId, actorId, callerId, claim) {
+      const scope=this.requireToolThread(threadId, callerId)
+      inputLifecycle.retainReference(threadId,inputId,actorId,scope.actorId,claim)
     },
     inputReferences(threadId) {
       return bindingDb.prepare('SELECT input_id,actor_id FROM t3_thread_input_references WHERE thread_id=?').all(identifier(threadId, '会话ID')).map(row => ({ inputId: row.input_id, actorId: row.actor_id }))
@@ -629,12 +652,19 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       const stored = bindingDb.prepare('SELECT owner_id,thread_id FROM t3_attachment_access WHERE attachment_id=?').get(attachmentId)
       if (stored.thread_id !== threadId || stored.owner_id !== binding.ownerId) fail(409, 'ATTACHMENT_SCOPE_CONFLICT', '生成附件归属不一致')
     },
-    forkBinding(principal, sourceThreadId, targetThreadId) {
+    forkBinding(principal, sourceThreadId, targetThreadId, commandId) {
       const source = requireThread(principal, sourceThreadId)
       if (source.executionBinding.kind === 'customer') fail(403, 'CUSTOMER_FORK_DISABLED', '客户工作区首版未开放会话分支')
       const target = bindThread(principal, { ...source, threadId: targetThreadId, visibility: 'private' })
-      for (const input of this.listThreadInputs(sourceThreadId)) this.retainInputReference(targetThreadId, input.inputId, source.ownerId)
-      for (const reference of this.inputReferences(sourceThreadId)) this.retainInputReference(targetThreadId, reference.inputId, reference.actorId)
+      if(commandId) {
+        identifier(commandId,'命令ID')
+        bindingDb.prepare("INSERT INTO t3_request_actors VALUES(?,?,'thread.fork',?,?,?) ON CONFLICT(command_id) DO NOTHING").run(commandId,targetThreadId,sourceThreadId,principal.id,new Date(now()).toISOString())
+        const original=bindingDb.prepare('SELECT * FROM t3_request_actors WHERE command_id=?').get(commandId)
+        if(original.thread_id!==targetThreadId||original.kind!=='thread.fork'||original.target_id!==sourceThreadId||original.actor_id!==principal.id) fail(409,'THREAD_FORK_IDENTITY_CHANGED','原分叉命令已固定其他来源')
+      }
+      const claim=commandId?{kind:'fork',commandId,sourceThreadId}:undefined
+      for (const input of this.listThreadInputs(sourceThreadId)) this.retainInputReference(targetThreadId, input.inputId, input.inputOwnerId, principal.id,claim)
+      for (const reference of this.inputReferences(sourceThreadId)) this.retainInputReference(targetThreadId, reference.inputId, reference.actorId, principal.id,claim)
       return target
     },
     recordLegacyNativeFork(sourceThreadId, targetThreadId, sourceNativeId, targetNativeId) {

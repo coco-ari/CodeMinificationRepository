@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off -- 当前资料编排复用工作区队列，原件和固定源码仍由各自存储所有者管理。
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalConsole:off -- 当前资料在 Node 边界编排队列、原件和固定源码；收尾故障只记录无敏感内容的固定诊断。
 import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -72,6 +72,10 @@ export function createCurrentWorkspace({
     { fingerprint: string; controller: AbortController; work: Promise<unknown> }
   >()
   const completions = new Set<Promise<unknown>>()
+  const externalSettlements = new Set<string>()
+  const preparationListeners = new Set<
+    (value: { projectId: string; requestId: string; actorId: string }) => void
+  >()
   function readPermission(
     project: string,
     actor: string,
@@ -106,7 +110,17 @@ export function createCurrentWorkspace({
       return run(combined)
     })
     works.set(key, { fingerprint, controller, work })
-    void work.finally(() => works.delete(key)).catch(() => {})
+    void work
+      .finally(() => {
+        works.delete(key)
+        for (const listener of preparationListeners)
+          try {
+            listener({ projectId: project, requestId: request, actorId: actor })
+          } catch {
+            /* 通知不改变所属任务收据；接收方重新读取真实状态。 */
+          }
+      })
+      .catch(() => {})
     return work
   }
   function syncState(
@@ -336,7 +350,8 @@ export function createCurrentWorkspace({
   function readInput(project: string, inputId: string, actor: string) {
     const value = authoring.readInput(project, inputId, actor)
     readPermission(project, actor, value.workspaceType)
-    if (value.status !== 'active') fail(410, 'WORKSPACE_INPUT_RELEASED', '本轮资料输入已释放')
+    if (value.status !== 'active')
+      fail(410, 'WORKSPACE_INPUT_RELEASED', '原资料已更新或清理，不能改读最新内容')
     return value
   }
   function repositoryForRecord(
@@ -513,10 +528,21 @@ export function createCurrentWorkspace({
     input: { requestId: string; workspaceType: 'internal' | 'external' },
     actor: string,
     signal?: AbortSignal,
+    requireOriginal = false,
   ): Promise<WorkspaceInputCapture> {
     readPermission(project, actor, input.workspaceType)
     const previous = authoring.inputByRequest(project, input.requestId, actor, input.workspaceType)
     if (previous) return readInput(project, previous.id, actor)
+    if (
+      requireOriginal &&
+      !works.has(JSON.stringify([project, input.requestId, actor])) &&
+      !authoring.preparedInputByRequest(project, input.requestId, actor, input.workspaceType)
+    )
+      fail(
+        409,
+        'WORKSPACE_INPUT_ORIGINAL_UNAVAILABLE',
+        '原任务资料选择未能固定，无法恢复原输入；请开始新一轮',
+      )
     return track(
       project,
       input.requestId,
@@ -599,6 +625,8 @@ export function createCurrentWorkspace({
           }
         }
         // 准备收据先固定版本，重试不再读取最新指针；丢失原件时明确失败。
+        if (value.status !== 'active')
+          fail(410, 'WORKSPACE_INPUT_RELEASED', '原资料输入已确认结束，不能改读最新内容')
         currentSignal.throwIfAborted()
         readPermission(project, actor, value.workspaceType)
         if (value.externalVersionId)
@@ -675,6 +703,7 @@ export function createCurrentWorkspace({
             try {
               authoring.releaseCapture(project, fixed.id, actor)
             } catch {}
+            collectUnusedQuietly(project)
           })
         completions.add(completion)
         void completion.finally(() => completions.delete(completion))
@@ -888,6 +917,33 @@ export function createCurrentWorkspace({
     }
     return task
   }
+  function releaseObsoletePickerInputs(current: WorkspaceInputCapture, actor: string) {
+    for (const record of authoring.obsoletePickerInputs(
+      current.projectId,
+      actor,
+      current.workspaceType,
+      current.requestId,
+    )) {
+      const value = record.value,
+        snapshot = access.inputResourceSnapshot(value.projectId, value.id)
+      if (
+        snapshot.truncated ||
+        snapshot.runs.length ||
+        snapshot.references.length ||
+        snapshot.claims.length ||
+        snapshot.origins.length ||
+        snapshot.nativeTurns.length
+      )
+        continue
+      access.withInputResourceSnapshot(snapshot, () =>
+        releaseInputResources({
+          projectId: value.projectId,
+          inputId: value.id,
+          inputOwnerId: actor,
+        }),
+      )
+    }
+  }
   async function captureAvailableInput(
     project: string,
     input: { workspaceType: 'internal' | 'external' },
@@ -902,17 +958,25 @@ export function createCurrentWorkspace({
           (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt),
         )[0]
       if (!version) fail(409, 'WORKSPACE_EXTERNAL_UNAVAILABLE', '项目尚未发布可供外部访问的资料')
-      return captureAgentInput(
+      const captured = await captureAgentInput(
         project,
         { workspaceType: 'external', requestId: `picker:${digest([actor, version.id])}` },
         actor,
       )
+      releaseObsoletePickerInputs(captured, actor)
+      return captured
     }
     const current = authoring.overview(project, actor)
     const available = availableRepositories(project, current.sources, actor)
     const records = authoring.syncRecords(project, actor)
     const requestId = `picker:${digest([actor, current.revision, available.map((value) => [value.sourceId, value.versionId]), records.map((value) => [value.sourceId, value.status, value.error?.code])])}`
-    return captureAgentInput(project, { workspaceType: 'internal', requestId }, actor)
+    const captured = await captureAgentInput(
+      project,
+      { workspaceType: 'internal', requestId },
+      actor,
+    )
+    releaseObsoletePickerInputs(captured, actor)
+    return captured
   }
   async function generateCurrentExternal(
     project: string,
@@ -945,7 +1009,7 @@ export function createCurrentWorkspace({
       if (input.expectedRevision !== undefined && input.expectedRevision !== captured.revision)
         fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原外部请求已经固定其他资料修订')
       signal?.throwIfAborted()
-      return store.startExternal(
+      const task = store.startExternal(
         project,
         {
           requestId: input.requestId,
@@ -954,6 +1018,8 @@ export function createCurrentWorkspace({
         },
         actor,
       )
+      watchExternalInput(project, input.requestId, actor)
+      return task
     }
     if (
       input.expectedRevision !== undefined &&
@@ -1005,7 +1071,7 @@ export function createCurrentWorkspace({
     )
     const task = await completedTask(project, sourceTaskId, actor, 'snapshot', signal)
     signal?.throwIfAborted()
-    return store.startExternal(
+    const external = store.startExternal(
       project,
       {
         requestId: input.requestId,
@@ -1014,6 +1080,109 @@ export function createCurrentWorkspace({
       },
       actor,
     )
+    watchExternalInput(project, input.requestId, actor)
+    return external
+  }
+  function watchExternalInput(project: string, requestId: string, actor: string) {
+    const key = JSON.stringify([project, requestId, actor])
+    if (externalSettlements.has(key)) return
+    externalSettlements.add(key)
+    const completion = store
+      .whenIdle()
+      .then(() => settleExternalInput(project, requestId, actor))
+      .catch(() => {
+        console.warn('外部资料原输入收尾尚未核验，继续保留原件', { projectId: project })
+      })
+      .finally(() => {
+        externalSettlements.delete(key)
+      })
+    completions.add(completion)
+    void completion.finally(() => completions.delete(completion))
+  }
+  function settleExternalInput(project: string, requestId: string, actor: string): boolean {
+    const task = store.taskForMaintenance(project, 'external', requestId, actor)
+    const source = store.taskForMaintenance(
+      project,
+      'snapshot',
+      `external-source-${digest(requestId)}`,
+      actor,
+    )
+    const record = authoring.inputForRequestMaintenance(
+      project,
+      `external-${digest(requestId)}`,
+      actor,
+      'internal',
+    )
+    if (
+      !task ||
+      !source ||
+      !record ||
+      record.preparing ||
+      !['completed', 'failed', 'interrupted'].includes(task.status) ||
+      source.status !== 'completed' ||
+      !source.versionId ||
+      source.captureId !== record.value.id ||
+      task.sourceVersionId !== source.versionId
+    )
+      return false
+    if (record.value.status !== 'released') {
+      const original = store.getVersion(project, source.versionId)
+      if (
+        original.cachePurpose !== 'external-input' ||
+        original.source.captureId !== record.value.id
+      )
+        return false
+      const snapshot = access.inputResourceSnapshot(project, record.value.id)
+      if (
+        snapshot.truncated ||
+        snapshot.runs.length ||
+        snapshot.references.length ||
+        snapshot.claims.length ||
+        snapshot.origins.length ||
+        snapshot.nativeTurns.length
+      )
+        return false
+      return access.withInputResourceSnapshot(snapshot, () =>
+        releaseInputResources({
+          projectId: project,
+          inputId: record.value.id,
+          inputOwnerId: actor,
+        }),
+      )
+    }
+    store.releaseVersion(project, `task:${source.id}`)
+    collectUnusedCurrentVersionsForMaintenance(project)
+    return true
+  }
+  function releaseInputResources(reference: {
+    projectId: string
+    inputId: string
+    inputOwnerId: string
+  }): boolean {
+    const record = authoring.inputForMaintenance(
+      reference.projectId,
+      reference.inputId,
+      reference.inputOwnerId,
+    )
+    if (!record) return false
+    if (works.has(JSON.stringify([record.value.projectId, record.value.requestId, record.actorId])))
+      return false
+    const value = authoring.releaseInputForMaintenance(record)
+    store.releaseVersion(value.projectId, `input:${value.id}`)
+    for (const repository of value.repositories)
+      store.releaseVersion(value.projectId, `input:${value.id}:${repository.sourceId}`)
+    for (const preparation of preparationReferences(value, record.actorId))
+      store.releaseVersion(value.projectId, preparation.reference)
+    if (value.requestId.startsWith('external-'))
+      for (const task of store.overview(value.projectId).tasks)
+        if (
+          task.type === 'external' &&
+          task.requestId &&
+          `external-${digest(task.requestId)}` === value.requestId
+        )
+          settleExternalInput(value.projectId, task.requestId, record.actorId)
+    collectUnusedCurrentVersionsForMaintenance(value.projectId)
+    return true
   }
   function protectedCurrentVersions(project: string, actor: string) {
     const overview = store.overview(project)
@@ -1026,6 +1195,25 @@ export function createCurrentWorkspace({
     for (const current of availableRepositories(project, configured, actor))
       versions.push(current.versionId)
     return [...new Set(versions)]
+  }
+  function collectUnusedCurrentVersionsForMaintenance(project: string) {
+    if ([...works.keys()].some((key) => (JSON.parse(key) as string[])[0] === project))
+      return { removed: [], pending: [] }
+    return authoring.withWorkspaceVersionRetention(project, (retention) =>
+      store.collectUnusedWorkspaceVersions(project, {
+        current: retention.current,
+        versions: [
+          ...new Set([...retention.versions, ...access.workspaceVersionReferences(project)]),
+        ],
+      }),
+    )
+  }
+  function collectUnusedQuietly(project: string) {
+    try {
+      collectUnusedCurrentVersionsForMaintenance(project)
+    } catch {
+      console.warn('当前资料回收尚未核验，继续保留原件', { projectId: project })
+    }
   }
   for (const project of authoring.currentAdoptionProjects()) {
     try {
@@ -1064,6 +1252,15 @@ export function createCurrentWorkspace({
     captureAgentInput,
     captureCurrentInput: captureAgentInput,
     captureAvailableInput,
+    collectUnusedCurrentVersionsForMaintenance,
+    subscribeInputPreparationSettled(
+      listener: (value: { projectId: string; requestId: string; actorId: string }) => void,
+    ) {
+      preparationListeners.add(listener)
+      return () => {
+        preparationListeners.delete(listener)
+      }
+    },
     captureDeploymentSource,
     startDeploymentPackages,
     reconcileFailedDeploymentCapture,
@@ -1185,6 +1382,74 @@ export function createCurrentWorkspace({
         store.releaseVersion(project, `input:${inputId}:${repository.sourceId}`)
       return value
     },
+    inputForNativeMaintenance(reference: {
+      projectId: string
+      inputId: string
+      inputOwnerId: string
+    }) {
+      return authoring.inputForMaintenance(
+        reference.projectId,
+        reference.inputId,
+        reference.inputOwnerId,
+      )
+    },
+    inputPreparationForNativeMaintenance(reference: {
+      projectId: string
+      requestId: string
+      actorId: string
+      workspaceType: 'internal' | 'external'
+    }) {
+      return authoring.inputForRequestMaintenance(
+        reference.projectId,
+        reference.requestId,
+        reference.actorId,
+        reference.workspaceType,
+      )
+    },
+    retainInputForNativeBinding(reference: {
+      projectId: string
+      inputId: string
+      inputOwnerId: string
+      workspaceType: 'internal' | 'external'
+    }): WorkspaceInputCapture {
+      const record = authoring.inputForMaintenance(
+        reference.projectId,
+        reference.inputId,
+        reference.inputOwnerId,
+      )
+      if (!record || record.preparing || record.value.workspaceType !== reference.workspaceType)
+        fail(409, 'WORKSPACE_INPUT_IDENTITY_CHANGED', '原输入不存在或不属于本轮固定资料范围')
+      const value = record.value
+      const versions = [
+        ...value.repositories.map((repository) => repository.versionId),
+        ...(value.externalVersionId ? [value.externalVersionId] : []),
+      ]
+      if (value.status === 'released')
+        for (const versionId of new Set(versions)) {
+          try {
+            store.verifyInputVersion(reference.projectId, versionId)
+          } catch (error) {
+            if (
+              error &&
+              typeof error === 'object' &&
+              (('status' in error && error.status === 404) ||
+                ('code' in error && error.code === 'ENOENT'))
+            )
+              fail(410, 'WORKSPACE_INPUT_ORIGINAL_CLEARED', '原资料已更新或清理，无法恢复原输入')
+            throw error
+          }
+        }
+      if (value.externalVersionId)
+        store.retainVersion(value.projectId, value.externalVersionId, `input:${value.id}`)
+      for (const repository of value.repositories)
+        store.retainVersion(
+          value.projectId,
+          repository.versionId,
+          `input:${value.id}:${repository.sourceId}`,
+        )
+      return authoring.retainInputForNativeBinding(record)
+    },
+    releaseInputAfterNativeTerminal: releaseInputResources,
     releaseDeploymentSource(project: string, inputId: string, actor: string) {
       access.requireProjectActionForActor(actor, project, 'source.generate')
       store.releaseVersion(project, `deployment:${inputId}`)

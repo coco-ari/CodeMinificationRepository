@@ -1,6 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { configuredAutoOpsAccess, initializeAutoOpsAccessSchema } from './access.mjs'
+import { configuredWorkspaceManagement } from './workspace-management.ts'
+import { configuredEnvironmentMcp } from './environment-mcp-runtime.ts'
+import { environmentRunScope } from './environment-run-inputs.ts'
 
 export function createNativeSubagentBindings(dataDirectory, access) {
   const db = new DatabaseSync(join(dataDirectory, 't3-autoops.sqlite'))
@@ -26,13 +29,15 @@ export function createNativeSubagentBindings(dataDirectory, access) {
         if (previous && (previous.child_thread_id !== childThreadId || previous.parent_thread_id !== parentThreadId || previous.native_thread_id !== nativeThreadId)) throw new Error('原生子任务身份已有其他来源')
         const existing = access.getThreadBinding(childThreadId)
         if (existing && !previous) throw new Error('原生子任务不能占用现有会话身份')
+        const original=previous?access.listThreadInputs(childThreadId).at(0):undefined
+        if(original&&inherited&&original.actorId!==inherited.actorId) throw new Error('原生子任务不能更换实际调用者，请创建新的子任务')
         if (!previous) {
           const at = new Date().toISOString()
           db.prepare('INSERT INTO t3_thread_bindings(thread_id,project_id,environment_id,agent_id,owner_id,visibility,created_at,compatibility_read_only,continuation_verified,native_thread_id,workspace_type,workspace_version_id,question_json) VALUES(?,?,?,?,?,?,?,0,1,?,?,?,?)').run(childThreadId,binding.projectId,binding.environmentId ?? '',binding.agentId,binding.ownerId,binding.visibility,at,nativeThreadId,binding.workspaceType??null,binding.workspaceVersionId??null,binding.question ? JSON.stringify(binding.question) : null)
           db.prepare('INSERT INTO t3_native_subagent_bindings VALUES(?,?,?,?)').run(childThreadId,parentThreadId,nativeThreadId,at)
         }
-        if (inherited) db.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at,actor_id,input_owner_id,actor_verified) VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(childThreadId, parentRunId, inherited.inputId, inherited.createdAt, inherited.actorId, inherited.inputOwnerId, Number(inherited.actorVerified))
-        for (const reference of access.inputReferences(parentThreadId)) db.prepare('INSERT INTO t3_thread_input_references VALUES(?,?,?,?) ON CONFLICT(thread_id,input_id) DO NOTHING').run(childThreadId, reference.inputId, reference.actorId, new Date().toISOString())
+        if (inherited&&!previous) db.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at,actor_id,input_owner_id,actor_verified) VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id,run_id) DO NOTHING').run(childThreadId, parentRunId, inherited.inputId, inherited.createdAt, inherited.actorId, inherited.inputOwnerId, Number(inherited.actorVerified))
+        if(!previous) for (const reference of access.inputReferences(parentThreadId)) db.prepare('INSERT INTO t3_thread_input_references VALUES(?,?,?,?) ON CONFLICT(thread_id,input_id) DO NOTHING').run(childThreadId, reference.inputId, reference.actorId, new Date().toISOString())
         db.exec('COMMIT')
       } catch (error) { db.exec('ROLLBACK'); throw error }
       return access.getThreadBinding(childThreadId)
@@ -42,9 +47,15 @@ export function createNativeSubagentBindings(dataDirectory, access) {
 }
 
 let configured
-export function registerNativeSubagent(parentThreadId, childThreadId, nativeThreadId, parentRunId) {
+export function registerNativeSubagent(parentThreadId, childThreadId, nativeThreadId, parentRunId, providerTurnId) {
   const access = configuredAutoOpsAccess()
   if (!access || !process.env.AUTOOPS_T3_DATA_DIR) return
   configured ||= createNativeSubagentBindings(process.env.AUTOOPS_T3_DATA_DIR, access)
-  return configured.register(parentThreadId,childThreadId,nativeThreadId,parentRunId)
+  const binding=configured.register(parentThreadId,childThreadId,nativeThreadId,parentRunId)
+  if(providerTurnId) {
+    configuredWorkspaceManagement(access).retainInputForNativeBinding(access.recordNativeInputTurn(childThreadId,providerTurnId))
+    const original=access.listThreadInputs(childThreadId).at(0)
+    configuredEnvironmentMcp(access).retainRunAfterNativeReference(environmentRunScope(access,childThreadId,original.runId))
+  }
+  return binding
 }

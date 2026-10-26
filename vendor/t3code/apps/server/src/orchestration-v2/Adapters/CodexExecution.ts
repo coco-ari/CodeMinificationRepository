@@ -2550,6 +2550,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               driver: CODEX_PROVIDER,
               nativeTurnId: turn.nativeTurnId,
             });
+            // 子线程可被提供商再次唤醒；先登记本次原生轮次并恢复原输入，再发布运行投影。
+            // 原件已回收时明确拒绝并中断本次子轮，不能换用后来父轮的资料。
+            const nativeChildThreadId = yield* getNativeThreadId(subagent.providerThread);
+            yield* Effect.sync(() => host.registerSubagent(
+              subagent.parentContext.projectionThreadId,
+              subagent.childThreadId,
+              nativeChildThreadId,
+              subagent.parentContext.input.runId,
+              providerTurnId,
+            )).pipe(Effect.catchCause(cause => client.request("turn/interrupt", {
+              threadId: nativeChildThreadId,
+              turnId: turn.nativeTurnId,
+            }).pipe(
+              Effect.timeoutOption("10 seconds"),
+              Effect.catchCause(() => Effect.void),
+              Effect.andThen(Effect.failCause(cause)),
+            )));
             const providerTurnOrdinal = yield* nextProviderTurnOrdinal(
               subagent.providerThread.id,
               1,

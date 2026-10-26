@@ -8,6 +8,8 @@ export interface WorkspaceStore {
   ensureProject(project: { id: string; name: string; documents?: ReadonlyArray<{ id: string; name: string; mime?: string; content: string }> }, options?: { initialContent: 'example' }): Promise<void>;
   overview(projectId: string): WorkspaceOverview;
   getVersion(projectId: string, versionId: string): WorkspaceVersion;
+  verifyInputVersion(projectId:string,versionId:string):WorkspaceVersion;
+  collectUnusedWorkspaceVersions(projectId:string,retention:{current:Array<{sourceId:string;versionId:string}>;versions:string[]}):{removed:string[];pending:string[]};
   findSourceCache(projectId: string, cacheKey: string): WorkspaceVersion | undefined;
   retainVersion(projectId: string, versionId: string, reference: string): void;
   releaseVersion(projectId: string, reference: string): void;
@@ -16,6 +18,7 @@ export interface WorkspaceStore {
   planCleanupVersions(projectId: string, versionIds: string[], actorId: string, additionalReferences?: string[]): { activeTasks: string[]; protected: string[]; removable: string[]; reasons: Record<string, Array<{ kind: string; reference: string }>> };
   pruneVersions(projectId: string, versionIds: string[], actorId: string, additionalReferences?: string[]): { removed: string[] };
   taskForRequest(projectId: string, type: string, requestId: string, actorId: string): WorkspaceTask | undefined;
+  taskForMaintenance(projectId:string,type:string,requestId:string,actorId:string):WorkspaceTask & {actorId:string;sourceVersionId?:string;captureId?:string} | undefined;
   files(projectId: string, versionId: string): WorkspaceFile[];
   tree(projectId: string, versionId: string, directory?: string): { entries: Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number }>; truncated: boolean };
   /** Management-only tree, including pending external review. */

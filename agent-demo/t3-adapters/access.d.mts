@@ -38,6 +38,17 @@ export interface ThreadBinding {
 }
 export interface ToolScope { actorId: string; binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
 export interface ThreadInputBinding { readonly threadId: string; readonly runId: string; readonly inputId: string; readonly actorId: string; readonly inputOwnerId: string; readonly actorVerified: boolean; readonly createdAt: string }
+export interface InputReferenceClaim {readonly commandId:string;readonly kind:'context'|'fork';readonly messageId?:string;readonly runId?:string;readonly sourceThreadId?:string}
+export interface RunInputRequest {readonly threadId:string;readonly runId:string;readonly projectId:string;readonly requestId:string;readonly actorId:string;readonly workspaceType:'internal'|'external'}
+export interface WorkspaceVersionResourceSnapshot {readonly threadId:string;readonly projectId:string;readonly versionId:string;readonly scopeState:string;readonly submissionCommandId:string|null;readonly nativeThreadId:string|null;readonly truncated:boolean;readonly commands:Array<{commandId:string;targetId:string;kind:string;actorId:string}>}
+export interface InputResourceSnapshot {
+  readonly projectId:string;readonly inputId:string;readonly truncated:boolean;
+  readonly origins:Array<RunInputRequest & {inputId:string;createdAt:string}>;
+  readonly nativeTurns:Array<{threadId:string;providerTurnId:string;projectId:string;inputId:string;inputOwnerId:string;actorId:string;createdAt:string}>;
+  readonly runs:Array<ThreadInputBinding & {projectId:string;environmentId:string|null;workspaceType:'internal'|'external';nativeThreadId:string|null;parentThreadId:string|null}>;
+  readonly references:Array<{threadId:string;inputId:string;inputOwnerId:string;createdAt:string;workspaceType:'internal'|'external';nativeThreadId:string|null;parentThreadId:string|null}>;
+  readonly claims:Array<{threadId:string;inputId:string;commandId:string;inputOwnerId:string;callerId:string;kind:'context'|'fork';messageId:string|null;runId:string|null;sourceThreadId:string|null;createdAt:string}>;
+}
 export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
 export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding;question?: AssistantSelection};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
@@ -92,10 +103,21 @@ export interface AutoOpsAccess {
   listThreadInputs(threadId: string): ThreadInputBinding[];
   /** 仅供可信原生终态协调读取持久引用；不授予内容访问权。 */
   runResourceReferences(threadId: string, runId: string): Array<ThreadInputBinding & {projectId: string; environmentId: string | null}>;
+  /** 可信维护只读取持久引用，不授予已撤权身份内容访问权。 */
+  inputResourceSnapshot(projectId:string,inputId:string):InputResourceSnapshot;
+  workspaceVersionResourceSnapshot(threadId:string):WorkspaceVersionResourceSnapshot|null;
+  releaseWorkspaceVersionResource(snapshot:WorkspaceVersionResourceSnapshot,sequence:number,operation:()=>unknown):boolean;
+  recordNativeInputTurn(threadId:string,providerTurnId:string):{projectId:string;inputId:string;inputOwnerId:string;workspaceType:'internal'|'external'};
+  recordRunInputRequest(threadId:string,runId:string,requestId:string,actorId:string):boolean;
+  completeRunInputRequest(origin:RunInputRequest,inputId:string):void;
+  inputPreparationCandidates(threadId:string):RunInputRequest[];
+  inputRequestThreads(projectId:string,requestId:string,actorId:string):string[];
+  inputResourceCandidates(threadId:string):Array<{projectId:string;inputId:string;inputOwnerId:string}>;
+  withInputResourceSnapshot(snapshot:InputResourceSnapshot,operation:()=>boolean):boolean;
   /** 子任务仍继承原父轮时保留环境输入，不能凭父轮终态推断子任务已结束。 */
   nativeSubagentRunReferenced(threadId: string, runId: string): boolean;
   workspaceVersionReferences(projectId: string): string[];
-  retainInputReference(threadId: string, inputId: string, actorId: string, callerId?:string): void;
+  retainInputReference(threadId: string, inputId: string, actorId: string, callerId?:string,claim?:InputReferenceClaim): void;
   inputReferences(threadId: string): Array<{inputId:string;actorId:string}>;
   requireRunInput(threadId: string, inputId: string, runId?: string): ThreadInputBinding;
   nativeSubagentParent(threadId: string): string | undefined;
@@ -116,7 +138,7 @@ export interface AutoOpsAccess {
   recordClaimedAttachment(principal: AutoOpsPrincipal, sourceId: string, finalId: string, threadId: string): void;
   recordThreadAttachment(principal: AutoOpsPrincipal, attachmentId: string, threadId: string, metadata?: {name:string;mimeType:string;sizeBytes:number}): void;
   recordGeneratedAttachment(threadId: string, attachmentId: string, metadata: {name:string;mimeType:string;sizeBytes:number}): void;
-  forkBinding(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;
+  forkBinding(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string,commandId?:string): ThreadBinding;
   recordLegacyNativeFork(sourceThreadId: string, targetThreadId: string, sourceNativeId: string, targetNativeId: string): void;
   requireToolThread(threadId: string, actorId?: string): ToolScope;
   requireReference(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;

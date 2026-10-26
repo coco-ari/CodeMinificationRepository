@@ -7,7 +7,7 @@ import { environmentRunScope } from './environment-run-inputs.ts'
 
 type WorkspaceInputs = Pick<
   WorkspaceManagement,
-  'captureAgentInput' | 'readInput' | 'inputFiles' | 'readInputFile' | 'readInputContent'
+  'captureAgentInput' | 'readInput' | 'inputFiles' | 'readInputFile' | 'readInputContent' | 'retainInputForNativeBinding'
 >
 
 export function createBusinessRunInputs(access: AutoOpsAccess, workspace: WorkspaceInputs) {
@@ -45,6 +45,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
               throw error
           }
         }
+        workspace.retainInputForNativeBinding({projectId:scope.binding.projectId,inputId:existing.inputId,inputOwnerId:existing.inputOwnerId,workspaceType:scope.binding.workspaceType??'internal'})
         return workspace.readInput(scope.binding.projectId, existing.inputId, existing.inputOwnerId)
       }
       const original = inheritedRunId ? access.getRunInput(threadId, inheritedRunId) : undefined
@@ -82,6 +83,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
       const { binding } = access.requireToolThread(threadId, actorId)
       access.requireQuestionForActor(actorId, threadId, modelSelection)
       if (original) {
+        workspace.retainInputForNativeBinding({projectId:binding.projectId,inputId:original.inputId,inputOwnerId:original.inputOwnerId,workspaceType:binding.workspaceType??'internal'})
         const captured = workspace.readInput(
           binding.projectId,
           original.inputId,
@@ -95,15 +97,19 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
         createHash('sha256')
           .update(JSON.stringify([threadId, runId, actorId]))
           .digest('hex')
+      const created=access.recordRunInputRequest(threadId,runId,requestId,actorId)
       const captured = await workspace.captureAgentInput(
         binding.projectId,
         { requestId, workspaceType: binding.workspaceType ?? 'internal' },
         actorId,
         signal,
+        !created,
       )
+      access.completeRunInputRequest({threadId,runId,projectId:binding.projectId,requestId,actorId,workspaceType:binding.workspaceType??'internal'},captured.id)
       access.requireToolThread(threadId, actorId)
       access.requireQuestionForActor(actorId, threadId, modelSelection)
       access.bindRunInput(threadId, runId, captured.id, actorId)
+      workspace.retainInputForNativeBinding({projectId:binding.projectId,inputId:captured.id,inputOwnerId:actorId,workspaceType:binding.workspaceType??'internal'})
       return captured
     },
     require(threadId: string, inputId: string, runId?: string) {

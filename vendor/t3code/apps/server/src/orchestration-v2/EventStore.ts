@@ -9,6 +9,7 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type * as SqlClient from "effect/sql/SqlClient";
@@ -68,6 +69,11 @@ export interface EventStoreV2Shape {
   readonly latestSequence: (input?: {
     readonly threadId?: ThreadId;
   }) => Effect.Effect<number, EventStoreV2Error>;
+  readonly latestResourceUpdate: (input: {
+    readonly threadId: ThreadId;
+    readonly eventType: "run.updated" | "subagent.updated" | "provider-turn.updated";
+    readonly entityId: string;
+  }) => Effect.Effect<Option.Option<OrchestrationV2StoredEvent>, EventStoreV2Error>;
   readonly latestApplicationSequence: Effect.Effect<number, EventStoreV2Error>;
   readonly publishCommitted: (events: ReadonlyArray<ApplicationStoredEvent>) => Effect.Effect<void>;
 }
@@ -124,6 +130,9 @@ const layerBase: Layer.Layer<EventStoreV2, never, OrchestrationEventStore.Orches
               Effect.mapError((cause) => new EventStoreAppendEventsError({ eventCount: 1, cause })),
             ),
         read,
+        latestResourceUpdate: (input) => applicationEvents.latestResourceUpdate(input).pipe(
+          Effect.mapError((cause) => new EventStoreReadEventsError({threadId: input.threadId, cause})),
+        ),
         readByCommandId: ({ commandId }) =>
           applicationEvents
             .readAgentEvents({ commandId })

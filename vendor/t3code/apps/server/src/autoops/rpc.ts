@@ -23,7 +23,7 @@ export const reserveForkBinding = Effect.fn("AutoOps.reserveForkBinding")(functi
     const existing = yield* threads.getThreadShell(command.targetThreadId);
     if (existing !== null) return yield* Effect.die(new Error("The fork target requires authorized migration."));
   }
-  yield* Effect.sync(() => access.forkBinding(principal, command.sourceThreadId, command.targetThreadId));
+  yield* Effect.sync(() => access.forkBinding(principal, command.sourceThreadId, command.targetThreadId, command.commandId));
 });
 
 export const authorize = (sessionId: string, method: string, payload: unknown) => Effect.try({

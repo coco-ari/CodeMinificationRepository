@@ -209,6 +209,11 @@ export type WorkspaceInputSelection =
       sourceWarnings?: WorkspaceInputSourceIssue[]
     }
   | { workspaceType: 'external'; versionId: string }
+export interface WorkspaceInputMaintenanceRecord {
+  actorId: string
+  preparing: boolean
+  value: WorkspaceInputCapture
+}
 export interface WorkspaceDeploymentSourceInput {
   requestId: string
   sources: DeploymentRepositorySelection[]

@@ -40,7 +40,7 @@ function publicVersion(value) {
   return clone(rest)
 }
 function publicTask(value) {
-  const { fingerprint: _fingerprint, ownerPid: _ownerPid, ownerInstanceId: _ownerInstanceId, actorId: _actorId, sourceVersionId: _sourceVersionId, ...rest } = value
+  const { fingerprint: _fingerprint, ownerPid: _ownerPid, ownerInstanceId: _ownerInstanceId, actorId: _actorId, sourceVersionId: _sourceVersionId, captureId: _captureId, ...rest } = value
   return clone(rest)
 }
 function livePid(pid) { try { process.kill(pid, 0); return true } catch { return false } }
@@ -192,7 +192,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     const { state, requestId, fingerprint, previous } = requestTask(id, type, input, actorId)
     if (previous) return publicTask(previous)
     jobs.assertCapacity()
-    const task = { id: randomUUID(), type, actorId, status: 'queued', stage: 'queued', message: '任务已排队', createdAt: now(), requestId, fingerprint, ownerPid: process.pid, ownerInstanceId: PROCESS_INSTANCE_ID }
+    const task = { id: randomUUID(), type, actorId, status: 'queued', stage: 'queued', message: '任务已排队', createdAt: now(), requestId, fingerprint, ownerPid: process.pid, ownerInstanceId: PROCESS_INSTANCE_ID,...(type==='external'?{sourceVersionId:input.sourceVersionId}:{}),...(['snapshot','sync','input'].includes(type)&&input.captureId?{captureId:input.captureId}:{}) }
     state.tasks.unshift(task); save(id, state)
     jobs.submit(task.id, async (signal) => {
       if (type === 'packages') runningPackages.add(task.id)
@@ -446,6 +446,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         ['workspace-versions',state.versions.length,'工作区仍有当前资料或历史版本'],
         ['workspace-packages',state.releases.filter(value => !value.clearedAt || !value.purgedAt).length,'工作区仍有源码包'],
         ['workspace-retired-packages',(state.retiredPackageVersions ?? []).filter(value => !value.purgedAt).length,'工作区仍有待完成回收的源码目录'],
+        ['workspace-retired-inputs',(state.retiredWorkspaceVersions ?? []).filter(value => !value.purgedAt).length,'工作区仍有待完成回收的历史资料目录'],
         ['workspace-protection',Object.keys(state.protectedReferences ?? {}).length,'工作区仍有活动或未知输入保护'],
       ]) if (count) values.push({kind,count,message})
       return values
@@ -460,6 +461,46 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       return { projectId: id, internalVersions: state.versions.filter((entry) => entry.type === 'internal' && !entry.cachePurpose).map(publicVersion), externalVersions: state.versions.filter((entry) => entry.type === 'external').map(publicVersion), releases: clone(state.releases.filter(release => !release.clearedAt)), tasks: state.tasks.map(publicTask), import: { supported: true, hosts: [...SUPPORTED_HOSTS], maxBytes: MAX_BYTES, maxFiles: MAX_FILES } }
     },
     getVersion(id, versionId) { return publicVersion(versionRecord(id, versionId)) },
+    verifyInputVersion(id, versionId) {
+      const version=versionRecord(id,versionId)
+      for(const file of version.files) readVersionFile(id,versionId,file.path,false)
+      return publicVersion(version)
+    },
+    collectUnusedWorkspaceVersions(id,retention) {
+      if(!retention||!Array.isArray(retention.current)||!Array.isArray(retention.versions)||retention.current.length>1000||retention.versions.length>2000) fail(400,'WORKSPACE_RETENTION_INVALID','当前资料保护快照无效')
+      const state=load(id)
+      if(state.tasks.some(task=>['queued','running'].includes(task.status))) return {removed:[],pending:[]}
+      const expected=new Map()
+      for(const value of retention.current) {
+        safeId(value.sourceId);safeId(value.versionId)
+        const version=state.versions.find(version=>version.id===value.versionId&&version.status==='published')
+        if(!version||!version.source.repositories?.some(repository=>repository.sourceId===value.sourceId)) fail(409,'WORKSPACE_CURRENT_IDENTITY_UNKNOWN','当前资料来源无法核验，继续保护原件')
+        expected.set(`current:${value.sourceId}`,value.versionId)
+      }
+      state.protectedReferences??={}
+      for(const reference of Object.keys(state.protectedReferences)) if(reference.startsWith('current:')&&!expected.has(reference)) delete state.protectedReferences[reference]
+      for(const [reference,versionId] of expected) state.protectedReferences[reference]=versionId
+      const protectedIds=new Set([...Object.values(state.protectedReferences),...retention.versions])
+      for(const versionId of retention.versions) {safeId(versionId);if(!state.versions.some(version=>version.id===versionId)) fail(409,'WORKSPACE_INPUT_IDENTITY_UNKNOWN','资料引用原件无法核验，停止回收')}
+      for(const release of state.releases) if(!release.clearedAt) protectedIds.add(release.sourceVersionId)
+      const latest=type=>state.versions.filter(version=>version.type===type&&version.status==='published'&&!version.cachePurpose).sort((a,b)=>(b.publishedAt??b.createdAt).localeCompare(a.publishedAt??a.createdAt))[0]
+      for(const type of ['internal','external']) {const version=latest(type);if(version) protectedIds.add(version.id)}
+      for(const version of state.versions) if(version.status!=='published'||version.cachePurpose==='deployment') protectedIds.add(version.id)
+      for(let changed=true;changed;) {
+        changed=false
+        for(const version of state.versions) if(protectedIds.has(version.id)&&version.sourceVersionId&&!protectedIds.has(version.sourceVersionId)) {protectedIds.add(version.sourceVersionId);changed=true}
+      }
+      const removed=state.versions.filter(version=>!protectedIds.has(version.id)).map(version=>version.id)
+      state.retiredWorkspaceVersions??=[]
+      for(const versionId of removed) state.retiredWorkspaceVersions.push({id:versionId,clearedAt:now()})
+      state.versions=state.versions.filter(version=>!removed.includes(version.id))
+      // 先提交不可访问事实；失败目录仍有收据并由后续维护重试，不能回到可读版本。
+      save(id,state)
+      for(const retired of state.retiredWorkspaceVersions.filter(value=>!value.purgedAt)) {
+        try {rmSync(join(projectRoot(id),'versions',safeId(retired.id)),{recursive:true,force:true});retired.purgedAt=now();save(id,state)} catch { /* 保留物理回收收据；未知失败不伪造已删除。 */ }
+      }
+      return {removed,pending:state.retiredWorkspaceVersions.filter(value=>!value.purgedAt).map(value=>value.id)}
+    },
     findSourceCache(id, cacheKey) {
       const version = load(id).versions.find(entry => entry.cacheKey === cacheKey && entry.status === 'published')
       return version ? publicVersion(version) : undefined
@@ -515,6 +556,12 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       if (task && task.actorId !== actorId) fail(409, 'WORKSPACE_REQUEST_CONFLICT', '该请求标识属于另一位操作人')
       return task ? publicTask(task) : undefined
     },
+    taskForMaintenance(id,type,requestId,actorId) {
+      const task=load(id).tasks.find(value=>value.type===type&&value.requestId===requestId)
+      if(!task) return undefined
+      if(task.actorId!==actorId) fail(409,'WORKSPACE_REQUEST_CONFLICT','维护候选不属于原任务操作人')
+      return {...publicTask(task),actorId:task.actorId,...(task.sourceVersionId?{sourceVersionId:task.sourceVersionId}:{}),...(task.captureId?{captureId:task.captureId}:{})}
+    },
     files(id, versionId) { return clone(versionRecord(id, versionId).files.map(({ binary: _binary, executable: _executable, ...file }) => file)) },
     tree(id, versionId, directory = '') { return versionTree(id, versionId, directory) },
     managementTree(id, versionId, directory = '') { return versionTree(id, versionId, directory, true) },
@@ -534,7 +581,9 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     readBytes(id, versionId, path) { return readVersionFile(id, versionId, path, false).bytes },
     versionFile(id, versionId, path) { return readVersionFile(id, versionId, path, true) },
     startExternal(id, input, actorId) {
-      const parent = source(id, input.sourceVersionId), rules = validateRules(input.rules)
+      const rules = validateRules(input.rules),request=requestTask(id,'external',{...input,rules},actorId)
+      if(request.previous) return publicTask(request.previous)
+      const parent = source(id, input.sourceVersionId)
       return start(id, 'external', { ...input, rules }, async ({ task, temporary, progress, signal }) => {
         const sourceRoot = checkedSource(id, parent), sourceIndex = scan(sourceRoot, { skipGit: true, skipCaches: true }), root = join(temporary, 'version', 'files')
         await mkdir(root, { recursive: true, mode: 0o700 })

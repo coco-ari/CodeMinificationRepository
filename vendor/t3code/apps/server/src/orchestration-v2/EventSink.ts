@@ -14,6 +14,7 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -171,6 +172,8 @@ export interface EventSinkV2Shape {
     readonly rejectedAt: DateTime.Utc;
     readonly error: string;
   }) => Effect.Effect<CommandReceiptStore.CommandReceiptV2, EventSinkV2Error>;
+  /** 只等待真实命令收据提交；通知本身不作为执行结果。 */
+  readonly awaitCommandReceipt: (commandId: CommandId) => Effect.Effect<void, EventSinkV2Error>;
   readonly commitProjectCommand: (input: {
     readonly commandId: CommandId;
     readonly projectId: ProjectId;
@@ -228,6 +231,11 @@ const layerBase: Layer.Layer<
     const projectStore = yield* ProjectStore.ProjectStoreV2;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const liveEvents = yield* PubSub.unbounded<OrchestrationV2StoredEvent>();
+    const receiptSignals = new Map<string, {signal:Deferred.Deferred<void>;waiters:number}>();
+    const signalReceipt = (commandId:CommandId) => Effect.suspend(() => {
+      const entry=receiptSignals.get(commandId);
+      return entry ? Deferred.succeed(entry.signal,undefined).pipe(Effect.asVoid) : Effect.void;
+    });
     const liveEventsByType = new Map<
       OrchestrationV2DomainEvent["type"],
       PubSub.PubSub<OrchestrationV2StoredEvent>
@@ -669,7 +677,10 @@ const layerBase: Layer.Layer<
             if (result.committed && input.effects.length > 0) {
               yield* effectOutbox.notifyAvailable(input.effects.length);
             }
-            if (result.committed) yield* publishStoredEvents(result.storedEvents);
+            if (result.committed) {
+              yield* publishStoredEvents(result.storedEvents);
+              yield* signalReceipt(input.commandId);
+            }
           }),
       );
       return {
@@ -848,6 +859,15 @@ const layerBase: Layer.Layer<
     };
 
     return EventSinkV2.of({
+      awaitCommandReceipt: (commandId) => Effect.scoped(Effect.gen(function*(){
+        // 先登记后读取，避免读取与提交之间丢失通知；取消等待会归还登记。
+        const entry=yield* Effect.acquireRelease(Effect.sync(()=>{
+          const value=receiptSignals.get(commandId)??{signal:Deferred.makeUnsafe<void>(),waiters:0};
+          value.waiters++;receiptSignals.set(commandId,value);return value;
+        }),value=>Effect.sync(()=>{value.waiters--;if(!value.waiters&&receiptSignals.get(commandId)===value) receiptSignals.delete(commandId)}));
+        const receipt=yield* commandReceipts.getByCommandId(commandId);
+        if(Option.isNone(receipt)) yield* Deferred.await(entry.signal);
+      })).pipe(Effect.mapError(cause=>new EventSinkWriteError({commandId,eventCount:0,cause}))),
       write: (input) =>
         writeEffect({ ...input, effects: [] }).pipe(
           Effect.mapError(
@@ -911,6 +931,7 @@ const layerBase: Layer.Layer<
         ),
       commitRejectedCommand: (input) =>
         commitRejectedCommandEffect(input).pipe(
+          Effect.tap(() => signalReceipt(input.commandId)),
           Effect.mapError(
             (cause) =>
               new EventSinkWriteError({

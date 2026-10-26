@@ -19,6 +19,7 @@ import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-m
 import { createManagedWorkspaceUpdates } from '../agent-demo/t3-adapters/workspace-update-runtime.ts'
 import { createCurrentWorkspace } from '../agent-demo/t3-adapters/workspace-current.ts'
 import { handleWorkspaceAuthoringRequest } from '../agent-demo/t3-adapters/workspace-authoring-http.ts'
+import {handleWorkspaceRequest} from '../agent-demo/t3-adapters/workspace-http.mjs'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
 import { createBusinessRunInputs } from '../agent-demo/t3-adapters/thread-inputs.ts'
 import { validateRepositorySource as validateGitSource } from '../agent-demo/t3-adapters/workspace-git.ts'
@@ -2129,4 +2130,118 @@ test('独立部署选源拒绝跨项目、连接篡改和目录重叠，不请�
   assert.equal((await f.finish(overlapped)).failureCode, 'WORKSPACE_DEPLOYMENT_SOURCES_INVALID')
   assert.equal(f.calls.resolve.length, 0)
   assert.equal(f.calls.fetch.length, 0)
+})
+
+test('可信终态回收旧输入源码，失败待更新配置仍保留真实有效current，原件不存在不换latest',async t=>{
+ const f=await fixture(t),source=await f.source('frontend')
+ await f.syncCurrent()
+ const original=await f.service.captureAgentInput(projectId,{requestId:'retention-first',workspaceType:'internal'},'reader')
+ const oldVersion=original.repositories[0].versionId
+ f.authoring.configureSource(projectId,{...f.mutation(),id:source.id,role:source.role,refKind:'branch',ref:'pending-branch',mountPath:'next-web'},owner)
+ f.control.failResolve=true
+ await assert.rejects(f.service.sync(projectId,f.mutation(),owner))
+ assert.equal(f.service.releaseInputAfterNativeTerminal({projectId,inputId:original.id,inputOwnerId:'reader'}),true)
+ assert.equal(f.store.getVersion(projectId,oldVersion).id,oldVersion)
+ assert.match(f.service.currentFile(projectId,'apps/web/README.md','reader').bytes.toString(),/固定源码/u)
+ f.control.failResolve=false
+ await advanceRepository(f,'frontend','# 已确认的新资料')
+ await f.syncCurrent()
+ const current=await f.service.captureAgentInput(projectId,{requestId:'retention-current',workspaceType:'internal'},'reader')
+ assert.notEqual(current.repositories[0].versionId,oldVersion)
+ f.service.collectUnusedCurrentVersionsForMaintenance(projectId)
+ assert.throws(()=>f.store.getVersion(projectId,oldVersion),{status:404})
+ assert.throws(()=>f.service.retainInputForNativeBinding({projectId,inputId:original.id,inputOwnerId:'reader',workspaceType:'internal'}),{code:'WORKSPACE_INPUT_ORIGINAL_CLEARED',status:410})
+ assert.equal(f.service.retainInputForNativeBinding({projectId,inputId:current.id,inputOwnerId:'reader',workspaceType:'internal'}).id,current.id)
+ assert.match(f.service.readInputFile(projectId,current.id,'next-web/README.md','reader').bytes.toString(),/已确认的新资料/u)
+})
+
+test('目录刷新回收同人同范围未发送旧选择，已接受引用、其他人选择和当前选择继续保护',async t=>{
+ const f=await fixture(t)
+ await f.upload('docs/picker.md','旧的未发送资料')
+ const stale=await f.service.captureAvailableInput(projectId,{workspaceType:'internal'},'reader')
+ const other=await f.service.captureAvailableInput(projectId,{workspaceType:'internal'},'second')
+ await f.upload('docs/picker.md','稍后的当前资料')
+ const accepted=await f.service.captureAvailableInput(projectId,{workspaceType:'internal'},'reader')
+ const principal={id:'reader',sessionHash:'session-reader'}
+ f.access.bindThread(principal,{threadId:'picker-accepted',projectId,environmentId:'env-test',agentId:'a-project',visibility:'private',workspaceType:'internal'})
+ f.access.retainInputReference('picker-accepted',accepted.id,'reader','reader',{kind:'context',commandId:'unknown-accepted-picker',messageId:'selected-message'})
+ await f.upload('docs/picker.md','最新的当前资料')
+ const latest=await f.service.captureAvailableInput(projectId,{workspaceType:'internal'},'reader')
+ assert.throws(()=>f.service.readInput(projectId,stale.id,'reader'),{code:'WORKSPACE_INPUT_RELEASED'})
+ assert.equal(f.service.readInput(projectId,accepted.id,'reader').status,'active')
+ assert.equal(f.service.readInput(projectId,other.id,'second').status,'active')
+ assert.equal(f.service.readInput(projectId,latest.id,'reader').status,'active')
+ assert.equal(f.service.readInputFile(projectId,latest.id,'docs/picker.md','reader').bytes.toString(),'最新的当前资料')
+ assert.equal(f.calls.resolve.length,0)
+})
+
+test('原生准备尚未固定选择即失败时，原运行重试明确缺失，新的运行才读取新当前资料',async t=>{
+ const f=await fixture(t),principal={id:owner,sessionHash:`session-${owner}`}
+ await f.upload('docs/original-missing.md','首次资料')
+ f.access.bindThread(principal,{threadId:'original-missing',projectId,environmentId:'env-test',agentId:'a-project',visibility:'private',workspaceType:'internal'})
+ f.access.recordMessageActor(principal,'original-missing','first-prepare-command','first-prepare-message')
+ const inputs=createBusinessRunInputs(f.access,f.service),prepare=f.authoring.prepareInput
+ f.authoring.prepareInput=()=>{throw new Error('隔离复现选择写入前失败')}
+ await assert.rejects(inputs.prepare('original-missing','first-prepare-run',undefined,undefined,'first-prepare-message'),/选择写入前失败/u)
+ f.authoring.prepareInput=prepare
+ await f.upload('docs/original-missing.md','后来的当前资料')
+ await assert.rejects(inputs.prepare('original-missing','first-prepare-run',undefined,undefined,'first-prepare-message'),{code:'WORKSPACE_INPUT_ORIGINAL_UNAVAILABLE'})
+ f.access.recordMessageActor(principal,'original-missing','next-prepare-command','next-prepare-message')
+ const next=await inputs.prepare('original-missing','next-prepare-run',undefined,undefined,'next-prepare-message')
+ assert.equal(f.service.readInputFile(projectId,next.id,'docs/original-missing.md',owner).bytes.toString(),'后来的当前资料')
+ assert.equal(f.access.getRunInput('original-missing','first-prepare-run'),undefined)
+ assert.equal(f.calls.resolve.length,0)
+})
+
+test('真实外部资料终态归还内部捕获和任务pin，保留当前来源链，替换后原请求只恢复历史收据',async t=>{
+ const f=await fixture(t)
+ await f.upload('docs/external-current.md','第一份外部资料')
+ const first=await f.service.generateCurrentExternal(projectId,{requestId:'external-retention-first'},owner)
+ await f.finish(first);await f.service.drain()
+ const firstCapture=f.authoring.inputForRequestMaintenance(projectId,`external-${sha(JSON.stringify('external-retention-first'))}`,owner,'internal')
+ const firstSource=f.store.taskForMaintenance(projectId,'snapshot',`external-source-${sha(JSON.stringify('external-retention-first'))}`,owner)
+ const firstDone=f.store.taskForMaintenance(projectId,'external','external-retention-first',owner)
+ assert.equal(firstDone.status,'completed')
+ assert.equal(firstCapture.value.status,'released')
+ assert.equal(firstSource.captureId,firstCapture.value.id)
+ const reasons=f.store.planCleanupVersions(projectId,[firstSource.versionId],owner).reasons[firstSource.versionId]
+ assert.equal(reasons.some(reason=>reason.kind==='task'||reason.kind==='input'||reason.kind==='preparation'),false)
+ assert.equal(f.store.getVersion(projectId,firstDone.versionId).sourceVersionId,firstSource.versionId)
+ await f.upload('docs/external-current.md','第二份外部资料')
+ const second=await f.service.generateCurrentExternal(projectId,{requestId:'external-retention-second'},owner)
+ await f.finish(second);await f.service.drain()
+ assert.throws(()=>f.store.getVersion(projectId,firstDone.versionId),{status:404})
+ assert.throws(()=>f.store.getVersion(projectId,firstSource.versionId),{status:404})
+ const restored=await f.service.generateCurrentExternal(projectId,{requestId:'external-retention-first'},owner)
+ assert.equal(restored.id,first.id)
+ assert.equal(restored.status,'completed')
+ await assert.rejects(f.service.generateCurrentExternal(projectId,{requestId:'external-retention-first',rules:[{find:'外部',replace:'其他'}]},owner),{code:'WORKSPACE_REQUEST_CONFLICT'})
+ assert.equal(f.calls.resolve.length,0)
+})
+
+test('待复核外部版本真实确认发布才切换当前，维护缺失不先写入，维护异常不改写成功发布事实',async t=>{
+ const f=await fixture(t)
+ await f.upload('docs/publish.md','先前外部资料')
+ const first=await f.service.generateCurrentExternal(projectId,{requestId:'publish-retention-first'},owner)
+ const firstDone=await f.finish(first);await f.service.drain()
+ await f.upload('assets/review.bin',Buffer.from([0,255,0,254]))
+ const next=await f.service.generateCurrentExternal(projectId,{requestId:'publish-retention-next'},owner)
+ const nextDone=await f.finish(next);await f.service.drain()
+ assert.equal(f.store.overview(projectId).externalVersions.find(value=>value.id===nextDone.versionId).status,'pending_review')
+ assert.equal(f.store.getVersion(projectId,firstDone.versionId).id,firstDone.versionId)
+ const call=(actor,maintainCurrent)=>handleWorkspaceRequest({access:f.access,store:f.store,principal:{id:actor,sessionHash:`session-${actor}`},url:new URL(`http://fixture.invalid/autoops/projects/${projectId}/workspaces/versions/${nextDone.versionId}/publish`),method:'POST',input:{confirmedPaths:['assets/review.bin'],excludedPaths:[]},maintainCurrent})
+ await assert.rejects(call('reader',()=>assert.fail('越权不能维护或发布')),{status:403})
+ await assert.rejects(call(owner),{code:'WORKSPACE_MAINTENANCE_UNAVAILABLE'})
+ assert.equal(f.store.overview(projectId).externalVersions.find(value=>value.id===nextDone.versionId).status,'pending_review')
+ const published=await call(owner,project=>f.service.collectUnusedCurrentVersionsForMaintenance(project))
+ assert.equal(published.body.status,'published')
+ assert.throws(()=>f.store.getVersion(projectId,firstDone.versionId),{status:404})
+ const warn=console.warn,messages=[]
+ console.warn=(...args)=>messages.push(args)
+ try{
+  const replay=await call(owner,()=>{throw new Error('隔离复现维护存储不可用')})
+  assert.equal(replay.body.status,'published')
+  assert.equal(f.store.getVersion(projectId,nextDone.versionId).status,'published')
+  assert.equal(messages.length,1)
+ }finally{console.warn=warn}
 })

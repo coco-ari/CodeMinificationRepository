@@ -21,6 +21,7 @@ import type {
   WorkspaceInputCapture,
   WorkspaceInputRepository,
   WorkspaceInputSelection,
+  WorkspaceInputMaintenanceRecord,
   WorkspaceSourceSyncRecord,
   WorkspaceDeploymentSourceCapture,
   WorkspaceDeploymentSourceMaintenanceCandidate,
@@ -691,6 +692,60 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         .all()
         .map((row) => text(row, 'project_id'))
     },
+    withWorkspaceVersionRetention<T>(
+      projectId: string,
+      operation: (value: {
+        current: Array<{ sourceId: string; versionId: string }>
+        versions: string[]
+      }) => T,
+    ): T {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      id(projectId)
+      return transaction.run(() => {
+        const unknown = db
+          .prepare(
+            'SELECT 1 FROM authoring_sources s WHERE project_id=? AND NOT EXISTS(SELECT 1 FROM authoring_current_adoptions a WHERE a.project_id=s.project_id AND a.source_id=s.id) LIMIT 1',
+          )
+          .get(projectId)
+        if (unknown)
+          fail(
+            409,
+            'WORKSPACE_CURRENT_ADOPTION_PENDING',
+            '当前来源尚未完成有效资料核验，继续保护原资料',
+          )
+        const current = db
+          .prepare(
+            'SELECT r.source_id,r.value FROM authoring_source_sync r JOIN authoring_sources s ON s.project_id=r.project_id AND s.id=r.source_id WHERE r.project_id=?',
+          )
+          .all(projectId)
+          .flatMap((row) => {
+            const value = JSON.parse(text(row, 'value')) as WorkspaceSourceSyncRecord
+            if (!value.versionId) return []
+            if (
+              !value.current ||
+              value.current.versionId !== value.versionId ||
+              value.current.sourceId !== row.source_id
+            )
+              fail(409, 'WORKSPACE_CURRENT_IDENTITY_UNKNOWN', '当前资料来源无法核验，继续保护原件')
+            return [{ sourceId: text(row, 'source_id'), versionId: value.versionId }]
+          })
+        const rows = db
+          .prepare(
+            "SELECT value FROM authoring_inputs WHERE project_id=? AND coalesce(json_extract(value,'$.status'),'unknown')<>'released' UNION ALL SELECT value FROM authoring_input_preparations WHERE project_id=? AND coalesce(json_extract(value,'$.status'),'unknown')<>'released' LIMIT 1001",
+          )
+          .all(projectId, projectId)
+        if (rows.length > 1000)
+          fail(409, 'WORKSPACE_INPUT_REFERENCE_LIMIT', '活动或未知资料输入过多，继续保护原件')
+        const versions = rows.flatMap((row) => {
+          const value = JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+          return [
+            ...value.repositories.map((repository) => repository.versionId),
+            ...(value.externalVersionId ? [value.externalVersionId] : []),
+          ]
+        })
+        return operation({ current, versions: [...new Set(versions)] })
+      })
+    },
     currentAdoptionSources(
       projectId: string,
     ): Array<{ source: WorkspaceRepositorySource; record?: WorkspaceSourceSyncRecord }> {
@@ -902,7 +957,9 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         },
         {
           kind: 'workspace-preparing-inputs',
-          count: count('SELECT COUNT(*) AS n FROM authoring_input_preparations WHERE project_id=?'),
+          count: count(
+            "SELECT COUNT(*) AS n FROM authoring_input_preparations WHERE project_id=? AND coalesce(json_extract(value,'$.status'),'unknown')<>'released'",
+          ),
           message: '仍有尚未交接的固定资料选择',
         },
       ].filter((value) => value.count > 0)
@@ -1444,6 +1501,136 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已固定其他操作人或资料范围')
       return JSON.parse(text(row, 'value')) as WorkspaceInputCapture
     },
+    inputForMaintenance(
+      projectId: string,
+      inputId: string,
+      actorId: string,
+    ): WorkspaceInputMaintenanceRecord | null {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      id(projectId)
+      id(inputId)
+      id(actorId)
+      const rows = db
+        .prepare(
+          `SELECT actor_id,value,0 AS preparing FROM authoring_inputs WHERE project_id=? AND id=?
+        UNION ALL SELECT actor_id,value,1 AS preparing FROM authoring_input_preparations WHERE project_id=? AND json_extract(value,'$.id')=?`,
+        )
+        .all(projectId, inputId, projectId, inputId)
+      if (!rows.length) return null
+      if (rows.length !== 1 || rows[0]!.actor_id !== actorId)
+        fail(409, 'WORKSPACE_INPUT_IDENTITY_CHANGED', '原资料输入身份无法核验')
+      return {
+        actorId,
+        preparing: Boolean(rows[0]!.preparing),
+        value: JSON.parse(text(rows[0]!, 'value')) as WorkspaceInputCapture,
+      }
+    },
+    obsoletePickerInputs(
+      projectId: string,
+      actorId: string,
+      workspaceType: 'internal' | 'external',
+      keepRequestId: string,
+    ): WorkspaceInputMaintenanceRecord[] {
+      authorize(projectId, actorId, workspaceType === 'internal' ? 'read' : 'external-read')
+      requestIdentifier(keepRequestId)
+      const rows = db
+        .prepare(
+          "SELECT value FROM authoring_inputs WHERE project_id=? AND actor_id=? AND workspace_type=? AND request_id LIKE 'picker:%' AND request_id<>? AND coalesce(json_extract(value,'$.status'),'unknown')<>'released' LIMIT 1001",
+        )
+        .all(projectId, actorId, workspaceType, keepRequestId)
+      if (rows.length > 1000)
+        fail(409, 'WORKSPACE_INPUT_REFERENCE_LIMIT', '未发送选择过多，继续保护原资料')
+      return rows.map((row) => ({
+        actorId,
+        preparing: false,
+        value: JSON.parse(text(row, 'value')) as WorkspaceInputCapture,
+      }))
+    },
+    inputForRequestMaintenance(
+      projectId: string,
+      requestId: string,
+      actorId: string,
+      workspaceType: 'internal' | 'external',
+    ): WorkspaceInputMaintenanceRecord | null {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      id(projectId)
+      id(actorId)
+      requestIdentifier(requestId)
+      const row = db
+        .prepare(
+          `SELECT actor_id,workspace_type,value FROM authoring_inputs WHERE project_id=? AND request_id=?
+        UNION ALL SELECT actor_id,workspace_type,value FROM authoring_input_preparations WHERE project_id=? AND request_id=?`,
+        )
+        .get(projectId, requestId, projectId, requestId)
+      if (!row) return null
+      if (row.actor_id !== actorId || row.workspace_type !== workspaceType)
+        fail(409, 'WORKSPACE_INPUT_IDENTITY_CHANGED', '原资料准备身份无法核验')
+      const value = JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+      return api.inputForMaintenance(projectId, value.id, actorId)
+    },
+    retainInputForNativeBinding(expected: WorkspaceInputMaintenanceRecord): WorkspaceInputCapture {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      return transaction.run(() => {
+        const current = api.inputForMaintenance(
+          expected.value.projectId,
+          expected.value.id,
+          expected.actorId,
+        )
+        if (!current || current.preparing || JSON.stringify(current) !== JSON.stringify(expected))
+          fail(409, 'WORKSPACE_INPUT_IDENTITY_CHANGED', '原资料输入已经变化，请核对原请求')
+        if (current.value.captureId) {
+          const owned = captureRow(current.value.projectId, current.value.captureId)
+          if (owned.actor_id !== current.actorId)
+            fail(409, 'WORKSPACE_INPUT_IDENTITY_CHANGED', '原资料输入所有者不一致')
+          const captured = captureFrom(owned)
+          for (const file of captured.files) {
+            if (!existsSync(join(blobRoot, file.sha256)))
+              fail(410, 'WORKSPACE_INPUT_ORIGINAL_CLEARED', '原资料已更新或清理，无法恢复原输入')
+            original(file.sha256)
+          }
+          db.prepare(
+            "UPDATE authoring_captures SET status='active' WHERE project_id=? AND id=?",
+          ).run(current.value.projectId, current.value.captureId)
+        }
+        const retained = { ...current.value, status: 'active' as const }
+        db.prepare(
+          'UPDATE authoring_inputs SET value=? WHERE project_id=? AND id=? AND actor_id=?',
+        ).run(JSON.stringify(retained), retained.projectId, retained.id, current.actorId)
+        return structuredClone(retained)
+      })
+    },
+    releaseInputForMaintenance(expected: WorkspaceInputMaintenanceRecord): WorkspaceInputCapture {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      const released = transaction.run(() => {
+        const current = api.inputForMaintenance(
+          expected.value.projectId,
+          expected.value.id,
+          expected.actorId,
+        )
+        if (!current || JSON.stringify(current) !== JSON.stringify(expected))
+          fail(409, 'WORKSPACE_INPUT_IDENTITY_CHANGED', '原资料输入已经变化，请保留引用后重新核对')
+        const value = { ...current.value, status: 'released' as const }
+        if (current.preparing)
+          db.prepare(
+            'UPDATE authoring_input_preparations SET value=? WHERE project_id=? AND request_id=? AND actor_id=?',
+          ).run(JSON.stringify(value), value.projectId, value.requestId, current.actorId)
+        else
+          db.prepare(
+            'UPDATE authoring_inputs SET value=? WHERE project_id=? AND id=? AND actor_id=?',
+          ).run(JSON.stringify(value), value.projectId, value.id, current.actorId)
+        if (value.captureId) {
+          const capture = captureRow(value.projectId, value.captureId)
+          if (capture.actor_id !== current.actorId)
+            fail(409, 'WORKSPACE_INPUT_IDENTITY_CHANGED', '原资料捕获所有者不一致')
+          db.prepare(
+            "UPDATE authoring_captures SET status='released' WHERE project_id=? AND id=?",
+          ).run(value.projectId, value.captureId)
+        }
+        return value
+      })
+      collectUnusedQuietly()
+      return structuredClone(released)
+    },
     prepareInput(
       projectId: string,
       requestId: string,
@@ -1559,6 +1746,8 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           actorId,
           value.workspaceType,
         )
+        if (prepared?.status === 'released')
+          fail(410, 'WORKSPACE_INPUT_RELEASED', '原资料输入已确认结束，不能改读最新内容')
         if (prepared && JSON.stringify(prepared) !== JSON.stringify(value))
           fail(409, 'WORKSPACE_REQUEST_CONFLICT', '原请求已经固定另一份资料选择')
         db.prepare('INSERT INTO authoring_inputs VALUES(?,?,?,?,?,?)').run(
@@ -1727,7 +1916,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           SELECT 1 FROM authoring_inputs i WHERE project_id=? AND coalesce(json_extract(i.value,'$.status'),'unknown')<>'released' AND
             (id=? OR request_id=? OR json_extract(i.value,'$.captureId')=? OR EXISTS(SELECT 1 FROM json_each(i.value,'$.repositories') r WHERE json_extract(r.value,'$.versionId')=?))
           UNION ALL
-          SELECT 1 FROM authoring_input_preparations p WHERE project_id=? AND
+          SELECT 1 FROM authoring_input_preparations p WHERE project_id=? AND coalesce(json_extract(p.value,'$.status'),'unknown')<>'released' AND
             (json_extract(p.value,'$.id')=? OR request_id=? OR json_extract(p.value,'$.captureId')=? OR EXISTS(SELECT 1 FROM json_each(p.value,'$.repositories') r WHERE json_extract(r.value,'$.versionId')=?))
           LIMIT 1
         `,
@@ -1772,7 +1961,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       authorize(projectId, actorId, 'manage')
       const inputs = db
         .prepare(
-          "SELECT id,request_id,value,0 AS preparing FROM authoring_inputs WHERE project_id=? AND json_extract(value,'$.status')='active' UNION ALL SELECT json_extract(value,'$.id') AS id,request_id,value,1 AS preparing FROM authoring_input_preparations WHERE project_id=? ORDER BY id LIMIT 501",
+          "SELECT id,request_id,value,0 AS preparing FROM authoring_inputs WHERE project_id=? AND json_extract(value,'$.status')='active' UNION ALL SELECT json_extract(value,'$.id') AS id,request_id,value,1 AS preparing FROM authoring_input_preparations WHERE project_id=? AND coalesce(json_extract(value,'$.status'),'unknown')<>'released' ORDER BY id LIMIT 501",
         )
         .all(projectId, projectId)
       const captures = db

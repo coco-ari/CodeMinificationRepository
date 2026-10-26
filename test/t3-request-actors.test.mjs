@@ -84,8 +84,9 @@ test('原生活动轮限定 inputId，旧输入不能选择创建者身份，没
 })
 
 test('新轮以实际消息调用者捕获资料，恢复固定输入所有者而不更换实际调用者', async t => {
-  const f = fixture(t), captures = [], reads = []
+  const f = fixture(t), captures = [], reads = [], retained = []
   const workspace = {
+    retainInputForNativeBinding(reference) { retained.push(reference) },
     async captureAgentInput(projectId, input, actor) { captures.push(actor); return { id: 'caller-capture', projectId, workspaceType: input.workspaceType } },
     readInput(projectId, inputId, actor) { reads.push(actor); return { id: inputId, projectId, workspaceType: 'internal' } },
   }
@@ -100,6 +101,8 @@ test('新轮以实际消息调用者捕获资料，恢复固定输入所有者�
   assert.equal(f.access.getRunInput('shared', 'restart').actorId, 'other')
   assert.equal(f.access.getRunInput('shared', 'restart').inputOwnerId, 'caller')
   assert.equal(reads.at(-1), 'caller')
+  assert.deepEqual(retained.map(value => value.inputOwnerId), ['caller', 'caller'])
+  assert.deepEqual(retained.map(value => value.inputId), ['caller-capture', 'caller-capture'])
   assert.deepEqual(captures, ['caller'])
   f.membership.status = 'disabled'
   assert.throws(() => inputs.require('shared', 'caller-capture', 'caller-run'), { code: 'THREAD_SCOPE_REVOKED' })
@@ -121,7 +124,7 @@ test('共享会话报告记录真实发起者，不把成果所有者改成会�
 test('已固定身份的接受轮次按原持久输入恢复，没有消息身份的新轮仍拒绝', async t => {
   const f = fixture(t), captures = []
   f.access.bindRunInput('shared', 'legacy-run', 'legacy-input', 'owner')
-  const inputs = createBusinessRunInputs(f.access, { readInput(projectId, id, actor) { assert.equal(actor, 'owner'); return { id, projectId, workspaceType: 'internal' } }, async captureAgentInput() { captures.push(true); throw new Error('不能捕获新资料') } })
+  const inputs = createBusinessRunInputs(f.access, { retainInputForNativeBinding(reference) { assert.deepEqual(reference, { projectId: 'project', inputId: 'legacy-input', inputOwnerId: 'owner', workspaceType: 'internal' }) }, readInput(projectId, id, actor) { assert.equal(actor, 'owner'); return { id, projectId, workspaceType: 'internal' } }, async captureAgentInput() { captures.push(true); throw new Error('不能捕获新资料') } })
   assert.equal((await inputs.prepare('shared', 'legacy-run', undefined, undefined, 'legacy-native-message')).id, 'legacy-input')
   await assert.rejects(inputs.prepare('shared', 'new-without-actor', undefined, undefined, 'untracked-message'), { code: 'MESSAGE_ACTOR_MISSING' })
   assert.deepEqual(captures, [])
@@ -145,7 +148,7 @@ test('排队问题由另一位成员成功编辑后，新轮捕获采用编辑�
   const f = fixture(t), actors = []
   f.access.recordMessageActor(f.caller, 'shared', 'original-command', 'queued-message')
   f.access.recordQueuedEditActor(f.other, 'shared', 'accepted-edit', 'queued-run')
-  const inputs = createBusinessRunInputs(f.access, { async captureAgentInput(projectId, input, actor) { actors.push(actor); return { id: 'edited-input', projectId, workspaceType: input.workspaceType } } })
+  const inputs = createBusinessRunInputs(f.access, { retainInputForNativeBinding(reference) { assert.deepEqual(reference, { projectId: 'project', inputId: 'edited-input', inputOwnerId: 'other', workspaceType: 'internal' }) }, async captureAgentInput(projectId, input, actor) { actors.push(actor); return { id: 'edited-input', projectId, workspaceType: input.workspaceType } } })
   await inputs.prepare('shared', 'queued-run', undefined, undefined, 'queued-message', 'accepted-edit')
   assert.deepEqual(actors, ['other'])
   assert.equal(f.access.getRunInput('shared', 'queued-run').actorId, 'other')

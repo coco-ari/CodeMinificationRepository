@@ -1,7 +1,7 @@
 // 入口只裁决业务动作；文件处理和版本发布仍由工作区服务拥有。
 const fail = (status, code, message) => { throw Object.assign(new Error(message), {status, code}) }
 
-export async function handleWorkspaceRequest({access, store, principal, url, method, input}) {
+export async function handleWorkspaceRequest({access, store, principal, url, method, input, maintainCurrent}) {
   const match = /^\/autoops\/projects\/([^/]+)\/workspaces(?:\/(.*))?$/.exec(url.pathname)
   if (!match || !store) fail(404, 'WORKSPACE_NOT_FOUND', '工作区不存在')
   const projectId = decodeURIComponent(match[1])
@@ -55,7 +55,10 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
     if (parts.length === 1 && parts[0] === 'import') return {status:202, body:store.startImport(projectId, body, principal.id)}
     if (parts.length === 3 && parts[0] === 'versions' && parts[2] === 'publish') {
       access.requireProjectAction(principal, projectId, 'workspace.external.publish')
-      return {status:200, body:store.confirmExternal(projectId, parts[1], body)}
+      if(typeof maintainCurrent!=='function') fail(503,'WORKSPACE_MAINTENANCE_UNAVAILABLE','当前资料维护服务未接入，请稍后重试')
+      const version=store.confirmExternal(projectId, parts[1], body)
+      try {maintainCurrent(projectId)} catch {console.warn('当前外部资料已经发布，旧资料回收尚未核验，继续保留原件',{projectId})}
+      return {status:200, body:version}
     }
     if (parts.length === 3 && parts[0] === 'tasks' && parts[2] === 'cancel')
       return {status:200, body:store.cancelTask(projectId, parts[1])}

@@ -65,6 +65,13 @@ export class OrchestrationEventStore extends Context.Service<
       readonly skipUnknownEventTypes?: boolean;
     }) => Stream.Stream<OrchestrationV2StoredEvent, OrchestrationEventStoreError>;
 
+    /** 只读取指定持久实体的最新来源，供原生资源终态复核使用。 */
+    readonly latestResourceUpdate: (input: {
+      readonly threadId: ThreadId;
+      readonly eventType: "run.updated" | "subagent.updated" | "provider-turn.updated";
+      readonly entityId: string;
+    }) => Effect.Effect<Option.Option<OrchestrationV2StoredEvent>, OrchestrationEventStoreError>;
+
     readonly getAgentReplayStats: (input: {
       readonly threadId: ThreadId;
       readonly afterSequence: number;
@@ -184,6 +191,7 @@ const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unkno
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 function metadataForV2Event(event: OrchestrationV2DomainEvent): Record<string, unknown> {
+
   return {
     ...(event.runId === undefined ? {} : { runId: event.runId }),
     ...(event.nodeId === undefined ? {} : { nodeId: event.nodeId }),
@@ -738,10 +746,27 @@ const makeEventStore = Effect.gen(function* () {
     input,
   ) => streamProjectedApplicationEvents({ ...input, project: (event) => event });
 
+  const latestResourceUpdate: OrchestrationEventStore["Service"]["latestResourceUpdate"] = (input) =>
+    sql<ApplicationEventRow>`
+      SELECT sequence,event_id,command_id,aggregate_kind,stream_id,event_type,occurred_at,
+        ${restoredPayloadJson} AS payload_json,metadata_json,application_event_version,
+        causation_event_id,correlation_id
+      FROM orchestration_events INDEXED BY idx_orchestration_events_resource_entity_sequence
+      WHERE application_event_version = 2 AND aggregate_kind = 'thread'
+        AND event_type IN ('run.updated','subagent.updated','provider-turn.updated')
+        AND stream_id = ${input.threadId} AND event_type = ${input.eventType}
+        AND json_extract(payload_json, '$.id') = ${input.entityId}
+      ORDER BY sequence DESC LIMIT 1
+    `.pipe(
+      Effect.flatMap((rows) => rows[0] ? rowToV2StoredEvent(rows[0]).pipe(Effect.map(Option.some)) : Effect.succeed(Option.none())),
+      Effect.mapError(toPersistenceSqlOrDecodeError("OrchestrationEventStore.latestResourceUpdate:query", "OrchestrationEventStore.latestResourceUpdate:decode")),
+    );
+
   return {
     appendProjectEvent,
     appendAgentEvents,
     readAgentEvents,
+    latestResourceUpdate,
     getAgentReplayStats,
     getReplayStats,
     latestAgentSequence,

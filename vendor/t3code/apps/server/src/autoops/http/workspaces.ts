@@ -4,6 +4,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { responseError } from './responses.ts'
 import type { BusinessHttpContext } from './context.ts'
 import { configuredWorkspaceStore } from '../../../../../../../agent-demo/t3-adapters/workspaces.mjs'
+import {configuredWorkspaceManagement} from '../../../../../../../agent-demo/t3-adapters/workspace-management.ts'
 import { handleWorkspaceRequest } from '../../../../../../../agent-demo/t3-adapters/workspace-http.mjs'
 import { resourceHeaders } from './responses.ts'
 
@@ -13,7 +14,7 @@ const workspaceRequest = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     if (request.method !== 'GET') yield* Effect.try(() => access.requireCsrf(current, request.headers['x-demo-csrf']));
     const input = request.method === 'GET' ? undefined : yield* request.json;
-    const result = yield* Effect.tryPromise(() => handleWorkspaceRequest({access, store:configuredWorkspaceStore(), principal:current, url:new URL(request.url,'http://localhost'), method:request.method, input}));
+    const result = yield* Effect.tryPromise(() => handleWorkspaceRequest({access, store:configuredWorkspaceStore(), principal:current, url:new URL(request.url,'http://localhost'), method:request.method, input,maintainCurrent:(projectId:string)=>configuredWorkspaceManagement(access).collectUnusedCurrentVersionsForMaintenance(projectId)}));
     if (result.file) {
       const url = new URL(request.url,'http://localhost');
       if (url.searchParams.get('metadata') === '1') return HttpServerResponse.jsonUnsafe({name:result.file.name,mime:result.file.mime,size:result.file.bytes.byteLength}, {headers:{'cache-control':'private, no-store'}});

@@ -131,7 +131,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     access.requireQuestionForActor(principal.id, binding.threadId, payload.modelSelection)
     checkRuntime(payload, access, binding)
     checkReferences(access, principal, payload.initialMessage, binding.threadId)
-    if (!customer) configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.initialMessage?.context,principal.id)
+    if (!customer) configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.initialMessage?.context,principal.id,typeof payload.commandId==='string'?{kind:'context',commandId:payload.commandId,...(payload.initialMessage?.messageId?{messageId:payload.initialMessage.messageId}:{})}:undefined)
     return
   }
   if (method === 'orchestration.dispatchCommand') {
@@ -171,7 +171,7 @@ export function authorizeAutoOpsRpc(access, principal, method, payload = {}) {
     if (payload.type === 'message.dispatch' || payload.type === 'queued-run.edit') {
       if (!customer) {
         resolveBusinessSkillMentions(payload.text,process.env,binding)
-        configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context,principal.id)
+        configuredBusinessResourceCatalog()?.requireContext(binding.threadId,payload.context,principal.id,typeof payload.commandId==='string'?{kind:'context',commandId:payload.commandId,...(payload.messageId?{messageId:payload.messageId}:{}),...(payload.type==='queued-run.edit'?{runId:payload.runId}:{})}:undefined)
       }
     }
     return

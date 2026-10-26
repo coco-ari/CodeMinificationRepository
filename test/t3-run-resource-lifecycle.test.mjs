@@ -233,6 +233,27 @@ test('真实子任务登记仍引用原父轮时保留MCP输入，深层工具�
       { code: 'ENVIRONMENT_MCP_RUN_RELEASED' },
     )
     assert.equal(mcp.readRun(environmentRunScope(f.access, 'grandchild', 'run')).status, 'active')
+    const original=mcp.readRun(scope)
+    assert.deepEqual(coordinator.releaseAfterNativeTreeTerminal(reference),{released:true})
+    assert.equal(mcp.readRun(scope).status,'released')
+    f.member.role='project_admin'
+    const changed=mcp.save('project','test',{requestId:'change-after-child-terminal',expectedRevision:mcp.list('project','test','actual-caller')[0].revision,value:{type:'redis',name:'下一轮连接',host:'other-fixture.invalid',port:6380,database:1,tls:'disabled',keyPatterns:['test:*']}},'actual-caller',connection.id)
+    await mcp.testConnection('project','test',connection.id,{requestId:'test-next-configuration',expectedRevision:changed.revision},'actual-caller')
+    mcp.setEnabled('project','test',connection.id,{requestId:'enable-next-configuration',expectedRevision:changed.revision,enabled:true},'actual-caller')
+    f.member.role='reader'
+    f.access.recordNativeInputTurn('grandchild','new-native-child-turn')
+    const restored=mcp.retainRunAfterNativeReference(environmentRunScope(f.access,'grandchild','run'))
+    assert.deepEqual(restored.connections,original.connections)
+    assert.equal(restored.status,'active')
+    // 驱动仍断言旧 database=0；不能因当前连接改为 database=1 而更换执行位置。
+    assert.deepEqual((await mcp.invoke(scope,{connectionId:connection.id,action:'redis.read',key:'test:original'})).data,{value:'原轮只读结果'})
+    assert.throws(()=>mcp.retainRunAfterNativeReference({...scope,environmentId:'other'}),{status:403})
+    f.member.status='disabled'
+    assert.throws(()=>mcp.retainRunAfterNativeReference(scope),{status:404,code:'PROJECT_NOT_FOUND'})
+    f.member.status='active';f.member.role='project_admin'
+    mcp.setEnabled('project','test',connection.id,{requestId:'disable-restored-original',expectedRevision:mcp.list('project','test','actual-caller')[0].revision,enabled:false},'actual-caller')
+    f.member.role='reader'
+    await assert.rejects(mcp.invoke(scope,{connectionId:connection.id,action:'redis.read',key:'test:original'}),{code:'ENVIRONMENT_MCP_DISABLED'})
   } finally {
     await mcp.close()
     credentials.close()

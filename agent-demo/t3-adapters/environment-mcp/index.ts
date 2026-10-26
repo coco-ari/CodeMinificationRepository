@@ -776,6 +776,13 @@ export function createEnvironmentMcp(options: Options) {
         return runView(runRow(scope))
       })
     },
+    // 只供已登记原生新子轮引用的可信入口恢复原收据；不会选择当前目录或凭证版本。
+    retainRunAfterNativeReference(input:EnvironmentMcpScope) {
+      const scope=query(input)
+      runRow(scope)
+      db.prepare("UPDATE mcp_runs SET status='active' WHERE thread_id=? AND run_id=?").run(scope.threadId,scope.runId)
+      return runView(runRow(scope))
+    },
     readRun(scope: EnvironmentMcpScope) {
       query(scope)
       return runView(runRow(scope))

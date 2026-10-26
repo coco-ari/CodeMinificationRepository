@@ -15,6 +15,7 @@ import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-m
 import { createProjectCredentialService } from '../agent-demo/t3-adapters/credentials.ts'
 import { createNativeSubagentBindings } from '../agent-demo/t3-adapters/subagents.mjs'
 import { environmentRunScope } from '../agent-demo/t3-adapters/environment-run-inputs.ts'
+import {users,projects,agents} from '../agent-demo/fixtures.mjs'
 
 function createBusinessRunInputs(access, workspace) {
   const inputs = createInputs(access, workspace)
@@ -30,7 +31,8 @@ function fixture(t, workspaceStore) {
   initializeAutoOpsAccessSchema(bindingDb)
   sessionDb.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
   for (const id of ['u-admin', 'u-lin']) sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update(id).digest('hex'), id, 'csrf', Date.now() + 60000)
-  const access = createAutoOpsAccess({ bindingDb, sessionDb, workspaceStore }), principal = access.authenticateCookie('demo_session=u-admin')
+  const catalogState=structuredClone({users,projects,agents})
+  const access = createAutoOpsAccess({ bindingDb, sessionDb, workspaceStore,catalog:catalogState }), principal = access.authenticateCookie('demo_session=u-admin')
   const scope = { projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'project', workspaceType: 'internal' }
   for (const threadId of ['one', 'two']) access.bindThread(principal, { ...scope, threadId })
   access.bindThread(principal, { ...scope, threadId: 'external', workspaceType: 'external' })
@@ -48,6 +50,7 @@ function fixture(t, workspaceStore) {
       return capture
     },
     captureAvailableInput(projectId, input, actorId) { return this.captureAgentInput(projectId, { ...input, requestId: `picker-${current}` }, actorId) },
+    retainInputForNativeBinding(reference) { return this.readInput(reference.projectId,reference.inputId,reference.inputOwnerId) },
     readInput(projectId, id, actorId) {
       const found = snapshots.get(id)
       if (!found || found.actorId !== actorId || found.capture.projectId !== projectId) throw new AutoOpsAccessError(404, 'WORKSPACE_INPUT_NOT_FOUND', '资料不存在')
@@ -68,7 +71,7 @@ function fixture(t, workspaceStore) {
   const inputs = createBusinessRunInputs(access, workspace), catalog = createBusinessResourceCatalog({ access, workspaceInputs: workspace, workspaceStore })
   t.after(() => { bindingDb.close(); sessionDb.close(); rmSync(directory, { force: true, recursive: true }) })
   const cwd = threadId => `autoops://projects/p-autoops/environments/env-test/threads/${threadId}?workspaceType=${threadId === 'external' ? 'external' : 'internal'}`
-  return { access, principal, workspace, inputs, catalog, directory, bindingDb, cwd, update(value) { current = value }, afterRead(value) { afterRead = value } }
+  return { access, principal, workspace, inputs, catalog, directory, bindingDb, cwd,catalogState, update(value) { current = value }, afterRead(value) { afterRead = value } }
 }
 
 test('新会话不选固定版本，每轮原任务幂等，恢复和迟到调用不会读取下一轮资料', async t => {
@@ -133,6 +136,8 @@ test('原生子任务只继承事件所属父轮输入，深层子任务与重�
   const second = await f.inputs.prepare('one', 'run-two')
   native.register('one', 'child', 'native-child', 'run-one')
   native.register('child', 'grandchild', 'native-grandchild', 'run-one')
+  native.register('one','child','native-child','run-two')
+  assert.deepEqual(f.access.listThreadInputs('child').map(value=>value.inputId),[first.id])
   assert.deepEqual(environmentRunScope(f.access, 'child', 'run-one'), environmentRunScope(f.access, 'one', 'run-one'))
   assert.deepEqual(environmentRunScope(f.access, 'grandchild', 'run-one'), environmentRunScope(f.access, 'one', 'run-one'))
   assert.equal(f.inputs.require('child', first.id).input.runId, 'run-one')
@@ -197,6 +202,61 @@ test('真实资料SQLite上传替换后原任务仍读原件，新轮读取产�
   } finally { await management.close(); await store.close() }
 })
 
+test('共享会话分叉保留实际输入所有者，另一成员产生的原输入仍按原身份读取', async t => {
+  const f = fixture(t), project = 'p-autoops', actor = f.principal.id
+  const store = createWorkspaceStore({dataDir:f.directory,authorizeTask:({actorId,projectId})=>f.access.requireWorkspaceReader(actorId,projectId)})
+  await store.ensureProject(f.access.requireProject(f.principal,project))
+  const authoring = createWorkspaceAuthoring({dataDir:f.directory,authorize:(actorId,projectId,action)=>action==='read'?f.access.requireWorkspaceReader(actorId,projectId):action==='external-read'?f.access.requireWorkspaceInputReader(actorId,projectId,'external'):f.access.requireWorkspaceActor(actorId,projectId)})
+  const credentials = createProjectCredentialService({databasePath:join(f.directory,'fork-credentials.sqlite'),keyPath:join(f.directory,'fork-credential.key'),initializeKeyIfNew:true,authorize:(actorId,projectId,action)=>f.access.requireCredentialActor(actorId,projectId,action)})
+  const git = {validateRepositorySource:value=>value,async resolveRepositoryRef(){assert.fail('资料分叉不访问Git')},async fetchRepositoryAt(){assert.fail('资料分叉不访问Git')}}
+  const management = createWorkspaceManagement({access:f.access,store,authoring,credentials,git})
+  const catalog = createBusinessResourceCatalog({access:f.access,workspaceInputs:management,workspaceStore:store})
+  try {
+    const bytes=Buffer.from('共享成员产生的固定原件')
+    authoring.upload(project,{requestId:'fork-upload',expectedRevision:authoring.overview(project,actor).revision,path:'docs/共同资料.md',conflict:'replace',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')},bytes,actor)
+    const member=f.access.authenticateCookie('demo_session=u-lin')
+    f.access.recordMessageActor(member,'one','member-command','member-message')
+    const original=await createInputs(f.access,management).prepare('one','member-run',undefined,undefined,'member-message')
+    f.access.forkBinding(f.principal,'one','owner-fork')
+    const forkRun=await createBusinessRunInputs(f.access,management).prepare('owner-fork','fork-run')
+    const path=`autoops/${project}/inputs/${original.id}/docs/共同资料.md`
+    assert.equal((await catalog.readForThread('owner-fork',path,forkRun.id,[original.id])).content,'共享成员产生的固定原件')
+    assert.deepEqual(f.access.inputReferences('owner-fork'),[{inputId:original.id,actorId:member.id}])
+    assert.equal(f.access.getRunInput('one','member-run').inputOwnerId,member.id)
+  } finally {await management.close();await store.close()}
+})
+
+test('可信终态维护可在原成员撤权后归还原件，重新绑定只恢复仍存在的原输入而不换当前资料',async t=>{
+  const f=fixture(t),project='p-autoops',actor=f.principal.id
+  const store=createWorkspaceStore({dataDir:f.directory,authorizeTask:({actorId,projectId})=>f.access.requireWorkspaceReader(actorId,projectId)})
+  await store.ensureProject(f.access.requireProject(f.principal,project))
+  const authoring=createWorkspaceAuthoring({dataDir:f.directory,authorize:(actorId,projectId,action)=>action==='read'?f.access.requireWorkspaceReader(actorId,projectId):action==='external-read'?f.access.requireWorkspaceInputReader(actorId,projectId,'external'):f.access.requireWorkspaceActor(actorId,projectId)})
+  const credentials=createProjectCredentialService({databasePath:join(f.directory,'retention-credentials.sqlite'),keyPath:join(f.directory,'retention-credential.key'),initializeKeyIfNew:true,authorize:(actorId,projectId,action)=>f.access.requireCredentialActor(actorId,projectId,action)})
+  const git={validateRepositorySource:value=>value,async resolveRepositoryRef(){assert.fail('原输入恢复不能访问Git')},async fetchRepositoryAt(){assert.fail('原输入恢复不能访问Git')}}
+  const management=createWorkspaceManagement({access:f.access,store,authoring,credentials,git}),inputs=createBusinessRunInputs(f.access,management)
+  let sequence=0
+  const upload=content=>{const bytes=Buffer.from(content);return authoring.upload(project,{requestId:`retention-upload-${++sequence}`,expectedRevision:authoring.overview(project,actor).revision,path:'docs/固定.md',conflict:'replace',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')},bytes,actor)}
+  try {
+    upload('第一轮原件')
+    const first=await inputs.prepare('one','retention-first')
+    const reference={projectId:project,inputId:first.id,inputOwnerId:actor}
+    assert.equal(management.releaseInputAfterNativeTerminal(reference),true)
+    assert.equal((await inputs.prepare('one','retention-first')).id,first.id)
+    assert.equal(management.readInputFile(project,first.id,'docs/固定.md',actor).bytes.toString(),'第一轮原件')
+    upload('后来当前正文')
+    f.catalogState.users.find(value=>value.id===actor).status='disabled'
+    assert.equal(management.releaseInputAfterNativeTerminal(reference),true)
+    assert.equal(management.releaseInputAfterNativeTerminal(reference),true)
+    f.catalogState.users.find(value=>value.id===actor).status='active'
+    await assert.rejects(inputs.prepare('one','retention-restart','retention-first'),{code:'WORKSPACE_INPUT_ORIGINAL_CLEARED',status:410})
+    assert.equal(authoring.inputForMaintenance(project,first.id,actor).value.status,'released')
+    const latest=await inputs.prepare('one','retention-new-round')
+    assert.notEqual(latest.id,first.id)
+    assert.equal(management.readInputFile(project,latest.id,'docs/固定.md',actor).bytes.toString(),'后来当前正文')
+    assert.throws(()=>management.releaseInputAfterNativeTerminal({...reference,inputOwnerId:'u-lin'}),{code:'WORKSPACE_INPUT_IDENTITY_CHANGED'})
+  } finally {await management.close();await store.close()}
+})
+
 
 test('引用资料工具不能绕过原轮历史读取下一轮附件或报告', async t => {
   const f = fixture(t), artifacts = createBusinessArtifactStore(f.directory)
@@ -213,4 +273,21 @@ test('引用资料工具不能绕过原轮历史读取下一轮附件或报告',
   await assert.rejects(catalog.readForThread('one', 'autoops/p-autoops/threads/one/attachments/later-file/later.txt', first.id, [], history))
   await assert.rejects(catalog.readForThread('one', `autoops/p-autoops/threads/one/reports/${later.id}/later.md`, first.id, [], history))
   assert.equal((await catalog.readForThread('one', `autoops/p-autoops/threads/one/reports/${older.id}/first.md`, second.id, [], history)).content, '第一轮报告')
+})
+
+test('资料取得后运行绑定失败仍保留原请求输入来源，重试沿用原件而不取新资料',async t=>{
+ const f=fixture(t),bind=f.access.bindRunInput.bind(f.access)
+ f.access.bindRunInput=()=>{throw new Error('真实交接写入失败')}
+ await assert.rejects(f.inputs.prepare('one','handoff-failed'),/交接写入失败/u)
+ const [candidate]=f.access.inputResourceCandidates('one')
+ const original=f.workspace.readInput(candidate.projectId,candidate.inputId,candidate.inputOwnerId)
+ const snapshot=f.access.inputResourceSnapshot(candidate.projectId,candidate.inputId)
+ assert.equal(snapshot.runs.length,0)
+ assert.equal(snapshot.origins.length,1)
+ assert.equal(snapshot.origins[0].runId,'handoff-failed')
+ assert.equal(snapshot.origins[0].requestId,original.requestId)
+ f.update('不应漂移到后来资料')
+ f.access.bindRunInput=bind
+ assert.equal((await f.inputs.prepare('one','handoff-failed')).id,original.id)
+ assert.equal(f.access.getRunInput('one','handoff-failed').inputOwnerId,candidate.inputOwnerId)
 })

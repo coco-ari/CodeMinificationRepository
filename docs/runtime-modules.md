@@ -1036,3 +1036,15 @@ macOS 定向 Node 22 项、Web 8 项、独立 ZIP 分发及真实本地 WebSocke
 关闭缺陷先通过原失败复现：第一次停止/检查失败后，旧实现第二次 close 返回成功，验证器据此误删未知现场；v2 以同一关闭 Promise 保留原失败，验证器不再二次关闭后清场。函数参数 JSON schema 中的 `file_id` 等合法字段也先被真实 HTTP/UDS 测试复现误拒，现仅对真实 wire 引用字段裁决，内联文件同时附远端句柄、URL 及 item 引用仍拒绝。客户完整 62 项通过（含通道 20 项与关闭原回归，集合重叠不累加）。独立 C6 组合完整 Node 787 项中 784 通过、3 项按环境跳过（Linux 文件锁与两项真实 MySQL），Web 单测 204、后端定向 38、原生全目录 209 通过/2 项真实 CLI 二进制探针跳过，固定技能 2 项及队列 1 项通过（定向集合不累加）。严格类型、284 文件边界、Web/Worker 和客户发行构建通过；Linux 新浏览器交互及完整 CI 仍在复验。原生 RPC 旧夹具补齐实际 owner 公开投影端口，原 foreign 过滤断言保留。日志 `.deployment/c6-combination-*`、`shared-model-gateway-schema-{before,after}.log`，原关闭红证据 `/tmp/autoops-shared-close-promise-before.log`。
 
 2026-10-26 通过 SSH 在 `192.168.31.157` 的独立 `/home/tao/autoops-shared-validation-20261026` 目标验证 v2 客户 ZIP `38d6fa0c8e2efffb5e098e89c3782ad691245ec5debec7bc063af26f73c020ba`。宿主 Node 24.22.0；固定镜像为 Codex 0.159.2/Node 24.12.0，镜像 ID `sha256:63ceb822d4747132da262e8bcc533933035158e91439ad6b6fb18ffa4803e8a8`。真实容器 10 项均为 true：来源读取/禁止写入、宿主私有文件和状态不可读、Docker socket 不可读、配置/技能不可写、宿主环境秘密缺席、本人 HOME 可写、外网不可达；停止后原容器 ID/名称/运行态已核实。结果 `.deployment/shared-os-profile-result.json` 与服务器 `os-profile-result.json` 明确 `containerStopped:true`、`sharedBusinessAccepted:false`，此证据不代替真实模型或双用户业务验收。现有业务数据、服务和其他容器未修改。
+
+## 当前资料输入保护与按引用回收（2026-10-26）
+
+[access-input-lifecycle](../agent-demo/t3-adapters/access-input-lifecycle.mjs) 归属实际操作者的命令、输入、fork 与原 run 引用；[workspaceInputLifecycle](../vendor/t3code/apps/server/src/autoops/workspaceInputLifecycle.ts) 组合原生持久命令收据、排队/运行及 provider-native 子任务的可信状态，沿公开所有者合同归还。拒绝命令也通过提交后的原收据唤醒，不能因为没有 run 事件永久保护；运行、排队、未知、引用读取失败或原件缺损继续保留。原生最新来源通过迁移 068 的实体终态索引查询，不回放全部历史。
+
+共享 fork 固定原 inputOwner，子任务后续轮次保持首个输入而不混入父任务的新范围；原生新 child turn 登记早于上轮完成投影，避免中间空档误回收。普通当前资料、固定历史资料及 MCP 都按原 input/run/scope 恢复：MCP 保留原 database/连接/凭证版本，当前停用、撤权及跨环境仍拒绝；清理不能借管理员读取撤权后的私有资料。没有可信原收据或完整原件时明确失败或保留，不从最新资料代替。
+
+当前指针、准备中的候选、真实命令、活动/未知及部署包的引用均保护底层内容；同操作者刷新目录只回收零真实引用的旧未发送选择。外部生成的原输入与快照仅在精确原任务终态并排除活动/未知引用后归还，成功发布再维护旧资料；维护失败单独诊断，不把已发布结果伪装失败。物理删除失败保留 tombstone 重试；包、版本链和原请求元数据仍按各所有者规则保留，回收后读取明确返回 410。
+
+先复现并验证的根因包括：共享 fork 误用来源 owner 导致原件 404；已拒绝命令没有 run 事件使引用长期不释放；复用 child 混入后来父输入；旧 picker 替换未归还；同步释放回调丢失 thenable 导致事务未回滚。对应原失败与修后证据在 `.deployment/workspace-{input-fork,native-claim,child-reuse,picker-retention,version-release-async}-before.log`，未通过放宽越权、超时推断终态或切最新输入修复。
+
+独立 C6 v2+D3 候选的 owner/SQLite/临时磁盘及受控 Git 125 项、MCP/运行资源 24 项、原生持久生命周期与索引升级 41 项通过；集合重叠不累加。适配器、原生、Web、客户四类严格类型通过，286 个源文件边界 0 错误，Worker 32 文件重建及 diff 检查通过。日志 `.deployment/d3-c6-{owner,mcp,native}-final.log`、`d3-c6-*-types.log` 与 `d3-c6-worker-build.log`；真实 EXPLAIN 与 67→68 原数据保留回归位于 [068 索引测试](../vendor/t3code/apps/server/src/persistence/Migrations/068_NativeResourceUpdateIndex.test.ts)。独立完整 Node 803 项中 800 通过、3 项按环境跳过；真实发行清单 10467 文件、97 条内部链接全部摘要校验通过，源码 ZIP 冒烟保持原输入、重复请求和定期设置（`.deployment/final-current-inputs-evidence.json`）。该候选尚未附加 Linux 官方原生依赖或启动服务。3 处旧 actor 夹具补齐实际 `retainInputForNativeBinding` 公开口，并强化原调用者和排队编辑者断言，原文件 14 项通过。本批没有用户界面操作变化，完整 CI、Linux 发行及真实服务原请求/问答/回收仍待验，以上不代表整体工作区或部署业务已完成。
