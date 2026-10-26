@@ -10,6 +10,24 @@
 
 本节是当前程序、网页、客户包及恢复配置的唯一现行记录。正式入口为 `https://auto.996788.xyz/`；`192.168.31.157:28887` 保留为后端地址，日常访问使用 HTTPS 域名。公网配置见[公网入口与旧环境清理](#公网入口与旧环境清理2026-10-24)，模块归属及验收分层见[部署核心适配运行记录](../docs/runtime-modules.md#main-部署核心适配2026-10-25)。历史记录不代表旧发行仍可执行恢复。
 
+2026-10-26，当前应用为 `be768c1972e0449272e089c3a2c6c6938b915fc4`，完整发行目录 `/home/tao/autoops-agent-demo/releases/t3-confirmed-be768c19`，数据继续使用 `/home/tao/autoops-deployment-validation/data`。网关 PID 354732、Worker 启动器 PID 353131、实际原生进程 PID 353143 已核对；Node 为 24.22.0。当前总体规划仍在真实业务验收，发行上线不等于完整交付。
+
+| 本批发行证据 | 已核实结果 |
+| --- | --- |
+| 上传归档 SHA-256 | `db784609850482d46c1a986e88c066c2b6f1e477af4dfb1c7186a70ba6b6b115` |
+| 完整清单 SHA-256 | `76bb0feb10ab224598c47c44aebad13727d647ba60447d70d039d166522eea2a` |
+| 原生依赖清单 SHA-256 | `f16f9862feddb59b10f362e07db3b24a5ee3a2e7b7196ea7f2d014b4222ab3fb`；与存量官方 T3 0.1.1 Linux x64 依赖逐字核对 |
+| 来源与发行 | 独立 Git archive 冻结 29473 个跟踪文件，源码和锁未变化；10468 个发行普通文件（含清单）、97 条内部相对链接全部摘要匹配 |
+| 客户与部署包 | 客户 0.4.0 ZIP `bfced879bdd7052cb714212bcb3eeadfd6ae418e936deaabf16a3dbacdfa34d2`；部署 Agent 包 `eaeeb027464ca876a9ac900b955a43b24ffd1e7f3e618587e31b54feea02c783` |
+| 实际入口 | 网关和 Worker 健康；HTML `dc05e0565c19587ffa4056cc3d476e0fdd9029cd5ac6005134c5a92c661c7ed9` 及两个 Web Worker 与发行字节一致 |
+| 同提交 CI | [质量 40313314774](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40313314774)、[运行 40313314848](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40313314848) 均通过；Web 612/612、客户 73/73，Node 803 通过、2 项跳过 |
+
+按用户本次授权直接 SSH，不使用 Agent Ops，不备份或恢复数据。旧两条 Git 来源的拆表迁移逐行重构摘要相等；4 条线程仅因正常附加原会话更新时间；14 份已真实完成的输入归还引用及 10 个保护引用能精确重构升级前摘要，原资料未被替换。12 条部署任务、9 个版本及原源码 ZIP 与原 Agent 持久账本一致；B4 只准入各项目原已绑定的节点，林晓和陈一继续待分配。原 Agent 仍直连 28889 并上报维护结果，旧部署整体 JSON 摘要无法逐字重构，未将它记为字节相等。逐项证明和明确边界见[本批升级核对](../docs/runtime-modules.md#总体规划发行升级与原收据实证2026-10-26)。
+
+新版本已执行原生 068 和资料 3/4 等升级，不能套用下方历史发行的程序回滚预检。原切换脚本因旧列比较而保守拒绝后，保留当前数据及配置；按所有者完成只读迁移核对后恢复 Web。没有执行旧程序降级、数据覆盖、空库初始化或整分支合并。后续恢复须继续核对当前 schema 和活动任务。
+
+### 历史批次：客户文件面板（2026-10-25）
+
 2026-10-25，本批应用提交为 `5d10924242879cb4a7166788dbeb3dfabd1adcb0`，完整发行目录为 `/home/tao/autoops-agent-demo/releases/t3-deployment-ui-5d109242`，数据继续使用 `/home/tao/autoops-deployment-validation/data`。客户电脑文件的查看、目录浏览和引用已统一到问答原生侧栏；窄屏沿用原生侧面板。正文、目录、错误和引用边界保持原合同，不需升级现有 0.3.0 客户连接程序。具体操作步骤、原因与本机测试见[客户文件面板验收](../docs/runtime-modules.md#客户电脑文件面板统一2026-10-25)。
 
 | 本批发行证据 | 已核实结果 |

@@ -1092,3 +1092,21 @@ v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3`
 `2d963b58` 后续完整 Linux CI 已到浏览器 609 通过、3 失败（`40308750309`）。原成功保存焦点、身份 guard 及其他原失败场景已通过；剩余两项新增延迟刷新回归的拦截器漏去实际 `/api/agent-demo/t3` 网关前缀，因而没有真正挂起请求，已按同文件原 fetch 夹具的实际 URL 合同修正，未删除焦点断言。另一个撤回目录的完整选项名与 profile 修订不匹配时不同，已分别断言“隔离运行器 · 已不可用”和“原隔离运行器 · 已不可用”，仍保留原 profile/模型/技能、错误及零写入断言。原红日志 `.deployment/ci-2d963b58.log`；修后继续等待完整 CI，不能将 609 项通过代替整项完成。
 
 随后真实 WebSocket 扩展回归暴露历史轮次边界：人工停止后账本保留 nativeTurnId，旧查询条件误拒已空闲会话；单独移除这一条件又可能在同会话仍等待准入或建立进程时错误补出 epoch。原测试 1 通过、3 失败（`/tmp/autoops-original-receipt-activity-before.log`），定位到客户端查询条件与执行器缺少逐会话在途计数。现在按 session 独立计数，并同时检查 opening/runners；两条同会话准入分别结束不会提前清除活动标志，其他会话不阻断原收据。4 项真实 WS 场景及相关 Node 42 项、严格客户类型通过，保留原中心代次及授权校验。恢复专用运维入口另经实际包、真实 WS/registry/SQLite 验证无目录发现、无原生启动及无个人 HOME 写入；该隔离测试仍不代表真实旧设备收据已归并或自用升级完成。
+
+## 总体规划发行升级与原收据实证（2026-10-26）
+
+`be768c19` 已通过[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40313314774)及[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40313314848)：Web 74 文件、612 项全过，客户 73 项全过，Node 805 项中 803 通过、2 项按环境跳过；原生目录 222 通过、2 项真实 CLI 探针跳过。此前 6/3 项浏览器失败已实际关闭，不再以“待 CI”记录。完整日志 `.deployment/ci-be768c19.log`。
+
+独立冻结副本四项构建、源码包原输入/重复请求冒烟及发行逐文件验证通过；正式 Linux 原生依赖来自存量清单登记的官方目录。当前程序、包和摘要统一见[当前验证发行](../examples/agent-demo-t3-deployment.md#当前验证发行)，不将其上游 T3 sourceCommit 当成 AutoOps 应用提交。准备脚本的去重检查最初放在 tar filter 回调内，Ubuntu Python 在目录属性收尾再次调用 filter 时误报重复；原包 11415 个成员无重复，已解出的 10468 文件及 97 链接逐字核验后仅附加官方依赖，没有覆盖原数据或旧发行。
+
+真实切换先遇到原 Agent 心跳更新导致部署摘要变化；已先复现并补 30 项运维回归，只排除已确认指标和观察时间，保留配置、活动任务、身份和版本。随后在原维护终态窗口取得新 preflight，停旧 Web/Worker并启动新 Worker。资料迁移 3 把 name/url/credential_id 移至仓库连接表，保守旧列比较拒绝、自动降级也被阻断；没有清库或覆盖数据库。按所有者核对后才恢复新 Web，原拒绝收据仍保留，没有把原脚本结果改成成功。
+
+本批迁移实证：两条原来源按同 project/id join 重构旧列，摘要完全相同；29 条原线程完整旧行可重构，4 条新 attached 事件只更新时间，原会话、模型、身份与绑定一致。14 个 input/capture 只正常释放，其原运行和最新终态事件均已存在于升级前，14 尝试、166 节点、14 provider turn 均终态且无额外待处理引用；两条 sync 只新增 current/currentOrigin，原提交和版本不变。补回实际 10 个旧 pin、去掉新增空 retired 字段后，整个旧工作区 state.json 精确匹配原 SHA；不是实际恢复或保留这些已结束引用。其余原行、349 个原资料/技能文件及凭证密钥继续逐项保护。证据 `.deployment/current-release-switch/be768c19-native-{reconstruct,attachments}.json`、`be768c19-d3-owner-readonly-audit.json`。
+
+部署侧另以原 Agent 升级前持久账本核对 12 任务、9 版本及恢复链，原源码 ZIP 的实际 1002 字节和 SHA 与原任务一致。应用/服务/目标已有配置和项目环境绑定保持原投影摘要；B4 准入集合严格等于各项目原绑定节点，机柜项目仍无准入。原 Agent PID 59368 未停止，直连 Worker 28889，所以 Web 暂停时仍有维护报告；当前报告与其本机状态文件完全相同。旧部署整体 JSON 只有摘要、没有原正文，不能宣称整体字节相等；B4 显式新增字段和维护变化分别记录，不从授权比较中抹去。证据 `.deployment/current-release-switch/deployment-post-upgrade/`。林晓、陈一仍为 authorizationPending，未启用新授权。
+
+真实原收据恢复已通过原身份正常 HELLO/query：原 `remote-0cf7…` 的 resumeThread 变为 failed/CUSTOMER_MANUALLY_RECONCILED，runtimeEpoch 保持原值；中心总命令 36、unknown 0、lease/event 0，没有重发执行；provider session 仍 unknown，已撤回线程不重新开放。本机原失败收据逐字不变，恢复入口 nativeAttempts=0。证据 `.deployment/original-receipt-recovery/real-center-reconciled.json`。本机运维控制脚本在旧连接退出后，普通 SQLite mode=ro 首次 SELECT 无法打开已无 WAL/SHM 的数据库，并且缺少 finally 恢复，导致连接恢复中断；已保留真实异常及同一静止 mainDB 的 immutable 只读对照，证明账本未丢失，不以空库初始化解决。恢复专用入口正常结束后，按原 argv/cwd、已确认 HOME/PATH/CODEX_HOME 缺省和原启动方法恢复旧自用连接，中心同 device/owner 已 connected。未保存的完整旧进程环境无法证明一致，不宣称完整环境保持或新版自用/共享验收完成；未编辑个人模型配置。异常和恢复边界见 `.deployment/original-receipt-recovery/post-stop-*.json`、`restored-original-client.json`。
+
+真实私有仓库已在本次专属项目同步成功，Worker 的 strace 观察器有 ls-remote/fetch 各 1 次正对照；原收据读取没有新增远端 Git。缺失分支同步在准备阶段返回真实 404，验收器正在按原更新收据继续核对，尚不把这一阶段当成完整失败恢复通过。连续新轮问答零 Git、五分钟周期、MCP 原生调用、双用户共享、Java/static 及整页仍须继续实际验收；该批不是整体完成报告。
+
+原缺失分支更新收据随后已核实为真实失败，旧当前正文、版本和提交保持可读；验收器只恢复同一原请求，不重发同步。首轮实际问答虽为 completed，但 5 个 dynamic_tool（列目录及不同资料读取）均 failed，完整读取验收明确失败，未用最终回答替代。原消息、run 及 inputId 保留，正在按实际工具错误与授权/输入时间线复现；尚不能宣称 D1 连续问答成功。证据 `.deployment/d123-native-1-discovery.json`。
