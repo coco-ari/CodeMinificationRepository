@@ -280,6 +280,66 @@ async function create(name = "新增数据库") {
   await page.getByRole("button", { name: "保存连接", exact: true }).click();
 }
 
+it("延迟读取时添加入口禁用仍将焦点放入弹窗，加载后键盘不逃逸且 Esc 恢复原入口", async () => {
+  const f = setup();
+  f.options.holdRead = true;
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<App fixture={f} />);
+  await page.getByRole("button", { name: "管理环境 MCP", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "测试环境 · 环境连接", exact: true });
+  await expect.element(dialog).toBeVisible();
+  await vi.waitFor(() => expect(f.held.length).toBeGreaterThan(0));
+  await expect.element(page.getByRole("button", { name: "添加连接", exact: true })).toBeDisabled();
+  await expect.poll(() => dialog.element().contains(document.activeElement)).toBe(true);
+  const loadingFocus = document.activeElement;
+  f.options.holdRead = false;
+  for (const release of f.held) release();
+  await expect.element(page.getByRole("button", { name: "添加连接", exact: true })).toBeEnabled();
+  await expect.poll(() => document.activeElement).toBe(loadingFocus);
+  for (let step = 0; step < 8; step++) {
+    await userEvent.keyboard("{Tab}");
+    await expect.poll(() => dialog.element().contains(document.activeElement)).toBe(true);
+  }
+  await userEvent.keyboard("{Escape}");
+  await expect.element(dialog).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("button", { name: "管理环境 MCP", exact: true }))
+    .toHaveFocus();
+  expect(f.writes).toHaveLength(0);
+});
+
+it("初次读取失败保留弹窗内焦点，重试加载恢复后 Tab 与 Esc 仍使用原生焦点边界", async () => {
+  const f = setup();
+  f.options.read503 = 2;
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<App fixture={f} />);
+  await page.getByRole("button", { name: "管理环境 MCP", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "测试环境 · 环境连接", exact: true });
+  await expect.element(page.getByText("连接列表暂不可用", { exact: true })).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "添加连接", exact: true })).toBeDisabled();
+  await expect.poll(() => dialog.element().contains(document.activeElement)).toBe(true);
+  f.options.read503 = 0;
+  f.options.holdRead = true;
+  await page.getByRole("button", { name: "重试读取连接", exact: true }).click();
+  await vi.waitFor(() => expect(f.held.length).toBeGreaterThan(0));
+  await expect.poll(() => dialog.element().contains(document.activeElement)).toBe(true);
+  f.options.holdRead = false;
+  for (const release of f.held) release();
+  await expect.element(page.getByRole("button", { name: "添加连接", exact: true })).toBeEnabled();
+  await expect.element(page.getByText("连接列表暂不可用", { exact: true })).not.toBeInTheDocument();
+  await expect.poll(() => dialog.element().contains(document.activeElement)).toBe(true);
+  for (let step = 0; step < 8; step++) {
+    await userEvent.keyboard("{Tab}");
+    await expect.poll(() => dialog.element().contains(document.activeElement)).toBe(true);
+  }
+  await userEvent.keyboard("{Escape}");
+  await expect.element(dialog).not.toBeInTheDocument();
+  await expect
+    .element(screen.getByRole("button", { name: "管理环境 MCP", exact: true }))
+    .toHaveFocus();
+  expect(f.writes).toHaveLength(0);
+});
+
 it("同一原生 Dialog 完成创建、测试、启停、修改与移除，保留标签、历史时间及焦点", async () => {
   const f = setup();
   using _fetch = stubGlobal("fetch", f.fetcher);

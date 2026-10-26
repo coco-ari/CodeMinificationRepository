@@ -526,7 +526,7 @@ function EnvironmentMcpScope({
     <Dialog open={open} onOpenChange={(next) => callbacks.current.onOpenChange(next)}>
       <DialogPopup
         finalFocus={finalFocus}
-        initialFocus={() => add.current}
+        initialFocus={() => (add.current?.disabled ? undefined : (add.current ?? undefined))}
         className="sm:max-w-2xl"
       >
         <form
