@@ -582,7 +582,7 @@ it("有调整权者从实际模型菜单显式更换模型，发送只改变本�
   expect(f.preset.configuration.model.model).toBe("selected-actual-model");
 });
 
-it("实际输入器已有文本和图片时切换来源新建干净草稿，原附件与选择保留", async () => {
+it("实际输入器已有文本和未上传图片时切换来源新建干净草稿，原附件与选择保留", async () => {
   await page.viewport(1280, 800);
   const f = setup("actual-composer-dirty", true);
   using _fetch = stubGlobal("fetch", f.fetcher);
@@ -600,20 +600,22 @@ it("实际输入器已有文本和图片时切换来源新建干净草稿，原�
   await vi.waitFor(() =>
     expect(useComposerDraftStore.getState().getComposerDraft(f.draftId)?.images).toHaveLength(1),
   );
+  const originalImage = useComposerDraftStore.getState().getComposerDraft(f.draftId)!.images[0];
   await page.getByRole("button", { name: "助手", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
   await vi.waitFor(() => expect(mocks.createThread).toHaveBeenCalledOnce());
   const clean = useComposerDraftStore.getState().getComposerDraft(DraftId.make(`${f.id}-clean`));
   expect(clean?.prompt ?? "").toBe("");
   expect(clean?.images ?? []).toEqual([]);
-  expect(useComposerDraftStore.getState().getComposerDraft(f.draftId)?.images).toHaveLength(1);
+  expect(useComposerDraftStore.getState().getComposerDraft(f.draftId)?.images).toEqual([originalImage]);
   expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe(
     "preset-one",
   );
   expect(readAutoOpsThreadScope(`${f.id}-clean`, "composer-project")?.question?.assistantId).toBe(
     "preset-two",
   );
-  await expect.element(editor()).toHaveTextContent("原来源的必要输入");
+  expect(f.handle.current?.getSendContext().prompt).toBe("原来源的必要输入");
+  await expect.element(editor()).toHaveTextContent(/原来源的必要输入/);
 });
 
 it("本机离线期间保留原模型及草稿，不选平台或其他本机来源", async () => {

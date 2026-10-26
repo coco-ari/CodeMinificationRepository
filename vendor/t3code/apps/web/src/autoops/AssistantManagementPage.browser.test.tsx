@@ -421,7 +421,7 @@ it("普通提供者不需项目管理权，按真实来源创建，再主动共�
   await page.getByRole("button", { name: "保存共享", exact: true }).click();
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
   expect(f.writes[2]?.body).toMatchObject({ expectedRevision: 1, enabled: false });
-  await expect.element(screen.getByRole("button", { name: "当前项目", exact: true })).toBeEnabled();
+  await expect.element(page.getByRole("button", { name: "当前项目", exact: true })).toBeEnabled();
 });
 
 it("个人预设断线按GET原payload恢复不重复创建；配对仍从同一我提供的入口可用", async () => {
@@ -460,8 +460,10 @@ it("原收据读取失败后关闭编辑并切分类，重开仍恢复同一原�
     .element(page.getByRole("button", { name: "添加个人助手", exact: true }))
     .toBeEnabled();
   await create();
+  await expect.element(page.getByRole("dialog").getByRole("alert"))
+    .toHaveTextContent("原收据读取暂不可用");
+  await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect.element(page.getByRole("button", { name: "重试", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByRole("button", { name: "当前项目", exact: true }).click();
   await expect.element(page.getByRole("heading", { name: "项目预设", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "我提供的", exact: true }).click();
