@@ -17,6 +17,7 @@ import { repositoriesRoutes } from './http/repositories.ts'
 import { assistantsRoutes } from './http/assistants.ts'
 import { providedAssistantsRoutes } from './http/providedAssistants.ts'
 import { environmentMcpRoutes } from './http/environmentMcp.ts'
+import { workspaceUpdatesRoutes } from './http/workspaceUpdates.ts'
 import { configuredEnvironmentMcp } from '../../../../../../agent-demo/t3-adapters/environment-mcp-runtime.ts'
 import { configuredProjectDeletionInspection } from '../../../../../../agent-demo/t3-adapters/project-deletion.ts'
 export { responseError } from './http/responses.ts'
@@ -30,7 +31,7 @@ export const layer = Layer.unwrap(Effect.sync(() => {
     workspacesRoutes(context), workspaceAuthoringRoutes(context), deploymentsRoutes(context), deploymentNodesRoutes(context), skillsRoutes(context),
     conversationsRoutes(context), resourcesRoutes(context), projectDirectoryRoutes(context,
       (project, environment) => configuredProjectDeletionInspection(access, configuredEnvironmentMcp(access))(project, environment)),
-    assistantsRoutes(context), providedAssistantsRoutes(context), repositoriesRoutes(context), environmentMcpRoutes(context),
+    assistantsRoutes(context), providedAssistantsRoutes(context), repositoriesRoutes(context), environmentMcpRoutes(context), workspaceUpdatesRoutes(context),
     HttpRouter.middleware((handler) => Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const path = new URL(request.url, "http://localhost").pathname;

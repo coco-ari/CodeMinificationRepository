@@ -18,7 +18,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   if (!(await stat(root)).isDirectory()) throw new Error('发行路径不是目录')
   if (!(await stat(join(root, 'node_modules'))).isDirectory()) throw new Error('发行目录缺少运行依赖')
   const adapters = join(root, 'agent-demo/t3-adapters')
-  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'thread-inputs.ts', 'project-directory/index.ts', 'project-directory/schema.ts', 'assistants/index.ts', 'assistants/schema.ts', 'assistants/policy.ts']) {
+  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'workspace-update-runtime.ts', 'workspace-updates/index.ts', 'workspace-updates/storage.ts', 'thread-inputs.ts', 'project-directory/index.ts', 'project-directory/schema.ts', 'assistants/index.ts', 'assistants/schema.ts', 'assistants/policy.ts']) {
     const path = await realpath(join(adapters, file))
     if (!within(root, path) || !(await stat(path)).isFile()) throw new Error(`发行工作区文件缺失或越界：${file}`)
   }
@@ -31,7 +31,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   const temporaryRoot = await realpath(tmpdir()), prefix = 'autoops-workspace-release-'
   const dataDir = await mkdtemp(join(temporaryRoot, prefix))
   const previousResources = process.env.AUTOOPS_BUSINESS_RESOURCES_DIR
-  let store, management, authoring, credentials, projectDirectory, assistants
+  let store, management, authoring, credentials, projectDirectory, assistants, updates
   try {
     process.env.AUTOOPS_BUSINESS_RESOURCES_DIR = adapters
     const [{ createWorkspaceStore }, { inspectZip }] = await Promise.all([
@@ -116,6 +116,13 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     credentials = createProjectCredentialService({ databasePath: join(dataDir, 'credentials.sqlite'), keyPath: join(dataDir, 'credentials.key'), initializeKeyIfNew: true, authorize })
     const access = { requireWorkspaceActor: authorize, requireWorkspaceReader: authorize, requireWorkspaceInputReader: authorize, requireCredentialActor: authorize, requireProjectActionForActor: authorize, workspaceVersionReferences: () => [] }
     management = createWorkspaceManagement({ access, store, authoring, credentials, git: createWorkspaceGit() })
+    const { createManagedWorkspaceUpdates } = await import(pathToFileURL(join(adapters, 'workspace-update-runtime.ts')).href)
+    updates = createManagedWorkspaceUpdates({ dataDir, access, store, service: management })
+    const updateSettings = {requestId: randomUUID(), expectedRevision: 0, value: {enabled: false, intervalMinutes: 60, timezone: 'Asia/Shanghai', sourceIds: []}}
+    const savedUpdate = updates.save(projectId, 'internal', updateSettings, actorId)
+    assert.equal(savedUpdate.enabled, false, '发行冒烟不能擅自启用定期更新')
+    assert.deepEqual(updates.save(projectId, 'internal', updateSettings, actorId), savedUpdate)
+    await updates.start()
     const document = Buffer.from('# 发行验收\n\n这份资料应保持在原轮次输入中。')
     const uploaded = await authoring.upload(projectId, { requestId: randomUUID(), expectedRevision: 0, path: 'docs/发行验收.md', size: document.length, sha256: createHash('sha256').update(document).digest('hex'), conflict: 'replace' }, document, actorId)
     const firstRequest = { requestId: randomUUID(), workspaceType: 'internal' }
@@ -128,10 +135,11 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     assert.deepEqual(Buffer.from(management.readInputFile(projectId, first.id, 'docs/发行验收.md', actorId).bytes), document)
     assert.equal((await management.captureAgentInput(projectId, firstRequest, actorId)).id, first.id)
     assert.equal(store.overview(projectId).internalVersions.length, overview.internalVersions.length, '每轮输入不应新增日常版本')
-    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, currentInput: second.id, previousInputPreserved: true, repeatedRequestPreserved: true }
+    return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, currentInput: second.id, previousInputPreserved: true, repeatedRequestPreserved: true, workspaceUpdateSettingsPreserved: true }
   } finally {
     try {
-      const results = await Promise.allSettled([assistants?.close(), projectDirectory?.close(), store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()])
+      const results = await Promise.allSettled([updates?.close()])
+      results.push(...await Promise.allSettled([assistants?.close(), projectDirectory?.close(), store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()]))
       const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
       if (errors.length) throw new AggregateError(errors, '发行冒烟资源关闭失败')
     }

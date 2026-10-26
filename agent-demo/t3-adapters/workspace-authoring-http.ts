@@ -5,6 +5,8 @@ import type { WorkspaceAuthoringMutation, WorkspaceDeploymentSourceInput, Worksp
 import { decodeContract } from '../../autoops/contracts/index.ts'
 import { ConfigureRepositoryWorkspace } from '../../autoops/contracts/project-repositories.ts'
 import type { CredentialCreate, CredentialReplace, CredentialRevoke } from './credentials.ts'
+import { configuredWorkspaceUpdates } from './workspace-update-runtime.ts'
+import type { WorkspaceUpdates } from './workspace-updates/index.ts'
 
 export interface WorkspaceAuthoringHttpResult {
   status: number
@@ -20,8 +22,8 @@ function identifier(value: unknown): string {
   if (typeof value !== 'string' || !value || value.length > 160) fail(400, 'WORKSPACE_REQUEST_INVALID', '工作区请求缺少有效标识')
   return value
 }
-export async function handleWorkspaceAuthoringRequest({ access, principal, url, method, input, bytes, service: provided, store: supplied }: {
-  access: AutoOpsAccess; principal: AutoOpsPrincipal; url: URL; method: string; input?: unknown; bytes?: Uint8Array; service?: WorkspaceManagement; store?: WorkspaceStore
+export async function handleWorkspaceAuthoringRequest({ access, principal, url, method, input, bytes, service: provided, store: supplied, updates }: {
+  access: AutoOpsAccess; principal: AutoOpsPrincipal; url: URL; method: string; input?: unknown; bytes?: Uint8Array; service?: WorkspaceManagement; store?: WorkspaceStore; updates?: WorkspaceUpdates
 }): Promise<WorkspaceAuthoringHttpResult> {
   const match = /^\/api\/v1\/projects\/([^/]+)\/workspace\/(.+)$/.exec(url.pathname)
   if (!match) fail(404, 'WORKSPACE_ROUTE_NOT_FOUND', '此资料操作不存在')
@@ -60,10 +62,10 @@ export async function handleWorkspaceAuthoringRequest({ access, principal, url, 
       return ok(body.dryRun === true ? service.planCleanupVersions(projectId, body.versionIds as string[], actor) : service.cleanupVersions(projectId, body.versionIds as string[], actor))
     }
     if (action === 'deployment-packages') return { status: 202, body: { task: service.startDeploymentPackages(projectId, body as unknown as WorkspaceDeploymentSourceInput, actor) } }
-    if (action === 'sync') return { status: 202, body: { task: await service.sync(projectId, body as unknown as WorkspaceAuthoringMutation, actor) } }
+    if (action === 'sync') return { status: 202, body: { task: await (updates ?? configuredWorkspaceUpdates(access)).manual(projectId, 'internal', body, actor) } }
     if (action === 'external') {
       access.requireProjectAction(principal, projectId, 'workspace.external.publish')
-      return { status: 202, body: { task: await service.generateCurrentExternal(projectId, body as unknown as { requestId: string; rules?: Array<{ find: string; replace: string }>; expectedRevision?: number }, actor) } }
+      return { status: 202, body: { task: await (updates ?? configuredWorkspaceUpdates(access)).manual(projectId, 'external', body, actor) } }
     }
     if (action === 'versions') return { status: 202, body: { task: await service.generate(projectId, body as unknown as WorkspaceAuthoringMutation, actor) } }
     const command = object(body.input)

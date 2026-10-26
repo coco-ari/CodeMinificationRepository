@@ -45,7 +45,12 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
   }
   if (method === 'POST') {
     access.requireWorkspaceManager(principal, projectId)
-    if (parts.length === 1 && parts[0] === 'external') { access.requireProjectAction(principal, projectId, 'workspace.external.publish'); return {status:202, body:store.startExternal(projectId, body, principal.id)} }
+    if (parts.length === 1 && parts[0] === 'external') {
+      access.requireProjectAction(principal, projectId, 'workspace.external.publish')
+      const previous = store.taskForRequest(projectId, 'external', body.requestId, principal.id)
+      if (previous) return {status:202, body:previous}
+      fail(410, 'WORKSPACE_EXTERNAL_CURRENT_REQUIRED', '请从当前内部资料更新外部工作区，不再从历史版本创建新任务')
+    }
     if (parts.length === 1 && parts[0] === 'packages') return {status:202, body:store.startPackages(projectId, body, principal.id)}
     if (parts.length === 1 && parts[0] === 'import') return {status:202, body:store.startImport(projectId, body, principal.id)}
     if (parts.length === 3 && parts[0] === 'versions' && parts[2] === 'publish') {

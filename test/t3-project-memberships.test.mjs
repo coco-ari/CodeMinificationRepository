@@ -22,10 +22,15 @@ function setup(t, options = {}) {
     { id:'external-v1', type:'external', status:'published', sourceVersionId:'internal-v1', source:{contentHash:'external-digest',repositories:[{path:'.',commit:'internal-commit'}]} },
     { id:'external-pending', type:'external', status:'pending_review', source:{contentHash:'pending',repositories:[]} },
   ]
-  let writes = 0, lastTaskActor
+  let writes = 0, lastReceiptLookup
   const file = { path:'docs/资料.md',name:'资料.md',mime:'text/markdown',size:10,sha256:'digest' }
   const store = {
     async ensureProject() {},
+    taskForRequest(projectId, type, requestId, actorId) {
+      lastReceiptLookup = { projectId, type, requestId, actorId }
+      if (projectId === base.projectId && type === 'external' && requestId === 'existing-external' && actorId === 'u-admin')
+        return { id: 'existing-task', requestId, actorId }
+    },
     getVersion(projectId,id) { const version = projectId === base.projectId && versions.find((entry) => entry.id === id && entry.status === 'published'); if (!version) throw Object.assign(new Error('未发布'),{code:'WORKSPACE_NOT_FOUND'}); return version },
     overview() { return {projectId:base.projectId,internalVersions:versions.filter((entry) => entry.type === 'internal'),externalVersions:versions.filter((entry) => entry.type === 'external'),releases:[{id:'release',manifest:{source:'raw-source'}}],tasks:[{id:'raw-task',message:'internal'}],import:{supported:true,hosts:['github.com']}} },
     files(projectId,id) { this.getVersion(projectId,id); return [file] },
@@ -35,18 +40,18 @@ function setup(t, options = {}) {
     managementRead(projectId,id) { return {contents:id === 'internal-v1'?'原始内容':'脱敏内容'} },
     versionFile(projectId,id) { return {bytes:Buffer.from(id),name:'资料.md',mime:'text/markdown'} },
     packageFile() { return {bytes:Buffer.from('raw-package'),name:'frontend.zip',mime:'application/zip'} },
-    startExternal(_projectId, _input, actorId) { writes++; lastTaskActor = actorId; return {id:'new-task'} },
+    startExternal() { writes++; return {id:'new-task'} },
   }
   const access = createAutoOpsAccess({sessionDb,bindingDb,catalog,workspaceStore:store,...options})
   const principal = (id) => access.authenticateCookie('demo_session=' + id)
   const admin=principal('u-admin'), member=principal('u-lin'), guest=principal('u-guest')
   const call = (principal,path='',method='GET',input) => handleWorkspaceRequest({access,store,principal,url:new URL('http://localhost/autoops/projects/p-autoops/workspaces'+path),method,input})
-  return {access,store,catalog,bindingDb,admin,member,guest,call,writes:()=>writes,lastTaskActor:()=>lastTaskActor}
+  return {access,store,catalog,bindingDb,admin,member,guest,call,writes:()=>writes,lastReceiptLookup:()=>lastReceiptLookup}
 }
 
 test('项目动作投影复用真实成员与环境授权，关闭部署及撤权后即时收敛', async t => {
   let enabled = true
-  const { access, admin, member, guest, catalog, call, lastTaskActor } = setup(t, { deploymentEnabled: () => enabled })
+  const { access, admin, member, guest, catalog, call, lastReceiptLookup, writes } = setup(t, { deploymentEnabled: () => enabled })
   const capabilities = (principal) => access.bootstrap(principal).projects.find((entry) => entry.id === base.projectId)?.capabilities
   assert.deepEqual(capabilities(admin), { 'workspace.read': true, 'workspace.manage': true, 'credential.use': true, 'credential.manage': true, 'deployment.read': true, 'deployment.execute': true, 'workspace.external.publish': true, 'project.manage': true, 'chat.use': true, 'chat.configure': true })
   for (const principal of [member, guest]) assert.deepEqual(capabilities(principal), { 'workspace.read': true, 'workspace.manage': false, 'credential.use': principal === member, 'credential.manage': false, 'deployment.read': false, 'deployment.execute': false, 'workspace.external.publish': false, 'project.manage': false, 'chat.use': true, 'chat.configure': true })
@@ -64,8 +69,11 @@ test('项目动作投影复用真实成员与环境授权，关闭部署及撤�
   assert.equal(capabilities(admin)['deployment.read'], true)
   assert.equal(capabilities(admin)['deployment.execute'], false)
   assert.throws(() => access.requireDeploymentActor(admin.id, base.projectId, base.environmentId), { code: 'DEPLOYMENT_DISABLED' })
-  assert.equal((await call(admin, '/external', 'POST', { actorId: guest.id, actor: { id: guest.id } })).status, 202)
-  assert.equal(lastTaskActor(), admin.id)
+  const original = await call(admin, '/external', 'POST', { requestId: 'existing-external', actorId: guest.id, actor: { id: guest.id } })
+  assert.equal(original.status, 202)
+  assert.equal(original.body.id, 'existing-task')
+  assert.deepEqual(lastReceiptLookup(), { projectId: base.projectId, type: 'external', requestId: 'existing-external', actorId: admin.id })
+  assert.equal(writes(), 0)
   enabled = true
   const project = catalog.projects.find((entry) => entry.id === base.projectId)
   const membership = project.memberships.find((entry) => entry.userId === admin.id) || { userId: admin.id, workspaceAccess: 'internal', role: 'project_admin', environmentIds: [base.environmentId], status: 'active' }
@@ -156,8 +164,8 @@ test('overview、pending、原件、部署包与管理操作按身份过滤', as
   await assert.rejects(call(member,'/external','POST',{}),{code:'WORKSPACE_MANAGEMENT_FORBIDDEN'})
   await assert.rejects(call(guest,'/external','POST',{}),{code:'WORKSPACE_FORBIDDEN'})
   assert.equal(writes(),0)
-  await call(admin,'/external','POST',{})
-  assert.equal(writes(),1)
+  await assert.rejects(call(admin,'/external','POST',{requestId:'fresh-external'}), {status:410,code:'WORKSPACE_EXTERNAL_CURRENT_REQUIRED'})
+  assert.equal(writes(),0)
 })
 
 test('直接资源、元数据与草稿@不能绕过外部资料授权', async t => {

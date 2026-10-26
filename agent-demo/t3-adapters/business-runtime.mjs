@@ -6,6 +6,7 @@ import { closeConfiguredSettingsPreferences } from './settings-preferences.mjs'
 import { closeConfiguredBusinessArtifactStore } from './business-tools.mjs'
 import { stopConfiguredWorkspaceManagement, closeConfiguredWorkspaceManagement } from './workspace-management.ts'
 import { configuredEnvironmentMcp, stopConfiguredEnvironmentMcp, closeConfiguredEnvironmentMcp } from './environment-mcp-runtime.ts'
+import { configuredWorkspaceUpdates, stopConfiguredWorkspaceUpdates, closeConfiguredWorkspaceUpdates } from './workspace-update-runtime.ts'
 
 // 宿主协调已启用的服务入口；未启用模块与其他可选存储仍按需初始化。
 export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
@@ -17,6 +18,7 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
   const stopAccepting = () => {
     if (stopped) return
     stopped = true
+    stopConfiguredWorkspaceUpdates()
     stopConfiguredAutoOpsAccess()
     stopConfiguredEnvironmentMcp()
     stopConfiguredWorkspaceManagement()
@@ -27,7 +29,11 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
     stopAccepting()
     return draining ||= (async () => {
       let timer, workspaceFinished = false, deploymentFinished = false
-      const workspace = closeConfiguredWorkspaceStore().finally(() => { workspaceFinished = true })
+      const updates = closeConfiguredWorkspaceUpdates()
+      const workspace = updates.then(() => closeConfiguredWorkspaceStore(), async error => {
+        await closeConfiguredWorkspaceStore()
+        throw error
+      }).finally(() => { workspaceFinished = true })
       const deployment = closeConfiguredDeploymentStore().finally(() => { deploymentFinished = true })
       // 预算只触发本地任务协作取消；部署结果仍需落盘，不能因此关闭正在使用的数据库。
       timer = setTimeout(() => {
@@ -35,9 +41,10 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
         console.warn(JSON.stringify({event:'autoops.shutdown.drain_budget_exceeded', workspacePending:!workspaceFinished, deploymentPending:!deploymentFinished, code:'AUTOOPS_SHUTDOWN_PENDING'}))
       }, budget)
       const environment = closeConfiguredEnvironmentMcp()
-      const authoring = environment.then(() => closeConfiguredWorkspaceManagement(), async error => {
+      const authoring = Promise.allSettled([environment, updates]).then(async results => {
         await closeConfiguredWorkspaceManagement()
-        throw error
+        const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
+        if (errors.length) throw new AggregateError(errors, '工作区资料更新关闭失败')
       })
       const results = await Promise.allSettled([workspace, deployment, authoring]).finally(() => clearTimeout(timer))
       const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
@@ -49,6 +56,7 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
       const access = configuredAutoOpsAccess()
       if (access) await configuredDeploymentStore()?.initialize()
       if (access) configuredEnvironmentMcp(access)
+      if (access) await configuredWorkspaceUpdates(access).start()
       return access
     },
     stopAccepting,

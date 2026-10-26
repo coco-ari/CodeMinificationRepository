@@ -3,6 +3,7 @@ import type { DeletionBlocker } from '../../autoops/contracts/project-directory.
 import { configuredAutoOpsAssistantDirectory, type AutoOpsAccess } from './access.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
 import { configuredWorkspaceManagement } from './workspace-management.ts'
+import { configuredWorkspaceUpdates } from './workspace-update-runtime.ts'
 import { configuredDeploymentDeletionReferences } from './deployments.mjs'
 import { projectSkillDeletionReferences } from './skill-library.mjs'
 
@@ -60,7 +61,7 @@ export function configuredProjectDeletionInspection(
   const management = configuredWorkspaceManagement(access)
   return createProjectDeletionInspection({
     access,
-    workspace,
+    workspace: { deletionReferences: (project, environment) => [...workspace.deletionReferences(project, environment), ...configuredWorkspaceUpdates(access).deletionReferences(project, environment)] },
     authoring: management.authoring,
     credentials: management.credentials,
     assistants: configuredAutoOpsAssistantDirectory(),

@@ -8,6 +8,7 @@ import {
   MoreHorizontalIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
+  ClockIcon,
 } from 'lucide-react'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
@@ -21,6 +22,7 @@ import { Spinner } from '~/components/ui/spinner'
 import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
 import { ModuleHeader, ModuleSidebar } from './ModuleWorkspace'
 import { WorkspaceAuthoring, type WorkspaceSection } from './WorkspaceAuthoringPanel'
+import { WorkspaceUpdateDialog } from './WorkspaceUpdateDialog'
 import { WorkspaceFileBrowser } from './WorkspaceFileBrowser'
 import { readSelection, saveSelection } from './workspaceViewState'
 import { useWorkspaceOverview } from './useWorkspaceOverview'
@@ -43,7 +45,7 @@ import {
 } from './workspaces'
 
 const taskActive = (task: WorkspaceTask) => task.status === 'queued' || task.status === 'running'
-type Dialog = 'external' | 'tasks' | 'review' | 'detail' | null
+type Dialog = 'external' | 'tasks' | 'review' | 'detail' | 'updates' | null
 export function AutoOpsWorkspacesPage() {
   const projectId = useAutoOpsProjectId()
   const host = readAutoOpsHost()
@@ -138,11 +140,15 @@ function ProjectWorkspaces({
     dialogFocus.current =
       next === 'tasks' && tab === 'internal' && historicalId === undefined
         ? authoringMenuFocus.current
-        : next === 'external'
-          ? externalMenuFocus.current
-          : document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : null
+        : next === 'updates'
+          ? tab === 'internal'
+            ? authoringMenuFocus.current
+            : externalMenuFocus.current
+          : next === 'external'
+            ? externalMenuFocus.current
+            : document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null
     setError(null)
     setDialog(next)
   }
@@ -268,6 +274,12 @@ function ProjectWorkspaces({
                 新建对话
               </MenuItem>
               {manager ? (
+                <MenuItem onClick={() => open('updates')}>
+                  <ClockIcon />
+                  更新设置
+                </MenuItem>
+              ) : null}
+              {manager ? (
                 <MenuItem onClick={() => open('tasks')}>
                   {running ? <Spinner size="sm" /> : <HistoryIcon />}
                   {taskLabel}
@@ -357,6 +369,12 @@ function ProjectWorkspaces({
                       <MoreHorizontalIcon />
                     </MenuTrigger>
                     <MenuPopup align="end">
+                      {project?.capabilities?.['workspace.external.publish'] === true ? (
+                        <MenuItem onClick={() => open('updates')}>
+                          <ClockIcon />
+                          更新设置
+                        </MenuItem>
+                      ) : null}
                       {pendingReview ? (
                         <MenuItem onClick={() => setPreviewReview(!previewReview)}>
                           {previewReview ? '查看已发布内容' : '查看待复核内容'}
@@ -424,6 +442,20 @@ function ProjectWorkspaces({
       )}
       {manager ? (
         <>
+          <WorkspaceUpdateDialog
+            projectId={projectId}
+            scope={tab}
+            open={dialog === 'updates'}
+            onOpenChange={(value) => {
+              if (!value) setDialog(null)
+            }}
+            finalFocus={() => dialogFocus.current}
+            onChanged={refreshOverview}
+            onAccessDenied={(cause) => {
+              setError(cause instanceof Error ? cause.message : '工作区维护权限已撤回')
+              refreshOverview()
+            }}
+          />
           <ExternalWorkspaceDialog
             open={dialog === 'external'}
             onOpenChange={(value) => {

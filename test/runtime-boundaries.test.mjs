@@ -343,3 +343,32 @@ test('当前资料公开入口允许协作，外部调用方不能穿透事务�
     result.result.violations.some((row) => row.rule.name === '当前资料存储只通过公开入口被调用'),
   )
 })
+
+test('定期资料更新从公开入口装配，HTTP 不能直接改写计划存储', async (t) => {
+  const f = await fixture(t)
+  await f.write(
+    'agent-demo/t3-adapters/workspace-updates/storage.ts',
+    'export const save = () => true\n',
+  )
+  await f.write(
+    'agent-demo/t3-adapters/workspace-updates/index.ts',
+    "export { save } from './storage.ts'\n",
+  )
+  await f.write(
+    'agent-demo/t3-adapters/workspace-update-runtime.ts',
+    "import { save } from './workspace-updates/index.ts'; export const start = save\n",
+  )
+  let result = f.run()
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  await f.write(
+    `${server}/workspaceUpdateHttp.ts`,
+    "import { save } from '../../../../../../agent-demo/t3-adapters/workspace-updates/storage.ts'; export const update = save\n",
+  )
+  result = f.run()
+  assert.equal(result.status, 1, result.stderr || result.stdout)
+  assert.ok(
+    result.result.violations.some(
+      (row) => row.rule.name === '定期资料更新存储只通过公开入口被调用',
+    ),
+  )
+})

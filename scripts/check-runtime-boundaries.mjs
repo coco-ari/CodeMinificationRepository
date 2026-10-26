@@ -89,6 +89,11 @@ const privateBoundaries = [
     owner: '^agent-demo/t3-adapters/workspace-authoring/',
   },
   {
+    name: '定期资料更新存储只通过公开入口被调用',
+    internal: '^agent-demo/t3-adapters/workspace-updates/(?!index\\.ts$)',
+    owner: '^agent-demo/t3-adapters/workspace-updates/',
+  },
+  {
     name: '部署项目存储只由部署引擎调用',
     internal: '^src/deployment-projects\\.mjs$',
     owner: '^src/(?:deployment|deployment-projects)\\.mjs$',

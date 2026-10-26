@@ -16,6 +16,7 @@ import { createWorkspaceStore } from '../agent-demo/t3-adapters/workspaces.mjs'
 import { createWorkspaceAuthoring } from '../agent-demo/t3-adapters/workspace-authoring/index.ts'
 import { createProjectCredentialService } from '../agent-demo/t3-adapters/credentials.ts'
 import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-management.ts'
+import { createManagedWorkspaceUpdates } from '../agent-demo/t3-adapters/workspace-update-runtime.ts'
 import { createCurrentWorkspace } from '../agent-demo/t3-adapters/workspace-current.ts'
 import { handleWorkspaceAuthoringRequest } from '../agent-demo/t3-adapters/workspace-authoring-http.ts'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
@@ -215,7 +216,9 @@ async function fixture(t, initialization) {
     },
   }
   const service = createWorkspaceManagement({ access, store, authoring, credentials, git })
+  const updates = createManagedWorkspaceUpdates({ dataDir, access, store, service })
   t.after(async () => {
+    await updates.close()
     await service.close()
     await store.close()
     sessionDb.close()
@@ -237,6 +240,7 @@ async function fixture(t, initialization) {
       bytes,
       service,
       store,
+      updates,
     })
   }
   const mutation = () => request(authoring.overview(projectId, owner).revision)
