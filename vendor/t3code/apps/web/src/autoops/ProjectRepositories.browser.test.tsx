@@ -62,7 +62,14 @@ function setup({ manage = true, lost = false, inUse = false, denied = false } = 
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), window.location.origin).pathname
     if (path.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
-    if (path.endsWith('/workspace/authoring')) return Response.json({ projectId: project.id, revision: 0, sources: [], entries: [], limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 } })
+    if (path.endsWith('/workspace/authoring'))
+      return Response.json({
+        projectId: project.id,
+        revision: 0,
+        sources: [],
+        entries: [],
+        limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 },
+      })
     if (path.endsWith('/workspace/credentials'))
       return Response.json({
         credentials: [
@@ -248,7 +255,7 @@ it('使用中的连接拒绝移除并保留恢复入口，Esc 返回原管理菜
   await page.getByRole('button', { name: '移除连接', exact: true }).click()
   await expect
     .element(page.getByRole('dialog').getByRole('alert'))
-    .toHaveTextContent('工作区仍使用此仓库')
+    .toHaveTextContent('工作区仍使用此仓库，请先移除工作区来源')
   await userEvent.keyboard('{Escape}')
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   await expect.element(menu).toHaveFocus()
@@ -266,7 +273,9 @@ it('撤回仓库权限后检查返回拒绝并清除连接，保留读取重试�
   await expect
     .element(screen.getByRole('button', { name: '编辑仓库 业务仓库', exact: true }))
     .not.toBeInTheDocument()
-  await expect.element(screen.getByRole('alert')).toHaveTextContent('仓库管理权限已撤回')
+  await expect
+    .element(screen.getByRole('alert'))
+    .toHaveTextContent('仓库管理权限已撤回重试仓库配置')
   await expect
     .element(screen.getByRole('button', { name: '重试仓库配置', exact: true }))
     .toBeVisible()
