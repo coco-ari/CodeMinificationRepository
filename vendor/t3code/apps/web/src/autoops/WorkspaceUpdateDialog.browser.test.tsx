@@ -266,7 +266,11 @@ it('原收据缺失时显式按原请求重试，关闭再开不会生成另一�
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.element(page.getByRole('button', { name: '核对原请求' })).toBeEnabled()
   const first = structuredClone(f.writes[0])
-  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '关闭', exact: true })
+    .filter({ hasText: '关闭' })
+    .click()
   await page.getByRole('button', { name: '更新设置', exact: true }).click()
   await expect.element(page.getByRole('button', { name: '按原请求重试' })).toBeEnabled()
   expect(f.writes).toHaveLength(1)
