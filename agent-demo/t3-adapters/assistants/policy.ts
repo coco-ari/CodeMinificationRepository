@@ -1,4 +1,7 @@
-import type { QuestionConfiguration } from '../../../autoops/contracts/assistants.ts'
+import type {
+  QuestionConfiguration,
+  AssistantChoices,
+} from '../../../autoops/contracts/assistants.ts'
 import type {
   ProjectMembership,
   RuntimeProject,
@@ -15,8 +18,96 @@ type Ports = {
     projectId: string,
     agentId: string,
     workspaceType: 'internal' | 'external',
-  ): Array<{ id: string }>
+  ): Array<{ id: string; displayName?: string; name?: string }>
   customers(): CustomerRegistry
+}
+
+/** 只返回配置所需的公开能力，不返回技能物理路径、设备凭证或其他人的目录。 */
+export function questionConfigurationChoices(
+  ports: Ports,
+  actor: string,
+  projectId: string,
+): AssistantChoices {
+  const agents = ports
+    .agents()
+    .filter((agent) => agent.projectIds.includes(projectId))
+    .map(({ id, name }) => ({ id, name }))
+  const models = ports.models()
+  const sources: AssistantChoices['sources'] = [
+    {
+      id: 'platform',
+      name: '平台运行器',
+      executionBinding: { kind: 'platform' },
+      available: models.discovered,
+      ...(!models.discovered
+        ? { reason: { code: 'ASSISTANT_MODELS_UNAVAILABLE', message: '实际模型目录尚未就绪' } }
+        : {}),
+      models: models.discovered
+        ? models.models.map(({ id, name, reasoningLevels, defaultReasoning }) => ({
+            id,
+            name,
+            reasoningLevels,
+            defaultReasoning,
+          }))
+        : [],
+      skills: [],
+    },
+  ]
+  const registry = ports.customers(),
+    devices = registry.listDevices(actor)
+  for (const workspace of registry.listWorkspaces(actor, projectId)) {
+    const target = {
+      kind: 'customer' as const,
+      deviceId: workspace.deviceId,
+      registeredWorkspaceId: workspace.registeredWorkspaceId,
+      workspaceBindingRevision: workspace.workspaceBindingRevision,
+      runtimeId: workspace.runtimeId,
+    }
+    const capabilities = registry.getCapabilities(actor, target)
+    let unavailable: { code: string; message: string } | undefined
+    try {
+      registry.validateTarget(actor, projectId, target, { requireOnline: true })
+      if (!capabilities)
+        unavailable = { code: 'CUSTOMER_CAPABILITIES_MISSING', message: '电脑能力目录尚未就绪' }
+    } catch (error) {
+      const value = error as { code?: string; message?: string }
+      unavailable = {
+        code: value.code ?? 'CUSTOMER_UNAVAILABLE',
+        message: value.message ?? '电脑当前不可用',
+      }
+    }
+    sources.push({
+      id: `${target.deviceId}/${target.registeredWorkspaceId}/${target.workspaceBindingRevision}`,
+      name: `${devices.find((device) => device.id === target.deviceId)?.label ?? '自己的电脑'} · ${workspace.label}`,
+      executionBinding: target,
+      available: !unavailable,
+      ...(unavailable ? { reason: unavailable } : {}),
+      models:
+        capabilities?.models.map((model) => ({
+          id: model.id,
+          name: model.name ?? model.id,
+          reasoningLevels: model.supportedReasoningEfforts,
+          defaultReasoning: model.defaultReasoningEffort ?? null,
+        })) ?? [],
+      skills: capabilities?.skills.map(({ id, name }) => ({ id, name })) ?? [],
+    })
+  }
+  return {
+    agents,
+    sources,
+    platformSkills: agents.flatMap((agent) =>
+      (['internal', 'external'] as const).flatMap((workspaceType) =>
+        ports
+          .skills(projectId, agent.id, workspaceType)
+          .map((skill) => ({
+            id: skill.id,
+            name: skill.displayName ?? skill.name ?? skill.id,
+            agentId: agent.id,
+            workspaceType,
+          })),
+      ),
+    ),
+  }
 }
 const fail = (code: string, message: string): never => {
   throw Object.assign(new Error(message), { status: 403, code })

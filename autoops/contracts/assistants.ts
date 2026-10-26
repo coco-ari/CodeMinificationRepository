@@ -84,3 +84,26 @@ export interface AssistantDirectory {
   ready: boolean
   reason?: { code: string; message: string }
 }
+export interface AssistantChoices {
+  agents: Array<{ id: string; name: string }>
+  sources: Array<{
+    id: string
+    name: string
+    executionBinding: QuestionConfiguration['executionBinding']
+    available: boolean
+    reason?: { code: string; message: string }
+    models: Array<{
+      id: string
+      name: string
+      reasoningLevels: string[]
+      defaultReasoning: string | null
+    }>
+    skills: Array<{ id: string; name: string }>
+  }>
+  platformSkills: Array<{
+    id: string
+    name: string
+    agentId: string
+    workspaceType: 'internal' | 'external'
+  }>
+}

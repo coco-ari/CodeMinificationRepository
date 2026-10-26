@@ -8,7 +8,7 @@ import { resolveProductProfile } from './product-profile.mjs'
 import { configuredBusinessModels } from './models.mjs'
 import { isCustomerAgentsEnabled } from './customer-registry.mjs'
 import { createProjectDirectory } from './project-directory/index.ts'
-import { createAssistantDirectory, questionConfigurationPolicy } from './assistants/index.ts'
+import { createAssistantDirectory, questionConfigurationPolicy, questionConfigurationChoices } from './assistants/index.ts'
 import { resolveSkillLibrary } from './skill-library.mjs'
 import { isProjectRole } from '../../autoops/contracts/project-access.ts'
 
@@ -38,16 +38,18 @@ export function configuredAutoOpsAssistantDirectory() {
   const access = configuredAutoOpsAccess()
   if (!access) fail(503, 'AUTOOPS_NOT_CONFIGURED', '助手业务授权尚未就绪')
   const directory = configuredAutoOpsProjectDirectory()
+  const capabilityPorts = {
+    projects: () => directory.catalog.projects, agents: () => directory.catalog.agents,
+    models: configuredBusinessModels,
+    skills: (projectId, agentId, workspaceType) => resolveSkillLibrary(process.env.AUTOOPS_T3_DATA_DIR, { projectId, agentId, workspaceType }),
+    customers: () => access.customerRegistry,
+  }
   return configuredAssistants ||= createAssistantDirectory({
     dataDir: resolve(process.env.AUTOOPS_T3_DATA_DIR),
     membership: (actor, project) => access.requireProjectActionForActor(actor, project, 'chat.use'),
     manage: (actor, project) => access.requireProjectActionForActor(actor, project, 'project.manage'),
-    validate: questionConfigurationPolicy({
-      projects: () => directory.catalog.projects, agents: () => directory.catalog.agents,
-      models: configuredBusinessModels,
-      skills: (projectId, agentId, workspaceType) => resolveSkillLibrary(process.env.AUTOOPS_T3_DATA_DIR, { projectId, agentId, workspaceType }),
-      customers: () => access.customerRegistry,
-    }),
+    validate: questionConfigurationPolicy(capabilityPorts),
+    choices: (actor, project) => questionConfigurationChoices(capabilityPorts, actor, project),
     validateTarget(project, target) {
       if (!directory.catalog.projects.some(item => item.id === project) || (target.kind === 'role' ? !isProjectRole(target.id) : !directory.catalog.users.some(user => user.id === target.id && (user.status === undefined || user.status === 'active')))) fail(400, 'ASSISTANT_TARGET_INVALID', '分配对象不属于当前可用账号或固定角色')
     },

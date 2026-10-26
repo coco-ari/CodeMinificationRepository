@@ -26,7 +26,7 @@ function setup() {
   const catalog = { users: [{ id: 'admin', name: '管理员', role: 'admin' }, { id: 'reader', name: '只读成员', role: 'member' }], projects: [{ id: 'project', name: '项目', memberIds: ['reader'], memberships: [{ userId: 'reader', role: 'reader' as const, workspaceAccess: 'internal' as const, environmentIds: [], status: 'active' as const }], environments: [], documents: [], resources: [] }], agents: [] }
   const access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, catalog, now: () => 1000 })
   for (const id of ['admin', 'reader']) access.recordNativeSession(access.authenticateCookie(`demo_session=${id}`), id)
-  const directory = createAssistantDirectory({ dataDir, membership: (actor, project) => access.requireProjectActionForActor(actor, project, 'chat.use'), manage: (actor, project) => access.requireProjectActionForActor(actor, project, 'project.manage'), validate: () => {}, validateTarget: () => {} })
+  const directory = createAssistantDirectory({ dataDir, membership: (actor, project) => access.requireProjectActionForActor(actor, project, 'chat.use'), manage: (actor, project) => access.requireProjectActionForActor(actor, project, 'project.manage'), validate: () => {}, validateTarget: () => {}, choices: () => ({ agents: [], sources: [], platformSkills: [] }) })
   mock.directory = directory
   const app = HttpRouter.toWebHandler(assistantsRoutes(createBusinessHttpContext(access)).pipe(HttpRouter.provideRequest(Layer.mergeAll(NodeServices.layer, Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
     authenticateHttpRequest: (request: { headers: Record<string, string> }) => Effect.succeed({ sessionId: AuthSessionId.make(request.headers['x-test-session'] ?? 'missing'), subject: 'test', method: 'bearer-access-token', scopes: [] }),
@@ -58,6 +58,8 @@ it('身份、CSRF、管理和跨项目边界在消费正文前拒绝，不返回
     expect(request.bodyUsed).toBe(false)
   }
   expect((await f.handle(f.request('/assistants/settings', undefined, 'reader'))).status).toBe(403)
+  expect((await f.handle(f.request('/assistants/choices', undefined, 'reader'))).status).toBe(403)
+  expect(await (await f.handle(f.request('/assistants/choices'))).json()).toEqual({ agents: [], sources: [], platformSkills: [] })
   expect((await f.handle(f.request('/assistants', undefined, 'reader', true, 'another'))).status).toBe(404)
   expect((await f.handle(f.request('/assistants', { ...create, ownerId: 'reader' }))).status).toBe(400)
   expect(await (await f.handle(f.request('/assistants/settings'))).json()).toMatchObject({ presets: [], allocations: [] })

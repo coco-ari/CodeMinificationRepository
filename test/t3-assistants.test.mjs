@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../agent-demo/t3-adapters/access.mjs'
-import { createAssistantDirectory, questionConfigurationPolicy } from '../agent-demo/t3-adapters/assistants/index.ts'
+import { createAssistantDirectory, questionConfigurationPolicy, questionConfigurationChoices } from '../agent-demo/t3-adapters/assistants/index.ts'
 import { createCustomerRegistry } from '../agent-demo/t3-adapters/customer-registry.mjs'
 import { readBusinessModels } from '../agent-demo/t3-adapters/models.mjs'
 import { resolveSkillLibrary } from '../agent-demo/t3-adapters/skill-library.mjs'
@@ -26,10 +26,12 @@ function fixture(t) {
   const models = [{ id: 'actual-model', name: '真实目录模型', reasoningLevels: ['low', 'high'], defaultReasoning: 'low', inputModalities: ['text'], contextWindow: null, supportsReasoningEffortUpdates: true }]
   writeFileSync(join(dataDir, 't3/models-catalog.json'), JSON.stringify({ version: 1, source: 'https://catalog.example/models', models }))
   let assistants
+  const ports = { projects: () => catalog.projects, agents: () => catalog.agents, models: () => readBusinessModels(dataDir, 'actual-model'), skills: (projectId, agentId, workspaceType) => resolveSkillLibrary(dataDir, { projectId, agentId, workspaceType }), customers: () => access.customerRegistry }
   const open = () => assistants = createAssistantDirectory({ dataDir,
     membership: (actor, project) => access.requireProjectActionForActor(actor, project, 'chat.use'),
     manage: (actor, project) => access.requireProjectActionForActor(actor, project, 'project.manage'),
-    validate: questionConfigurationPolicy({ projects: () => catalog.projects, agents: () => catalog.agents, models: () => readBusinessModels(dataDir, 'actual-model'), skills: (projectId, agentId, workspaceType) => resolveSkillLibrary(dataDir, { projectId, agentId, workspaceType }), customers: () => access.customerRegistry }),
+    validate: questionConfigurationPolicy(ports),
+    choices: (actor, project) => questionConfigurationChoices(ports, actor, project),
     validateTarget(project, target) { if (project !== 'project' || target.kind === 'member' && !catalog.users.some(user => user.id === target.id)) throw Object.assign(new Error('目标无效'), { code: 'TARGET_INVALID' }) },
   })
   open()
@@ -158,4 +160,24 @@ test('用户来源只使用登记能力中的模型和技能，目录身份保�
   assert.throws(() => f.assistants.validateSelection('developer', 'project', select(preset)), { code: 'ASSISTANT_REQUIRED' })
   registry.setDeviceStatus('admin', device.device.id, 'disabled')
   assert.throws(() => f.assistants.validateSelection('admin', 'project', select(preset)), { code: 'ASSISTANT_REQUIRED' })
+})
+
+
+test('配置候选复用实际模型与技能目录，只显示自己的电脑且不返回物理路径或凭据', t => {
+  const f = fixture(t), registry = f.access.customerRegistry
+  for (const owner of ['admin', 'developer']) {
+    const pair = registry.createPairing(owner), device = registry.consumePairing(pair.pairingCode, { label: owner === 'admin' ? '自己的电脑' : '别人私有电脑' })
+    const actor = registry.authenticateToken(device.deviceToken)
+    registry.registerWorkspace(actor, { registeredWorkspaceId: owner + '-workspace', projectId: 'project', label: '登记目录', workspaceBindingRevision: 1, runtimeId: 'codex' })
+  }
+  const choices = f.assistants.choices('admin', 'project'), encoded = JSON.stringify(choices)
+  assert.equal(choices.sources[0].models[0].id, 'actual-model')
+  assert.equal(choices.sources.length, 2)
+  assert.equal(encoded.includes('自己的电脑'), true)
+  for (const forbidden of ['别人私有电脑', f.dataDir, 'packageRoot', 'tokenHash', 'deviceToken']) assert.equal(encoded.includes(forbidden), false)
+  assert.throws(() => f.assistants.choices('reader', 'project'), { code: 'PROJECT_ACTION_FORBIDDEN' })
+  registry.setDeviceStatus('admin', registry.listDevices('admin')[0].id, 'disabled')
+  const disabled = f.assistants.choices('admin', 'project')
+  assert.equal(disabled.sources[0].available, true)
+  assert.equal(disabled.sources[1].available, false)
 })

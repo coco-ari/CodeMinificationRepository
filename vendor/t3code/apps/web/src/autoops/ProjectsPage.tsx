@@ -32,6 +32,7 @@ import {
   loadProjectDirectory,
   loadProjectSettings,
   prepareProjectWrite,
+  prepareProjectMutation,
   readPendingProjectWrite,
   submitProjectWrite,
   refreshProjectHost,
@@ -39,13 +40,23 @@ import {
   type ProjectSettings,
 } from './projectDirectory'
 
-type Editor = {
-  kind: 'create' | 'project' | 'environment'
-  environmentId?: string
-  revision: number
-  name: string
-  description: string
-}
+import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
+import { ProjectConfigurationFields } from './ProjectConfigurationFields'
+import {
+  isConfigurationEditor,
+  configurationMutation,
+  type ProjectConfigurationEditor,
+} from './projectConfiguration'
+
+type Editor =
+  | ProjectConfigurationEditor
+  | {
+      kind: 'create' | 'project' | 'environment'
+      environmentId?: string
+      revision: number
+      name: string
+      description: string
+    }
 export function AutoOpsProjectsPage() {
   const location = useLocation()
   return (
@@ -69,6 +80,7 @@ function ProjectsContent() {
   const [error, setError] = useState<string | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [busy, setBusy] = useState(false)
+  const [configurationRevision, setConfigurationRevision] = useState(0)
   const [pending, setPending] = useState(readPendingProjectWrite)
   const alive = useRef(true)
   useEffect(() => {
@@ -79,34 +91,37 @@ function ProjectsContent() {
   }, [])
   const request = useRef<AbortController | null>(null)
   const trigger = useRef<HTMLButtonElement | null>(null)
-  const load = useCallback(async () => {
-    request.current?.abort()
-    const controller = new AbortController()
-    request.current = controller
-    setLoading(true)
-    setError(null)
-    try {
-      const [directory, details] = await Promise.all([
-        loadProjectDirectory(controller.signal),
-        explicit && manageable
-          ? loadProjectSettings(explicit, controller.signal)
-          : Promise.resolve(null),
-      ])
-      if (controller.signal.aborted) return
-      setProjects(directory.items)
-      setSettings(details)
-    } catch (cause) {
-      if (controller.signal.aborted) return
-      if (isAutoOpsAccessError(cause)) {
-        setProjects([])
-        setSettings(null)
-        if (!readPendingProjectWrite()) setEditor(null)
+  const load = useCallback(
+    async (background = false) => {
+      request.current?.abort()
+      const controller = new AbortController()
+      request.current = controller
+      if (!background) setLoading(true)
+      setError(null)
+      try {
+        const [directory, details] = await Promise.all([
+          loadProjectDirectory(controller.signal),
+          explicit && manageable
+            ? loadProjectSettings(explicit, controller.signal)
+            : Promise.resolve(null),
+        ])
+        if (controller.signal.aborted) return
+        setProjects(directory.items)
+        setSettings(details)
+      } catch (cause) {
+        if (controller.signal.aborted) return
+        if (isAutoOpsAccessError(cause)) {
+          setProjects([])
+          setSettings(null)
+          if (!readPendingProjectWrite()) setEditor(null)
+        }
+        setError(cause instanceof Error ? cause.message : '项目读取失败')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
       }
-      setError(cause instanceof Error ? cause.message : '项目读取失败')
-    } finally {
-      if (!controller.signal.aborted) setLoading(false)
-    }
-  }, [explicit, manageable])
+    },
+    [explicit, manageable],
+  )
   useEffect(() => {
     void load()
     return () => request.current?.abort()
@@ -128,17 +143,23 @@ function ProjectsContent() {
       const original = retry
         ? readPendingProjectWrite()
         : editor
-          ? prepareProjectWrite(
-              editor.kind === 'create'
-                ? '/api/v1/projects'
-                : editor.kind === 'project'
-                  ? `/api/v1/projects/${explicit}/settings`
-                  : `/api/v1/projects/${explicit}/environments${editor.environmentId ? '/' + editor.environmentId : ''}`,
-              editor.revision,
-              editor.kind === 'environment'
-                ? { name: editor.name }
-                : { name: editor.name, description: editor.description },
-            )
+          ? isConfigurationEditor(editor)
+            ? prepareProjectMutation(
+                configurationMutation(explicit!, editor).path,
+                editor.revision,
+                configurationMutation(explicit!, editor).payload,
+              )
+            : prepareProjectWrite(
+                editor.kind === 'create'
+                  ? '/api/v1/projects'
+                  : editor.kind === 'project'
+                    ? `/api/v1/projects/${explicit}/settings`
+                    : `/api/v1/projects/${explicit}/environments${editor.environmentId ? '/' + editor.environmentId : ''}`,
+                editor.revision,
+                editor.kind === 'environment'
+                  ? { name: editor.name }
+                  : { name: editor.name, description: editor.description },
+              )
           : null
       if (!original) throw new Error('没有可重试的保存')
       let result: Record<string, unknown>
@@ -162,8 +183,11 @@ function ProjectsContent() {
         readAutoOpsHost()?.projects.some((project) => project.id === result.id)
       )
         go(result.id)
-      else await load()
-      if (alive.current) setEditor(null)
+      else await load(true)
+      if (alive.current) {
+        setConfigurationRevision((value) => value + 1)
+        setEditor(null)
+      }
     } catch (cause) {
       if (!alive.current) return
       setPending(readPendingProjectWrite())
@@ -208,7 +232,7 @@ function ProjectsContent() {
               disabled={loading || busy}
               onClick={() => {
                 void refreshProjectHost()
-                  .then(load)
+                  .then(() => load())
                   .catch((cause) => setError(String(cause.message)))
               }}
             >
@@ -380,36 +404,12 @@ function ProjectsContent() {
                 </SettingsGroup>
               </SettingsSection>
               {manageable && settings ? (
-                <SettingsSection title="成员与权限">
-                  <SettingsGroup>
-                    {settings.members.map((member) => (
-                      <SettingsRow
-                        key={member.userId}
-                        title={member.name}
-                        description={
-                          member.authorizationPending
-                            ? '待管理员分配'
-                            : member.status === 'disabled'
-                              ? '已停用'
-                              : roleNames[member.role]
-                        }
-                        control={
-                          <span className="text-xs text-muted-foreground">
-                            {member.role === 'project_admin'
-                              ? '全部环境'
-                              : member.environmentIds
-                                  .map(
-                                    (id) =>
-                                      current?.environments.find((env) => env.id === id)?.name ??
-                                      id,
-                                  )
-                                  .join('、') || '无环境'}
-                          </span>
-                        }
-                      />
-                    ))}
-                  </SettingsGroup>
-                </SettingsSection>
+                <ProjectConfigurationPanel
+                  project={settings}
+                  revision={configurationRevision}
+                  disabled={busy || !!pending}
+                  onOpen={open}
+                />
               ) : null}
             </>
           )}
@@ -428,7 +428,15 @@ function ProjectsContent() {
                 ? '创建项目'
                 : editor?.kind === 'environment'
                   ? '环境'
-                  : '编辑项目'}
+                  : editor?.kind === 'assistant'
+                    ? editor.id
+                      ? '编辑助手'
+                      : '添加助手'
+                    : editor?.kind === 'allocation'
+                      ? '分配助手'
+                      : editor?.kind === 'member'
+                        ? '成员权限'
+                        : '编辑项目'}
             </DialogTitle>
           </DialogHeader>
           <DialogPanel>
@@ -440,36 +448,48 @@ function ProjectsContent() {
               }}
             >
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="directory-name">名称</Label>
-                  <Input
-                    id="directory-name"
-                    value={editor?.name ?? ''}
-                    maxLength={120}
-                    required
+                {editor && isConfigurationEditor(editor) ? (
+                  <ProjectConfigurationFields
+                    editor={editor}
                     disabled={busy || !!pending}
-                    onChange={(event) =>
-                      setEditor((value) => (value ? { ...value, name: event.target.value } : null))
-                    }
-                    autoFocus
+                    onChange={setEditor}
                   />
-                </div>
-                {editor?.kind !== 'environment' ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="directory-description">说明（可选）</Label>
-                    <Textarea
-                      id="directory-description"
-                      value={editor?.description ?? ''}
-                      maxLength={2000}
-                      disabled={busy || !!pending}
-                      onChange={(event) =>
-                        setEditor((value) =>
-                          value ? { ...value, description: event.target.value } : null,
-                        )
-                      }
-                    />
-                  </div>
-                ) : null}
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="directory-name">名称</Label>
+                      <Input
+                        id="directory-name"
+                        value={editor?.name ?? ''}
+                        maxLength={120}
+                        required
+                        disabled={busy || !!pending}
+                        onChange={(event) =>
+                          setEditor((value) =>
+                            value ? { ...value, name: event.target.value } : null,
+                          )
+                        }
+                        autoFocus
+                      />
+                    </div>
+                    {editor?.kind !== 'environment' ? (
+                      <div className="space-y-2">
+                        <Label htmlFor="directory-description">说明（可选）</Label>
+                        <Textarea
+                          id="directory-description"
+                          value={editor?.description ?? ''}
+                          maxLength={2000}
+                          disabled={busy || !!pending}
+                          onChange={(event) =>
+                            setEditor((value) =>
+                              value ? { ...value, description: event.target.value } : null,
+                            )
+                          }
+                        />
+                      </div>
+                    ) : null}
+                  </>
+                )}
                 {error ? <p role="alert">{error}</p> : null}
               </div>
             </form>
@@ -486,7 +506,15 @@ function ProjectsContent() {
             <Button
               form="directory-editor-form"
               type={pending ? 'button' : 'submit'}
-              disabled={busy || (!pending && !editor?.name.trim())}
+              disabled={
+                busy ||
+                (!pending &&
+                  (!editor?.name.trim() ||
+                    (editor.kind === 'member' && !editor.value.userId) ||
+                    (editor.kind === 'assistant' &&
+                      editor.value.enabled &&
+                      !editor.value.configuration.model.model)))
+              }
               onClick={
                 pending
                   ? () => {
@@ -502,11 +530,4 @@ function ProjectsContent() {
       </Dialog>
     </SidebarInset>
   )
-}
-const roleNames = {
-  project_admin: '项目管理员',
-  developer: '开发',
-  release_operator: '发布运维',
-  reader: '只读成员',
-  external: '外部成员',
 }

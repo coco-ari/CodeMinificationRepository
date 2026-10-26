@@ -8,18 +8,20 @@ import type { BusinessHttpContext } from './context.ts'
 import { responseError } from './responses.ts'
 
 export function assistantsRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'list' | 'settings' | 'create' | 'save' | 'assign') =>
+  const handle = (operation: 'list' | 'settings' | 'create' | 'save' | 'assign' | 'choices') =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
       const parts = new URL(request.url, 'http://localhost').pathname.split('/')
       const project = yield* Effect.try(() => decodeURIComponent(parts[4] ?? ''))
       const directory = yield* Effect.try(configuredAutoOpsAssistantDirectory)
-      if (operation === 'list' || operation === 'settings') {
+      if (operation === 'list' || operation === 'settings' || operation === 'choices') {
         const value = yield* Effect.try(() =>
           operation === 'list'
             ? directory.catalog(current.id, project)
-            : directory.settings(current.id, project),
+            : operation === 'choices'
+              ? directory.choices(current.id, project)
+              : directory.settings(current.id, project),
         )
         return HttpServerResponse.jsonUnsafe(value, {
           headers: { 'cache-control': 'private, no-store' },
@@ -64,6 +66,7 @@ export function assistantsRoutes({ access, principal }: BusinessHttpContext) {
   return Layer.mergeAll(
     HttpRouter.add('GET', `${base}/assistants`, handle('list')),
     HttpRouter.add('GET', `${base}/assistants/settings`, handle('settings')),
+    HttpRouter.add('GET', `${base}/assistants/choices`, handle('choices')),
     HttpRouter.add('POST', `${base}/assistants`, handle('create')),
     HttpRouter.add('POST', `${base}/assistants/:assistantId`, handle('save')),
     HttpRouter.add('POST', `${base}/assistant-allocations`, handle('assign')),

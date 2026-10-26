@@ -35,7 +35,7 @@ export async function refreshProjectHost() {
 }
 export type PendingProjectWrite = {
   path: string
-  body: { requestId: string; expectedRevision: number; value: object }
+  body: { requestId: string; expectedRevision: number } & Record<string, unknown>
 }
 const pendingKey = () => autoOpsStorageKey('project-directory:pending')
 export function readPendingProjectWrite(): PendingProjectWrite | null {
@@ -52,8 +52,15 @@ export function prepareProjectWrite(
   expectedRevision: number,
   value: object,
 ): PendingProjectWrite {
+  return prepareProjectMutation(path, expectedRevision, { value })
+}
+export function prepareProjectMutation(
+  path: string,
+  expectedRevision: number,
+  payload: object,
+): PendingProjectWrite {
   if (readPendingProjectWrite()) throw new Error('请先核对上一次保存结果')
-  const pending = { path, body: { requestId: randomUUID(), expectedRevision, value } }
+  const pending = { path, body: { ...payload, requestId: randomUUID(), expectedRevision } }
   autoOpsStorage(window.sessionStorage).setItem(pendingKey(), JSON.stringify(pending))
   return pending
 }

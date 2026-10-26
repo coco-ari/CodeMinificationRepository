@@ -9,7 +9,7 @@ import { DirectoryId } from '../../../autoops/contracts/project-directory.ts'
 import type { ProjectMembership } from '../../../autoops/contracts/runtime.ts'
 import { openDatabase } from '../../../autoops/server/platform/database.ts'
 import { migrations } from './schema.ts'
-export { questionConfigurationPolicy } from './policy.ts'
+export { questionConfigurationPolicy, questionConfigurationChoices } from './policy.ts'
 
 type Options = {
   dataDir: string
@@ -23,6 +23,7 @@ type Options = {
     membership: ProjectMembership,
   ): void
   validateTarget(project: string, target: C.AssistantTarget): void
+  choices?: (actor: string, project: string) => C.AssistantChoices
 }
 const fail = (status: number, code: string, message: string): never => {
   throw Object.assign(new Error(message), { status, code })
@@ -194,6 +195,12 @@ export function createAssistantDirectory(options: Options) {
   }
   return {
     catalog,
+    choices(actor: string, project: string) {
+      manage(actor, project)
+      if (!options.choices)
+        return fail(503, 'ASSISTANT_CHOICES_UNAVAILABLE', '助手配置目录尚未就绪')
+      return options.choices(actor, project)
+    },
     settings(actor: string, project: string) {
       manage(actor, project)
       return {

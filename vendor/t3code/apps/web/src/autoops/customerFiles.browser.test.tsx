@@ -4,10 +4,14 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { render } from '../../test/render'
 import { ComposerHandleContext } from '~/composerHandleContext'
+import { useComposerFocusState } from '~/components/chat/useComposerFocusState'
 import type { ChatComposerHandle } from '~/components/chat/ChatComposer'
 import type { FilePreviewPanelProps } from '~/components/files/FilePreviewPanel'
 import { RightPanelSheet } from '~/components/RightPanelSheet'
-import { ComposerPromptEditor, type ComposerPromptEditorHandle } from '~/components/ComposerPromptEditor'
+import {
+  ComposerPromptEditor,
+  type ComposerPromptEditorHandle,
+} from '~/components/ComposerPromptEditor'
 import { useMediaQuery } from '~/hooks/useMediaQuery'
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from '~/rightPanelLayout'
 import { useRightPanelStore, selectThreadRightPanelState } from '~/rightPanelStore'
@@ -96,21 +100,27 @@ function panelProps(relativePath: string | null): FilePreviewPanelProps {
     workspaceMutationId: null,
   }
 }
-function Workbench({ scope, realEditor = false }: { scope: AutoOpsThreadScope; realEditor?: boolean }) {
+function Workbench({
+  scope,
+  realEditor = false,
+}: {
+  scope: AutoOpsThreadScope
+  realEditor?: boolean
+}) {
   const input = useRef<HTMLInputElement>(null)
   const editor = useRef<ComposerPromptEditorHandle>(null)
   const [draft, setDraft] = useState('')
-  const [composerExpanded, setComposerExpanded] = useState(false)
+  const { isComposerFocused: composerExpanded, requestExpandedFocus } = useComposerFocusState()
   const handle = useRef({
     insertTextAtEnd: (text: string) => {
       setDraft((value) => value + text)
       return true
     },
-    focusAtEnd: () => {
-      setComposerExpanded(true)
-      requestAnimationFrame(() => realEditor ? editor.current?.focusAtEnd() : input.current?.focus())
-    },
+    focusAtEnd: () => {},
   } as ChatComposerHandle)
+  // 夹具复用真实输入框的布局提交后聚焦语义，不再用帧回调模拟已修复的旧时序。
+  handle.current.focusAtEnd = () =>
+    requestExpandedFocus(() => (realEditor ? editor.current?.focusAtEnd() : input.current?.focus()))
   const state = useRightPanelStore((value) =>
     selectThreadRightPanelState(value.byThreadKey, threadRef),
   )
@@ -147,13 +157,15 @@ function Workbench({ scope, realEditor = false }: { scope: AutoOpsThreadScope; r
                 onPaste={() => {}}
               />
             </div>
-          ) : <input
-            aria-label="测试消息"
-            ref={input}
-            value={draft}
-            hidden={sheet && !draft && !composerExpanded}
-            onChange={(event) => setDraft(event.target.value)}
-          />}
+          ) : (
+            <input
+              aria-label="测试消息"
+              ref={input}
+              value={draft}
+              hidden={sheet && !draft && !composerExpanded}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          )}
           {(!sheet || !state.isOpen) && (
             <CustomerFileAttachMenu
               onUpload={() => {}}

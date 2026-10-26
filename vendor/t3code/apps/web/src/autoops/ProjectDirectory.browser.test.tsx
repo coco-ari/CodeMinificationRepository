@@ -23,6 +23,8 @@ function setup({ manage = true, failFirst = false, loseResponse = false } = {}) 
   installAutoOpsHost(bootstrap(), window.location.origin)
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    if (url.endsWith('/assistants/choices')) return Response.json({ agents: [], sources: [], platformSkills: [] })
+    if (url.endsWith('/assistants/settings')) return Response.json({ presets: [], allocations: [] })
     if (url.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { requestId: string; value: { name: string } }
