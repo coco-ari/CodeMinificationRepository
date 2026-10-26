@@ -473,6 +473,7 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
   readonly launchArgs?: string | undefined;
   readonly cwd: string;
   readonly environment?: NodeJS.ProcessEnv | undefined;
+  readonly agentScope?: import('@t3tools/shared/AgentScope').AgentScopeShape | undefined;
 }) {
   const host = yield* CodexCatalogHost;
   // `~` is not shell-expanded when env vars are set via `child_process.spawn`,
@@ -486,9 +487,10 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
     ...codexAppServerEnvironment(input.environment),
     ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
   };
+  const launch = input.agentScope ? yield* input.agentScope.wrap({command:input.binaryPath,args:codexAppServerArgs(input.launchArgs),name:'codex-catalog',env:environment}) : {command:input.binaryPath,args:codexAppServerArgs(input.launchArgs)};
   const spawnCommand = yield* resolveSpawnCommand(
-    input.binaryPath,
-    codexAppServerArgs(input.launchArgs),
+    launch.command,
+    launch.args,
     { env: environment, extendEnv: true },
   );
   const child = yield* spawner

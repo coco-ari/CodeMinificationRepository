@@ -677,24 +677,14 @@ it("真实客户能力读取迟到并报告离线后，输入器保留原模型�
   };
   f.fetcher.mockImplementation(async (input, init) => {
     const path = String(input);
-    if (path.includes("/customer/capabilities?"))
+    if (path.endsWith("/customer/assistant-runtime"))
       return hold
         ? await new Promise<Response>((resolve) => pending.push(resolve))
-        : Response.json({ capabilities });
-    if (path.endsWith("/customer/devices"))
-      return Response.json({
-        devices: [
-          {
-            id: f.target.deviceId,
-            ownerId: "actual-composer-user",
-            label: "隔离本机",
-            status: "active",
-            online,
-            connectionEpoch: 1,
-            createdAt: "2026-10-26T00:00:00Z",
-          },
-        ],
-      });
+        : Response.json({
+            target: f.target, profile: "self", available: true, capabilities,
+            workspace: { label: "隔离目录", status: "active" },
+            device: { id: f.target.deviceId, label: "隔离本机", status: "active", online },
+          });
     return await original(input, init);
   });
   using _fetch = stubGlobal("fetch", f.fetcher);
@@ -707,7 +697,13 @@ it("真实客户能力读取迟到并报告离线后，输入器保留原模型�
   await vi.waitFor(() => expect(pending).toHaveLength(1));
   expect(f.handle.current?.getSendContext().selectedModelSelection).toMatchObject(f.selected);
   pending[0]!(
-    Response.json({ capabilities: { ...capabilities, models: capabilities.models.slice(1) } }),
+    Response.json({
+      target: f.target, profile: "self", available: false,
+      reason: { code: "CUSTOMER_DEVICE_OFFLINE", message: "客户设备离线，草稿保留；恢复连接后再发送。" },
+      capabilities: { ...capabilities, models: capabilities.models.slice(1) },
+      workspace: { label: "隔离目录", status: "active" },
+      device: { id: f.target.deviceId, label: "隔离本机", status: "active", online },
+    }),
   );
   await expect
     .element(

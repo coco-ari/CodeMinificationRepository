@@ -133,6 +133,15 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     return membership
   }
   const requireMembership = (principal, projectId) => membershipForUser(refresh(principal).id, projectId)
+  const requireCustomerSource = (binding, actorId, options = {}) => {
+    requireCustomerAgentsEnabled()
+    const source = customerRegistry.sourceOwner(binding.executionBinding)
+    if (source.ownerId !== actorId || source.projectId !== binding.projectId || binding.question?.configuration.customerProfile) {
+      if (!questions || !binding.question) fail(403, 'CUSTOMER_SHARED_ISOLATION_UNVERIFIED', '共享来源缺少已核验的助手授权')
+      questions().validateSelection(actorId, binding.projectId, binding.question, binding.scopeState !== 'draft')
+    }
+    return customerRegistry.validateTarget(source.ownerId, source.projectId, binding.executionBinding, options)
+  }
   const requireEnvironment = (principal, projectId, environmentId) => {
     const membership = requireMembership(principal, projectId)
     if (!membership.environmentIds.includes(environmentId)) fail(403, 'ENVIRONMENT_FORBIDDEN', '无权访问此项目环境')
@@ -196,6 +205,15 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     try { bindingAudienceForUser(current.id, binding) } catch { return false }
     return binding.visibility === 'project' || binding.ownerId === current.id
   }
+  const requireActorThread = (threadId, actorId) => {
+    assertAccepting()
+    const binding = getThreadBinding(identifier(threadId, '会话ID'))
+    if (!binding) fail(403, 'THREAD_NOT_BOUND', '缺少获授权的业务会话')
+    const scope = validateBinding(binding), actor = actorId ?? binding.ownerId
+    bindingAudienceForUser(actor, binding)
+    if (binding.visibility === 'private' && actor !== binding.ownerId) fail(404, 'THREAD_NOT_FOUND', '会话不存在或无权访问')
+    return { ...scope, actorId: actor }
+  }
   const requireThread = (principal, threadId) => {
     if (!canSeeThread(principal, threadId)) fail(404, 'THREAD_NOT_FOUND', '会话不存在或无权访问')
     const binding = getThreadBinding(threadId)
@@ -230,7 +248,6 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     bindingAudienceForUser(current.id, binding)
     if (binding.workspaceVersionId) workspaceForUser(current.id, binding.projectId, binding.workspaceType, binding.workspaceVersionId, binding.environmentId)
     validateBinding(binding)
-    if (binding.executionBinding.kind === 'customer') { requireCustomerAgentsEnabled(); customerRegistry.validateTarget(current.id, binding.projectId, binding.executionBinding) }
     if (questions && input.question === undefined && !getThreadBinding(binding.threadId)) fail(409, 'QUESTION_ASSISTANT_REQUIRED', '请选择当前项目已配置的可用助手')
     if (input.question !== undefined) {
       if (!questions) fail(503, 'QUESTIONS_NOT_CONFIGURED', '助手授权尚未就绪')
@@ -238,6 +255,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       binding.question = questions().validateSelection(current.id, binding.projectId, input.question, previous?.ownerId === current.id && previous.scopeState !== 'draft')
       assertQuestionBinding(binding.question, binding)
     }
+    if (binding.executionBinding.kind === 'customer') requireCustomerSource(binding, current.id)
     return binding
   }
   const bindingKeys = ['projectId','environmentId','agentId','ownerId','visibility','workspaceType','workspaceVersionId']
@@ -280,7 +298,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
   const requireThreadExecution = (principal, threadId, options = {}) => {
     const binding = requireThread(principal, threadId)
     if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史兼容会话仅供查看')
-    if (binding.executionBinding.kind === 'customer') { requireCustomerAgentsEnabled(); customerRegistry.validateTarget(binding.ownerId, binding.projectId, binding.executionBinding, options) }
+    if (binding.executionBinding.kind === 'customer') requireCustomerSource(binding, binding.ownerId, options)
     return binding
   }
   const beginThreadSubmission = (principal, threadId, commandId) => {
@@ -351,6 +369,83 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     refresh,
     customerRegistry,
     requireThreadExecution,
+    customerAssistantRuntime(principal,input) {
+      const current=refresh(principal)
+      requireCustomerAgentsEnabled()
+      if(!questions)fail(409,'ASSISTANT_DIRECTORY_UNAVAILABLE','助手目录尚未配置')
+      const state=questions().readRuntimeConfiguration(current.id,input.projectId,input.question)
+      const target=state.selection.configuration.executionBinding
+      const owner=customerRegistry.sourceOwner(target),source=customerRegistry.describeSource(owner.ownerId,target)
+      const shared=owner.ownerId!==current.id||owner.projectId!==input.projectId||state.selection.configuration.customerProfile!==undefined
+      const {sharedProfile,...capabilities}=source.capabilities??{}
+      // 共享文件浏览协议尚无双端资源许可；模型仍可读取容器内固定的只读来源。
+      const projected=source.capabilities?{...capabilities,...(shared?{models:sharedProfile?.models??[],skills:sharedProfile?.skills??[],workspaceFiles:false,permissions:{approvalPolicy:'on-request',sandboxMode:'read-only'}}:{})}:null
+      return {target,profile:shared?'linux-docker-readonly-v1':'self',device:{id:target.deviceId,label:source.deviceName,status:source.deviceStatus,online:source.online},workspace:{label:source.workspaceName,status:source.workspaceStatus},capabilities:projected,available:state.available,...(state.reason?{reason:state.reason}:{})}
+    },
+    visibleCustomerProviderInstances(principal) {
+      const current=refresh(principal),owned=customerRegistry.listDevices(current.id).map(device=>`customer-${device.id}-codex`),shared=new Set()
+      if(questions)for(const project of catalog.projects) {
+        try {for(const item of questions().catalog(current.id,project.id).items) {
+          const target=item.preset.configuration.executionBinding
+          if(item.available&&target.kind==='customer'&&!owned.includes(`customer-${target.deviceId}-codex`))shared.add(`customer-${target.deviceId}-codex`)
+        }} catch(error) {if(!(error&&typeof error==='object'&&'status' in error&&[401,403,404].includes(error.status)))throw error}
+      }
+      return {owned,shared:[...shared]}
+    },
+    customerExecutionSource(threadId, actorId) {
+      const binding = requireActorThread(threadId, actorId).binding
+      if (binding.executionBinding.kind !== 'customer') fail(403, 'CUSTOMER_TARGET_REQUIRED', '此对话没有客户运行来源')
+      requireCustomerSource(binding, actorId ?? binding.ownerId)
+      return customerRegistry.sourceOwner(binding.executionBinding)
+    },
+    issueCustomerSessionScope(threadId, sessionId, modelSelection) {
+      const binding = getThreadBinding(threadId)
+      if (!binding || binding.executionBinding.kind !== 'customer') fail(404, 'THREAD_NOT_FOUND', '客户会话不存在')
+      const selected = this.requireQuestionForActor(binding.ownerId, threadId, modelSelection)
+      if (!selected) return undefined
+      return questions().executionScope(binding.ownerId, binding.projectId, selected, { threadId, runId: `session:${identifier(sessionId, '客户会话ID')}` })
+    },
+    prepareCustomerRun(threadId, runId, messageId, editCommandId, modelSelection, inheritedRunId) {
+      const binding = getThreadBinding(threadId)
+      if (!binding || binding.executionBinding.kind !== 'customer') fail(404, 'THREAD_NOT_FOUND', '客户会话不存在')
+      const source = customerRegistry.sourceOwner(binding.executionBinding)
+      if (source.ownerId === binding.ownerId && source.projectId === binding.projectId && !binding.question?.configuration.customerProfile) return undefined
+      const original = inheritedRunId ? questions().executionGrant(threadId, inheritedRunId) : undefined
+      let actorId
+      try {
+        if (!messageId && !editCommandId) fail(409, 'MESSAGE_ACTOR_MISSING', '客户消息缺少可信调用者记录')
+        actorId = (editCommandId ? this.requireQueuedEditActor(threadId, editCommandId, runId) : this.requireMessageActor(threadId, messageId)).actorId
+      } catch (error) {
+        if (error.code !== 'MESSAGE_ACTOR_MISSING' || !original) throw error
+        actorId = original.actorId
+      }
+      if (inheritedRunId && !original) fail(409, 'CUSTOMER_SHARED_SCOPE_MISSING', '原任务缺少固定共享范围，不能改用最新来源恢复')
+      const selected = this.requireQuestionForActor(actorId, threadId, modelSelection)
+      if (!selected) fail(403, 'CUSTOMER_SHARED_SCOPE_MISSING', '共享执行必须使用已分配助手')
+      const scope = questions().executionScope(actorId, binding.projectId, selected, { threadId, runId })
+      if (original) {
+        const identity = ({ grantId, runId, ...value }) => JSON.stringify(value)
+        if (identity(original) !== identity(scope)) fail(409, 'CUSTOMER_SHARED_SCOPE_FIXED', '恢复必须沿用原共享配置及能力，不能切换最新来源')
+      }
+      return scope
+    },
+    customerRunScope(threadId, runId) {
+      const binding = getThreadBinding(threadId)
+      if (!binding || binding.executionBinding.kind !== 'customer') fail(404, 'THREAD_NOT_FOUND', '客户会话不存在')
+      const source = customerRegistry.sourceOwner(binding.executionBinding)
+      if (source.ownerId === binding.ownerId && source.projectId === binding.projectId && !binding.question?.configuration.customerProfile) return undefined
+      const scope = questions?.().executionGrant(threadId, runId)
+      if (!scope) fail(409, 'CUSTOMER_SHARED_SCOPE_MISSING', '任务尚无可信共享范围，不能按最新配置补建')
+      requireActorThread(threadId, scope.actorId)
+      return scope
+    },
+    requireSharedExecutionScope(scope, principal) {
+      if (!questions) fail(503, 'QUESTIONS_NOT_CONFIGURED', '助手授权尚未就绪')
+      const current = questions().requireExecutionScope(scope)
+      requireActorThread(current.threadId, current.actorId)
+      if (principal && (principal.deviceId !== current.target.deviceId || principal.ownerId !== current.providerId)) fail(403, 'CUSTOMER_SHARED_SCOPE_FORBIDDEN', '设备不能使用其他来源的执行范围')
+      return current
+    },
     questionInstructions(actorId, threadId, modelSelection) {
       const selected = this.requireQuestionForActor(actorId, threadId, modelSelection)
       return selected ? questions().instructions(actorId, getThreadBinding(threadId).projectId, selected) : ''
@@ -393,7 +488,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     requireQueuedEditActor(threadId, commandId, runId) {
       const record = this.getQueuedEditActor(threadId, commandId, runId)
       if (!record) fail(409, 'MESSAGE_ACTOR_MISSING', '原生编辑缺少可信调用者记录')
-      return this.requireToolThread(threadId, record.actorId)
+      return requireActorThread(threadId, record.actorId)
     },
     recordMessageActor(principal, threadId, commandId, messageId) {
       const current = refresh(principal)
@@ -411,7 +506,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     requireMessageActor(threadId, messageId) {
       const row = bindingDb.prepare('SELECT actor_id FROM t3_message_actors WHERE thread_id=? AND message_id=?').get(identifier(threadId, '会话ID'), identifier(messageId, '消息ID'))
       if (!row) fail(409, 'MESSAGE_ACTOR_MISSING', '消息缺少可信调用者记录，不能继承会话创建者身份')
-      return this.requireToolThread(threadId, row.actor_id)
+      return requireActorThread(threadId, row.actor_id)
     },
     getRunInput(threadId, runId) {
       const row = bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND run_id=?').get(identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
@@ -491,7 +586,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       if (!binding || binding.ownerId !== ownerId || binding.executionBinding.kind !== 'customer') fail(404, 'ATTACHMENT_NOT_FOUND', '附件不存在或无权访问')
       validateBinding(binding)
       bindingAudienceForUser(ownerId, binding)
-      customerRegistry.validateTarget(ownerId, binding.projectId, binding.executionBinding)
+      requireCustomerSource(binding, ownerId)
       const row = bindingDb.prepare('SELECT * FROM t3_attachment_access WHERE attachment_id=?').get(identifier(attachmentId, '附件ID'))
       if (!row || row.owner_id !== ownerId || row.thread_id !== threadId) fail(404, 'ATTACHMENT_NOT_FOUND', '附件不属于此客户对话')
       return {id:row.attachment_id, ...(row.metadata_json ? JSON.parse(row.metadata_json) : {})}

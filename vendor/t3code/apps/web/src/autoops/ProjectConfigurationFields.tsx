@@ -324,15 +324,28 @@ export function ProjectConfigurationFields({
     (source) =>
       assistantSourceKey(source.executionBinding) === assistantSourceKey(config.executionBinding),
   )
-  const model = source?.models.find((model) => model.id === config.model.model)
   const customer = config.executionBinding.kind === 'customer'
-  const update = (patch: Partial<QuestionConfiguration>) =>
-    onChange({ ...editor, value: { ...value, configuration: { ...config, ...patch } } })
-  const skillChoices = customer
-    ? (source?.skills ?? [])
-    : choices.platformSkills.filter(
-        (skill) => skill.agentId === config.agentId && skill.workspaceType === config.workspaceType,
-      )
+  const isolated = customer && config.customerProfile !== undefined
+  const model = isolated
+    ? undefined
+    : source?.models.find((model) => model.id === config.model.model)
+  const update = (patch: Partial<QuestionConfiguration>) => {
+    const next = { ...config, ...patch }
+    if (
+      patch.executionBinding &&
+      assistantSourceKey(patch.executionBinding) !== assistantSourceKey(config.executionBinding)
+    )
+      delete next.customerProfile
+    onChange({ ...editor, value: { ...value, configuration: next } })
+  }
+  const skillChoices = isolated
+    ? []
+    : customer
+      ? (source?.skills ?? [])
+      : choices.platformSkills.filter(
+          (skill) =>
+            skill.agentId === config.agentId && skill.workspaceType === config.workspaceType,
+        )
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -392,6 +405,27 @@ export function ProjectConfigurationFields({
           {source.reason.message}
         </p>
       ) : null}
+      {customer ? (
+        <>
+          <Choice
+            label="运行目录"
+            value={isolated ? 'shared' : 'self'}
+            disabled
+            options={[
+              { id: 'self', name: '自用运行器' },
+              ...(config.customerProfile
+                ? [{ id: 'shared', name: `隔离运行器 · ${config.customerProfile.id}` }]
+                : []),
+            ]}
+            onChange={() => {}}
+          />
+          {isolated ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              隔离目录参数请在“我提供的”助手中维护。
+            </p>
+          ) : null}
+        </>
+      ) : null}
       <Choice
         label="业务助手"
         value={config.agentId}
@@ -402,8 +436,12 @@ export function ProjectConfigurationFields({
       <Choice
         label="模型"
         value={config.model.model}
-        disabled={disabled || !source?.models.length}
-        options={source?.models.map((model) => ({ id: model.id, name: model.name })) ?? []}
+        disabled={disabled || isolated || !source?.models.length}
+        options={
+          isolated
+            ? [{ id: config.model.model, name: config.model.model }]
+            : (source?.models.map((model) => ({ id: model.id, name: model.name })) ?? [])
+        }
         onChange={(id) => {
           const next = source?.models.find((model) => model.id === id)
           if (next)
@@ -420,11 +458,13 @@ export function ProjectConfigurationFields({
       <Choice
         label="思考强度"
         value={config.model.reasoningEffort ?? 'none-supported'}
-        disabled={disabled || !model?.reasoningLevels.length}
+        disabled={disabled || isolated || !model?.reasoningLevels.length}
         options={
-          model?.reasoningLevels.length
-            ? model.reasoningLevels.map((id) => ({ id, name: id }))
-            : [{ id: 'none-supported', name: '此模型不提供思考档位' }]
+          isolated && config.model.reasoningEffort
+            ? [{ id: config.model.reasoningEffort, name: config.model.reasoningEffort }]
+            : model?.reasoningLevels.length
+              ? model.reasoningLevels.map((id) => ({ id, name: id }))
+              : [{ id: 'none-supported', name: '此模型不提供思考档位' }]
         }
         onChange={(reasoningEffort) =>
           update({
@@ -479,13 +519,13 @@ export function ProjectConfigurationFields({
           ...skillChoices,
           ...config.skillIds
             .filter((id) => !skillChoices.some((skill) => skill.id === id))
-            .map((id) => ({ id, name: `${id} · 已不可用` })),
+            .map((id) => ({ id, name: `${id} · ${isolated ? '原预设技能' : '已不可用'}` })),
         ].map((skill) => (
           <Check
             key={skill.id}
             label={skill.name}
             checked={config.skillIds.includes(skill.id)}
-            disabled={disabled}
+            disabled={disabled || isolated}
             onChange={(checked) =>
               update({
                 skillIds: checked

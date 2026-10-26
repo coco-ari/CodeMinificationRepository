@@ -9,6 +9,8 @@ import type {
 } from '../../../autoops/contracts/runtime.ts'
 import type { BusinessModels } from '../models.mjs'
 import type { CustomerRegistry } from '../customer-registry.mjs'
+import type { SharedProfileVerifier } from '../shared-profile-approvals.ts'
+import { validateSharedAllocationConfiguration } from './allocation-policy.ts'
 
 type Ports = {
   projects(): RuntimeProject[]
@@ -20,6 +22,7 @@ type Ports = {
     workspaceType: 'internal' | 'external',
   ): Array<{ id: string; displayName?: string; name?: string }>
   customers(): CustomerRegistry
+  verifySharedProfile?: SharedProfileVerifier
 }
 
 /** 只返回配置所需的公开能力，不返回技能物理路径、设备凭证或其他人的目录。 */
@@ -153,11 +156,19 @@ export function questionConfigurationPolicy(ports: Ports) {
       const registry = ports.customers(),
         target = value.executionBinding
       const source = registry.sourceOwner(target)
-      if (source.ownerId !== actor || source.projectId !== projectId)
-        return fail(
-          'CUSTOMER_SHARED_ISOLATION_UNVERIFIED',
-          '此运行器尚未通过跨用户或跨项目执行隔离验证',
-        )
+      const shared = source.ownerId !== actor || source.projectId !== projectId || value.customerProfile!==undefined
+      if (shared) {
+        if (member.workspaceAccess !== 'internal')
+          return fail('CUSTOMER_SHARED_EXTERNAL_UNSUPPORTED', '此隔离来源尚未支持外部资料范围')
+        const capabilities = registry.getCapabilities(source.ownerId, target)
+        if (!ports.verifySharedProfile)
+          return fail('CUSTOMER_SHARED_ISOLATION_UNVERIFIED', '此运行器尚未通过跨用户或跨项目执行隔离验证')
+        ports.verifySharedProfile({providerId:source.ownerId,sourceProjectId:source.projectId,target,profile:capabilities?.sharedProfile})
+        registry.validateTarget(source.ownerId,source.projectId,target,{requireOnline:true})
+        const profile = capabilities?.sharedProfile
+        validateSharedAllocationConfiguration(value,profile)
+        return
+      }
       if (value.model.instanceId !== `customer-${target.deviceId}-${target.runtimeId}`)
         return fail('CUSTOMER_RUNTIME_MISMATCH', '模型不属于此助手的运行器')
       registry.validateTarget(actor, projectId, target)
@@ -178,6 +189,7 @@ export function questionConfigurationPolicy(ports: Ports) {
         return fail('ASSISTANT_REASONING_REQUIRED', '请明确选择此运行器支持的思考强度')
       return
     }
+    if(value.customerProfile!==undefined)return fail('ASSISTANT_PROFILE_FORBIDDEN','平台运行来源不能选择客户隔离profile')
     if (
       value.workspaceType === null ||
       (member.workspaceAccess === 'external' && value.workspaceType !== 'external')

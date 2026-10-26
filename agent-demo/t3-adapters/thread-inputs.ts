@@ -137,7 +137,10 @@ export async function prepareBusinessRunContext(
   const access = configuredAutoOpsAccess()
   if (!access) return undefined
   const binding = access.getThreadBinding(threadId)
-  if (binding?.executionBinding.kind === 'customer') return undefined
+  if (binding?.executionBinding.kind === 'customer') {
+    access.prepareCustomerRun(threadId, runId, messageId, editCommandId, modelSelection, inheritedRunId)
+    return undefined
+  }
   const capture = await createBusinessRunInputs(
     access,
     configuredWorkspaceManagement(access),

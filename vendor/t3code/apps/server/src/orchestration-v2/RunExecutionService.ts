@@ -1604,7 +1604,7 @@ export const layer: Layer.Layer<
           driver: input.session.driver, threadId: input.run.threadId,
           providerThreadId: input.providerThread.id, runId: input.run.id, cause,
         });
-        const startTurn = (customer ? Effect.succeed(undefined) : Effect.gen(function* () {
+        const startTurn = (Effect.gen(function* () {
           const access = configuredAutoOpsAccess();
           const editCommandId = access ? yield* (BusinessOption.isSome(businessEvents)
             ? queuedRunActorCommand(access, businessEvents.value.read, input.run.threadId, input.run.id, input.run.userMessageId).pipe(Effect.mapError(turnStartFailure))

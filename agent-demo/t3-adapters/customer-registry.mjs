@@ -1,4 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { decodeContract } from '../../autoops/contracts/index.ts'
+import { SharedProfileCapability } from '../../autoops/contracts/shared-execution.ts'
 
 // Device and authorization metadata only. Commands, runs and chat history remain in T3.
 export class CustomerRegistryError extends Error {
@@ -188,7 +190,7 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       return publicWorkspace(workspaceRow(device.id, workspaceId))
     },
     updateCapabilities(principal, input) {
-      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments', 'workspaceFiles', 'assistantConfiguration'])
+      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments', 'workspaceFiles', 'assistantConfiguration', 'sharedProfile'])
       if (input.assistantConfiguration !== undefined && typeof input.assistantConfiguration !== 'boolean') fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '助手配置能力无效')
       if (input.workspaceFiles !== undefined && typeof input.workspaceFiles !== 'boolean') fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '文件浏览能力无效')
       const device = activeDevice(principal), workspace = workspaceRow(device.id, input.registeredWorkspaceId)
@@ -214,6 +216,18 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
         return {...input.attachments}
       })()
       const snapshot = {...(attachments ? {attachments} : {}),deviceId:device.id,registeredWorkspaceId:workspace.id,workspaceBindingRevision:workspace.binding_revision,runtimeId:workspace.runtime_id,revision:text(input.revision,'能力版本'),protocolVersion:1,...(input.runtimeVersion ? {runtimeVersion:text(input.runtimeVersion,'运行器版本',100)} : {}),...(input.configRevision ? {configRevision:text(input.configRevision,'配置版本')} : {}),models,skills,...(permissions ? {permissions} : {})}
+      if (input.sharedProfile !== undefined) {
+        try {
+          const profile = decodeContract(SharedProfileCapability, input.sharedProfile)
+          if (new Set(profile.models.map(model => model.id)).size !== profile.models.length ||
+            new Set(profile.skills.map(skill => skill.id)).size !== profile.skills.length ||
+            profile.models.some(model => model.defaultReasoningEffort !== undefined && !model.supportedReasoningEfforts.includes(model.defaultReasoningEffort)))
+            throw new Error('invalid shared catalog')
+          snapshot.sharedProfile = profile
+        } catch {
+          fail(400, 'CUSTOMER_SHARED_PROFILE_INVALID', '隔离运行器能力目录无效')
+        }
+      }
       if (input.assistantConfiguration === true) snapshot.assistantConfiguration = true
       if (input.workspaceFiles === true) snapshot.workspaceFiles = true
       const encoded = JSON.stringify(snapshot)

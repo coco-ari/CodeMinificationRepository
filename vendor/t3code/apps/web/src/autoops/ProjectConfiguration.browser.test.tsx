@@ -130,6 +130,76 @@ it('编辑用户来源保留原目录、实际模型及思考强度，不被平�
 })
 
 
+it('项目表单保留隔离预设目录与原参数，不用自用目录显示或覆盖隔离模型技能', async () => {
+  const f = setup(),
+    source = {
+      kind: 'customer' as const,
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      registeredWorkspaceId: 'registered-root',
+      workspaceBindingRevision: 2,
+      runtimeId: 'codex' as const,
+    }
+  const profile = {
+    id: 'readonly-profile',
+    revision: 3,
+    digest: 'a'.repeat(64),
+    imageDigest: `sha256:${'b'.repeat(64)}`,
+    policy: 'linux-docker-readonly-v1' as const,
+  }
+  f.choices.sources.push({
+    id: 'own-source',
+    name: '自己的电脑 · 登记目录',
+    executionBinding: source,
+    available: true,
+    models: [
+      { id: 'self-model', name: '自用模型', reasoningLevels: ['low'], defaultReasoning: 'low' },
+    ],
+    skills: [{ id: 'self-skill', name: '自用技能' }],
+  })
+  Object.assign(f.presets[0]!.configuration, {
+    executionBinding: source,
+    customerProfile: profile,
+    environmentId: null,
+    workspaceType: null,
+    model: {
+      instanceId: `customer-${source.deviceId}-codex`,
+      model: 'isolated-model',
+      reasoningEffort: 'high',
+    },
+    skillIds: ['isolated-skill'],
+  })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=config-project' })
+  const edit = screen.getByRole('button', { name: '编辑助手 资料分析', exact: true })
+  await expect.element(edit).toBeEnabled()
+  await edit.click()
+  await expect
+    .element(page.getByRole('combobox', { name: '运行目录', exact: true }))
+    .toHaveTextContent('隔离运行器 · readonly-profile')
+  await expect.element(page.getByRole('combobox', { name: '模型', exact: true })).toBeDisabled()
+  await expect
+    .element(page.getByRole('combobox', { name: '模型', exact: true }))
+    .toHaveTextContent('isolated-model')
+  await expect
+    .element(page.getByRole('combobox', { name: '思考强度', exact: true }))
+    .toHaveTextContent('high')
+  await expect
+    .element(page.getByRole('checkbox', { name: '自用技能', exact: true }))
+    .not.toBeInTheDocument()
+  await expect
+    .element(page.getByRole('checkbox', { name: 'isolated-skill · 原预设技能', exact: true }))
+    .toBeDisabled()
+  await page.getByRole('textbox', { name: '名称', exact: true }).fill('保留隔离参数')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  expect(f.writes[0]?.body.value.configuration).toMatchObject({
+    customerProfile: profile,
+    executionBinding: source,
+    model: { model: 'isolated-model', reasoningEffort: 'high' },
+    skillIds: ['isolated-skill'],
+  })
+})
+
 it('管理读取被撤回时移除已显示的配置和成员入口，保留项目页面及恢复入口', async () => {
   const f = setup({ denied: true }); using _fetch = stubGlobal('fetch', f.fetch)
   await using screen = await render(<App />, { router: '/projects?projectId=config-project' })

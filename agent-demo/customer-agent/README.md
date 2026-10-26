@@ -91,6 +91,45 @@ node autoops-customer-agent.mjs run
 
 ## 首版能力与验证边界
 
+### Linux 只读隔离 profile（待真实业务验收的新增能力）
+
+跨用户来源必须由提供者在本机明确选择 profile，再在“助手 → 我提供的”选择隔离目录能力并主动共享到项目，最后由项目管理员分配。使用者没有设备管理权；未验证的 profile、旧客户端、撤回的共享或失效的分配都会拒绝执行，不改用自用进程或其他模型。
+
+profile 是提供者本机的 JSON 文件，权限为 `0600`，路径须为无符号链接的绝对路径。例如下列值仅说明结构，镜像摘要必须换成实际已核验且本机已存在的镜像 ID：
+
+```json
+{
+  "version": 1,
+  "id": "linux-readonly",
+  "revision": 1,
+  "imageDigest": "sha256:实际64位镜像ID",
+  "skills": ["/提供者明确开放的技能目录"],
+  "gateway": {
+    "url": "https://已配置模型服务/v1",
+    "authorizationEnv": "AUTOOPS_SHARED_MODEL_TOKEN"
+  },
+  "sudo": true
+}
+```
+
+`skills` 可为空；每个目录须含 `SKILL.md`，不接收符号链接，按全部内容固定摘要。镜像包含锁定版本的 Node 与 Codex；程序不自动拉取镜像。模型凭据只由宿主模型网关在调用时读取指定环境变量，不写进容器、profile、命令或日志。容器使用非 root 身份、无外网、只读根目录和源码，只能写本次独立 HOME；预设技能和受控配置另以只读挂载固定。模型、思考强度与技能来自该镜像实际目录，不能用提供者自用目录替代。
+
+既有登记可单独选择或撤回 profile，自用能力继续保留：
+
+```sh
+node autoops-customer-agent.mjs profile --workspace 登记ID --shared-profile /本机/profile.json
+node autoops-customer-agent.mjs profile --workspace 登记ID --disable-shared-profile
+node autoops-customer-agent.mjs validate-profile --shared-profile /本机/profile.json
+```
+
+选用或更改后，结束活动任务并重启连接程序以同步实际目录；管理员须重新确认发生变化的预设和共享修订。撤回会立即阻止后续共享准入及模型数据返回，不能据此声称已经停止远端工具。停止结果不明时保留原容器身份、原任务与收据，不自动再跑。
+
+该 profile 目前只适配内部成员的私有问答、固定只读源码、独立附件与显式技能范围。外部成员及外部角色不能获得此内部来源分配。平台资料、环境 MCP、产物回传和共享文件浏览尚未接入此隔离协议；共享目录不宣称支持文件浏览，自用文件浏览保持原流程。原生模型仍可在固定只读源码内读取获准内容。
+
+新增的单元与 HTTP 测试不等于真实隔离验收。发布时还须实际执行 Linux 容器 OS 探测、锁定 Codex 目录和技能校验、跨用户实际问答、附件、撤回、断线及原收据恢复；只有对应来源的真实证据全部成立，中心才配置该 profile 的验收许可。
+
+`validate-profile` 仅创建本次临时资料、私有 canary 和受管容器，实际检查只读源码、私有文件、宿主状态、Docker socket、配置与技能只读、环境变量、独立 HOME、外网隔离及容器停止。它不发起模型请求，不签发中心许可；输出中的 `sharedBusinessAccepted:false` 明确保留真实业务待验。停止结果不明时保留原现场，不清理其恢复状态。
+
 已接入：固定登记目录、本机 Codex、文本、图片和文件附件与实际工具事件、引导、停止、审批、模型及强度、真实本机技能发现与执行、命令去重、事件补传及手动异常恢复。
 
 未开放：本机产物回传、平台资料与报告工具、共享控制、子 Agent、计划、Git 管理和任意已运行 Codex 会话接管。技能只回传身份、名称和描述；执行前复核目录及技能身份，不上传技能正文和依赖。

@@ -11,6 +11,7 @@ import { createProjectDirectory } from './project-directory/index.ts'
 import { createAssistantDirectory, questionConfigurationPolicy, questionConfigurationChoices } from './assistants/index.ts'
 import { resolveSkillLibrary } from './skill-library.mjs'
 import { isProjectRole } from '../../autoops/contracts/project-access.ts'
+import { sharedProfileVerifier } from './shared-profile-approvals.ts'
 
 const fail = (status, code, message) => { throw new AutoOpsAccessError(status, code, message) }
 const configuration = () => {
@@ -38,11 +39,13 @@ export function configuredAutoOpsAssistantDirectory() {
   const access = configuredAutoOpsAccess()
   if (!access) fail(503, 'AUTOOPS_NOT_CONFIGURED', '助手业务授权尚未就绪')
   const directory = configuredAutoOpsProjectDirectory()
+  const verifySharedProfile = sharedProfileVerifier(() => process.env.AUTOOPS_CUSTOMER_SHARED_PROFILES_FILE)
   const capabilityPorts = {
     projects: () => directory.catalog.projects, agents: () => directory.catalog.agents,
     models: configuredBusinessModels,
     skills: (projectId, agentId, workspaceType) => resolveSkillLibrary(process.env.AUTOOPS_T3_DATA_DIR, { projectId, agentId, workspaceType }),
     customers: () => access.customerRegistry,
+    verifySharedProfile,
   }
   return configuredAssistants ||= createAssistantDirectory({
     dataDir: resolve(process.env.AUTOOPS_T3_DATA_DIR),
@@ -51,6 +54,7 @@ export function configuredAutoOpsAssistantDirectory() {
     validate: questionConfigurationPolicy(capabilityPorts),
     choices: (actor, project) => questionConfigurationChoices(capabilityPorts, actor, project),
     providers: { registry: () => access.customerRegistry, displayName: actor => directory.catalog.users.find(user => user.id === actor)?.name ?? '不可用提供者' },
+    verifySharedProfile,
     validateTarget(project, target) {
       if (!directory.catalog.projects.some(item => item.id === project) || (target.kind === 'role' ? !isProjectRole(target.id) : !directory.catalog.users.some(user => user.id === target.id && (user.status === undefined || user.status === 'active')))) fail(400, 'ASSISTANT_TARGET_INVALID', '分配对象不属于当前可用账号或固定角色')
     },

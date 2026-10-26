@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { customerFileReference } from "../../vendor/t3code/packages/contracts/src/customerFiles.ts";
 import { serializeComposerFileLink } from "../../vendor/t3code/packages/shared/src/composerTrigger.ts";
 import { tmpdir } from "node:os";
@@ -9,6 +9,8 @@ import { CustomerAgentStore } from "./store.ts";
 import { CustomerAgentExecutor, customerSkillId, type RunnerFactory } from "./executor.ts";
 import { validateBaseUrl } from "./connection.ts";
 import { decodeCustomerAgentServerFrame, type CustomerAgentCommand } from "../../vendor/t3code/packages/contracts/src/autoopsRemote.ts";
+import { loadSharedDockerProfile } from './shared-docker-profile.ts';
+import type { SharedExecutionScope } from '../../autoops/contracts/shared-execution.ts';
 
 function fixture(options: ConstructorParameters<typeof CustomerAgentStore>[1] = {}) {
   const root = mkdtempSync(join(tmpdir(), "autoops-customer-test-"));
@@ -234,3 +236,58 @@ test("同名技能换路径后拒绝缓存旧选择，不静默调用新技能",
     assert.equal(f.store.session("session-a")?.state, "idle");
   } finally { await executor.close(); f.close(); }
 });
+
+test('旧连接程序没有本机隔离profile时拒绝共享命令，不能按自用权限运行', async () => {
+  const f=fixture(), h=runnerHarness(f)
+  try {
+    const shared={...command(f.workspace,'openSession','shared-open'),executionScope:{grantId:'unconfigured-shared'}} as CustomerAgentCommand
+    const receipt=await h.executor.execute(shared)
+    assert.equal(receipt.state,'failed')
+    assert.equal(receipt.error?.code,'shared_profile_required')
+    assert.deepEqual(h.calls,[])
+  } finally {await h.executor.close();f.close()}
+})
+
+test('共享收据仅按原命令与grant恢复，查询未见收据不补发，不能改写另一共享范围',()=>{
+  const f=fixture()
+  try {
+    const input={...command(f.workspace,'openSession','shared-receipt'),executionScope:{grantId:'issued-grant'}} as CustomerAgentCommand
+    const receipt=f.store.accept(input)
+    assert.equal(receipt.grantId,'issued-grant')
+    assert.deepEqual(f.store.queryReceipt(input.commandId,input.sessionId,'issued-grant'),receipt)
+    assert.equal(f.store.queryReceipt('not-seen',input.sessionId,'issued-grant'),undefined)
+    assert.throws(()=>f.store.queryReceipt(input.commandId,input.sessionId,'other-grant'),{code:'receipt_scope_changed'})
+    assert.throws(()=>f.store.finish({...receipt,state:'completed',grantId:'other-grant'}),{code:'receipt_scope_changed'})
+  } finally {f.close()}
+})
+
+test('中心准入等待期间提供者撤回本机目录，迟到许可不能启动隔离进程',async()=>{
+  const f=fixture(),profilePath=join(realpathSync(f.root),'profile.json')
+  writeFileSync(profilePath,JSON.stringify({version:1,id:'readonly',revision:1,imageDigest:`sha256:${'a'.repeat(64)}`,skills:[],gateway:{url:'https://models.invalid/v1',authorizationEnv:'FIXTURE_ONLY_TOKEN'}}),{mode:0o600})
+  f.store.setSharedProfile(f.workspace.registeredWorkspaceId,profilePath)
+  const profile=(await loadSharedDockerProfile(profilePath)).descriptor
+  const target={kind:'customer' as const,deviceId:'device-a',registeredWorkspaceId:f.workspace.registeredWorkspaceId,workspaceBindingRevision:1,runtimeId:'codex' as const}
+  const scope:SharedExecutionScope={grantId:'issued-fixture',actorId:'actual-caller',providerId:'provider',projectId:'caller-project',sourceProjectId:f.workspace.projectId,threadId:'caller-thread',runId:'session:session-a',assistantId:'selected-assistant',presetRevision:1,shareRevision:1,allocation:{kind:'member',id:'actual-caller',revision:1},capabilityRevision:'fixture-capability',profile,target,model:{instanceId:'customer-device-a-codex',model:'actual-model',reasoningEffort:'low'},skillIds:[]}
+  let launched=0,admissions=0
+  const executor=new CustomerAgentExecutor({store:f.store,deviceId:'device-a',notify:()=>{},runnerFactory:async()=>{launched++;throw new Error('必须在本机撤回后拒绝')},authorizeShared:async()=>{admissions++;f.store.revoke(f.workspace.registeredWorkspaceId)}})
+  try {
+    const receipt=await executor.execute({...command(f.workspace,'openSession','shared-local-revocation'),executionScope:scope})
+    assert.equal(receipt.error?.code,'workspace_revoked')
+    assert.equal(admissions,1)
+    assert.equal(launched,0)
+  } finally {await executor.close();f.close()}
+})
+test('撤回本机隔离profile保留既有自用目录、身份及登记修订',()=>{
+  const f=fixture(),profilePath=join(realpathSync(f.root),'profile.json')
+  writeFileSync(profilePath,'{}',{mode:0o600})
+  try {
+    const selected=f.store.setSharedProfile(f.workspace.registeredWorkspaceId,profilePath)
+    assert.equal(selected.sharedProfilePath,profilePath)
+    const removed=f.store.setSharedProfile(f.workspace.registeredWorkspaceId)
+    assert.equal(removed.sharedProfilePath,undefined)
+    assert.equal(removed.revoked,false)
+    assert.equal(f.store.resolveWorkspace(f.workspace).realPath,f.workspace.realPath)
+    assert.equal(removed.workspaceBindingRevision,f.workspace.workspaceBindingRevision)
+    assert.equal(removed.identity,f.workspace.identity)
+  } finally {f.close()}
+})

@@ -8,6 +8,8 @@ import { ConnectorError, CustomerAgentStore, type LocalSession, type LocalWorksp
 import type { HeadlessCodexRunner, HeadlessCodexRunnerOptions } from "../../vendor/t3code/apps/server/src/provider/HeadlessCodexRunner.ts";
 import { SKILL_MENTION_PATTERN } from "../../vendor/t3code/packages/shared/src/composerInlineTokens.ts";
 import { resolveCustomerFileReferences } from "./files.ts";
+import { createSharedDockerRuntime, loadSharedDockerProfile, sharedRuntimeDirectory, type SharedDockerRuntime } from './shared-docker-profile.ts';
+import { sharedSessionIdentity, type SharedExecutionScope } from '../../autoops/contracts/shared-execution.ts';
 
 export type RunnerFactory = (options: HeadlessCodexRunnerOptions) => Promise<HeadlessCodexRunner>;
 export const customerSkillId = (workspaceId: string, localPath: string): string =>
@@ -18,6 +20,7 @@ const object = (value: unknown): Record<string, any> => {
 };
 const errorReceipt = (command: CustomerAgentCommand, error: unknown, state: "failed" | "unknown" = "failed"): CustomerAgentReceipt => ({
   type: "receipt", commandId: command.commandId, sessionId: command.sessionId, state,
+  ...(command.executionScope?{grantId:command.executionScope.grantId}:{}),
   error: { code: error instanceof ConnectorError ? error.code : "runtime_error",
     // Provider errors may contain command arguments or credentials: keep operations logs and wire errors generic.
     message: error instanceof ConnectorError ? error.message : "客户运行器未能完成操作，请在本机查看运行状态" },
@@ -37,18 +40,43 @@ export class CustomerAgentExecutor {
   private readonly shutdown = new AbortController();
   private readonly attachments: CustomerAttachmentCache | undefined;
   private readonly discoveryRunners = new Set<HeadlessCodexRunner>();
+  private readonly sharedRuntimes = new Map<string,SharedDockerRuntime>();
+  private readonly sharedAttachments = new Map<string,CustomerAttachmentCache>();
+  private readonly authorizeShared:((scope:SharedExecutionScope,signal?:AbortSignal)=>Promise<void>)|undefined;
+  private readonly downloadAttachment:AttachmentDownload|undefined;
   private readonly notify: (frame: CustomerAgentClientFrame) => void;
   private readonly runnerFactory: RunnerFactory;
   private readonly onState: (message: string) => void;
   constructor(options: {
     store: CustomerAgentStore; deviceId: string; runnerFactory: RunnerFactory; downloadAttachment?: AttachmentDownload;
     notify: (frame: CustomerAgentClientFrame) => void; onState?: (message: string) => void;
+    authorizeShared?:(scope:SharedExecutionScope,signal?:AbortSignal)=>Promise<void>;
   }) {
     this.store = options.store; this.deviceId = options.deviceId; this.runnerFactory = options.runnerFactory;
     this.attachments = options.downloadAttachment ? new CustomerAttachmentCache(join(options.store.directory, "attachments"), options.downloadAttachment) : undefined;
     this.notify = options.notify; this.onState = options.onState ?? (() => {});
+    this.authorizeShared=options.authorizeShared?async(scope,signal)=>{
+      const checkLocal=async()=>{
+        signal?.throwIfAborted();
+        if(scope.target.deviceId!==this.deviceId)throw new ConnectorError('shared_target_changed','共享范围不属于本机设备');
+        const workspace=this.store.resolveWorkspace(scope.target);
+        if(workspace.projectId!==scope.sourceProjectId||!workspace.sharedProfilePath)throw new ConnectorError('shared_profile_required','本机来源的共享profile已撤回');
+        if((await loadSharedDockerProfile(workspace.sharedProfilePath)).descriptor.digest!==scope.profile.digest)throw new ConnectorError('shared_profile_changed','本机隔离profile已变更，请重新核验');
+        return workspace.sharedProfilePath;
+      };
+      const before=await checkLocal();
+      await options.authorizeShared!(scope,signal);
+      if(await checkLocal()!==before)throw new ConnectorError('shared_profile_changed','准入期间提供者已更换本机隔离profile');
+    }:undefined;this.downloadAttachment=options.downloadAttachment;
   }
-  private async runner(sessionId: string, workspace: LocalWorkspace): Promise<HeadlessCodexRunner> {
+  private async isolatedRunner(options:HeadlessCodexRunnerOptions,isolation:SharedDockerRuntime):Promise<HeadlessCodexRunner> {
+    const probe=await this.runnerFactory({...options,onEvent:()=>{}});
+    try {await isolation.configureSkillCatalog((await probe.catalog()).skills)} finally {await probe.close()}
+    const runner=await this.runnerFactory(options);
+    try {isolation.assertSkillCatalog((await runner.catalog()).skills);return runner}
+    catch(error){await runner.close();throw error}
+  }
+  private async runner(sessionId: string, workspace: LocalWorkspace, executionScope?:SharedExecutionScope): Promise<HeadlessCodexRunner> {
     const existing = this.runners.get(sessionId);
     if (existing) return existing;
     if (this.opening.has(sessionId)) throw new ConnectorError("session_opening", "本机会话正在建立");
@@ -57,19 +85,31 @@ export class CustomerAgentExecutor {
     if (saved && saved.workspaceId !== workspace.registeredWorkspaceId) throw new ConnectorError("binding_changed", "已有会话不能切换登记目录");
     if (saved?.state === "unknown" || saved?.state === "active") throw new ConnectorError("execution_unknown", "旧执行尚未确认结束，请先在本机核实");
     this.opening.add(sessionId);
+    let isolation:SharedDockerRuntime|undefined;
     try {
       let epoch = "";
-      const runner = await this.runnerFactory({
+      isolation=executionScope ? await createSharedDockerRuntime({directory:this.store.directory,workspace,sessionId,scope:executionScope,authorize:this.authorizeShared!}) : undefined;
+      if(isolation)this.sharedRuntimes.set(sessionId,isolation);
+      const options:HeadlessCodexRunnerOptions={
         instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath, localPolicy: workspace.policy,
-        resolveAttachmentPath: (attachment) => this.attachments?.resolve(sessionId, attachment) ?? null,
+        ...(isolation?.options??{}),
+        resolveAttachmentPath: (attachment) => {const path=(isolation?this.sharedAttachments.get(sessionId):this.attachments)?.resolve(sessionId,attachment);return path ? isolation?.attachmentPath(path)??path : null},
         onEvent: (event) => this.handleEvent(sessionId, epoch, event),
         onError: () => this.markUnknown(sessionId, "客户运行器连接异常，结果待核实", "runtime_lost"),
-      });
+      };
+      const runner=isolation?await this.isolatedRunner(options,isolation):await this.runnerFactory(options);
       epoch = runner.processGeneration;
       this.store.saveSession({ sessionId, runtimeEpoch: epoch, workspaceId: workspace.registeredWorkspaceId,
         state: "idle", nativeThreadId: saved?.nativeThreadId ?? null, nativeTurnId: null, runId: null, attemptId: null,
+        ...(executionScope?{executionScope}:{}),
         ...(saved?.resolution ? { resolution: saved.resolution } : {}) });
       this.runners.set(sessionId, runner); return runner;
+    } catch(error) {
+      if(isolation) {
+        // 目录发现或原生初始化失败也必须排空本次容器；停止不明时保留其持久状态。
+        await isolation.close();this.sharedRuntimes.delete(sessionId);this.sharedAttachments.delete(sessionId);
+      }
+      throw error;
     } finally { this.opening.delete(sessionId); }
   }
   private markUnknown(sessionId: string, message: string, reason: "runtime_lost" | "journal_unavailable" | "outcome_unknown" = "outcome_unknown"): void {
@@ -140,6 +180,14 @@ export class CustomerAgentExecutor {
       if (previous) { this.notify(previous); return previous; }
       const workspace = this.store.resolveWorkspace(command.target, command.method === "interruptTurn" || command.method === "readThreadSnapshot");
       const session = this.store.session(command.sessionId);
+      if(command.executionScope) {
+        if(!workspace.sharedProfilePath || !this.authorizeShared)throw new ConnectorError('shared_profile_required','提供者尚未配置已验证的本机隔离profile');
+        if(command.executionScope.target.deviceId!==this.deviceId || command.executionScope.target.registeredWorkspaceId!==workspace.registeredWorkspaceId || command.executionScope.target.workspaceBindingRevision!==workspace.workspaceBindingRevision || command.executionScope.sourceProjectId!==workspace.projectId)throw new ConnectorError('shared_target_changed','固定共享范围不属于此本机登记来源');
+        if(session && sharedSessionIdentity(session.executionScope)!==sharedSessionIdentity(command.executionScope))throw new ConnectorError('shared_session_changed','原生会话不能更换共享调用者或项目');
+        if(command.method!=='interruptTurn')await this.authorizeShared(command.executionScope);
+        if(command.method!=='interruptTurn')await this.sharedRuntimes.get(command.sessionId)?.updateScope(command.executionScope);
+        if(!this.sharedAttachments.has(command.sessionId)&&this.downloadAttachment)this.sharedAttachments.set(command.sessionId,new CustomerAttachmentCache(join(sharedRuntimeDirectory(this.store.directory,command.executionScope),'attachments'),this.downloadAttachment));
+      } else if(session?.executionScope)throw new ConnectorError('shared_scope_required','共享会话不能退回提供者自用权限');
       if (session && session.workspaceId !== workspace.registeredWorkspaceId) throw new ConnectorError("binding_changed", "已有会话不能更换工作区");
       const control = ["steerTurn", "interruptTurn", "respondToRuntimeRequest"].includes(command.method);
       if (control && (!command.runtimeEpoch || command.runtimeEpoch !== session?.runtimeEpoch || !this.runners.has(command.sessionId))) {
@@ -161,15 +209,21 @@ export class CustomerAgentExecutor {
       let dispatched = false;
       try {
         const runner = command.method === "openSession" || command.method === "catalog"
-          ? await this.runner(command.sessionId, workspace) : this.runners.get(command.sessionId);
+          ? await this.runner(command.sessionId, workspace,command.executionScope) : this.runners.get(command.sessionId);
         if (!runner) throw new ConnectorError("session_not_open", "请先建立或恢复本机会话");
+        if(command.executionScope && ['startTurn','steerTurn'].includes(command.method)) {
+          const catalog=await runner.catalog();
+          this.sharedRuntimes.get(command.sessionId)!.assertSkillCatalog(catalog.skills);
+          this.sharedRuntimes.get(command.sessionId)!.setModelDefaults(catalog.models.map(model=>{const descriptor=model.capabilities?.optionDescriptors?.find(value=>value.id==='reasoningEffort');return {id:model.slug,effort:descriptor?.type==='select'?descriptor.options.find(value=>value.isDefault)?.id??null:null}}));
+        }
         if (command.method === "openSession") {
           const epochReceipt: CustomerAgentReceipt = { ...accepted, runtimeEpoch: runner.processGeneration };
           this.store.finish(epochReceipt); this.notify(epochReceipt);
         }
         if (command.method === "startTurn" || command.method === "steerTurn") {
           if (input.message) input.message = await resolveCustomerFileReferences(this.store, this.deviceId, command.target, input.message, this.shutdown.signal);
-          if (this.attachments) await this.attachments.prepare(command, this.shutdown.signal, () => { this.store.resolveWorkspace(command.target); });
+          const attachments=command.executionScope?this.sharedAttachments.get(command.sessionId):this.attachments;
+          if (attachments) await attachments.prepare(command, this.shutdown.signal, () => { this.store.resolveWorkspace(command.target); });
           else if (input.message?.attachments?.length || command.attachments?.length) throw new ConnectorError("attachment_unavailable", "请更新连接程序后再发送附件");
           const requestedNames = input.assistantConfiguration?.skillNames ?? [];
           if (!Array.isArray(requestedNames) || requestedNames.length > 32 || requestedNames.some((name: unknown) => typeof name !== "string")) throw new ConnectorError("invalid_input", "助手技能选择无效");
@@ -190,6 +244,7 @@ export class CustomerAgentExecutor {
         if (command.method === "steerTurn" && this.providerTurns.get(command.sessionId) !== input.providerTurnId) throw new ConnectorError("stale_turn", "这条消息对应的轮次已结束，请重新发送");
         this.shutdown.signal.throwIfAborted();
         this.store.resolveWorkspace(command.target, command.method === "interruptTurn" || command.method === "readThreadSnapshot");
+        if(command.executionScope && command.method!=='interruptTurn')await this.sharedRuntimes.get(command.sessionId)?.assertCurrent();
         if (command.method === "startTurn") {
           if (input.providerThread?.nativeThreadRef?.nativeId) {
             this.providerThreads.set(command.sessionId, input.providerThread);
@@ -202,6 +257,7 @@ export class CustomerAgentExecutor {
         dispatched = true;
         nativeAttempted = true;
         const result = command.method === "catalog" ? await this.catalogSnapshot(workspace, runner) : await runner.dispatch(command.method, input);
+        if(command.executionScope && command.method!=='interruptTurn')await this.sharedRuntimes.get(command.sessionId)?.assertCurrent();
         if (Buffer.byteLength(JSON.stringify(result)) > 900 * 1024) throw new ConnectorError("result_too_large", "运行结果超过首版单次传输上限；原执行不会被自动重做");
         if (["ensureThread", "resumeThread"].includes(command.method) && result && typeof result === "object") {
           const thread = result as { nativeThreadRef?: { nativeId?: string } };
@@ -212,7 +268,7 @@ export class CustomerAgentExecutor {
         }
         if (command.method === "respondToRuntimeRequest") this.requests.get(command.sessionId)?.delete(String(input.requestId));
         const receipt: CustomerAgentReceipt = { type: "receipt", commandId: command.commandId, sessionId: command.sessionId,
-          runtimeEpoch: runner.processGeneration, state: "completed", result };
+          runtimeEpoch: runner.processGeneration, state: "completed", result,...(command.executionScope?{grantId:command.executionScope.grantId}:{}) };
         this.store.finish(receipt); this.notify(receipt); return receipt;
       } catch (error) {
         const notStarted = typeof error === "object" && error !== null && "outcome" in error && error.outcome === "not_started";
@@ -245,7 +301,31 @@ export class CustomerAgentExecutor {
     const runner = await this.runnerFactory({ instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath,
       localPolicy: workspace.policy, onEvent: () => {} });
     this.discoveryRunners.add(runner);
-    try { return await this.catalogSnapshot(workspace, runner); } finally { this.discoveryRunners.delete(runner); await runner.close(); }
+    let own:CustomerCapabilityInput;
+    try { own=await this.catalogSnapshot(workspace, runner); } finally { this.discoveryRunners.delete(runner); await runner.close(); }
+    if(!workspace.sharedProfilePath)return own;
+    let isolated:SharedDockerRuntime|undefined,sharedRunner:HeadlessCodexRunner|undefined;
+    try {
+      const profile=await loadSharedDockerProfile(workspace.sharedProfilePath),scope:SharedExecutionScope={
+        grantId:'local-catalog-only',actorId:'local-catalog',providerId:'local-catalog',projectId:workspace.projectId,sourceProjectId:workspace.projectId,
+        threadId:`catalog-${workspace.registeredWorkspaceId}`,runId:'catalog-only',assistantId:'local-catalog',presetRevision:1,shareRevision:1,
+        allocation:{kind:'member',id:'local-catalog',revision:1},capabilityRevision:'local-discovery',profile:profile.descriptor,
+        target:{kind:'customer',deviceId:this.deviceId,registeredWorkspaceId:workspace.registeredWorkspaceId,workspaceBindingRevision:workspace.workspaceBindingRevision,runtimeId:workspace.runtimeId},
+        model:{instanceId:`customer-${this.deviceId}-codex`,model:'catalog-only',reasoningEffort:null},skillIds:[],
+      };
+      isolated=await createSharedDockerRuntime({directory:this.store.directory,workspace,sessionId:scope.threadId,scope,discovery:true,authorize:async()=>{throw new ConnectorError('shared_discovery_only','能力发现不能发起模型执行')}});
+      sharedRunner=await this.isolatedRunner({instanceId:`customer-${this.deviceId}-codex`,cwd:workspace.realPath,localPolicy:{approvalPolicy:'on-request',sandboxMode:'read-only',networkAccess:false},...isolated.options,onEvent:()=>{}},isolated);
+      this.discoveryRunners.add(sharedRunner);
+      const catalog=await this.catalogSnapshot(workspace,sharedRunner);
+      const sharedProfile={...profile.descriptor,models:catalog.models,skills:catalog.skills};
+      return {...own,sharedProfile,revision:createHash('sha256').update(JSON.stringify({own:own.revision,sharedProfile})).digest('hex')};
+    } catch {
+      this.onState('共享隔离能力发现未完成；当前仅发布已实际读取的自用能力，不开放共享执行');
+      return own;
+    } finally {
+      if(sharedRunner){this.discoveryRunners.delete(sharedRunner);await sharedRunner.close()}
+      if(isolated)await isolated.close();
+    }
   }
   private async catalogSnapshot(workspace: LocalWorkspace, runner: HeadlessCodexRunner): Promise<CustomerCapabilityInput> {
     const catalog = await runner.catalog();
@@ -290,6 +370,10 @@ export class CustomerAgentExecutor {
     this.shutdown.abort();
     await Promise.allSettled([...this.runners.values(), ...this.discoveryRunners].map((runner) => runner.close()));
     await Promise.allSettled([...this.commands]);
+    for(const [sessionId,runtime] of this.sharedRuntimes) {
+      try {await runtime.close()} catch {this.markUnknown(sessionId,'隔离容器停止结果待核实')}
+    }
+    this.sharedRuntimes.clear();this.sharedAttachments.clear();
     for (const session of this.store.sessions()) if (session.state === "active") this.markUnknown(session.sessionId, "连接程序退出，旧执行需核实");
     this.runners.clear();
   }

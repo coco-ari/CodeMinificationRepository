@@ -50,6 +50,13 @@ export interface AutoOpsAccess {
   questionInstructions(actorId:string, threadId:string, modelSelection?:unknown):string;
   requireQuestionForActor(actorId:string, threadId:string, modelSelection?: unknown): AssistantSelection | undefined;
   requireThreadExecution(principal: AutoOpsPrincipal, threadId: string, options?: {requireOnline?: boolean}): ThreadBinding;
+  customerAssistantRuntime(principal:AutoOpsPrincipal,input:import('../../autoops/contracts/customer-assistant-runtime.ts').CustomerAssistantRuntimeRequest):import('../../autoops/contracts/customer-assistant-runtime.ts').CustomerAssistantRuntime;
+  visibleCustomerProviderInstances(principal:AutoOpsPrincipal):{owned:string[];shared:string[]};
+  customerExecutionSource(threadId:string, actorId?:string): {ownerId:string;projectId:string};
+  issueCustomerSessionScope(threadId:string,sessionId:string,modelSelection?:unknown): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;
+  prepareCustomerRun(threadId:string,runId:string,messageId?:string,editCommandId?:string,modelSelection?:unknown,inheritedRunId?:string): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;
+  customerRunScope(threadId:string,runId:string): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;
+  requireSharedExecutionScope(scope:import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope,principal?:import('./customer-registry.mjs').CustomerDevicePrincipal): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope;
   authenticateCookie(cookie?: string): AutoOpsPrincipal;
   refresh(principal: AutoOpsPrincipal): AutoOpsPrincipal;
   requireProject(principal: AutoOpsPrincipal, projectId: string): AutoOpsProject;

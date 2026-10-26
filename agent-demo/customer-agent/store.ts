@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from "node:f
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CustomerAgentCommand, CustomerAgentReceipt, CustomerAgentTarget, CustomerAgentResolution } from "../../vendor/t3code/packages/contracts/src/autoopsRemote.ts";
+import { sharedSessionIdentity, type SharedExecutionScope } from "../../autoops/contracts/shared-execution.ts";
 
 export interface LocalPolicy {
   approvalPolicy: "untrusted" | "on-request";
@@ -13,12 +14,14 @@ export interface LocalWorkspace extends CustomerAgentTarget {
   projectId: string; label: string; realPath: string; identity: string;
   revoked: boolean; policy: LocalPolicy;
   published?: boolean;
+  sharedProfilePath?: string;
 }
 export interface LocalSession {
   sessionId: string; runtimeEpoch: string; workspaceId: string;
   state: "idle" | "active" | "unknown"; nativeThreadId: string | null;
   nativeTurnId: string | null; runId: string | null; attemptId: string | null;
   resolution?: CustomerAgentResolution;
+  executionScope?: SharedExecutionScope;
 }
 export class ConnectorError extends Error {
   code: string;
@@ -121,6 +124,12 @@ export class CustomerAgentStore {
     if (row.hash !== this.commandHash(command)) throw new ConnectorError("command_id_conflict", "同一命令 ID 的内容不一致");
     return parse<CustomerAgentReceipt>(row, "receipt");
   }
+  queryReceipt(commandId: string, sessionId: string, grantId?: string): CustomerAgentReceipt | undefined {
+    const row = this.db.prepare('SELECT receipt FROM commands WHERE id=? AND session_id=?').get(commandId,sessionId);
+    const receipt = row ? parse<CustomerAgentReceipt>(row,'receipt') : undefined;
+    if (receipt && receipt.grantId !== grantId) throw new ConnectorError('receipt_scope_changed','原收据不属于此共享范围');
+    return receipt;
+  }
   commandHash(command: CustomerAgentCommand): string {
     return createHash("sha256").update(JSON.stringify(canonicalJson(command))).digest("hex");
   }
@@ -130,12 +139,15 @@ export class CustomerAgentStore {
     if (!["interruptTurn", "respondToRuntimeRequest", "readThreadSnapshot"].includes(command.method)) this.assertCapacity();
     const count = this.db.prepare("SELECT COUNT(*) count FROM commands").get()!;
     if (Number(count.count) >= 100000) throw new ConnectorError("command_log_full", "本机恢复日志已达容量，请先维护日志");
-    const receipt: CustomerAgentReceipt = { type: "receipt", commandId: command.commandId, sessionId: command.sessionId, state: "accepted" };
+    const receipt: CustomerAgentReceipt = { type: "receipt", commandId: command.commandId, sessionId: command.sessionId, state: "accepted",...(command.executionScope?{grantId:command.executionScope.grantId}:{}) };
     this.db.prepare("INSERT INTO commands(id,hash,session_id,method,state,receipt,updated_at) VALUES(?,?,?,?,?,?,?)")
       .run(command.commandId, this.commandHash(command), command.sessionId, command.method, "accepted", JSON.stringify(receipt), Date.now());
     return receipt;
   }
   finish(receipt: CustomerAgentReceipt): void {
+    const row=this.db.prepare('SELECT session_id,receipt FROM commands WHERE id=?').get(receipt.commandId);
+    if(!row || row.session_id!==receipt.sessionId || parse<CustomerAgentReceipt>(row,'receipt').grantId!==receipt.grantId)
+      throw new ConnectorError('receipt_scope_changed','完成收据不能改写原命令及共享范围');
     this.db.prepare("UPDATE commands SET state=?,receipt=?,updated_at=? WHERE id=?")
       .run(receipt.state, JSON.stringify(receipt), Date.now(), receipt.commandId);
   }
@@ -145,8 +157,21 @@ export class CustomerAgentStore {
   sessions(): LocalSession[] { return this.db.prepare("SELECT payload FROM sessions").all().map((row) => parse<LocalSession>(row, "payload")); }
   session(id: string): LocalSession | undefined { return this.sessions().find((session) => session.sessionId === id); }
   saveSession(session: LocalSession): void {
+    const old=this.session(session.sessionId);
+    if(old && (old.workspaceId!==session.workspaceId || sharedSessionIdentity(old.executionScope)!==sharedSessionIdentity(session.executionScope)))
+      throw new ConnectorError('session_scope_changed','本机会话不能更换实际调用者、项目或隔离边界');
     this.db.prepare("INSERT INTO sessions(id,payload) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload")
       .run(session.sessionId, JSON.stringify(session));
+  }
+  setSharedProfile(workspaceId: string, path?: string): LocalWorkspace {
+    const saved=this.workspaces().find(workspace=>workspace.registeredWorkspaceId===workspaceId);
+    if(!saved)throw new ConnectorError('unknown_workspace','未找到本机登记目录');
+    const workspace=this.resolveWorkspace(saved);
+    if (path!==undefined&&(!isAbsolute(path) || realpathSync(path)!==path || !statSync(path).isFile())) throw new ConnectorError('shared_profile_invalid','请选择本机明确的隔离profile文件');
+    const {sharedProfilePath:previous,...self}=workspace;
+    const value=path===undefined?self:{...self,sharedProfilePath:path};
+    this.db.prepare('UPDATE workspaces SET payload=? WHERE id=?').run(JSON.stringify(value),workspaceId);
+    return value;
   }
   /** Only call once after owning the connector process lock. Never infer a crashed command did not run. */
   recoverAfterRestart(): void {

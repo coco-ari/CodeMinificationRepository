@@ -183,7 +183,25 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
       toastManager.add({ type: "success", title: "项目助手已保存" });
     } catch (cause) {
       if (!alive.current) return;
-      if (isAutoOpsAccessError(cause)) {
+      const targetScopeError =
+        original.path.endsWith("/assistant-allocations") &&
+        cause instanceof AutoOpsRequestError &&
+        [
+          "ASSISTANT_ENVIRONMENT_FORBIDDEN",
+          "ASSISTANT_WORKSPACE_FORBIDDEN",
+          "ASSISTANT_MODEL_FORBIDDEN",
+          "ASSISTANT_REASONING_FORBIDDEN",
+          "ASSISTANT_SKILL_FORBIDDEN",
+          "ASSISTANT_PROVIDER_SHARE_REQUIRED",
+          "CUSTOMER_SHARED_EXTERNAL_UNSUPPORTED",
+          "CUSTOMER_CONTEXT_UNSUPPORTED",
+          "CUSTOMER_MODEL_UNAVAILABLE",
+          "CUSTOMER_REASONING_UNAVAILABLE",
+          "CUSTOMER_SKILL_UNAVAILABLE",
+          "CUSTOMER_SHARED_ISOLATION_UNVERIFIED",
+          "CUSTOMER_SHARED_PROFILE_REQUIRED",
+        ].includes(cause.code ?? "");
+      if (isAutoOpsAccessError(cause) && !targetScopeError) {
         setContext(null);
         setEditor(null);
       }
@@ -211,7 +229,8 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   }
   const availableDefault = (preset: AssistantPreset) =>
     preset.enabled &&
-    (context?.provided.items.find((item) => item.preset.id === preset.id)?.available ?? true);
+    (!preset.providedBy ||
+      context?.provided.items.find((item) => item.preset.id === preset.id)?.assignable === true);
   const allocate = (button: HTMLButtonElement) => {
     if (!context) return;
     trigger.current = button;

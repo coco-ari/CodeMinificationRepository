@@ -52,4 +52,15 @@ export const migrations: readonly Migration[] = [
     ) STRICT;
     `,
   },
+  {
+    version: 3,
+    name: '共享运行范围签发事实',
+    sql: `
+    CREATE TABLE assistant_execution_grants (
+      grant_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, run_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL, value_json TEXT NOT NULL, created_at TEXT NOT NULL,
+      UNIQUE(thread_id,run_id)
+    ) STRICT;
+    `,
+  },
 ]

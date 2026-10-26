@@ -10,6 +10,10 @@ import {
   normalizeExecutionBinding,
   type CustomerCapabilityInput,
 } from "../../../../../../agent-demo/t3-adapters/customer-registry.mjs";
+import { SharedExecutionScope } from '../../../../../../autoops/contracts/shared-execution.ts';
+import { CustomerAssistantRuntimeRequest } from '../../../../../../autoops/contracts/customer-assistant-runtime.ts';
+import { decodeContractJson } from '../../../../../../autoops/contracts/index.ts';
+import * as Stream from 'effect/Stream';
 
 const responseError = (error: unknown) => {
   const wrapped = error as { _tag?: string; cause?: unknown };
@@ -76,6 +80,33 @@ export const layer = Layer.unwrap(
       });
     });
     return Layer.mergeAll(
+      HttpRouter.add('POST','/autoops/customer/assistant-runtime',Effect.gen(function* () {
+        const initial=yield* owner,request=yield* HttpServerRequest.HttpServerRequest;
+        const input=yield* request.stream.pipe(Stream.runFoldEffect(()=>({buffer:new Uint8Array(128*1024),bytes:0}),
+          (state,chunk)=>chunk.byteLength>state.buffer.byteLength-state.bytes?Effect.fail('body-limit'):Effect.sync(()=>{state.buffer.set(chunk,state.bytes);state.bytes+=chunk.byteLength;return state})),
+          Effect.flatMap(state=>Effect.try(()=>new TextDecoder('utf-8',{fatal:true}).decode(state.buffer.subarray(0,state.bytes)))),
+          Effect.flatMap(text=>Effect.try(()=>decodeContractJson(CustomerAssistantRuntimeRequest,text))),
+          Effect.mapError(()=>({status:400,code:'CUSTOMER_RUNTIME_REQUEST_INVALID',message:'助手目录请求字段或大小无效'})));
+        const current=yield* owner;
+        if(current.id!==initial.id)return yield* Effect.fail({status:403,code:'CUSTOMER_ACTOR_CHANGED',message:'登录身份已改变，请重新载入'});
+        yield* Effect.try(()=>access.customerAssistantRuntime(current,input));
+        // 原生登录与中心成员事实都在返回前重查，目录读取不签发执行许可。
+        const final=yield* owner;
+        if(final.id!==current.id)return yield* Effect.fail({status:403,code:'CUSTOMER_ACTOR_CHANGED',message:'登录身份已改变，请重新载入'});
+        return bodyResponse(yield* Effect.try(()=>access.customerAssistantRuntime(final,input)));
+      }).pipe(Effect.catch(error=>Effect.succeed(responseError(error))))),
+      HttpRouter.add('POST','/autoops/customer/connector/shared-admission',Effect.gen(function* () {
+        const current=yield* device, request=yield* HttpServerRequest.HttpServerRequest;
+        const scope=yield* request.stream.pipe(Stream.runFoldEffect(()=>({buffer:new Uint8Array(128*1024),bytes:0}),
+          (state,chunk)=>chunk.byteLength>state.buffer.byteLength-state.bytes?Effect.fail('body-limit'):Effect.sync(()=>{state.buffer.set(chunk,state.bytes);state.bytes+=chunk.byteLength;return state})),
+          Effect.flatMap(state=>Effect.try(()=>new TextDecoder('utf-8',{fatal:true}).decode(state.buffer.subarray(0,state.bytes)))),
+          Effect.flatMap(text=>Effect.try(()=>decodeContractJson(SharedExecutionScope,text))),
+          Effect.mapError(()=>({status:400,code:'CUSTOMER_SHARED_SCOPE_INVALID',message:'共享执行范围格式或大小无效'})));
+        const refreshed=yield* device;
+        const admitted=yield* Effect.try(()=>access.requireSharedExecutionScope(scope,refreshed));
+        if(refreshed.deviceId!==current.deviceId)return yield* Effect.fail({status:403,code:'CUSTOMER_DEVICE_CHANGED',message:'设备身份已改变'});
+        return bodyResponse({grantId:admitted.grantId,available:true});
+      }).pipe(Effect.catch(error=>Effect.succeed(responseError(error))))),
       HttpRouter.add(
         "GET",
         "/autoops/customer/download",

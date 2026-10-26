@@ -18,8 +18,9 @@ import {
 import { ScopeReadError } from './ScopeReadError'
 import { ScopeComposerChoice } from './scopeSelection'
 import { loadSkillLibrary } from './skillLibrary'
-import { loadCustomerCapabilities } from './customerAgents'
+import { loadCustomerAssistantRuntime } from './customerAgents'
 import type { AutoOpsThreadScope } from './threadScopes'
+import { readAutoOpsHost } from './hostConfig'
 
 /** 沿用现有能力目录；预设只选择可用技能，不拥有另一份技能内容。 */
 export function QuestionSkillsControl({
@@ -36,7 +37,7 @@ export function QuestionSkillsControl({
   const question = scope.question
   const selected = question?.configuration.skillIds ?? []
   const target = scope.executionBinding
-  const key = JSON.stringify([scope.projectId, scope.agentId, scope.workspaceType, target])
+  const key = JSON.stringify([readAutoOpsHost()?.principal.id, scope.projectId, scope.agentId, scope.workspaceType, target, question])
   const [attempt, setAttempt] = useState(0)
   const [state, setState] = useState<{
     key: string
@@ -49,7 +50,7 @@ export function QuestionSkillsControl({
     const controller = new AbortController()
     const read = async () => {
       if (target?.kind === 'customer') {
-        const catalog = await loadCustomerCapabilities(target, controller.signal)
+        const catalog = (await loadCustomerAssistantRuntime(scope.projectId, question, controller.signal)).capabilities
         if (!catalog) throw new Error('电脑技能目录尚未就绪')
         return catalog.skills.map(({ id, name }) => ({ id, name }))
       }

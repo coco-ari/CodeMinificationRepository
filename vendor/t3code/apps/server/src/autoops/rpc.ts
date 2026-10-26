@@ -10,6 +10,7 @@ import { configuredAutoOpsAccess } from "../../../../../../agent-demo/t3-adapter
 import { PRODUCT_CAPABILITY_DISABLED, PRODUCT_CAPABILITY_MESSAGE } from "../../../../../../agent-demo/t3-adapters/product-profile.mjs";
 import { authorizeAutoOpsRpc, filterAutoOpsShell, filterAutoOpsShellItem, prepareAutoOpsRpcPayload } from "../../../../../../agent-demo/t3-adapters/rpc-policy.mjs";
 import type * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import { projectCustomerProviderResult } from '../../../../../../agent-demo/t3-adapters/customer-target.mjs';
 
 /** A fork may reserve a new binding, never claim an unmigrated native thread. */
 export const reserveForkBinding = Effect.fn("AutoOps.reserveForkBinding")(function* (
@@ -52,15 +53,7 @@ function projectResult(sessionId: string, method: string, payload: unknown, resu
   const principal = access.principalForNativeSession(sessionId);
   authorizeAutoOpsRpc(access, principal, method, payload);
   if (['server.getConfig','subscribeServerConfig','server.refreshProviders'].includes(method)) {
-    const owned=new Set(access.customerRegistry.listDevices(principal.id).map(device=>`customer-${device.id}-codex`));
-    const allowed=(provider: {instanceId?:string})=>!provider.instanceId?.startsWith('customer-')||owned.has(provider.instanceId);
-    const filter=(value:unknown):unknown=>{
-      if(Array.isArray(value))return value.filter(allowed);
-      if(!value || typeof value!=='object')return value;
-      const row=value as {providers?:Array<{instanceId?:string}>;payload?:unknown;config?:unknown};
-      return {...row,...(row.providers?{providers:row.providers.filter(allowed)}:{}),...(row.payload?{payload:filter(row.payload)}:{}),...(row.config?{config:filter(row.config)}:{})};
-    };
-    return filterBusinessProviderResult(process.env.AUTOOPS_T3_DATA_DIR!,filter(result),{access,principal});
+    return filterBusinessProviderResult(process.env.AUTOOPS_T3_DATA_DIR!,projectCustomerProviderResult(access,principal,result),{access,principal});
   }
   if (method === "orchestration.dispatchCommand" && (payload as {type: string}).type === "thread.delete")
     access.markThreadDeleted((payload as {threadId: string}).threadId);

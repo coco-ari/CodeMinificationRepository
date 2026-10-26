@@ -30,6 +30,13 @@ import { AutoOpsRequestError, isAutoOpsAccessError } from "./apiClient";
 import { assistantSourceKey } from "./projectConfiguration";
 import { CustomerDevicesContent } from "./CustomerDevicesSettings";
 import {
+  providedProfileDescriptor,
+  providedRuntimeKey,
+  providedRuntimeCatalog,
+  providedConfigurationIssue,
+  type ProvidedRuntimeSelection,
+} from "./providedAssistantConfiguration";
+import {
   loadProvidedAssistants,
   readPendingProvidedAssistant,
   clearPendingProvidedAssistant,
@@ -50,6 +57,7 @@ type Draft = {
   instructions: string;
   enabled: boolean;
   source: string;
+  runtime: ProvidedRuntimeSelection;
   model: string;
   reasoning: string | null;
   skillIds: string[];
@@ -66,6 +74,7 @@ const blank = (): Draft => ({
   instructions: "",
   enabled: true,
   source: "",
+  runtime: null,
   model: "",
   reasoning: null,
   skillIds: [],
@@ -261,6 +270,7 @@ export function ProviderAssistantPanel() {
             instructions: preset.instructions,
             enabled: preset.enabled,
             source: assistantSourceKey(preset.configuration.executionBinding),
+            runtime: preset.configuration.customerProfile ?? "self",
             model: preset.configuration.model.model,
             reasoning: preset.configuration.model.reasoningEffort,
             skillIds: [...preset.configuration.skillIds],
@@ -276,9 +286,13 @@ export function ProviderAssistantPanel() {
     editor?.kind === "save"
       ? sources.find((value) => assistantSourceKey(value.executionBinding) === editor.draft.source)
       : undefined;
+  const directory = providedRuntimeCatalog(
+    source,
+    editor?.kind === "save" ? editor.draft.runtime : null,
+  );
   const model =
     editor?.kind === "save"
-      ? source?.capabilities?.models.find((value) => value.id === editor.draft.model)
+      ? directory.models.find((value) => value.id === editor.draft.model)
       : undefined;
   const save = () => {
     if (!editor || disabled) return;
@@ -301,9 +315,17 @@ export function ProviderAssistantPanel() {
       const draft = editor.draft,
         binding = source?.executionBinding ?? editor.preset?.configuration.executionBinding;
       if (binding?.kind !== "customer") throw new Error("请选择本人已登记的运行来源。");
+      if (draft.runtime === null) throw new Error("请选择运行目录。");
+      if (draft.enabled) {
+        const issue = providedConfigurationIssue(source, draft);
+        if (issue) throw new Error(issue);
+      }
       const configuration: AssistantDetails["configuration"] = {
         agentId: "a-project",
         executionBinding: binding,
+        ...(draft.runtime !== "self"
+          ? { customerProfile: providedProfileDescriptor(draft.runtime) }
+          : {}),
         environmentId: null,
         workspaceType: null,
         visibility: "private",
@@ -563,18 +585,79 @@ export function ProviderAssistantPanel() {
                         : []),
                     ]}
                     onChange={(source) =>
-                      update({ source, model: "", reasoning: null, skillIds: [] })
+                      update({ source, runtime: null, model: "", reasoning: null, skillIds: [] })
                     }
                   />
                   <Choice
+                    label="运行目录"
+                    value={providedRuntimeKey(editor.draft.runtime)}
+                    disabled={disabled || !source}
+                    options={[
+                      { id: "self", name: "自用运行器" },
+                      ...(source?.capabilities?.sharedProfile
+                        ? [
+                            {
+                              id: providedRuntimeKey(source.capabilities.sharedProfile),
+                              name:
+                                source.sharedProfileAvailable === true
+                                  ? "隔离运行器"
+                                  : "隔离运行器 · 已不可用",
+                              disabled: source.sharedProfileAvailable !== true,
+                            },
+                          ]
+                        : []),
+                      ...(editor.draft.runtime !== null &&
+                      editor.draft.runtime !== "self" &&
+                      (!source?.capabilities?.sharedProfile ||
+                        providedRuntimeKey(editor.draft.runtime) !==
+                          providedRuntimeKey(source.capabilities.sharedProfile))
+                        ? [
+                            {
+                              id: providedRuntimeKey(editor.draft.runtime),
+                              name: "原隔离运行器 · 已不可用",
+                              disabled: true,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    onChange={(value) => {
+                      const profile = source?.capabilities?.sharedProfile;
+                      if (value === "self")
+                        update({ runtime: "self", model: "", reasoning: null, skillIds: [] });
+                      else if (
+                        profile &&
+                        value === providedRuntimeKey(profile) &&
+                        source?.sharedProfileAvailable === true
+                      )
+                        update({
+                          runtime: providedProfileDescriptor(profile),
+                          model: "",
+                          reasoning: null,
+                          skillIds: [],
+                        });
+                    }}
+                  />
+                  {editor.draft.runtime !== null && !directory.available ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      {directory.reason}
+                    </p>
+                  ) : null}
+                  {editor.draft.runtime === null &&
+                  source?.sharedProfileAvailable !== true &&
+                  source?.sharedProfileReason ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      {source.sharedProfileReason.message}
+                    </p>
+                  ) : null}
+                  <Choice
                     label="模型"
                     value={editor.draft.model}
-                    disabled={disabled || !source?.capabilities?.models.length}
+                    disabled={disabled || !directory.available || !directory.models.length}
                     options={[
-                      ...(source?.capabilities?.models.map((model) => ({
+                      ...directory.models.map((model) => ({
                         id: model.id,
                         name: model.name ?? model.id,
-                      })) ?? []),
+                      })),
                       ...(!model && editor.draft.model
                         ? [
                             {
@@ -586,7 +669,7 @@ export function ProviderAssistantPanel() {
                         : []),
                     ]}
                     onChange={(id) => {
-                      const next = source?.capabilities?.models.find((model) => model.id === id);
+                      const next = directory.models.find((model) => model.id === id);
                       if (next)
                         update({ model: id, reasoning: next.defaultReasoningEffort ?? null });
                     }}
@@ -594,10 +677,22 @@ export function ProviderAssistantPanel() {
                   <Choice
                     label="思考强度"
                     value={editor.draft.reasoning ?? "runtime-default"}
-                    disabled={disabled || !model}
+                    disabled={disabled || !directory.available || !model}
                     options={[
-                      { id: "runtime-default", name: "运行器默认" },
+                      ...(!model?.supportedReasoningEfforts.length
+                        ? [{ id: "runtime-default", name: "此模型不提供思考档位" }]
+                        : []),
                       ...(model?.supportedReasoningEfforts.map((id) => ({ id, name: id })) ?? []),
+                      ...(editor.draft.reasoning &&
+                      !model?.supportedReasoningEfforts.includes(editor.draft.reasoning)
+                        ? [
+                            {
+                              id: editor.draft.reasoning,
+                              name: `${editor.draft.reasoning} · 已不可用`,
+                              disabled: true,
+                            },
+                          ]
+                        : []),
                     ]}
                     onChange={(value) =>
                       update({ reasoning: value === "runtime-default" ? null : value })
@@ -606,18 +701,16 @@ export function ProviderAssistantPanel() {
                   <fieldset className="space-y-2">
                     <legend className="mb-2 text-sm font-medium">技能</legend>
                     {[
-                      ...(source?.capabilities?.skills ?? []),
+                      ...directory.skills,
                       ...editor.draft.skillIds
-                        .filter(
-                          (id) => !source?.capabilities?.skills.some((skill) => skill.id === id),
-                        )
+                        .filter((id) => !directory.skills.some((skill) => skill.id === id))
                         .map((id) => ({ id, name: `${id} · 已不可用` })),
                     ].map((skill) => (
                       <Label key={skill.id} className="flex items-center gap-2">
                         <Checkbox
                           aria-label={skill.name}
                           checked={editor.draft.skillIds.includes(skill.id)}
-                          disabled={disabled}
+                          disabled={disabled || !directory.available}
                           onCheckedChange={(checked) =>
                             update({
                               skillIds: checked
@@ -687,7 +780,7 @@ export function ProviderAssistantPanel() {
                     共享给此项目
                   </Label>
                   <p className="text-sm text-muted-foreground">
-                    共享后由该项目管理员分配。使用权不包含设备管理权；跨用户执行尚未开放。
+                    共享后由该项目管理员分配，使用权不包含设备管理权。
                   </p>
                 </>
               ) : null}

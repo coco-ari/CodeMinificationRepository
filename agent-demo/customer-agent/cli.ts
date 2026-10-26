@@ -8,6 +8,7 @@ import { parseArgs } from "node:util";
 import { createInterface } from "node:readline/promises";
 import { CustomerAgentStore, defaultLocalPolicy, ConnectorError } from "./store.ts";
 import { CustomerAgentConnection, CustomerAgentHttpClient, CONNECTOR_VERSION, type DeviceCredentials } from "./connection.ts";
+import { loadSharedDockerProfile } from './shared-docker-profile.ts';
 
 export function defaultStateDirectory(): string { return join(homedir(), ".autoops", "customer-agent"); }
 function ensureDirectory(directory: string): void {
@@ -58,10 +59,18 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     session: { type: "string" }, "confirm-stopped": { type: "boolean" },
     help: { type: "boolean", short: "h" },
     "read-only": { type: "boolean" }, "network-access": { type: "boolean" }, "approval-policy": { type: "string" },
+    "shared-profile": {type:'string'},
+    "disable-shared-profile": {type:'boolean'},
   } });
   const command = positionals[0]; const directory = resolve(values["state-dir"] ?? defaultStateDirectory());
-  if (values.help || !["connect", "register", "status", "run", "revoke", "resolve"].includes(command ?? "")) {
-    console.log("AutoOps 客户连接程序\n\nconnect --url https://中心地址 [--code 一次性配对码]\nregister --project 项目ID --path 本机目录 --label 名称 [--read-only] [--network-access]\nstatus\nrun\nrevoke --workspace 登记ID\nresolve --session 会话ID --confirm-stopped\n\n本机 Codex CLI 需已安装并登录。公网必须使用 HTTPS。凭据保留在本机，不上传目录内容。");
+  if (values.help || !["connect", "register", "profile", "validate-profile", "status", "run", "revoke", "resolve"].includes(command ?? "")) {
+    console.log("AutoOps 客户连接程序\n\nconnect --url https://中心地址 [--code 一次性配对码]\nregister --project 项目ID --path 本机目录 --label 名称 [--read-only] [--network-access] [--shared-profile 本机JSON]\nprofile --workspace 登记ID --shared-profile 本机JSON\nprofile --workspace 登记ID --disable-shared-profile\nvalidate-profile --shared-profile 本机JSON\nstatus\nrun\nrevoke --workspace 登记ID\nresolve --session 会话ID --confirm-stopped\n\n自用需本机 Codex CLI 已安装并登录；隔离profile另需 Linux Docker 和已核验固定镜像。公网必须使用 HTTPS。凭据保留在本机，不上传目录内容。");
+    return;
+  }
+  if(command==='validate-profile') {
+    if(!values['shared-profile'])throw new Error('请使用 --shared-profile 指定提供者本机隔离profile文件');
+    const {validateSharedProfile}=await import('./shared-profile-validation.ts');
+    console.log(JSON.stringify(await validateSharedProfile(realpathSync(resolve(values['shared-profile'])))));
     return;
   }
   if (command === "connect") {
@@ -96,6 +105,14 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       })), sessions: store.sessions(), pendingEventBytes: store.logBytes(), pendingCommands: store.pendingReceipts().map(({ commandId, sessionId, state }) => ({ commandId, sessionId, state })) }, null, 2));
       return;
     }
+    if(command==='profile') {
+      if(!values.workspace||Boolean(values['shared-profile'])===Boolean(values['disable-shared-profile']))throw new Error('请选择登记 ID，并明确提供 --shared-profile 或 --disable-shared-profile 其中之一');
+      const path=values['shared-profile']?realpathSync(resolve(values['shared-profile'])):undefined;
+      if(path)await loadSharedDockerProfile(path);
+      store.setSharedProfile(values.workspace,path);
+      console.log(path?'本机隔离profile已保存。结束活动任务后重启连接程序同步真实目录，并由提供者明确选择和共享、管理员确认分配；尚未验证的来源不能执行。':'本机隔离profile已撤回，新共享操作立即拒绝；自用目录登记仍有效，活动任务须等待真实停止结果。');
+      return;
+    }
     const credentials = readCredentials(directory);
     const client = new CustomerAgentHttpClient(credentials.baseUrl, credentials.token, credentials.allowInsecure);
     const publishWorkspace = async (workspace: ReturnType<CustomerAgentStore["workspaces"]>[number]) => client.request("connector/workspaces", {
@@ -109,8 +126,10 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         const label = values.label ?? await question("工作区显示名称：");
         const approval = values["approval-policy"] ?? "on-request";
         if (!["on-request", "untrusted"].includes(approval)) throw new Error("审批方式只能是 on-request 或 untrusted");
-        const workspace = store.register(path, projectId, label, { ...defaultLocalPolicy,
+        if(values['shared-profile'])await loadSharedDockerProfile(realpathSync(resolve(values['shared-profile'])));
+        let workspace = store.register(path, projectId, label, { ...defaultLocalPolicy,
           approvalPolicy: approval as "on-request" | "untrusted", sandboxMode: values["read-only"] ? "read-only" : "workspace-write", networkAccess: values["network-access"] ?? false });
+        if(values['shared-profile'])workspace=store.setSharedProfile(workspace.registeredWorkspaceId,realpathSync(resolve(values['shared-profile'])));
         try { await publishWorkspace(workspace); store.markPublished(workspace.registeredWorkspaceId); console.log(`已登记工作区：${workspace.label}（${workspace.registeredWorkspaceId}）`); }
         catch { console.log(`本机登记已保存（${workspace.registeredWorkspaceId}），中心暂不可达；下次 run 会重新同步登记。`); }
         return;

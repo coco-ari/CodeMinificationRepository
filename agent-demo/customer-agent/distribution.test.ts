@@ -29,6 +29,8 @@ test("完整ZIP可在没有仓库和node_modules的目录中运行且哈希清�
     const binary = join(artifact, "autoops-customer-agent.mjs");
     const options = { cwd: directory, encoding: "utf8" as const, env: { ...process.env, PATH: "", NODE_PATH: "" } };
     assert.match(execFileSync(process.execPath, [binary, "--help"], options), /connect --url/);
+    assert.match(execFileSync(process.execPath, [binary, "--help"], options), /validate-profile --shared-profile/);
+    assert.ok(manifest.files['shared-container-entry.mjs']);
     const status = JSON.parse(execFileSync(process.execPath, [binary, "status", "--state-dir", join(directory, "state")], options));
     assert.equal(status.deviceId, null); assert.deepEqual(status.workspaces, []);
   } finally { rmSync(directory, { recursive: true, force: true }); }

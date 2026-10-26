@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- 助手模块复用已验证的同步 SQLite 基础设施。
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import * as S from 'effect/Schema'
 import * as DateTime from 'effect/DateTime'
 import * as C from '../../../autoops/contracts/assistants.ts'
@@ -10,6 +10,9 @@ import type { ProjectMembership } from '../../../autoops/contracts/runtime.ts'
 import type { CustomerRegistry } from '../customer-registry.mjs'
 import { openDatabase } from '../../../autoops/server/platform/database.ts'
 import { migrations } from './schema.ts'
+import { SharedExecutionScope } from '../../../autoops/contracts/shared-execution.ts'
+import type { SharedProfileVerifier } from '../shared-profile-approvals.ts'
+import { validateRoleDefault, validateSharedAllocationConfiguration } from './allocation-policy.ts'
 export { questionConfigurationPolicy, questionConfigurationChoices } from './policy.ts'
 export { assertQuestionBinding, nativeQuestionModel } from './question.ts'
 
@@ -28,6 +31,7 @@ type Options = {
   validateTarget(project: string, target: C.AssistantTarget): void
   choices?: (actor: string, project: string) => C.AssistantChoices
   providers?: { registry(): CustomerRegistry; displayName(actor: string): string }
+  verifySharedProfile?: SharedProfileVerifier
 }
 const fail = (status: number, code: string, message: string): never => {
   throw Object.assign(new Error(message), { status, code })
@@ -181,13 +185,14 @@ export function createAssistantDirectory(options: Options) {
     const share = shareFor(item.id, project)
     if (!self && !share?.enabled)
       return fail(403, 'ASSISTANT_PROVIDER_SHARE_REQUIRED', '提供者尚未向此项目共享该助手')
-    if (!self)
-      return fail(
-        403,
-        'CUSTOMER_SHARED_ISOLATION_UNVERIFIED',
-        '此运行器尚未通过跨用户或跨项目执行隔离验证',
-      )
-    if (member.role === 'project_admin') return
+    if (!self) {
+      const target = item.configuration.executionBinding
+      if (target.kind !== 'customer' || !options.verifySharedProfile)
+        return fail(403,'CUSTOMER_SHARED_ISOLATION_UNVERIFIED','此运行器尚未通过跨用户或跨项目执行隔离验证')
+      options.verifySharedProfile({providerId:item.providedBy.id,sourceProjectId:item.providedBy.sourceProjectId,
+        target,profile:providerRegistry().getCapabilities(item.providedBy.id,target)?.sharedProfile})
+    }
+    if (self && member.role === 'project_admin') return
     const approvals = db
       .prepare(
         "SELECT target_kind,target_id,preset_revision,share_revision,source_json FROM assistant_allocation_sources WHERE project_id=? AND assistant_id=? AND ((target_kind='member' AND target_id=?) OR (target_kind='role' AND target_id=?))",
@@ -357,6 +362,96 @@ export function createAssistantDirectory(options: Options) {
       .map((row) => shareFor(id, String(row.project_id))!)
   return {
     catalog,
+    executionGrant(threadId: string, runId: string): SharedExecutionScope | undefined {
+      const row = db.prepare('SELECT value_json FROM assistant_execution_grants WHERE thread_id=? AND run_id=?').get(threadId,runId)
+      return row ? this.requireExecutionScope(decode(SharedExecutionScope,JSON.parse(String(row.value_json)))) : undefined
+    },
+    executionScope(actor: string, project: string, input: C.AssistantSelection, context: {threadId:string;runId:string}): SharedExecutionScope | undefined {
+      const selected = this.validateSelection(actor,project,input,true)
+      const item = preset(project,selected.assistantId), provider = item.providedBy
+      if (!provider || (provider.id === actor && provider.sourceProjectId === project && !selected.configuration.customerProfile)) return undefined
+      const target = selected.configuration.executionBinding
+      if (target.kind !== 'customer' || !options.verifySharedProfile)
+        return fail(403,'CUSTOMER_SHARED_ISOLATION_UNVERIFIED','此来源尚未通过共享执行验证')
+      const capabilities = providerRegistry().getCapabilities(provider.id,target)
+      const profile = options.verifySharedProfile({providerId:provider.id,sourceProjectId:provider.sourceProjectId,
+        target,profile:capabilities?.sharedProfile})
+      const member = membership(actor,project), share = shareFor(item.id,project),self=provider.id===actor&&provider.sourceProjectId===project
+      const approval = db.prepare(
+        "SELECT target_kind,target_id,allocation_revision,preset_revision,share_revision,source_json FROM assistant_allocation_sources WHERE project_id=? AND assistant_id=? AND ((target_kind='member' AND target_id=?) OR (target_kind='role' AND target_id=?)) ORDER BY target_kind",
+      ).all(project,item.id,actor,member.role).find(value =>
+        allocation(project,String(value.target_kind),String(value.target_id))?.revision === Number(value.allocation_revision) &&
+        allocation(project,String(value.target_kind),String(value.target_id))?.assistantIds.includes(item.id) &&
+        Number(value.preset_revision) === selected.presetRevision && Number(value.share_revision) === share?.revision &&
+        value.source_json === stable(target))
+      if ((!self&&(!approval||!share?.enabled)) || !capabilities)
+        return fail(403,'ASSISTANT_PROVIDER_APPROVAL_REQUIRED','当前共享及分配不允许本次执行')
+      const value = {
+        actorId:actor,providerId:provider.id,projectId:project,sourceProjectId:provider.sourceProjectId,
+        ...context,assistantId:item.id,presetRevision:selected.presetRevision,shareRevision:self?0:share!.revision,
+        allocation:self?{kind:'self',id:actor,revision:selected.presetRevision}:{kind:approval!.target_kind,id:approval!.target_id,revision:Number(approval!.allocation_revision)},
+        capabilityRevision:capabilities.revision,profile,target,model:selected.configuration.model,
+        skillIds:selected.configuration.skillIds,
+      }
+      const scope = decode(SharedExecutionScope,{...value,grantId:`shared-${createHash('sha256').update(stable(value)).digest('hex')}`})
+      // 哈希只用于稳定标识；已签发事实必须由中心保存，设备不能自行构造新任务范围。
+      return transaction.run(() => {
+        const previous = db.prepare('SELECT value_json FROM assistant_execution_grants WHERE thread_id=? AND run_id=?').get(context.threadId,context.runId)
+        if (previous) {
+          const stored = decode(SharedExecutionScope,JSON.parse(String(previous.value_json)))
+          if (stable(stored) !== stable(scope))
+            return fail(409,'CUSTOMER_SHARED_SCOPE_FIXED','原任务已固定运行范围，不能改用最新配置')
+          return stored
+        }
+        db.prepare('INSERT INTO assistant_execution_grants VALUES(?,?,?,?,?,?)').run(scope.grantId,scope.threadId,scope.runId,scope.actorId,stable(scope),DateTime.formatIso(DateTime.nowUnsafe()))
+        return scope
+      })
+    },
+    requireExecutionScope(input: SharedExecutionScope): SharedExecutionScope {
+      const original = decode(SharedExecutionScope,input)
+      const issued = db.prepare('SELECT value_json FROM assistant_execution_grants WHERE grant_id=?').get(original.grantId)
+      if (!issued || String(issued.value_json) !== stable(original))
+        return fail(403,'CUSTOMER_SHARED_SCOPE_UNISSUED','此执行范围未经中心签发，不能执行')
+      const row = db.prepare('SELECT value_json FROM assistant_versions WHERE assistant_id=? AND revision=?').get(original.assistantId,original.presetRevision)
+      if (!row) return fail(403,'CUSTOMER_SHARED_SCOPE_REVOKED','原执行范围已失效')
+      const details = decode(C.AssistantDetails,JSON.parse(String(row.value_json)))
+      let current:SharedExecutionScope|undefined
+      try {
+        current = this.executionScope(original.actorId,original.projectId,{
+          assistantId:original.assistantId,presetRevision:original.presetRevision,
+          configuration:{...details.configuration,model:original.model,skillIds:original.skillIds},
+        },{threadId:original.threadId,runId:original.runId})
+      } catch(error) {
+        // 设备核对已签发原许可时，当前授权消失统一拒绝；不能被解释成可改参数的新配置冲突。
+        if(error&&typeof error==='object'&&'status' in error&&typeof error.status==='number'&&error.status>=400&&error.status<500)
+          return fail(403,'CUSTOMER_SHARED_SCOPE_REVOKED','本次固定共享范围已失效，请核对原任务及收据')
+        throw error
+      }
+      if (!current || stable(current) !== stable(original))
+        return fail(403,'CUSTOMER_SHARED_SCOPE_REVOKED','本次固定共享范围已变化，不能改用最新配置执行')
+      return current
+    },
+    /** 读取当前合法目录供修正失效参数，不生成执行许可，也不继承管理者权限。 */
+    readRuntimeConfiguration(actor:string,project:string,input:unknown) {
+      const selection=decode(C.AssistantSelection,input),member=membership(actor,project),allowed=applicable(actor,project,member)
+      const item=all(project).find(item=>item.id===selection.assistantId&&visible(actor,project,item)&&(member.role==='project_admin'||allowed.ids.has(item.id)))
+      if(!item)return fail(403,'ASSISTANT_NOT_ASSIGNED','当前成员未获分配此助手')
+      if(!item.enabled)return fail(409,'ASSISTANT_DISABLED','助手已停用，请联系项目管理员')
+      if(item.revision!==selection.presetRevision)return fail(409,'ASSISTANT_PRESET_CHANGED','助手预设已更新，请重新载入')
+      providerAdmission(actor,project,member,item,selection.presetRevision)
+      const configuration=selection.configuration,original=item.configuration
+      if(stable(configuration.executionBinding)!==stable(original.executionBinding)||stable(configuration.customerProfile)!==stable(original.customerProfile)||configuration.agentId!==original.agentId)
+        return fail(403,'ASSISTANT_SOURCE_FIXED','不能改变助手的运行来源或业务身份')
+      if(!adjustable(member)&&stable(configuration)!==stable(original))
+        return fail(403,'ASSISTANT_PARAMETERS_FIXED','当前成员只能使用已分配预设的参数')
+      if(configuration.executionBinding.kind!=='customer'||configuration.agentId!=='a-project'||configuration.environmentId!==null||configuration.workspaceType!==null||configuration.visibility!=='private')
+        return fail(403,'CUSTOMER_CONTEXT_UNSUPPORTED','此目录只支持当前助手的私有客户来源')
+      const source=providerRegistry().sourceOwner(configuration.executionBinding)
+      if((source.ownerId!==actor||source.projectId!==project)&&member.workspaceAccess!=='internal')
+        return fail(403,'CUSTOMER_SHARED_EXTERNAL_UNSUPPORTED','此隔离来源尚未支持外部资料范围')
+      try {options.validate(actor,project,configuration,member);return {selection,available:true as boolean}}
+      catch(error){return {selection,available:false as boolean,reason:reason(error)}}
+    },
     requireProviderAccess(actor: string, id?: string) {
       if (id !== undefined) ownedPreset(actor, id)
       else requireProvider(actor)
@@ -393,7 +488,14 @@ export function createAssistantDirectory(options: Options) {
           const item = presetFrom(row, String(row.project_id))
           return item.providedBy?.id === actor ? [{ preset: item, shares: shares(item.id) }] : []
         })
-      return { items, sources: providerRegistry().listSources(actor) }
+      return { items, sources: providerRegistry().listSources(actor).map(source=>{
+        try {
+          if(!options.verifySharedProfile)return fail(403,'CUSTOMER_SHARED_ISOLATION_UNVERIFIED','此来源尚未取得隔离验证许可')
+          options.verifySharedProfile({providerId:actor,sourceProjectId:source.sourceProjectId,target:source.executionBinding,profile:source.capabilities?.sharedProfile})
+          providerRegistry().validateTarget(actor,source.sourceProjectId,source.executionBinding,{requireOnline:true})
+          return {...source,sharedProfileAvailable:true}
+        } catch(error){return {...source,sharedProfileAvailable:false,sharedProfileReason:reason(error)}}
+      }) }
     },
     saveProvided(actor: string, id: string | null, input: unknown): C.AssistantPreset {
       requireProvider(actor)
@@ -437,7 +539,7 @@ export function createAssistantDirectory(options: Options) {
             value.value.configuration.skillIds.length
           )
             fail(400, 'ASSISTANT_SKILLS_DUPLICATE', '技能不能重复选择')
-          if (value.value.enabled)
+          if (value.value.enabled || value.value.configuration.customerProfile!==undefined)
             options.validate(
               actor,
               source.sourceProjectId,
@@ -519,14 +621,52 @@ export function createAssistantDirectory(options: Options) {
                 '获共享运行来源暂不可核对，请恢复后重试',
               )
             }
+            let assignmentReason: { code: string; message: string } | undefined
+            try {
+              if (!item.enabled) fail(409, 'ASSISTANT_DISABLED', '助手已停用，请联系提供者')
+              const self =
+                item.providedBy.id === actor && item.providedBy.sourceProjectId === project
+              if (!self) {
+                if (!shareFor(item.id, project)?.enabled)
+                  fail(403, 'ASSISTANT_PROVIDER_SHARE_REQUIRED', '提供者尚未向此项目共享该助手')
+                const profile = source.capabilities?.sharedProfile
+                if (!options.verifySharedProfile)
+                  return fail(
+                    403,
+                    'CUSTOMER_SHARED_ISOLATION_UNVERIFIED',
+                    '此运行器尚未取得实际隔离验证许可',
+                  )
+                options.verifySharedProfile({
+                  providerId: item.providedBy.id,
+                  sourceProjectId: item.providedBy.sourceProjectId,
+                  target: binding,
+                  profile,
+                })
+                providerRegistry().validateTarget(
+                  item.providedBy.id,
+                  item.providedBy.sourceProjectId,
+                  binding,
+                  { requireOnline: true },
+                )
+                validateSharedAllocationConfiguration(item.configuration, profile)
+              }
+              options.validate(actor, project, item.configuration, membership(actor, project))
+            } catch (error) {
+              assignmentReason = reason(error)
+            }
+            const candidate = {
+              preset: item,
+              source,
+              share: shareFor(item.id, project),
+              assignable: assignmentReason === undefined,
+              ...(assignmentReason ? { assignmentReason } : {}),
+            }
             try {
               available(actor, project, membership(actor, project), item)
-              return { preset: item, source, share: shareFor(item.id, project), available: true }
+              return { ...candidate, available: true }
             } catch (error) {
               return {
-                preset: item,
-                source,
-                share: shareFor(item.id, project),
+                ...candidate,
                 available: false,
                 reason: reason(error),
               }
@@ -642,7 +782,6 @@ export function createAssistantDirectory(options: Options) {
     assign(actor: string, project: string, input: unknown) {
       manage(actor, project)
       const value = decode(C.AssignAssistantCommand, input)
-      options.validateTarget(project, value.target)
       if (
         new Set(value.assistantIds).size !== value.assistantIds.length ||
         (value.defaultAssistantId !== null &&
@@ -657,10 +796,20 @@ export function createAssistantDirectory(options: Options) {
         value,
         value.target.id,
         () => {
+          options.validateTarget(project, value.target)
           const previous = allocation(project, value.target.kind, value.target.id)
           checkRevision(previous?.revision ?? 0, value.expectedRevision)
           for (const id of value.assistantIds) {
             const item = preset(project, id)
+            if(item.configuration.executionBinding.kind==='customer') {
+              if(value.target.kind==='role'&&value.target.id==='external')
+                fail(403,'CUSTOMER_SHARED_EXTERNAL_UNSUPPORTED','此隔离来源尚未支持外部资料范围，不能分配给外部角色')
+              if(value.target.kind==='member'&&membership(value.target.id,project).workspaceAccess==='external') {
+                const source=providerRegistry().sourceOwner(item.configuration.executionBinding)
+                if(source.ownerId!==value.target.id||source.projectId!==project||item.configuration.customerProfile!==undefined)
+                  fail(403,'CUSTOMER_SHARED_EXTERNAL_UNSUPPORTED','此隔离来源尚未支持外部资料范围，不能分配给外部成员')
+              }
+            }
             if (!item.providedBy) continue
             const self =
               value.target.kind === 'member' &&
@@ -699,6 +848,42 @@ export function createAssistantDirectory(options: Options) {
             value.defaultAssistantId,
             (previous?.revision ?? 0) + 1,
           )
+          if (value.defaultAssistantId !== null) {
+            const item = preset(project, value.defaultAssistantId)
+            if (value.target.kind === 'member') {
+              // 新分配事实在同一事务中可见；任何失败连来源确认、审计及收据一起回滚。
+              available(value.target.id, project, membership(value.target.id, project), item)
+            } else {
+              if (!item.enabled) fail(409, 'ASSISTANT_DISABLED', '已停用助手不能设为默认')
+              validateRoleDefault(value.target.id, item.configuration)
+              if (item.providedBy) {
+                const target = item.configuration.executionBinding
+                if (target.kind !== 'customer' || !options.verifySharedProfile)
+                  return fail(
+                    403,
+                    'CUSTOMER_SHARED_ISOLATION_UNVERIFIED',
+                    '此运行器尚未取得实际隔离验证许可',
+                  )
+                const profile = providerRegistry().getCapabilities(item.providedBy.id, target)
+                  ?.sharedProfile
+                options.verifySharedProfile({
+                  providerId: item.providedBy.id,
+                  sourceProjectId: item.providedBy.sourceProjectId,
+                  target,
+                  profile,
+                })
+                providerRegistry().validateTarget(
+                  item.providedBy.id,
+                  item.providedBy.sourceProjectId,
+                  target,
+                  { requireOnline: true },
+                )
+                validateSharedAllocationConfiguration(item.configuration, profile)
+              }
+              // 角色模板只验证合法配置和固定外部边界，不借配置者环境权给未来成员扩权。
+              options.validate(actor, project, item.configuration, membership(actor, project))
+            }
+          }
           return allocation(project, value.target.kind, value.target.id)!
         },
       )
@@ -764,7 +949,8 @@ export function createAssistantDirectory(options: Options) {
       if (
         stable(configuration.executionBinding) !==
           stable(original.configuration.executionBinding) ||
-        configuration.agentId !== original.configuration.agentId
+        configuration.agentId !== original.configuration.agentId ||
+        stable(configuration.customerProfile)!==stable(original.configuration.customerProfile)
       )
         fail(403, 'ASSISTANT_SOURCE_FIXED', '不能改变助手的运行来源或业务身份')
       if (!adjustable(member) && stable(configuration) !== stable(original.configuration))

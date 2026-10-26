@@ -60,9 +60,73 @@ function provider(instanceId: string): ServerProvider {
 }
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.resetModules();
 });
 describe("customer workspace UI boundary", () => {
+  it("获分配的电脑助手按项目与原参数读取能力，不查询提供者设备管理目录", async () => {
+    const host = await import('./hostConfig')
+    host.installAutoOpsHost(bootstrap, 'https://work.test')
+    const question = {
+      assistantId: 'provided-one', presetRevision: 2,
+      configuration: { agentId: 'a-project', executionBinding: target, environmentId: null,
+        workspaceType: null, visibility: 'private' as const,
+        model: { instanceId: 'customer-device-1-codex', model: 'local-model', reasoningEffort: 'high' as const }, skillIds: [] },
+    }
+    const projected = { target, profile: 'linux-docker-readonly-v1', available: false,
+      reason: { code: 'ASSISTANT_MODEL_UNAVAILABLE', message: '原模型已下线，请选择目录中可用模型' },
+      device: { id: target.deviceId, label: '项目已分配电脑', status: 'active', online: true },
+      workspace: { label: '获准目录', status: 'active' }, capabilities: catalog }
+    const fetch = vi.fn().mockResolvedValue(Response.json(projected))
+    vi.stubGlobal('fetch', fetch)
+    const { loadCustomerAssistantRuntime } = await import('./customerAgents')
+    await expect(loadCustomerAssistantRuntime('p-autoops', question)).resolves.toEqual(projected)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    const [path, init] = fetch.mock.calls[0]!
+    expect(path).toBe('/api/agent-demo/t3/autoops/customer/assistant-runtime')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ projectId: 'p-autoops', question })
+    expect(new Headers(init.headers).get('x-demo-csrf')).toBe('csrf')
+  })
+  it("助手能力响应串入其他目录时明确拒绝，撤权不退回设备所有者接口", async () => {
+    const host = await import('./hostConfig')
+    host.installAutoOpsHost(bootstrap, 'https://work.test')
+    const question = {
+      assistantId: 'provided-one', presetRevision: 2,
+      configuration: { agentId: 'a-project', executionBinding: target, environmentId: null,
+        workspaceType: null, visibility: 'private' as const,
+        model: { instanceId: 'customer-device-1-codex', model: 'local-model', reasoningEffort: 'high' as const }, skillIds: [] },
+    }
+    const projected = { target, profile: 'self', available: true,
+      device: { id: target.deviceId, label: '已分配电脑', status: 'active', online: true },
+      workspace: { label: '获准目录', status: 'active' },
+      capabilities: { ...catalog, registeredWorkspaceId: 'other-directory' } }
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json(projected))
+      .mockResolvedValueOnce(Response.json({ error: { code: 'ASSISTANT_WITHDRAWN', message: '助手已撤回' } }, { status: 403 }))
+    vi.stubGlobal('fetch', fetch)
+    const { loadCustomerAssistantRuntime } = await import('./customerAgents')
+    await expect(loadCustomerAssistantRuntime('p-autoops', question)).rejects.toMatchObject({ code: 'CUSTOMER_RUNTIME_SCOPE_CHANGED' })
+    await expect(loadCustomerAssistantRuntime('p-autoops', question)).rejects.toMatchObject({ code: 'ASSISTANT_WITHDRAWN', status: 403 })
+    expect(fetch.mock.calls.map(call => call[0])).toEqual(Array(2).fill('/api/agent-demo/t3/autoops/customer/assistant-runtime'))
+  })
+  it('能力响应返回前切换实际调用者，拒绝旧账号结果', async () => {
+    const host = await import('./hostConfig')
+    host.installAutoOpsHost(bootstrap, 'https://work.test')
+    const question = { assistantId: 'provided-one', presetRevision: 2,
+      configuration: { agentId: 'a-project', executionBinding: target, environmentId: null,
+        workspaceType: null, visibility: 'private' as const,
+        model: { instanceId: 'customer-device-1-codex', model: 'local-model', reasoningEffort: 'high' as const }, skillIds: [] } }
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve })))
+    const { loadCustomerAssistantRuntime } = await import('./customerAgents')
+    const result = loadCustomerAssistantRuntime('p-autoops', question)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    vi.spyOn(host, 'readAutoOpsHost').mockReturnValue({ ...host.readAutoOpsHost()!, principal: { id: 'other-actor', displayName: '另一用户' } })
+    finish(Response.json({ target, profile: 'self', available: true,
+      device: { id: target.deviceId, label: '旧账号电脑', status: 'active', online: true },
+      workspace: { label: '原目录', status: 'active' }, capabilities: catalog }))
+    await expect(result).rejects.toMatchObject({ code: 'CUSTOMER_RUNTIME_ACTOR_CHANGED', status: 401 })
+  })
   it("显示本机默认思考档位，并保留用户显式选择及未知默认值", async () => {
     const host = await import("./hostConfig");
     host.installAutoOpsHost(bootstrap, "https://work.test");

@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { CustomerAttachmentManifest } from "./customerAttachments.ts";
 import { CustomerFileInput, CustomerFileResult } from "./customerFiles.ts";
+import { SharedExecutionScope } from "../../../../../autoops/contracts/shared-execution.ts";
 
 /** Device transport only. Browser chat and Provider events retain their T3 contracts. */
 export const CUSTOMER_AGENT_PROTOCOL_VERSION = 1;
@@ -23,6 +24,7 @@ export const CustomerAgentCommand = Schema.Struct({
   type: Schema.Literal("command"), commandId: Id, sessionId: Id,
   target: CustomerAgentTarget, method: CustomerAgentMethod,
   runtimeEpoch: Schema.optional(Id), input: Schema.Unknown,
+  executionScope: Schema.optional(SharedExecutionScope),
   attachments: Schema.optional(Schema.Array(CustomerAttachmentManifest)),
   skillBindings: Schema.optional(Schema.Array(Schema.Struct({ id: Id, name: Id }))),
 });
@@ -31,6 +33,7 @@ export const CustomerAgentReceipt = Schema.Struct({
   type: Schema.Literal("receipt"), commandId: Id, sessionId: Id,
   state: Schema.Literals(["accepted", "completed", "failed", "unknown"]),
   runtimeEpoch: Schema.optional(Id), result: Schema.optional(Schema.Unknown),
+  grantId: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))),
   error: Schema.optional(Schema.Struct({ code: Id, message: Schema.String })),
 });
 export type CustomerAgentReceipt = typeof CustomerAgentReceipt.Type;
@@ -51,6 +54,7 @@ export const CustomerAgentClientFrame = Schema.Union([
     attachmentTransfers: Schema.optional(Schema.Boolean),
     workspaceFiles: Schema.optional(Schema.Boolean),
     assistantConfiguration: Schema.optional(Schema.Boolean),
+    sharedExecutionVersion: Schema.optional(Schema.Literal(1)),
     workspaces: Schema.Array(Schema.Struct({
       ...CustomerAgentTarget.fields, projectId: Id, label: Schema.String,
     })),
@@ -76,6 +80,8 @@ export type CustomerAgentClientFrame = typeof CustomerAgentClientFrame.Type;
 export const CustomerAgentServerFrame = Schema.Union([
   Schema.Struct({ type: Schema.Literal("welcome"), connectionEpoch: Id }),
   CustomerAgentCommand,
+  Schema.Struct({ type: Schema.Literal("receiptQuery"), commandId: Id, sessionId: Id,
+    grantId: Schema.optional(Schema.String.check(Schema.isMinLength(1),Schema.isMaxLength(512))) }),
   Schema.Struct({ type: Schema.Literal("files"), requestId: Id, target: CustomerAgentTarget, input: CustomerFileInput }),
   Schema.Struct({ type: Schema.Literal("filesCancel"), requestId: Id }),
   Schema.Struct({ type: Schema.Literal("ack"), sessionId: Id, runtimeEpoch: Id, seq: Cursor }),

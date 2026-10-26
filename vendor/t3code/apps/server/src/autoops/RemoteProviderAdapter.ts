@@ -43,7 +43,7 @@ export function makeRemoteProviderAdapter(
         const customerTarget = binding.executionBinding;
         yield* Effect.try({
           try: () => {
-            hub.bind(binding, input.providerSessionId);
+            hub.bind(binding, input.providerSessionId, input.modelSelection);
             if (!input.resumeFromSession) {
               hub.access.requireQuestionForActor(
                 binding.ownerId,
@@ -247,11 +247,12 @@ export function makeRemoteProviderAdapter(
                     value.modelSelection,
                   );
                   if (!selected) return undefined;
-                  const catalog = hub.access.customerRegistry.getCapabilities(
-                    binding.ownerId,
-                    customerTarget,
+                  const scope = hub.access.customerRunScope(binding.threadId,value.runId);
+                  const capabilities = hub.access.customerRegistry.getCapabilities(
+                    scope?.providerId ?? binding.ownerId, customerTarget,
                   );
-                  if (catalog?.assistantConfiguration !== true)
+                  const catalog = scope ? capabilities?.sharedProfile : capabilities;
+                  if (capabilities?.assistantConfiguration !== true || !catalog)
                     throw new Error("请更新电脑连接程序后使用助手预设");
                   return {
                     instructions: hub.access.questionInstructions(

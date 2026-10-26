@@ -1,4 +1,7 @@
-import { autoOpsRequest, isAutoOpsAccessError } from './apiClient'
+import { autoOpsRequest, AutoOpsRequestError, isAutoOpsAccessError } from './apiClient'
+import { decodeContract } from '../../../../../../autoops/contracts/index.ts'
+import { CustomerAssistantRuntimeRequest, type CustomerAssistantRuntime } from '../../../../../../autoops/contracts/customer-assistant-runtime.ts'
+import type { AssistantSelection } from '../../../../../../autoops/contracts/assistants.ts'
 import { ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import type { ProviderInstanceEntry } from "~/providerInstances";
@@ -18,7 +21,7 @@ export const isCustomerScope = (scope: AutoOpsThreadScope | undefined) =>
   scope?.executionBinding?.kind === "customer";
 export const customerInstanceId = (target: CustomerTarget) =>
   ProviderInstanceId.make(`customer-${target.deviceId}-${target.runtimeId}`);
-export const customerTargetKey = (target: CustomerTarget) =>
+export const customerTargetKey = (target: Pick<CustomerTarget, 'deviceId' | 'registeredWorkspaceId' | 'workspaceBindingRevision' | 'runtimeId'>) =>
   `${target.deviceId}/${target.registeredWorkspaceId}/${target.workspaceBindingRevision}/${target.runtimeId}`;
 /** Dynamic customer instances are not machine settings. Their enablement comes
  * from the authenticated server snapshot for the exact fixed workspace target. */
@@ -63,14 +66,29 @@ export async function loadCustomerCapabilities(target: CustomerTarget, signal?: 
     )
   ).capabilities;
 }
+export async function loadCustomerAssistantRuntime(projectId: string, question: AssistantSelection, signal?: AbortSignal) {
+  const actorId = readAutoOpsHost()?.principal.id
+  const input = decodeContract(CustomerAssistantRuntimeRequest, { projectId, question })
+  const target = input.question.configuration.executionBinding
+  if (target.kind !== 'customer') throw new AutoOpsRequestError('当前助手不使用电脑运行器。', 'CUSTOMER_RUNTIME_TARGET_INVALID', 400)
+  const result = await autoOpsRequest<CustomerAssistantRuntime>('/autoops/customer/assistant-runtime', {
+    label: '助手运行能力', body: input, timeoutMs: 30_000, ...(signal ? { signal } : {}),
+  })
+  if (readAutoOpsHost()?.principal.id !== actorId)
+    throw new AutoOpsRequestError('登录账号已变更，请重新读取当前助手。', 'CUSTOMER_RUNTIME_ACTOR_CHANGED', 401)
+  if (customerTargetKey(result.target) !== customerTargetKey(target) || result.device.id !== target.deviceId ||
+      (result.capabilities && customerTargetKey(result.capabilities) !== customerTargetKey(target)))
+    throw new AutoOpsRequestError('运行能力与当前助手不一致，请刷新重试。', 'CUSTOMER_RUNTIME_SCOPE_CHANGED', 409)
+  return result
+}
 export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
   const target = scope?.executionBinding?.kind === "customer" ? scope.executionBinding : null;
   const principalId = readAutoOpsHost()?.principal.id;
-  const key = target ? `${principalId}/${customerTargetKey(target)}` : null;
+  const key = target ? JSON.stringify([principalId, scope?.projectId, target, scope?.question]) : null;
   const [state, setState] = useState<{
     key: string;
     catalog: CustomerCapabilities | null;
-    device: CustomerDevice | null;
+    device: Pick<CustomerDevice, 'id' | 'label' | 'status' | 'online'> | null;
     error: string | null;
   } | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -82,6 +100,13 @@ export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
       if (reading || controller.signal.aborted) return;
       reading = true;
       try {
+        if (scope?.question) {
+          const runtime = await loadCustomerAssistantRuntime(scope.projectId, scope.question, controller.signal)
+          if (!controller.signal.aborted)
+            setState({ key, catalog: runtime.capabilities, device: runtime.device,
+              error: runtime.available ? null : runtime.reason?.message ?? '当前助手配置不可用，请核对实际能力' })
+          return
+        }
         const [catalog, devices] = await Promise.all([
           loadCustomerCapabilities(target, controller.signal),
           customerRequest<{ devices: CustomerDevice[] }>("devices", undefined, controller.signal),
@@ -102,8 +127,7 @@ export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
             device: !isAutoOpsAccessError(cause) && current?.key === key ? current.device : null,
             error: cause instanceof Error ? cause.message : "无法读取客户运行器",
           }));
-      }
-      reading = false;
+      } finally { reading = false; }
     };
     const refreshOnFocus = () => {
       if (document.visibilityState === "visible") void read();

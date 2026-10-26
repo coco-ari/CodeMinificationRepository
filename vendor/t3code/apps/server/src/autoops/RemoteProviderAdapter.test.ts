@@ -59,6 +59,8 @@ it.each(["restart", "preflight-failure", "dispatch-unknown", "same-file", "other
     const commands: Array<{ method: string; input: any }> = [];
     const hub = {
       access: {
+        customerExecutionSource: () => ({ownerId:'owner',projectId:'project'}),
+        customerRunScope: () => undefined,
         requireQuestionForActor: () => ({ configuration: { skillIds: ["local-skill"] } }),
         questionInstructions: () => "按现场真实资料回答",
         getThreadBinding: () => ({

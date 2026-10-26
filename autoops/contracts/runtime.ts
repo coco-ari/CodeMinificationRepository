@@ -1,3 +1,5 @@
+import type { SharedProfileCapability } from './shared-profile.ts'
+
 /** 当前工作台共享的公开 DTO；不包含身份凭据、存储句柄或服务实现。 */
 export interface ProjectCapabilities {
   'project.manage'?: boolean
@@ -57,6 +59,7 @@ export interface CustomerSkill {
   description: string
 }
 export interface CustomerCapabilityInput {
+  sharedProfile?: SharedProfileCapability
   workspaceFiles?: boolean
   assistantConfiguration?: boolean
   registeredWorkspaceId: string

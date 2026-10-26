@@ -1,9 +1,11 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CustomerExecutionBinding } from './customer-registry.mjs';
+import type { SharedExecutionScope } from '../../autoops/contracts/shared-execution.ts';
 export class CustomerTransportError extends Error {code:string;constructor(code:string,message:string)}
 export function customerCommandId(sessionId:string,method:string,key:unknown):string;
 export interface TransportSession {
  sessionId:string;deviceId:string;threadId:string;ownerId:string;projectId:string;target:Omit<CustomerExecutionBinding,'kind'|'deviceId'>;
+ providerId?:string;executionScope?:SharedExecutionScope;
  runtimeEpoch?:string; providerSession?:unknown; providerThreadId?:string;
  runs?:Array<{runId:string;attemptId:string;rootNodeId:string;runOrdinal:number;providerTurnOrdinal:number}>;
  nodeIds?:string[];
@@ -15,8 +17,8 @@ export interface TransportSession {
  resolution?:{runId:string;attemptId:string;resolvedAt:string;reason:'operator_confirmed_process_stopped'};
  appliedResolution?:TransportSession['resolution'];
 }
-export interface TransportCommand {type:'command';commandId:string;sessionId:string;target:TransportSession['target'];method:string;runtimeEpoch?:string;input:unknown;attachments?:ReadonlyArray<import('../../vendor/t3code/packages/contracts/src/customerAttachments.ts').CustomerAttachmentManifest>}
-export interface TransportReceipt {type:'receipt';commandId:string;sessionId:string;state:'accepted'|'completed'|'failed'|'unknown';runtimeEpoch?:string|undefined;result?:unknown;error?:{code:string;message:string}|undefined}
+export interface TransportCommand {type:'command';commandId:string;sessionId:string;target:TransportSession['target'];method:string;runtimeEpoch?:string;input:unknown;executionScope?:SharedExecutionScope;attachments?:ReadonlyArray<import('../../vendor/t3code/packages/contracts/src/customerAttachments.ts').CustomerAttachmentManifest>}
+export interface TransportReceipt {type:'receipt';commandId:string;sessionId:string;state:'accepted'|'completed'|'failed'|'unknown';runtimeEpoch?:string|undefined;grantId?:string|undefined;result?:unknown;error?:{code:string;message:string}|undefined}
 export interface CustomerTransportJournal {
  acquireWorkspace(workspaceKey:string,threadId:string,runId:string):boolean;
  releaseWorkspace(workspaceKey:string,runId:string):boolean;

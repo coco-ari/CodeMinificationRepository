@@ -3,7 +3,7 @@ import * as Stream from "effect/Stream";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({ principal: { id: "actor-a", username: "actor-a" }, authorize: vi.fn() }));
-vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ getThreadBinding: () => undefined, principalForNativeSession: () => mocks.principal, customerRegistry: { listDevices: () => [{ id: "owned" }] } }) }));
+vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ getThreadBinding: () => undefined, principalForNativeSession: () => mocks.principal, visibleCustomerProviderInstances: () => ({ owned: ["customer-owned-codex"], shared: [] }), customerRegistry: { listDevices: () => [{ id: "owned" }] } }) }));
 vi.mock("../../../../../../agent-demo/t3-adapters/rpc-policy.mjs", () => ({
   authorizeAutoOpsRpc: mocks.authorize,
   filterAutoOpsShell: (_access: unknown, _principal: unknown, value: unknown) => value,

@@ -52,6 +52,7 @@ await writeFile(path.join(output, 'dependency-audit.json'), JSON.stringify({
 await rename(path.join(output, 'cli.mjs'), path.join(output, 'autoops-customer-agent.mjs'));
 await copyFile(path.join(t3Root, 'LICENSE'), path.join(output, 'LICENSE-T3-Code'));
 await copyFile(path.join(root, 'agent-demo/customer-agent/README.md'), path.join(output, 'README.md'));
+await copyFile(path.join(root, 'agent-demo/customer-agent/shared-container-entry.mjs'), path.join(output, 'shared-container-entry.mjs'));
 for (const [name, location] of [
   ['effect', 'effect'], ['effect-platform-node', '@effect/platform-node'],
   ['effect-platform-node-shared', '@effect/platform-node-shared'], ['undici', 'undici'],

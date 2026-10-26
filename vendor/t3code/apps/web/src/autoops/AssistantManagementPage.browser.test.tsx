@@ -4,7 +4,7 @@ import { render, stubGlobal } from "../../test/render";
 import { Sidebar, SidebarContent, SidebarProvider } from "~/components/ui/sidebar";
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from "./ModuleWorkspace";
 import { AssistantManagementPage } from "./AssistantManagementPage";
-import { installAutoOpsHost } from "./hostConfig";
+import { installAutoOpsHost, readAutoOpsHost } from "./hostConfig";
 import type {
   AssistantPreset,
   ProvidedAssistantSettings,
@@ -65,6 +65,13 @@ function setup(manage = false) {
     id: "foreign-preset",
     projectId: "target-project",
     name: "他人已共享助手",
+    configuration: {
+      ...ownerPreset.configuration,
+      executionBinding: { ...source, deviceId: "provider-device", registeredWorkspaceId: "provider-directory" },
+      customerProfile: { ...isolatedProfile },
+      model: { instanceId: "customer-provider-device-codex", model: "isolated-model", reasoningEffort: "high" },
+      skillIds: ["isolated-skill"],
+    },
     providedBy: { id: "other-provider", name: "提供者甲", sourceProjectId: "source-project" },
   };
   const own: ProvidedAssistantSettings = {
@@ -108,6 +115,9 @@ function setup(manage = false) {
     conflict: false,
     projectMixed: false,
     savedUnavailable: false,
+    assignable: false,
+    targetScopeError: false,
+    sharedWithdrawn: false,
   };
   const projects = ["source-project", "target-project"].map((id) => ({
     id,
@@ -129,7 +139,7 @@ function setup(manage = false) {
         {
           preset: foreign,
           available: false,
-          reason: { code: "SHARING_NOT_VERIFIED", message: "共享隔离待验证，暂不可执行" },
+          reason: { code: "ASSISTANT_NOT_ASSIGNED", message: "当前管理员未获分配此助手" },
         },
       ],
       defaultAssistantId: platform.id,
@@ -291,20 +301,48 @@ function setup(manage = false) {
       );
     if (path.endsWith("/assistants/provided"))
       return Response.json({
-        items: [
-          {
-            preset: foreign,
-            source: own.sources[0],
-            share: {
-              assistantId: foreign.id,
-              projectId: "target-project",
-              enabled: true,
-              revision: 1,
-            },
-            available: false,
-            reason: { code: "SHARING_NOT_VERIFIED", message: "共享隔离待验证，暂不可执行" },
-          },
-        ],
+        items: state.sharedWithdrawn
+          ? []
+          : [
+              {
+                preset: foreign,
+                source: {
+                  ...own.sources[0],
+                  executionBinding: foreign.configuration.executionBinding,
+                  deviceName: "提供者电脑",
+                  workspaceName: "提供者登记目录",
+                  capabilities: {
+                    ...own.sources[0]!.capabilities,
+                    deviceId: "provider-device",
+                    registeredWorkspaceId: "provider-directory",
+                    models: [{ id: "provider-self-model", supportedReasoningEfforts: ["low"] }],
+                    skills: [],
+                    sharedProfile: {
+                      ...isolatedProfile,
+                      models: [{ id: "isolated-model", supportedReasoningEfforts: ["high"], defaultReasoningEffort: "high" }],
+                      skills: [{ id: "isolated-skill", name: "隔离只读技能", description: "" }],
+                    },
+                  },
+                },
+                share: {
+                  assistantId: foreign.id,
+                  projectId: "target-project",
+                  enabled: true,
+                  revision: 1,
+                },
+                available: false,
+                assignable: state.assignable,
+                ...(!state.assignable
+                  ? {
+                      assignmentReason: {
+                        code: "SHARING_NOT_VERIFIED",
+                        message: "共享隔离待验证，暂不可分配默认",
+                      },
+                    }
+                  : {}),
+                reason: { code: "ASSISTANT_NOT_ASSIGNED", message: "当前管理员未获分配此助手" },
+              },
+            ],
       });
     if (path.endsWith("/assistants/settings"))
       return Response.json({ presets: [platform, foreign], allocations });
@@ -349,6 +387,11 @@ function setup(manage = false) {
     if (path.endsWith("/assistant-allocations")) {
       const body = JSON.parse(String(init?.body));
       writes.push({ path, body });
+      if (state.targetScopeError)
+        return Response.json(
+          { code: "CUSTOMER_SHARED_EXTERNAL_UNSUPPORTED", error: "所选目标成员不能使用此资料范围" },
+          { status: 403 },
+        );
       allocations.push({ ...body, revision: 1 });
       return Response.json({ ...body, revision: 1 });
     }
@@ -379,10 +422,179 @@ async function create() {
   await page.getByRole("textbox", { name: "名称", exact: true }).fill("新增本人助手");
   await page.getByRole("combobox", { name: "本人运行来源", exact: true }).click();
   await page.getByRole("option", { name: "本人电脑 · 登记目录", exact: true }).click();
+  await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
+  await page.getByRole("option", { name: "自用运行器", exact: true }).click();
   await page.getByRole("combobox", { name: "模型", exact: true }).click();
   await page.getByRole("option", { name: "真实本机模型", exact: true }).click();
   await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
 }
+
+const isolatedProfile = {
+  id: "readonly-profile",
+  revision: 2,
+  digest: "a".repeat(64),
+  imageDigest: `sha256:${"b".repeat(64)}`,
+  policy: "linux-docker-readonly-v1" as const,
+};
+function enableIsolatedProfile(f: ReturnType<typeof setup>) {
+  const source = f.own.sources[0]!;
+  source.sharedProfileAvailable = true;
+  source.capabilities!.sharedProfile = {
+    ...isolatedProfile,
+    models: [
+      {
+        id: "isolated-model",
+        name: "隔离实际模型",
+        supportedReasoningEfforts: ["medium", "high"],
+        defaultReasoningEffort: "medium",
+      },
+    ],
+    skills: [{ id: "isolated-skill", name: "隔离只读技能", description: "" }],
+  };
+}
+
+it("新预设显式选择隔离目录后仅展示其真实模型技能，提交固定profile且不自动选首项", async () => {
+  const f = setup();
+  enableIsolatedProfile(f);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using _screen = await render(<App />, {
+    router: "/assistants?projectId=target-project&assistantView=provided",
+  });
+  const add = page.getByRole("button", { name: "添加个人助手", exact: true });
+  await expect.element(add).toBeEnabled();
+  await add.click();
+  await page.getByRole("textbox", { name: "名称", exact: true }).fill("显式隔离助手");
+  await page.getByRole("combobox", { name: "本人运行来源", exact: true }).click();
+  await page.getByRole("option", { name: "本人电脑 · 登记目录", exact: true }).click();
+  await expect.element(page.getByRole("combobox", { name: "模型", exact: true })).toBeDisabled();
+  await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
+  await page.getByRole("option", { name: "隔离运行器", exact: true }).click();
+  await expect
+    .element(page.getByRole("combobox", { name: "模型", exact: true }))
+    .toHaveTextContent("请选择");
+  await page.getByRole("combobox", { name: "模型", exact: true }).click();
+  await expect
+    .element(page.getByRole("option", { name: "真实本机模型", exact: true }))
+    .not.toBeInTheDocument();
+  await page.getByRole("option", { name: "隔离实际模型", exact: true }).click();
+  await expect
+    .element(page.getByRole("combobox", { name: "思考强度", exact: true }))
+    .toHaveTextContent("medium");
+  await expect
+    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .not.toBeInTheDocument();
+  await page.getByRole("checkbox", { name: "隔离只读技能", exact: true }).click();
+  await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  await expect.element(add).toHaveFocus();
+  expect(f.writes[0]?.body).toMatchObject({
+    value: {
+      configuration: {
+        customerProfile: isolatedProfile,
+        model: { model: "isolated-model", reasoningEffort: "medium" },
+        skillIds: ["isolated-skill"],
+      },
+    },
+  });
+  expect((f.writes[0]?.body.value as AssistantPreset).configuration.customerProfile).toEqual(
+    isolatedProfile,
+  );
+});
+
+it("编辑自用预设保留原参数，显式切换运行目录清除旧模型技能且不默选新模型", async () => {
+  const f = setup();
+  enableIsolatedProfile(f);
+  Object.assign(f.own.items[0]!.preset.configuration, { skillIds: ["local-skill"] });
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using _screen = await render(<App />, {
+    router: "/assistants?projectId=target-project&assistantView=provided",
+  });
+  await expect.element(page.getByText("本人排障助手", { exact: true })).toBeVisible();
+  await menu("本人排障助手", "编辑助手");
+  await expect
+    .element(page.getByRole("combobox", { name: "运行目录", exact: true }))
+    .toHaveTextContent("自用运行器");
+  await expect
+    .element(page.getByRole("combobox", { name: "模型", exact: true }))
+    .toHaveTextContent("真实本机模型");
+  await expect
+    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .toBeChecked();
+  await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
+  await page.getByRole("option", { name: "隔离运行器", exact: true }).click();
+  await expect
+    .element(page.getByRole("combobox", { name: "模型", exact: true }))
+    .toHaveTextContent("请选择");
+  await expect
+    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .not.toBeInTheDocument();
+  await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
+  await expect
+    .element(page.getByRole("dialog").getByRole("alert"))
+    .toHaveTextContent("请选择所选运行目录提供的模型");
+  expect(f.writes).toHaveLength(0);
+  await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
+  await page.getByRole("option", { name: "自用运行器", exact: true }).click();
+  await expect
+    .element(page.getByRole("combobox", { name: "模型", exact: true }))
+    .toHaveTextContent("请选择");
+  await expect
+    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .not.toBeChecked();
+});
+
+it.each(["withdrawn", "changed", "model"] as const)(
+  "既有隔离预设%s保留原目录与参数，显示异常并阻止静默转为自用执行",
+  async (kind) => {
+    const f = setup();
+    enableIsolatedProfile(f);
+    const source = f.own.sources[0]!,
+      configuration = f.own.items[0]!.preset.configuration;
+    Object.assign(configuration, {
+      customerProfile: { ...isolatedProfile },
+      model: {
+        instanceId: "customer-device-one-codex",
+        model: "isolated-model",
+        reasoningEffort: "high",
+      },
+      skillIds: ["isolated-skill"],
+    });
+    if (kind === "withdrawn") {
+      source.sharedProfileAvailable = false;
+      source.sharedProfileReason = { code: "REVOKED", message: "隔离许可已撤回" };
+    }
+    if (kind === "changed")
+      source.capabilities!.sharedProfile = { ...source.capabilities!.sharedProfile!, revision: 3 };
+    if (kind === "model")
+      source.capabilities!.sharedProfile = { ...source.capabilities!.sharedProfile!, models: [] };
+    using _fetch = stubGlobal("fetch", f.fetcher);
+    await using _screen = await render(<App />, {
+      router: "/assistants?projectId=target-project&assistantView=provided",
+    });
+    await expect.element(page.getByText("本人排障助手", { exact: true })).toBeVisible();
+    await menu("本人排障助手", "编辑助手");
+    await expect
+      .element(page.getByRole("combobox", { name: "运行目录", exact: true }))
+      .toHaveTextContent("隔离运行器");
+    await expect
+      .element(page.getByRole("combobox", { name: "模型", exact: true }))
+      .toHaveTextContent("isolated-model · 已不可用");
+    await expect
+      .element(page.getByRole("combobox", { name: "思考强度", exact: true }))
+      .toHaveTextContent("high · 已不可用");
+    await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
+    await expect.element(page.getByRole("dialog").getByRole("alert")).toBeVisible();
+    expect(f.writes).toHaveLength(0);
+    expect(configuration.customerProfile).toEqual(isolatedProfile);
+    if (kind === "changed") {
+      await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
+      await page.getByRole("option", { name: "隔离运行器", exact: true }).click();
+      await expect
+        .element(page.getByRole("combobox", { name: "模型", exact: true }))
+        .toHaveTextContent("请选择");
+    }
+  },
+);
 
 it("普通提供者不需项目管理权，按真实来源创建，再主动共享和撤回目标项目", async () => {
   await page.viewport(1280, 800);
@@ -599,6 +811,87 @@ it("项目管理员只能分配已获共享助手，不能代提供者编辑或�
     assistantIds: ["foreign-preset"],
     defaultAssistantId: null,
   });
+});
+
+it("管理员本人不可执行仍可给明确成员设置获准默认，不取得执行或提供者管理权", async () => {
+  const f = setup(true);
+  f.state.assignable = true;
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using _screen = await render(<App />, {
+    router: "/assistants?projectId=target-project&assistantView=project",
+  });
+  const assign = page.getByRole("button", { name: "分配助手", exact: true });
+  await expect.element(assign).toBeEnabled();
+  await assign.click();
+  await page.getByRole("combobox", { name: "分配对象", exact: true }).click();
+  await page.getByRole("option", { name: "成员 · 待分配成员", exact: true }).click();
+  await page.getByRole("checkbox", { name: "他人已共享助手", exact: true }).click();
+  await page.getByRole("combobox", { name: "默认助手", exact: true }).click();
+  await page.getByRole("option", { name: "他人已共享助手", exact: true }).click();
+  await page.getByRole("button", { name: "保存助手配置", exact: true }).click();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  expect(f.writes[0]?.body).toMatchObject({
+    target: { kind: "member", id: "member-one" },
+    assistantIds: ["foreign-preset"],
+    defaultAssistantId: "foreign-preset",
+  });
+  expect(readAutoOpsHost()?.projects.find(project => project.id === "target-project")?.assistants?.items.find(item => item.preset.id === "foreign-preset")?.available).toBe(false);
+  expect(
+    f.fetcher.mock.calls.some(
+      ([input]) => String(input).includes("/customer/") && !String(input).includes("workspaces"),
+    ),
+  ).toBe(false);
+  await expect
+    .element(page.getByRole("button", { name: "编辑项目助手 他人已共享助手", exact: true }))
+    .not.toBeInTheDocument();
+});
+
+it("目标默认范围拒绝保留当前表单与实际目标，未把该业务错误当管理员被撤权", async () => {
+  const f = setup(true);
+  f.state.assignable = true;
+  f.state.targetScopeError = true;
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using _screen = await render(<App />, {
+    router: "/assistants?projectId=target-project&assistantView=project",
+  });
+  const assign = page.getByRole("button", { name: "分配助手", exact: true });
+  await expect.element(assign).toBeEnabled();
+  await assign.click();
+  await page.getByRole("combobox", { name: "分配对象", exact: true }).click();
+  await page.getByRole("option", { name: "成员 · 待分配成员", exact: true }).click();
+  await page.getByRole("checkbox", { name: "他人已共享助手", exact: true }).click();
+  await page.getByRole("combobox", { name: "默认助手", exact: true }).click();
+  await page.getByRole("option", { name: "他人已共享助手", exact: true }).click();
+  await page.getByRole("button", { name: "保存助手配置", exact: true }).click();
+  await expect
+    .element(page.getByRole("dialog").getByRole("alert"))
+    .toHaveTextContent("所选目标成员不能使用此资料范围");
+  await expect
+    .element(page.getByRole("combobox", { name: "分配对象", exact: true }))
+    .toHaveTextContent("待分配成员");
+  expect(f.writes).toHaveLength(1);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(assign).toHaveFocus();
+});
+
+it("共享候选撤回后刷新不能用旧执行或预设状态恢复默认选项", async () => {
+  const f = setup(true);
+  f.state.assignable = true;
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using _screen = await render(<App />, {
+    router: "/assistants?projectId=target-project&assistantView=project",
+  });
+  await expect.element(page.getByRole("button", { name: "分配助手", exact: true })).toBeEnabled();
+  f.state.sharedWithdrawn = true;
+  await page.getByRole("button", { name: "刷新助手", exact: true }).click();
+  await expect.element(page.getByRole("button", { name: "分配助手", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "分配助手", exact: true }).click();
+  await page.getByRole("checkbox", { name: "他人已共享助手", exact: true }).click();
+  await page.getByRole("combobox", { name: "默认助手", exact: true }).click();
+  await expect
+    .element(page.getByRole("option", { name: "他人已共享助手", exact: true }))
+    .toHaveAttribute("aria-disabled", "true");
+  expect(f.writes).toHaveLength(0);
 });
 
 it("管理列表刷新并发503和403时，已知撤权清除旧预设并保留错误及恢复入口", async () => {

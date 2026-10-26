@@ -42,3 +42,16 @@ test('unknown outcome is durable and will never enter automatic retry list',t=>{
  assert.equal(journal.pendingCommands('session').length,0);
  assert.equal(journal.saveCommand(command).receipt.state,'unknown');
 });
+
+test('传输会话固定实际调用者、提供者与业务项目，不能通过旧设备会话改投身份', () => {
+  const db = new DatabaseSync(':memory:'), journal = createCustomerTransportJournal(db)
+  try {
+    const session = {sessionId:'shared-session',deviceId:'device',threadId:'thread',ownerId:'caller',providerId:'provider',projectId:'business',target:{registeredWorkspaceId:'source',workspaceBindingRevision:1,runtimeId:'codex'}}
+    journal.saveSession(session)
+    for (const change of [{ownerId:'provider'},{projectId:'source'},{providerId:'caller'}])
+      assert.throws(()=>journal.saveSession({...session,...change}),{code:'SESSION_SCOPE_CHANGED'})
+    const command={type:'command',commandId:'shared-command',sessionId:session.sessionId,target:session.target,method:'startTurn',input:{},executionScope:{grantId:'issued-grant'}}
+    journal.saveCommand(command)
+    assert.throws(()=>journal.saveReceipt({type:'receipt',commandId:command.commandId,sessionId:session.sessionId,state:'completed',grantId:'other-grant'}),{code:'RECEIPT_SCOPE_CHANGED'})
+  } finally { db.close() }
+})

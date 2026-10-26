@@ -3,17 +3,13 @@ import { DirectoryCommand, DirectoryId } from './project-directory.ts'
 import { Name } from './index.ts'
 import { ProjectRole } from './project-access.ts'
 import type { CustomerCapabilities } from './runtime.ts'
+import { SharedProfileDescriptor } from './shared-profile.ts'
 
-export const RunnerReferenceId = S.String.check(S.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/))
+import { CustomerAssistantSource, RunnerReferenceId } from './customer-source.ts'
+export { CustomerAssistantSource, RunnerReferenceId } from './customer-source.ts'
 export const AssistantSource = S.Union([
   S.Struct({ kind: S.Literal('platform') }),
-  S.Struct({
-    kind: S.Literal('customer'),
-    deviceId: DirectoryId,
-    registeredWorkspaceId: RunnerReferenceId,
-    workspaceBindingRevision: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1)),
-    runtimeId: S.Literal('codex'),
-  }),
+  CustomerAssistantSource,
 ])
 export const AssistantModel = S.Struct({
   instanceId: S.String.check(S.isMinLength(1), S.isMaxLength(160)),
@@ -26,6 +22,8 @@ export const AssistantModel = S.Struct({
 export const QuestionConfiguration = S.Struct({
   agentId: DirectoryId,
   executionBinding: AssistantSource,
+  /** 明确选用隔离运行能力；缺省时保留提供者既有自用运行链路。 */
+  customerProfile: S.optionalKey(SharedProfileDescriptor),
   environmentId: S.NullOr(DirectoryId),
   workspaceType: S.NullOr(S.Literals(['internal', 'external'])),
   visibility: S.Literals(['private', 'project']),
@@ -78,6 +76,8 @@ export interface ProvidedAssistantShare {
   revision: number
 }
 export interface ProvidedAssistantSource {
+  sharedProfileAvailable?: boolean
+  sharedProfileReason?: { code: string; message: string }
   executionBinding: Extract<QuestionConfiguration['executionBinding'], { kind: 'customer' }>
   sourceProjectId: string
   deviceName: string
@@ -104,6 +104,9 @@ export interface ProjectProvidedAssistants {
     AssistantAvailability & {
       source: ProvidedAssistantSource
       share: ProvidedAssistantShare | null
+      /** 仅表示来源可供管理分配；不授予当前管理者执行权，目标默认须另行验证。 */
+      assignable: boolean
+      assignmentReason?: { code: string; message: string }
     }
   >
 }

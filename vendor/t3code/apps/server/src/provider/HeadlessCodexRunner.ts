@@ -8,6 +8,7 @@ import * as Adapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { AgentScope, type AgentScopeShape } from '@t3tools/shared/AgentScope';
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexSchema from "effect-codex-app-server/schema";
@@ -48,6 +49,9 @@ export interface HeadlessCodexRunnerOptions {
   readonly homePath?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly localPolicy?: CustomerCodexLocalPolicy;
+  readonly agentScope?: AgentScopeShape;
+  /** 仅本机已创建的外层隔离边界可使用；远端运行参数不能设置。 */
+  readonly externalSandbox?: boolean;
   readonly resolveAttachmentPath?: (attachment: C.ChatAttachment) => string | null;
   readonly onEvent: (event: unknown) => void | Promise<void>;
   readonly onError?: (error: unknown) => void | Promise<void>;
@@ -202,6 +206,7 @@ export function customerScopedIds(
 export function customerRuntimePolicy(
   cwd: string,
   policy: CustomerCodexLocalPolicy,
+  externalSandbox = false,
 ): Adapter.ProviderAdapterV2RuntimePolicy {
   if (
     !["untrusted", "on-request"].includes(policy.approvalPolicy) ||
@@ -216,7 +221,7 @@ export function customerRuntimePolicy(
     runtimeMode: policy.sandboxMode === "read-only" ? "approval-required" : "auto-accept-edits",
     approvalPolicy: policy.approvalPolicy,
     sandboxPolicy:
-      policy.sandboxMode === "read-only"
+      externalSandbox ? {type:'externalSandbox',networkAccess:'restricted'} : policy.sandboxMode === "read-only"
         ? { type: "readOnly", networkAccess: policy.networkAccess }
         : { type: "workspaceWrite", writableRoots: [cwd], networkAccess: policy.networkAccess },
   };
@@ -263,8 +268,9 @@ export async function createHeadlessCodexRunner(
       approvalPolicy: "on-request",
       sandboxMode: "workspace-write",
       networkAccess: false,
-    },
+    }, options.externalSandbox === true,
   );
+  if(options.externalSandbox && !options.agentScope)throw new Error('外层隔离必须提供实际进程边界');
   const settings = Schema.decodeUnknownSync(C.CodexSettings)({
     binaryPath: options.binaryPath ?? "codex",
     homePath: options.homePath ?? "",
@@ -279,6 +285,7 @@ export async function createHeadlessCodexRunner(
       ProviderEventLoggers.ProviderEventLoggers,
       ProviderEventLoggers.NoOpProviderEventLoggers,
     ),
+    options.agentScope ? Layer.succeed(AgentScope,options.agentScope) : Layer.empty,
   );
   const manager = ManagedRuntime.make(services);
   const scope = await manager.runPromise(Scope.make());
@@ -376,6 +383,7 @@ export async function createHeadlessCodexRunner(
                 launchArgs: settings.launchArgs,
                 cwd: options.cwd,
                 environment,
+                ...(options.agentScope ? {agentScope:options.agentScope} : {}),
               });
               return yield* catalogEffect(opened.client);
             }),

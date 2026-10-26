@@ -1,5 +1,6 @@
 // Transport receipts and delivery cursors only. T3 remains the conversation/run store.
 import { createHash } from 'node:crypto';
+import { sharedSessionIdentity } from '../../autoops/contracts/shared-execution.ts';
 
 export class CustomerTransportError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -47,7 +48,7 @@ export function createCustomerTransportJournal(db) {
     sessions: deviceId => db.prepare('SELECT body FROM customer_transport_sessions WHERE device_id=?').all(deviceId).map(parse),
     saveSession(value) {
       const old = this.session(value.sessionId);
-      if (old && (old.deviceId !== value.deviceId || old.threadId !== value.threadId || JSON.stringify(old.target) !== JSON.stringify(value.target)))
+      if (old && (old.deviceId !== value.deviceId || old.threadId !== value.threadId || old.ownerId !== value.ownerId || old.projectId !== value.projectId || old.providerId !== value.providerId || sharedSessionIdentity(old.executionScope) !== sharedSessionIdentity(value.executionScope) || JSON.stringify(old.target) !== JSON.stringify(value.target)))
         fail('SESSION_SCOPE_CHANGED', '客户会话的设备和工作区不能更换');
       db.prepare('INSERT INTO customer_transport_sessions(id,device_id,thread_id,body) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body')
         .run(value.sessionId, value.deviceId, value.threadId, JSON.stringify(value));
@@ -65,6 +66,7 @@ export function createCustomerTransportJournal(db) {
     saveReceipt(receipt) {
       const old = this.command(receipt.commandId);
       if (!old || old.command.sessionId !== receipt.sessionId) fail('UNKNOWN_COMMAND', '未知客户命令回执');
+      if (old.command.executionScope?.grantId !== receipt.grantId) fail('RECEIPT_SCOPE_CHANGED', '客户回执不属于原命令固定执行范围');
       if (old.receipt && ['completed','failed','unknown'].includes(old.receipt.state)) return old.receipt;
       db.prepare('UPDATE customer_transport_commands SET receipt=? WHERE id=?').run(JSON.stringify(receipt),receipt.commandId);
       return receipt;

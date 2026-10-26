@@ -23,7 +23,7 @@ import { customerProviderInstanceId,customerWorkspaceKey } from '../../../../../
 import { createCustomerTransportJournal, customerCommandId, CustomerTransportError, type CustomerTransportJournal, type TransportSession, type TransportReceipt } from '../../../../../../agent-demo/t3-adapters/customer-transport.mjs';
 
 type Send = (frame: CustomerAgentServerFrame) => Promise<void>;
-type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
+type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; sharedExecutionVersion?:1; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
 type Delivery = {sessionId:string;epoch:string;seq:number};
 const error = (code:string,message:string) => new CustomerTransportError(code,message);
 export class RemoteDeviceHub {
@@ -46,7 +46,7 @@ export class RemoteDeviceHub {
     if(!session.providerTurnBindings?.some(turn=>turn.id===providerTurnId))throw error('TURN_SCOPE','客户轮次尚未确认');
     const commandId=customerCommandId(sessionId,'interruptTurn',[providerTurnId]);
     const prior=this.journal.command(commandId);
-    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method:'interruptTurn',runtimeEpoch:session.runtimeEpoch,input:{providerThread:thread,providerTurnId}};
+    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method:'interruptTurn',runtimeEpoch:session.runtimeEpoch,...(session.executionScope?{executionScope:session.executionScope}:{}),input:{providerThread:thread,providerTurnId}};
     this.journal.saveCommand(command);
     if(!prior?.receipt||prior.receipt.state==='accepted')void this.connections.get(session.deviceId)?.send(command as CustomerAgentServerFrame).catch(()=>undefined);
     return commandId;
@@ -173,6 +173,7 @@ export class RemoteDeviceHub {
           connection.attachmentTransfers = frame.attachmentTransfers === true;
           connection.workspaceFiles = frame.workspaceFiles === true;
           connection.assistantConfiguration = frame.assistantConfiguration === true;
+          if(frame.sharedExecutionVersion===1)connection.sharedExecutionVersion = 1;
           const registered=this.access.customerRegistry.listWorkspaces(principal.ownerId);
           for(const workspace of frame.workspaces)if(!registered.some(item=>item.deviceId===principal.deviceId&&item.projectId===workspace.projectId&&item.registeredWorkspaceId===workspace.registeredWorkspaceId&&item.workspaceBindingRevision===workspace.workspaceBindingRevision&&item.runtimeId===workspace.runtimeId))throw error('WORKSPACE_SCOPE','客户设备声明了未登记的工作区');
           connection.hello=true;
@@ -185,7 +186,16 @@ export class RemoteDeviceHub {
               await send({type:'replay',sessionId:session.sessionId,runtimeEpoch:reported.runtimeEpoch,afterSeq:this.journal.cursor(session.sessionId,reported.runtimeEpoch).received});
               // Only previously journaled commands are retried. The local ledger decides
               // accepted/completed/unknown; a new prompt is never synthesized here.
-              for(const command of this.journal.pendingCommands(session.sessionId))await send(command as CustomerAgentServerFrame);
+              for(const command of this.journal.pendingCommands(session.sessionId)) {
+                if(command.executionScope && connection.sharedExecutionVersion!==1) {
+                  await send({type:'error',code:'SHARED_PROTOCOL_REQUIRED',message:'共享执行恢复需要支持隔离的连接程序，原命令未重发'});continue;
+                }
+                if(command.executionScope && command.method!=='interruptTurn') {
+                  try { this.access.requireSharedExecutionScope(command.executionScope,principal); }
+                  catch { await send({type:'receiptQuery',commandId:command.commandId,sessionId:command.sessionId,grantId:command.executionScope.grantId});continue; }
+                }
+                await send(command as CustomerAgentServerFrame);
+              }
             }
           }
           for(const reported of frame.sessions) {
@@ -218,7 +228,7 @@ export class RemoteDeviceHub {
           return;
         }
         const session=this.journal.session(frame.sessionId);
-        if(!session || session.deviceId!==principal.deviceId || session.ownerId!==principal.ownerId)throw error('SESSION_SCOPE','客户会话不属于此设备');
+        if(!session || session.deviceId!==principal.deviceId || (session.providerId ?? session.ownerId)!==principal.ownerId)throw error('SESSION_SCOPE','客户会话不属于此设备');
         if(frame.type==='receipt') {
           const pending=this.journal.command(frame.commandId);
           if(!pending || pending.command.sessionId!==session.sessionId)throw error('COMMAND_SCOPE','客户回执不属于此会话');
@@ -270,24 +280,28 @@ export class RemoteDeviceHub {
       disconnect:()=>{if(this.connections.get(principal.deviceId)!==connection)return;this.connections.delete(principal.deviceId);for(const pending of this.fileWaiters.values())if(pending.connection===connection)pending.reject(error('DEVICE_OFFLINE','电脑已离线，请等待重新连接'));this.access.customerRegistry.markDisconnected(principal.deviceId,connectionEpoch);this.signals.emit('connection',principal.deviceId);},
     };
   }
-  bind(binding:ThreadBinding,sessionId:string) {
+  bind(binding:ThreadBinding,sessionId:string,modelSelection?:unknown) {
     if(binding.executionBinding.kind!=='customer')throw error('NOT_CUSTOMER','这不是客户工作区');
     const {deviceId,...rest}=binding.executionBinding;
     const target={registeredWorkspaceId:rest.registeredWorkspaceId,workspaceBindingRevision:rest.workspaceBindingRevision,runtimeId:rest.runtimeId};
     const old=this.journal.session(sessionId);
-    this.journal.saveSession({...old,sessionId,deviceId,ownerId:binding.ownerId,projectId:binding.projectId,threadId:binding.threadId,target});
+    const executionScope=old?.executionScope ?? this.access.issueCustomerSessionScope(binding.threadId,sessionId,modelSelection);
+    this.journal.saveSession({...old,sessionId,deviceId,ownerId:binding.ownerId,projectId:binding.projectId,threadId:binding.threadId,target,...(executionScope?{providerId:executionScope.providerId,executionScope}:{})});
   }
   update(sessionId:string,update:Partial<TransportSession>) {const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');this.journal.saveSession({...session,...update});if(update.pendingInterrupt)this.signals.emit('session-state',sessionId);}
   async readAttachment(principal:CustomerDevicePrincipal,commandId:string,attachmentId:string) {
     const saved=this.journal.command(commandId), session=saved && this.journal.session(saved.command.sessionId);
-    if(!saved || !session || session.deviceId!==principal.deviceId || session.ownerId!==principal.ownerId || !this.attachments)throw error('ATTACHMENT_SCOPE','附件不属于此设备');
-    this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,{kind:'customer',deviceId:session.deviceId,...session.target});
+    if(!saved || !session || session.deviceId!==principal.deviceId || (session.providerId ?? session.ownerId)!==principal.ownerId || !this.attachments)throw error('ATTACHMENT_SCOPE','附件不属于此设备');
+    if(saved.command.executionScope)this.access.requireSharedExecutionScope(saved.command.executionScope,principal);
+    else this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,{kind:'customer',deviceId:session.deviceId,...session.target});
     const binding=this.access.getThreadBinding(session.threadId);
     if(binding?.executionBinding.kind!=='customer' || binding.executionBinding.deviceId!==session.deviceId || binding.executionBinding.runtimeId!==session.target.runtimeId || customerWorkspaceKey(binding.executionBinding)!==customerWorkspaceKey({kind:'customer',deviceId:session.deviceId,...session.target}))throw error('ATTACHMENT_SCOPE','附件绑定已失效');
     const manifest=saved.command.attachments?.find(item=>item.id===attachmentId);
     const attachment=customerMessageAttachments(saved.command.input).find(item=>item.id===attachmentId);
     if(!manifest || !attachment)throw error('ATTACHMENT_SCOPE','原命令没有此附件');
-    return (await this.attachments.read(session,attachment,manifest)).bytes;
+    const delivered=await this.attachments.read(session,attachment,manifest);
+    if(saved.command.executionScope)this.access.requireSharedExecutionScope(saved.command.executionScope,principal);
+    return delivered.bytes;
   }
   async command(sessionId:string,method:CustomerAgentMethod,input:unknown,key:unknown,signal?:AbortSignal):Promise<unknown> {
     const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');
@@ -297,22 +311,33 @@ export class RemoteDeviceHub {
     if (!control && method !== 'readThreadSnapshot') this.access.assertAccepting();
     if(!connection?.hello&&!control)throw error('DEVICE_OFFLINE','客户设备已离线，请等待重新连接');
     const target={kind:'customer' as const,deviceId:session.deviceId,...session.target};
-    if(method!=='readThreadSnapshot')this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,target,{requireOnline:!control});
     const commandId=customerCommandId(sessionId,method,key);
     const prior=this.journal.command(commandId);
+    const executionScope=prior?.command.executionScope ?? (method==='startTurn' && session.executionScope
+      ? this.access.customerRunScope(session.threadId,String((input as {runId:string}).runId)) : session.executionScope);
+    const authorize = () => {
+      if(executionScope) {
+        if(method!=='interruptTurn')this.access.requireSharedExecutionScope(executionScope);
+        if(connection?.sharedExecutionVersion!==1)throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED','此连接程序未支持已验证的共享隔离'),{outcome:'not_started'});
+      } else if(method!=='readThreadSnapshot')this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,target,{requireOnline:!control});
+    };
+    authorize();
+    if(executionScope && method==='startTurn')this.update(sessionId,{executionScope});
     if (method === 'startTurn' && (input as {assistantConfiguration?:unknown})?.assistantConfiguration && !connection?.assistantConfiguration) throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED', '请更新这台电脑的连接程序后使用助手预设'), {outcome:'not_started'});
     const requestedAttachments=['startTurn','steerTurn'].includes(method)?customerMessageAttachments(input):[];
     const fileMentions = ['startTurn', 'steerTurn'].includes(method) && collectComposerInlineTokens(String((input as { message?: { text?: string } })?.message?.text ?? '') + '\n').some(token => token.type === 'mention' && token.value.startsWith('autoops-customer/'));
     if (fileMentions && !connection?.workspaceFiles) throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED', '请更新这台电脑的连接程序后引用文件'), { outcome: 'not_started' });
     if(requestedAttachments.length && (!this.attachments || !connection?.attachmentTransfers))throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED','请更新这台电脑的连接程序后发送附件'),{outcome:'not_started'});
     const attachments=!prior && requestedAttachments.length?await this.attachments!.prepare(session,input):undefined;
+    authorize();
     if(signal?.aborted)throw Object.assign(error('WAIT_CANCELLED','已取消发送附件'),{outcome:'not_started'});
     const names=['startTurn','steerTurn'].includes(method)?[...new Set([...(method === 'startTurn' ? (input as {assistantConfiguration?:{skillNames:readonly string[]}})?.assistantConfiguration?.skillNames ?? [] : []), ...[...String((input as {message?:{text?:string}})?.message?.text??'').matchAll(SKILL_MENTION_PATTERN)].map(match=>match[2]!)])]:[];
-    const catalog=names.length?this.access.customerRegistry.getCapabilities(session.ownerId,target):undefined;
+    const capabilities=names.length?this.access.customerRegistry.getCapabilities(executionScope?.providerId ?? session.ownerId,target):undefined;
+    const catalog=executionScope?capabilities?.sharedProfile:capabilities;
     const skillBindings=names.map(name=>{const matches=catalog?.skills.filter(skill=>skill.name===name)??[];if(matches.length!==1)throw error('CUSTOMER_SKILL_UNAVAILABLE','所选本机技能已变更或有重名，请刷新后重选');return {id:matches[0]!.id,name};});
-    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method,...(method!=='openSession'&&session.runtimeEpoch?{runtimeEpoch:session.runtimeEpoch}:{}),...(skillBindings.length?{skillBindings}:{}),...(attachments?.length?{attachments}:{}),input};
+    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method,...(method!=='openSession'&&session.runtimeEpoch?{runtimeEpoch:session.runtimeEpoch}:{}),...(executionScope?{executionScope}:{}),...(skillBindings.length?{skillBindings}:{}),...(attachments?.length?{attachments}:{}),input};
     this.journal.saveCommand(command);
-    const settle=(receipt:TransportReceipt)=>{if(receipt.state==='completed')return receipt.result;if(receipt.state!=='accepted'){const failure=error(receipt.error?.code??'CUSTOMER_OUTCOME_UNKNOWN',receipt.error?.message??'客户执行结果尚未确认，请先检查本机任务');if(receipt.state==='failed'&&['startTurn','steerTurn'].includes(method))Object.assign(failure,{outcome:'not_started'});throw failure;}};
+    const settle=(receipt:TransportReceipt)=>{if(receipt.state==='completed'){authorize();return receipt.result;}if(receipt.state!=='accepted'){const failure=error(receipt.error?.code??'CUSTOMER_OUTCOME_UNKNOWN',receipt.error?.message??'客户执行结果尚未确认，请先检查本机任务');if(receipt.state==='failed'&&['startTurn','steerTurn'].includes(method))Object.assign(failure,{outcome:'not_started'});throw failure;}};
     if(prior?.receipt&&prior.receipt.state!=='accepted')return settle(prior.receipt);
     return await new Promise((resolve,reject)=>{
       const callbacks=this.waiters.get(commandId)??new Set();this.waiters.set(commandId,callbacks);

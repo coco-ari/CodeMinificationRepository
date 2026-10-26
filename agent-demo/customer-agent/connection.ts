@@ -26,11 +26,11 @@ export class CustomerAgentHttpClient {
   constructor(baseUrl: string, token?: string, allowInsecure = false) {
     this.baseUrl = validateBaseUrl(baseUrl, allowInsecure); this.token = token;
   }
-  async request<T>(path: string, body?: unknown): Promise<T> {
+  async request<T>(path: string, body?: unknown, signal?:AbortSignal): Promise<T> {
     const response = await fetch(endpoint(this.baseUrl, path), {
       method: body === undefined ? "GET" : "POST", dispatcher: this.dispatcher,
       headers: { ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(20000), redirect: "error",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000), redirect: "error",
     });
     if (!response.ok) { await response.body?.cancel(); throw new Error(`中心请求失败（HTTP ${response.status}），请检查设备授权与地址`); }
     const text = await response.text();
@@ -82,6 +82,7 @@ export class CustomerAgentConnection {
     this.beforeConnect = options.beforeConnect ?? (async () => {}); this.onReady = options.onReady ?? (async () => {});
     this.attachmentClient = new CustomerAgentHttpClient(this.credentials.baseUrl, this.credentials.token, this.credentials.allowInsecure);
     this.executor = new CustomerAgentExecutor({ store: this.store, deviceId: this.credentials.deviceId,
+      authorizeShared:async (scope,signal)=>{const admitted=await this.attachmentClient.request<{grantId:string;available:boolean}>('connector/shared-admission',scope,signal);if(admitted.grantId!==scope.grantId||admitted.available!==true)throw new ConnectorError('shared_admission_denied','共享执行授权已失效')},
       downloadAttachment: (commandId, attachmentId, signal) => this.attachmentClient.downloadAttachment(commandId, attachmentId, signal),
       runnerFactory: options.runnerFactory, notify: (frame) => this.enqueue(frame), onState: this.onState });
   }
@@ -107,7 +108,7 @@ export class CustomerAgentConnection {
       if (this.socket !== socket || this.stopped) return;
       this.lastReceived = Date.now(); this.sent.clear();
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: this.credentials.deviceId,
-        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true, workspaceFiles: true, assistantConfiguration: true,
+        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true, workspaceFiles: true, assistantConfiguration: true,sharedExecutionVersion:1,
         workspaces: this.store.workspaces().filter((workspace) => !workspace.revoked && workspace.published).map((workspace) => ({
           registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
           runtimeId: workspace.runtimeId, projectId: workspace.projectId, label: workspace.label,
@@ -154,6 +155,12 @@ export class CustomerAgentConnection {
           case "command":
             if (!this.ready) throw new Error("handshake required");
             void this.executor.execute(frame).catch(() => this.onState("客户命令未完成，请查看本机状态")); break;
+          case "receiptQuery": {
+            if (!this.ready) throw new Error('handshake required');
+            const receipt=this.store.queryReceipt(frame.commandId,frame.sessionId,frame.grantId);
+            this.enqueue(receipt ?? {type:'receipt',commandId:frame.commandId,sessionId:frame.sessionId,...(frame.grantId?{grantId:frame.grantId}:{}),state:'unknown',error:{code:'command_not_seen',message:'本机没有原命令收据，不能自动补发；请核查原任务'}});
+            break;
+          }
           case "ack": this.store.acknowledge(frame.sessionId, frame.runtimeEpoch, frame.seq); break;
           case "replay": this.sent.set(`${frame.sessionId}:${frame.runtimeEpoch}`, { seq: frame.afterSeq, at: Date.now() }); this.flush(); break;
           case "ping": this.enqueue({ type: "pong", at: frame.at }); break;
