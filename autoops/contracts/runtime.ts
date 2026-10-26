@@ -74,3 +74,32 @@ export interface CustomerCapabilities extends CustomerCapabilityInput {
   deviceId: string
   updatedAt: string
 }
+
+export interface ProjectMembership {
+  userId: string
+  workspaceAccess: 'internal' | 'external'
+  role: import('./project-access.ts').ProjectRole
+  environmentRoles?: Record<string, import('./project-access.ts').EnvironmentRole>
+  canAdjustChat?: boolean
+  authorizationPending?: boolean
+  environmentIds: string[]
+  status: 'active' | 'disabled'
+}
+export interface RuntimeProject {
+  id: string
+  name: string
+  description?: string
+  revision?: number
+  memberIds: string[]
+  memberships?: ProjectMembership[]
+  environments: { id: string; name: string }[]
+  documents: { id: string; name: string; mime: string; content: string; excerpt?: string }[]
+  resources: { id: string; name: string; type: string; environmentId: string }[]
+}
+export interface RuntimeAgent {
+  id: string
+  name: string
+  description: string
+  projectIds: string[]
+  capabilities: string[]
+}

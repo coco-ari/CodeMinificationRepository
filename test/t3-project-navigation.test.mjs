@@ -291,3 +291,10 @@ test('工作区与部署入口只使用服务端能力，角色和缺失投影�
     assert.equal(autoOpsAreaAvailable(area, { ...host, projects: [{ ...project, capabilities: { [capability]: true } }] }, 'removed'), false)
   }
 })
+
+test('项目目录是已认证用户的全局模块，创建与设置仍由服务端独立授权', () => {
+  assert.equal(autoOpsAreaAvailable('projects', { principal: { id: 'internal' }, projects: [] }), true)
+  assert.equal(autoOpsAreaAvailable('projects', undefined), false)
+  assert.equal(autoOpsAreaFromPath('/projects'), 'projects')
+  assert.equal(normalizeAutoOpsChatHref('/projects'), null)
+})

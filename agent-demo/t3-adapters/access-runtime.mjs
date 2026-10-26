@@ -7,6 +7,7 @@ import { configuredWorkspaceStore } from './workspaces.mjs'
 import { resolveProductProfile } from './product-profile.mjs'
 import { configuredBusinessModels } from './models.mjs'
 import { isCustomerAgentsEnabled } from './customer-registry.mjs'
+import { createProjectDirectory } from './project-directory/index.ts'
 
 const fail = (status, code, message) => { throw new AutoOpsAccessError(status, code, message) }
 const configuration = () => {
@@ -17,16 +18,24 @@ export function createAutoOpsAccess({ catalog = { users, projects, agents }, dep
   return createAccessService({ ...options, catalog, deploymentEnabled, configuration })
 }
 
-let configuredAccess, ownedDatabases, stopping = false, closed = false
+let configuredAccess, configuredDirectory, ownedDatabases, stopping = false, closed = false
 export function autoOpsAccessEnabled() { return process.env.AUTOOPS_T3_DATA_DIR !== undefined }
 export const isAutoOpsEnabled = autoOpsAccessEnabled
-export function configuredAutoOpsProjects() { return autoOpsAccessEnabled() ? projects : [] }
+export function configuredAutoOpsProjects() { return autoOpsAccessEnabled() ? configuredAutoOpsProjectDirectory().catalog.projects : [] }
+export function configuredAutoOpsProjectDirectory() {
+  if (closed || stopping) fail(503, 'AUTOOPS_STOPPING', '项目目录正在停止')
+  if (!process.env.AUTOOPS_T3_DATA_DIR?.trim()) fail(500, 'INVALID_DATA_DIR', 'AutoOps 数据目录不能为空')
+  return configuredDirectory ||= createProjectDirectory({ dataDir: resolve(process.env.AUTOOPS_T3_DATA_DIR), seed: { users, projects, agents }, authorize(actor, project, action) {
+    if (!configuredAccess) fail(503, 'PROJECT_AUTHORIZATION_REQUIRED', '项目授权尚未就绪')
+    return configuredAccess.requireProjectActionForActor(actor, project, action)
+  } })
+}
 export function stopConfiguredAutoOpsAccess() { stopping = true; configuredAccess?.stopAccepting() }
 export function closeConfiguredAutoOpsAccess() {
   stopConfiguredAutoOpsAccess()
   closed = true
   const databases = ownedDatabases; ownedDatabases = undefined
-  if (databases) { try { databases.bindingDb.close() } finally { databases.sessionDb.close() } }
+  try { if (databases) { try { databases.bindingDb.close() } finally { databases.sessionDb.close() } } } finally { configuredDirectory?.close() }
 }
 export function configuredAutoOpsAccess() {
   if (closed || (stopping && !configuredAccess)) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试')
@@ -49,7 +58,7 @@ export function configuredAutoOpsAccess() {
       if (type === 'cleanup') return configuredAccess.requireProjectActionForActor(actorId, projectId, 'workspace.cleanup')
       return configuredAccess.requireWorkspaceActor(actorId, projectId)
     } })
-    configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore })
+    configuredAccess = createAutoOpsAccess({ sessionDb, bindingDb, workspaceStore, catalog: configuredAutoOpsProjectDirectory().catalog })
     ownedDatabases = { sessionDb, bindingDb }
     return configuredAccess
   } catch (error) {

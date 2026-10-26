@@ -8,7 +8,7 @@ import {
   RocketIcon,
   SparklesIcon,
 } from 'lucide-react'
-import { readAutoOpsHost } from './hostConfig'
+import { readAutoOpsHost, useAutoOpsHost } from './hostConfig'
 import {
   autoOpsAreaFromPath,
   autoOpsProjectHref,
@@ -43,6 +43,7 @@ const areaIcons = {
   rocket: RocketIcon,
   sparkles: SparklesIcon,
   laptop: LaptopIcon,
+  folderSettings: FolderGit2Icon,
 }
 const areas = AUTOOPS_AREAS.map((area) => ({ ...area, icon: areaIcons[area.icon] }))
 
@@ -70,7 +71,7 @@ type FunctionItem = (typeof areas)[number]
 
 /** 项目与模块集中排列，切换继续使用原生搜索和焦点流程。 */
 export function ProjectAreaTopbar() {
-  const host = readAutoOpsHost()
+  const host = useAutoOpsHost()
   const projectId = useAutoOpsProjectId()
   const location = useLocation()
   const pathname = location.pathname
@@ -198,6 +199,9 @@ export function ProjectAreaTopbar() {
                 </ComboboxItem>
               )}
             </ComboboxList>
+            <div className="border-t p-1">
+              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setOpen(false); navigateTo('/projects') }}>项目管理</Button>
+            </div>
           </ComboboxPopup>
         </Combobox>
       </div>

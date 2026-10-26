@@ -61,7 +61,7 @@ function collect(target) {
   }
   walk(directory)
 }
-for (const name of ['officeparser', 'pdfkit', 'fflate', 'pdfjs-dist']) {
+for (const name of ['officeparser', 'pdfkit', 'fflate', 'pdfjs-dist', 'effect']) {
   const source = join(root, 'node_modules', name)
   collect(source)
   const link = join(destination, 'node_modules', name)

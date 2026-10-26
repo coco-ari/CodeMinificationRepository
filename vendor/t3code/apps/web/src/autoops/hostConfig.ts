@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react'
+import { readAutoOpsHost, subscribeAutoOpsHost } from './hostSnapshot'
 import { ProviderInstanceId } from '@t3tools/contracts'
 import { installClientHostIntegration } from '@t3tools/client-runtime/host-integration'
 import { installAutoOpsHostSnapshot, type AutoOpsT3Bootstrap } from './hostSnapshot'
@@ -40,3 +42,5 @@ export function installAutoOpsHost(input: AutoOpsT3Bootstrap, origin: string) {
   })
   return host
 }
+
+export const useAutoOpsHost = () => useSyncExternalStore(subscribeAutoOpsHost, readAutoOpsHost, () => undefined)

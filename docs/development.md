@@ -18,7 +18,7 @@
 
 `src` 和 `agent` 仍是实际部署引擎和执行器；`web` 包含当前托管入口及保留的原型。已完成调用核对，不能按目录名称删除。历史启动记录见[历史平台说明](history/legacy-platform-readme.md)，不能把历史命令当成独立 `autoops` 切片的启动方式。
 
-2026-10-26 已确认的[项目总图与简化权限](../examples/project-workbench-design.md#项目权限设计)属于下一批目标设计：项目与环境角色、助手参数调整、环境 MCP 继承和统一请求裁决尚须实际接入及验收。本次只统一文档，不将独立后端切片测试、旧原型或既有角色门禁视为新方案已上线；存量授权需先核对，不能因简化而自动扩权。
+2026-10-26 已确认的[项目总图与简化权限](../examples/project-workbench-design.md#项目权限设计)属于下一批目标设计：固定角色和环境覆盖已接入当前运行策略；助手参数调整、环境 MCP 继承及完整统一请求裁决继续实施与验收，不将独立后端切片测试、旧原型或局部门禁视为完整方案已上线；存量授权需先核对，不能因简化而自动扩权。
 
 同日确认[统一助手与用户运行来源](../examples/project-workbench-design.md#统一助手与用户提供的运行来源)：自用电脑纳入助手预设；提供者可主动共享到项目，再由管理员分配。跨用户执行、统一管理入口及受控平台资料/MCP 接入仍须实现与验证；现有客户自用、附件与文件能力保留，不把本次设计当成已开放共享执行。
 
@@ -39,7 +39,7 @@
 | A3 | 异步读取撤权、跨环境伪造与原地址恢复 | 已实现 | `a2b8d768`；[回归](../test/t3-deployment-response-access.test.mjs) 与[验收](runtime-modules.md#部署读取撤权回归2026-10-26)，尚未随本批发行部署 |
 | A4 | 统一问答最终参数合同、调整权及受限预设校验 | 待实现 | [会话绑定](../agent-demo/t3-adapters/access-service.mjs) 与 [RPC](../agent-demo/t3-adapters/rpc-policy.mjs) 可复用；缺助手修订、最终配置和受限参数裁决 |
 | A5 | 存量权限映射、私有内容及撤权后的历史阅读 | 待验证 | 用户已选择林晓/陈一先不启用新授权；[目录](../agent-demo/fixtures.mjs) 显式标记待分配，仅保留原使用边界，后续由管理员保存分配。外部不绑定新环境，历史自用电脑仍保留原身份/未知收据。自动负例已覆盖，服务器存量实测待最终发行 |
-| B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待实现 | 当前运行目录来自 [fixtures](../agent-demo/fixtures.mjs)；独立后端已有实现但未接入，不能直接切换服务或空库 |
+| B1 | 项目基本信息、成员和环境的持久管理及统一入口 | 待实现 | [项目目录](../agent-demo/t3-adapters/project-directory/index.ts) 已将存量项目/环境/成员一次导入自有版本化数据库，授权读取当前事实；[页面](../vendor/t3code/apps/web/src/autoops/ProjectsPage.tsx) 已接入创建、基本信息、环境添加/编辑和成员状态。SQLite/HTTP 正反例已过，浏览器待 CI；成员分配表单须与默认助手准入一并补齐，删除与引用处理、完整配置及真实发行待验。不切换独立后端或清空业务库 |
 | B2 | 项目仓库连接与工作区/部署分支配置分离 | 待实现 | [workspace-authoring](../agent-demo/t3-adapters/workspace-authoring/index.ts) 来源仍混合连接与使用配置；需保留现有来源/固定任务身份后拆分 |
 | B3 | 项目凭证创建、替换、撤销及受控使用 | 已实现 | [credentials](../agent-demo/t3-adapters/credentials.ts)、[回归](../test/t3-workspace-credentials.test.mjs)；集中管理页面和真实私有仓库待补 |
 | B4 | 部署服务器登记、环境绑定、观察与撤销 | 已实现 | [deployment-servers](../agent-demo/t3-adapters/deployment-servers.mjs)、[回归](../test/t3-deployment-servers.test.mjs)；需按新角色接入环境设置并重验 |
@@ -57,7 +57,7 @@
 | D4 | 部署独立分支、固定 Commit、完整构建上下文源码包 | 已实现 | [deployments](../agent-demo/t3-adapters/deployments.mjs)、[源码回归](../test/deployment-workspace-source.test.mjs)；仓库连接拆分后复用、真实用户仓库打包待验 |
 | D5 | 版本链、配置快照、原包恢复、失败恢复与收据 | 待验证 | [DeploymentService](../src/deployment.mjs)、[Agent](../agent/main.mjs) 已有核心；[适配记录](runtime-modules.md#main-部署核心适配2026-10-25) 尚缺新增 Java/static 隔离目标完整真实验收 |
 | D6 | 部署包按版本链/活动引用保留、临时包自动回收 | 待实现 | 复用 [SourceArchives](../src/source-archives.mjs) 引用保护；需核对中心工作区包与部署归档的生命周期和失败/仅下载回收 |
-| E1 | 集中项目配置、环境页与统一助手整页交互 | 待实现 | 复用锁定 T3 外壳、设置分组、文件工作台、菜单和 Dialog；不迁入独立模板或原型 CSS |
+| E1 | 集中项目配置、环境页与统一助手整页交互 | 待实现 | 项目目录的基本页面已复用锁定 T3 外壳、SettingsGroup/SettingsRow 和 Dialog；成员分配、仓库/凭证、环境 MCP/服务器与统一助手整页仍待补齐，不能据此宣称集中配置完成 |
 | E2 | 新角色成功/拒绝/撤回、参数篡改、共享与跨环境 | 待验证 | 每批增加真实服务/接口及关键交互负例，旧角色测试不能作为新规则验收 |
 | E3 | 浅深色、桌面/窄短窗、长数据、滚动、键盘与焦点 | 待验证 | 现有公共壳有历史证据；新页面逐流程自动化及整页实测，记录前后全部操作次数 |
 | E4 | 真实只读 MCP、私有 Git、问答与共享运行器 | 待验证 | 使用隔离资料、连接与任务；凭据或执行隔离条件缺失仅阻塞相应项，继续独立工作 |

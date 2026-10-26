@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock(import('./hostConfig'), async (original) => ({
   ...(await original()),
   readAutoOpsHost: mocks.host,
+  useAutoOpsHost: mocks.host,
 }))
 vi.mock(import('./hostSnapshot'), async (original) => ({
   ...(await original()),

@@ -39,6 +39,7 @@ export function autoOpsRouteAllowed(path: string): boolean {
   if (pathname === '/usage' || pathname.startsWith('/usage/')) return autoOpsFeature('usageDashboard')
   if (pathname === '/settings/keybindings' && !autoOpsFeature('customKeybindings')) return false
   if (pathname.startsWith('/settings')) return hostedSettings.has(pathname)
+  if (pathname === '/projects') return true
   return !['/connect', '/connect-agent', '/pair', '/welcome', '/pull-requests', '/projects'].some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   )

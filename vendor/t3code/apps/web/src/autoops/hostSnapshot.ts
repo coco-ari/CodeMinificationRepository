@@ -9,6 +9,7 @@ export interface AutoOpsT3Bootstrap {
   readonly csrfToken: string
   /** 保留协议字段名；允许模型选择时，此值仅为默认模型。 */
   readonly fixedModel: { readonly instanceId: string; readonly model: string }
+  readonly canCreateProject?: boolean
   readonly modelSelectionEnabled?: boolean
   readonly customerAgentsEnabled?: boolean
   readonly runtimeMode: 'approval-required'
@@ -38,6 +39,8 @@ export interface AutoOpsHost extends AutoOpsT3Bootstrap {
 }
 
 let activeHost: AutoOpsHost | undefined
+const hostListeners = new Set<() => void>()
+export const subscribeAutoOpsHost = (listener: () => void) => { hostListeners.add(listener); return () => { hostListeners.delete(listener) } }
 
 export function installAutoOpsHostSnapshot(input: AutoOpsT3Bootstrap, origin: string): AutoOpsHost {
   if (!input.principal?.id || typeof input.principal.id !== 'string') {
@@ -87,6 +90,7 @@ export function installAutoOpsHostSnapshot(input: AutoOpsT3Bootstrap, origin: st
     wsBaseUrl: socket.href,
   }
   activeHost = host
+  for (const listener of hostListeners) listener()
   if (typeof document !== 'undefined') document.documentElement.dataset.autoopsT3 = ''
   if (typeof window !== 'undefined') {
     try {

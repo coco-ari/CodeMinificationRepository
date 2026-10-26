@@ -5,6 +5,7 @@ export function projectAccessBootstrap({ current, catalog, membershipForUser, pr
   return {
     principal: { id: current.id, displayName: current.displayName, role: current.role },
     csrfToken: current.csrf,
+    canCreateProject: catalog.users.find(user => user.id === current.id)?.kind !== 'external',
     gatewayBasePath: '/api/agent-demo/t3',
     fixedModel: { instanceId: 'codex', model },
     modelSelectionEnabled,

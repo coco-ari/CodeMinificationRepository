@@ -18,7 +18,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   if (!(await stat(root)).isDirectory()) throw new Error('发行路径不是目录')
   if (!(await stat(join(root, 'node_modules'))).isDirectory()) throw new Error('发行目录缺少运行依赖')
   const adapters = join(root, 'agent-demo/t3-adapters')
-  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'thread-inputs.ts']) {
+  for (const file of ['workspaces.mjs', 'workspace-files.mjs', 'workspace-jobs.mjs', 'workspace-packages.mjs', 'workspace-package-worker.mjs', 'workspace-management.ts', 'credentials.ts', 'workspace-authoring/index.ts', 'workspace-current.ts', 'thread-inputs.ts', 'project-directory/index.ts', 'project-directory/schema.ts']) {
     const path = await realpath(join(adapters, file))
     if (!within(root, path) || !(await stat(path)).isFile()) throw new Error(`发行工作区文件缺失或越界：${file}`)
   }
@@ -31,12 +31,27 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
   const temporaryRoot = await realpath(tmpdir()), prefix = 'autoops-workspace-release-'
   const dataDir = await mkdtemp(join(temporaryRoot, prefix))
   const previousResources = process.env.AUTOOPS_BUSINESS_RESOURCES_DIR
-  let store, management, authoring, credentials
+  let store, management, authoring, credentials, projectDirectory
   try {
     process.env.AUTOOPS_BUSINESS_RESOURCES_DIR = adapters
     const [{ createWorkspaceStore }, { inspectZip }] = await Promise.all([
       import(pathToFileURL(join(adapters, 'workspaces.mjs')).href), import(pathToFileURL(archiveFile).href),
     ])
+    const schemaDependency = await realpath(workerRequire.resolve('effect/Schema'))
+    if (!within(root, schemaDependency)) throw new Error('发行目录缺少独立的 Effect 合同依赖')
+    const { createProjectDirectory } = await import(pathToFileURL(join(adapters, 'project-directory/index.ts')).href)
+    const directoryOptions = { dataDir, seed: { users: [{ id: 'release-smoke-actor', name: '发行测试账号', role: 'member' }], projects: [], agents: [] }, authorize: (actor, project) => {
+      assert.equal(actor, 'release-smoke-actor')
+      assert.ok(project)
+      return { userId: actor, role: 'project_admin', environmentIds: [] }
+    } }
+    projectDirectory = createProjectDirectory(directoryOptions)
+    const createRequest = { requestId: randomUUID(), expectedRevision: 0, value: { name: '发行隔离项目', description: '' } }
+    const created = projectDirectory.create('release-smoke-actor', createRequest)
+    assert.deepEqual(created.environments, [])
+    projectDirectory.close()
+    projectDirectory = createProjectDirectory(directoryOptions)
+    assert.equal(projectDirectory.create('release-smoke-actor', createRequest).id, created.id)
     const projectId = 'p-release-smoke', actorId = 'release-smoke-actor', requestId = randomUUID()
     const diagnostics = []
     let authorizations = 0
@@ -87,7 +102,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     const authorize = (actor, project) => assert.ok(actor === actorId && project === projectId, '新增模块越过隔离范围')
     authoring = createWorkspaceAuthoring({ dataDir, authorize })
     credentials = createProjectCredentialService({ databasePath: join(dataDir, 'credentials.sqlite'), keyPath: join(dataDir, 'credentials.key'), initializeKeyIfNew: true, authorize })
-    const access = { requireWorkspaceActor: authorize, requireWorkspaceReader: authorize, requireWorkspaceInputReader: authorize, requireCredentialActor: authorize, workspaceVersionReferences: () => [] }
+    const access = { requireWorkspaceActor: authorize, requireWorkspaceReader: authorize, requireWorkspaceInputReader: authorize, requireCredentialActor: authorize, requireProjectActionForActor: authorize, workspaceVersionReferences: () => [] }
     management = createWorkspaceManagement({ access, store, authoring, credentials, git: createWorkspaceGit() })
     const document = Buffer.from('# 发行验收\n\n这份资料应保持在原轮次输入中。')
     const uploaded = await authoring.upload(projectId, { requestId: randomUUID(), expectedRevision: 0, path: 'docs/发行验收.md', size: document.length, sha256: createHash('sha256').update(document).digest('hex'), conflict: 'replace' }, document, actorId)
@@ -104,7 +119,7 @@ export async function verifyT3WorkspaceRelease(releaseDirectory) {
     return { verified: true, release: root, taskId: task.id, requestId, zipBytes: archive.bytes.length, zipFiles: entries.length, sourceVersionId: source.id, currentInput: second.id, previousInputPreserved: true, repeatedRequestPreserved: true }
   } finally {
     try {
-      const results = await Promise.allSettled([store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()])
+      const results = await Promise.allSettled([projectDirectory?.close(), store?.close(), management?.close(), !management && authoring?.close(), !management && credentials?.close()])
       const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
       if (errors.length) throw new AggregateError(errors, '发行冒烟资源关闭失败')
     }

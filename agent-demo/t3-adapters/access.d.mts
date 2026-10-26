@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { ProjectCapabilities } from '../../autoops/contracts/runtime.ts';
-import type { ProjectRole, EnvironmentRole, ProjectAction, DeploymentAction } from '../../autoops/contracts/project-access.ts';
+import type { ProjectCapabilities, ProjectMembership, RuntimeProject as AutoOpsProject, RuntimeAgent as AutoOpsAgent } from '../../autoops/contracts/runtime.ts';
+export type { ProjectMembership, RuntimeProject as AutoOpsProject, RuntimeAgent as AutoOpsAgent } from '../../autoops/contracts/runtime.ts';
+import type { ProjectAction, DeploymentAction } from '../../autoops/contracts/project-access.ts';
 export type { ProjectCapabilities } from '../../autoops/contracts/runtime.ts';
 import type { WorkspaceStore } from './workspaces.mjs';
 import type { ProductProfile } from './product-profile.mjs';
@@ -33,24 +34,6 @@ export interface ThreadBinding {
   readonly nativeThreadId?: string;
   readonly nativeParentThreadId?: string;
 }
-export interface ProjectMembership {
-  userId: string;
-  workspaceAccess: 'internal' | 'external';
-  role: ProjectRole;
-  environmentRoles?: Record<string, EnvironmentRole>;
-  canAdjustChat?: boolean;
-  authorizationPending?: boolean;
-  environmentIds: string[];
-  status: 'active' | 'disabled';
-}
-export interface AutoOpsProject {
-  id: string; name: string; memberIds: string[];
-  memberships?: ProjectMembership[];
-  environments: {id: string; name: string}[];
-  documents: {id: string; name: string; mime: string; content: string; excerpt?: string}[];
-  resources: {id: string; name: string; type: string; environmentId: string}[];
-}
-export interface AutoOpsAgent { id: string; name: string; description: string; projectIds: string[]; capabilities: string[] }
 export interface ToolScope { binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
 export interface ThreadInputBinding { readonly threadId: string; readonly runId: string; readonly inputId: string; readonly createdAt: string }
 export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
@@ -118,6 +101,7 @@ export interface AutoOpsAccess {
   bootstrap(principal: AutoOpsPrincipal): {
     principal: {id: string; displayName: string; role:string}; csrfToken: string; gatewayBasePath: string;
     fixedModel: {instanceId: 'codex'; model: string}; runtimeMode: 'approval-required';
+    canCreateProject:boolean;
     modelSelectionEnabled:boolean;
     customerAgentsEnabled:boolean;
     projects: (Pick<AutoOpsProject, 'id'|'name'|'environments'> & {agents: {id:string; name:string}[];membership:ProjectMembership;capabilities:ProjectCapabilities})[];
@@ -130,6 +114,7 @@ export interface AutoOpsAccess {
 export function autoOpsAccessEnabled(): boolean;
 export const isAutoOpsEnabled: typeof autoOpsAccessEnabled;
 export function configuredAutoOpsProjects(): AutoOpsProject[];
+export function configuredAutoOpsProjectDirectory(): import('./project-directory/index.ts').ProjectDirectory;
 export function configuredAutoOpsAccess(): AutoOpsAccess | undefined;
 export function getThreadBinding(threadId: string): ThreadBinding | undefined;
 export function requireToolThread(threadId: string): ToolScope;

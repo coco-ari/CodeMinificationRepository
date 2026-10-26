@@ -53,6 +53,11 @@ export async function discoverRuntimeSources(root = process.cwd()) {
 // 所有者公开入口与内部实现一起维护；同模块内部允许直接协作。
 const privateBoundaries = [
   {
+    name: '项目目录存储只通过公开入口被调用',
+    internal: '^agent-demo/t3-adapters/project-directory/(?!index\\.ts$)',
+    owner: '^agent-demo/t3-adapters/project-directory/',
+  },
+  {
     name: '身份授权内部只能由授权门面装配',
     internal:
       '^agent-demo/t3-adapters/(?:access-(?:identity|bootstrap|service|runtime)|project-access)\\.mjs$',

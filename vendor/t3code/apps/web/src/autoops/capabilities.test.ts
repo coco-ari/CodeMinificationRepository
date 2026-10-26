@@ -60,11 +60,11 @@ describe('AutoOps product profiles', () => {
   it('blocks removed routes including direct links and leaves history restoration reachable', () => {
     using read = vi.spyOn(host, 'readAutoOpsHost').mockReturnValue(bootstrap(true))
     for (const route of ['/usage', '/usage/limits?period=day', '/settings/keybindings/',
-      '/settings/providers', '/settings/projects', '/connect', '/pull-requests']) {
+      '/settings/providers', '/settings/projects', '/projects/host-checkout', '/connect', '/pull-requests']) {
       expect(autoOpsRouteAllowed(route)).toBe(false)
     }
     for (const route of ['/settings/general', '/settings/appearance#theme',
-      '/settings/archived', '/settings/open-source-licenses']) {
+      '/settings/archived', '/settings/open-source-licenses', '/projects', '/projects?projectId=project-a']) {
       expect(autoOpsRouteAllowed(route)).toBe(true)
     }
   })
