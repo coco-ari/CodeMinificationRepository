@@ -5,6 +5,7 @@ import { closeConfiguredPreferences } from './preferences.mjs'
 import { closeConfiguredSettingsPreferences } from './settings-preferences.mjs'
 import { closeConfiguredBusinessArtifactStore } from './business-tools.mjs'
 import { stopConfiguredWorkspaceManagement, closeConfiguredWorkspaceManagement } from './workspace-management.ts'
+import { configuredEnvironmentMcp, stopConfiguredEnvironmentMcp, closeConfiguredEnvironmentMcp } from './environment-mcp-runtime.ts'
 
 // 宿主协调已启用的服务入口；未启用模块与其他可选存储仍按需初始化。
 export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
@@ -17,6 +18,7 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
     if (stopped) return
     stopped = true
     stopConfiguredAutoOpsAccess()
+    stopConfiguredEnvironmentMcp()
     stopConfiguredWorkspaceManagement()
     stopConfiguredWorkspaceStore()
     stopConfiguredDeploymentStore()
@@ -32,7 +34,11 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
         if (!workspaceFinished) void closeConfiguredWorkspaceStore({force:true}).catch(() => {})
         console.warn(JSON.stringify({event:'autoops.shutdown.drain_budget_exceeded', workspacePending:!workspaceFinished, deploymentPending:!deploymentFinished, code:'AUTOOPS_SHUTDOWN_PENDING'}))
       }, budget)
-      const authoring = closeConfiguredWorkspaceManagement()
+      const environment = closeConfiguredEnvironmentMcp()
+      const authoring = environment.then(() => closeConfiguredWorkspaceManagement(), async error => {
+        await closeConfiguredWorkspaceManagement()
+        throw error
+      })
       const results = await Promise.allSettled([workspace, deployment, authoring]).finally(() => clearTimeout(timer))
       const errors = results.filter(result => result.status === 'rejected').map(result => result.reason)
       if (errors.length) throw new AggregateError(errors, '业务任务关闭失败')
@@ -42,6 +48,7 @@ export function createBusinessRuntime({ workspaceDrainTimeoutMs } = {}) {
     async initialize() {
       const access = configuredAutoOpsAccess()
       if (access) await configuredDeploymentStore()?.initialize()
+      if (access) configuredEnvironmentMcp(access)
       return access
     },
     stopAccepting,

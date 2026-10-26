@@ -21,7 +21,12 @@ type User = {
   kind?: 'internal' | 'external'
   status?: string
 }
-type Catalog = { users: User[]; projects: AutoOpsProject[]; agents: AutoOpsAgent[] }
+type Catalog = {
+  users: User[]
+  projects: AutoOpsProject[]
+  agents: AutoOpsAgent[]
+  removedProjectAudience?: (project: string) => string[]
+}
 type Options = {
   dataDir: string
   seed: Catalog
@@ -57,7 +62,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
     return authorize(actor, project, action)
   }
   const rowFor = (project: string) =>
-    db.prepare('SELECT * FROM directory_projects WHERE id=?').get(project) ??
+    db.prepare("SELECT * FROM directory_projects WHERE id=? AND state='active'").get(project) ??
     fail(404, 'PROJECT_NOT_FOUND', '项目不存在或无权访问')
   function members(project: string): C.DirectoryMember[] {
     return db
@@ -99,7 +104,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       createdAt: String(row.created_at),
       environments: db
         .prepare(
-          'SELECT id,name,revision FROM directory_environments WHERE project_id=? ORDER BY rowid',
+          "SELECT id,name,revision FROM directory_environments WHERE project_id=? AND state='active' ORDER BY rowid",
         )
         .all(project)
         .map((env) => ({
@@ -143,19 +148,13 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       if (db.prepare('SELECT id FROM directory_seed WHERE id=1').get()) return
       const at = DateTime.formatIso(DateTime.nowUnsafe())
       for (const project of seed.projects) {
-        db.prepare('INSERT INTO directory_projects VALUES(?,?,?,1,?,?)').run(
-          project.id,
-          project.name,
-          '',
-          'u-admin',
-          at,
-        )
+        db.prepare(
+          'INSERT INTO directory_projects(id,name,description,revision,created_by,created_at) VALUES(?,?,?,1,?,?)',
+        ).run(project.id, project.name, '', 'u-admin', at)
         for (const env of project.environments)
-          db.prepare('INSERT INTO directory_environments VALUES(?,?,?,1)').run(
-            project.id,
-            env.id,
-            env.name,
-          )
+          db.prepare(
+            'INSERT INTO directory_environments(project_id,id,name,revision) VALUES(?,?,?,1)',
+          ).run(project.id, env.id, env.name)
         for (const member of project.memberships ?? [])
           writeMember(
             project.id,
@@ -181,7 +180,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
     },
     get projects() {
       return db
-        .prepare('SELECT id FROM directory_projects ORDER BY rowid')
+        .prepare("SELECT id FROM directory_projects WHERE state='active' ORDER BY rowid")
         .all()
         .map((row) => {
           const project = projectDetails(String(row.id)),
@@ -212,6 +211,16 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
           : [...agent.projectIds],
       }))
     },
+    removedProjectAudience(project) {
+      const removed = db
+        .prepare("SELECT id FROM directory_projects WHERE id=? AND state IN ('deleting','deleted')")
+        .get(project)
+      return removed
+        ? members(project)
+            .filter((member) => member.status === 'active')
+            .map((member) => member.userId)
+        : []
+    },
   }
   function command<T>(
     actor: string,
@@ -232,6 +241,10 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
           operation.startsWith('member.') ? 'project.members.manage' : 'project.manage',
         )
       const encoded = JSON.stringify(payload)
+      if (
+        db.prepare('SELECT request_id FROM directory_deletions WHERE request_id=?').get(requestId)
+      )
+        fail(409, 'PROJECT_REQUEST_CONFLICT', '原请求已用于删除操作')
       const previous = db
         .prepare('SELECT * FROM directory_receipts WHERE request_id=?')
         .get(requestId)
@@ -266,8 +279,255 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
     if (actual !== expected)
       fail(409, 'PROJECT_REVISION_CONFLICT', '配置已被修改，请刷新后核对再保存')
   }
+  type Inspect = () => C.DeletionBlocker[]
+  function inspectDeletion(
+    project: string,
+    environment: string | null,
+    inspect: Inspect,
+  ): C.DeletionBlocker[] {
+    const values = inspect()
+    if (
+      !Array.isArray(values) ||
+      values.some(
+        (value) =>
+          !value ||
+          !Number.isSafeInteger(value.count) ||
+          value.count < 0 ||
+          typeof value.kind !== 'string' ||
+          typeof value.message !== 'string',
+      )
+    )
+      return fail(503, 'PROJECT_DELETE_INSPECTION_UNAVAILABLE', '引用检查不可用，尚未删除')
+    const blockers = values
+      .filter((value) => value.count > 0)
+      .map((value) => ({
+        kind: value.kind.slice(0, 80),
+        count: Math.min(value.count, 9999),
+        message: value.message.slice(0, 160),
+      }))
+    if (environment === null) {
+      const count = Number(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM directory_environments WHERE project_id=? AND state!='deleted'",
+          )
+          .get(project)?.n ?? 0,
+      )
+      if (count)
+        blockers.unshift({
+          kind: 'environments',
+          count,
+          message: '项目仍有环境，请先处理环境引用并删除环境',
+        })
+    }
+    return blockers
+  }
+  const blocked = (blockers: C.DeletionBlocker[]): never =>
+    fail(
+      409,
+      'PROJECT_DELETE_BLOCKED',
+      `仍有引用，尚未删除：${blockers
+        .slice(0, 8)
+        .map((value) => `${value.message}（${value.count}）`)
+        .join('；')}`,
+    )
+  function deletionAuthority(actor: string, project: string) {
+    const user = active(actor)
+    if (user.kind === 'external')
+      fail(403, 'PROJECT_DELETE_FORBIDDEN', '外部账号不能删除项目或环境')
+    if (db.prepare("SELECT id FROM directory_projects WHERE id=? AND state='active'").get(project))
+      return permitted(actor, project)
+    if (
+      user.role === 'admin' ||
+      members(project).some(
+        (member) =>
+          member.userId === actor && member.role === 'project_admin' && member.status === 'active',
+      )
+    )
+      return
+    fail(403, 'PROJECT_DELETE_FORBIDDEN', '当前账号没有原删除请求的管理权限')
+  }
+  function deletionReceipt(
+    actor: string,
+    project: string,
+    environment: string | null,
+    input: unknown,
+  ) {
+    const value = decode(C.DeleteDirectoryCommand, input)
+    const previous = db
+      .prepare('SELECT * FROM directory_deletions WHERE request_id=?')
+      .get(value.requestId)
+    if (previous) {
+      if (
+        previous.actor_id !== actor ||
+        previous.project_id !== project ||
+        previous.environment_id !== environment ||
+        previous.payload !== JSON.stringify(value)
+      )
+        fail(409, 'PROJECT_REQUEST_CONFLICT', '原删除请求已用于其他操作者、范围或修订')
+      deletionAuthority(actor, project)
+      return { value, previous }
+    }
+    permitted(actor, project)
+    if (
+      db
+        .prepare('SELECT request_id FROM directory_receipts WHERE request_id=?')
+        .get(value.requestId)
+    )
+      fail(409, 'PROJECT_REQUEST_CONFLICT', '原请求已用于其他配置')
+    return { value, previous: undefined }
+  }
+  function deletionAudit(actor: string, project: string, operation: string, subject: string) {
+    db.prepare(
+      'INSERT INTO directory_audit(actor_id,project_id,operation,subject_id,created_at) VALUES(?,?,?,?,?)',
+    ).run(actor, project, operation, subject, DateTime.formatIso(DateTime.nowUnsafe()))
+  }
+  function publicDeletion(row: Record<string, unknown>): C.ProjectDeletionReceipt {
+    return {
+      state: row.state as C.ProjectDeletionReceipt['state'],
+      projectId: String(row.project_id),
+      requestId: String(row.request_id),
+      blockers: JSON.parse(String(row.blockers)) as C.DeletionBlocker[],
+    }
+  }
   return {
     catalog,
+    requireDeletionAccess(actor: string, project: string) {
+      deletionAuthority(actor, project)
+    },
+    deletionPreview(
+      actor: string,
+      project: string,
+      environment: string | null,
+      inspect: Inspect,
+    ): C.DeletionPreview {
+      permitted(actor, project)
+      const current =
+        environment === null
+          ? rowFor(project)
+          : db
+              .prepare(
+                "SELECT revision FROM directory_environments WHERE project_id=? AND id=? AND state='active'",
+              )
+              .get(project, decode(C.DirectoryId, environment))
+      if (!current) return fail(404, 'ENVIRONMENT_NOT_FOUND', '环境不存在或不属于当前项目')
+      const blockers = inspectDeletion(project, environment, inspect)
+      return {
+        revision: Number(current.revision),
+        canDelete: !blockers.length,
+        blockers: blockers.slice(0, 24),
+        truncated: blockers.length > 24,
+      }
+    },
+    beginProjectDeletion(
+      actor: string,
+      project: string,
+      input: unknown,
+      inspect: Inspect,
+    ): C.ProjectDeletionReceipt {
+      return transaction.run(() => {
+        const { value, previous } = deletionReceipt(actor, project, null, input)
+        if (previous) return publicDeletion(previous)
+        revision(Number(rowFor(project).revision), value.expectedRevision)
+        const blockers = inspectDeletion(project, null, inspect)
+        if (blockers.length) return blocked(blockers)
+        db.prepare(
+          "UPDATE directory_projects SET state='deleting',revision=revision+1 WHERE id=?",
+        ).run(project)
+        db.prepare("INSERT INTO directory_deletions VALUES(?,?,?,NULL,?,'pending','[]',?)").run(
+          value.requestId,
+          actor,
+          project,
+          JSON.stringify(value),
+          DateTime.formatIso(DateTime.nowUnsafe()),
+        )
+        deletionAudit(actor, project, 'project.delete.pending', project)
+        return { state: 'pending', projectId: project, requestId: value.requestId, blockers: [] }
+      })
+    },
+    completeProjectDeletion(
+      actor: string,
+      project: string,
+      input: unknown,
+    ): C.DirectoryDeletionResult {
+      return transaction.run(() => {
+        const { value, previous } = deletionReceipt(actor, project, null, input)
+        if (!previous || previous.state === 'blocked')
+          return fail(409, 'PROJECT_DELETE_NOT_PENDING', '没有可继续的原删除请求')
+        if (previous.state !== 'deleted') {
+          db.prepare(
+            "UPDATE directory_projects SET state='deleted' WHERE id=? AND state='deleting'",
+          ).run(project)
+          db.prepare("UPDATE directory_deletions SET state='deleted' WHERE request_id=?").run(
+            value.requestId,
+          )
+          deletionAudit(actor, project, 'project.delete.completed', project)
+        }
+        return { deleted: true, projectId: project }
+      })
+    },
+    blockProjectDeletion(
+      actor: string,
+      project: string,
+      input: unknown,
+      blockers: C.DeletionBlocker[],
+    ) {
+      return transaction.run(() => {
+        const { value, previous } = deletionReceipt(actor, project, null, input)
+        if (!previous || previous.state !== 'pending')
+          fail(409, 'PROJECT_DELETE_NOT_PENDING', '没有可继续的原删除请求')
+        db.prepare(
+          "UPDATE directory_projects SET state='active',revision=revision+1 WHERE id=? AND state='deleting'",
+        ).run(project)
+        db.prepare(
+          "UPDATE directory_deletions SET state='blocked',blockers=? WHERE request_id=?",
+        ).run(JSON.stringify(blockers), value.requestId)
+        deletionAudit(actor, project, 'project.delete.blocked', project)
+      })
+    },
+    deleteEnvironment(
+      actor: string,
+      project: string,
+      environment: string,
+      input: unknown,
+      inspect: Inspect,
+    ): C.DirectoryDeletionResult {
+      return transaction.run(() => {
+        const { value, previous } = deletionReceipt(actor, project, environment, input)
+        if (previous) return { deleted: true, projectId: project, environmentId: environment }
+        const current = db
+          .prepare(
+            "SELECT revision FROM directory_environments WHERE project_id=? AND id=? AND state='active'",
+          )
+          .get(project, decode(C.DirectoryId, environment))
+        if (!current) return fail(404, 'ENVIRONMENT_NOT_FOUND', '环境不存在或不属于当前项目')
+        revision(Number(current.revision), value.expectedRevision)
+        const blockers = inspectDeletion(project, environment, inspect)
+        if (blockers.length) return blocked(blockers)
+        db.prepare(
+          "UPDATE directory_environments SET state='deleting' WHERE project_id=? AND id=?",
+        ).run(project, environment)
+        db.prepare(
+          'UPDATE directory_members SET revision=revision+1 WHERE project_id=? AND user_id IN (SELECT user_id FROM directory_member_environments WHERE project_id=? AND environment_id=?)',
+        ).run(project, project, environment)
+        db.prepare(
+          'DELETE FROM directory_member_environments WHERE project_id=? AND environment_id=?',
+        ).run(project, environment)
+        db.prepare(
+          "UPDATE directory_environments SET state='deleted',revision=revision+1 WHERE project_id=? AND id=?",
+        ).run(project, environment)
+        db.prepare("INSERT INTO directory_deletions VALUES(?,?,?,?,?,'deleted','[]',?)").run(
+          value.requestId,
+          actor,
+          project,
+          environment,
+          JSON.stringify(value),
+          DateTime.formatIso(DateTime.nowUnsafe()),
+        )
+        deletionAudit(actor, project, 'environment.delete', environment)
+        return { deleted: true, projectId: project, environmentId: environment }
+      })
+    },
     list(actor: string) {
       active(actor)
       return catalog.projects.flatMap((project) => {
@@ -309,7 +569,9 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       const id = previous ? String(previous.project_id) : randomUUID()
       if (previous) permitted(actor, id)
       return command(actor, id, 'project.create', value.requestId, value, () => {
-        db.prepare('INSERT INTO directory_projects VALUES(?,?,?,1,?,?)').run(
+        db.prepare(
+          'INSERT INTO directory_projects(id,name,description,revision,created_by,created_at) VALUES(?,?,?,1,?,?)',
+        ).run(
           id,
           value.value.name,
           value.value.description,
@@ -356,7 +618,9 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
             environment === null
               ? undefined
               : db
-                  .prepare('SELECT * FROM directory_environments WHERE project_id=? AND id=?')
+                  .prepare(
+                    "SELECT * FROM directory_environments WHERE project_id=? AND id=? AND state='active'",
+                  )
                   .get(project, decode(C.DirectoryId, environment))
           if (environment !== null && !existing)
             fail(404, 'ENVIRONMENT_NOT_FOUND', '环境不存在或不属于当前项目')
@@ -364,7 +628,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
           const id = environment ?? randomUUID(),
             next = Number(existing?.revision ?? 0) + 1
           db.prepare(
-            'INSERT INTO directory_environments VALUES(?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET name=excluded.name,revision=excluded.revision',
+            'INSERT INTO directory_environments(project_id,id,name,revision) VALUES(?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET name=excluded.name,revision=excluded.revision',
           ).run(project, id, value.value.name, next)
           return { id, name: value.value.name, revision: next }
         },
@@ -389,7 +653,9 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       for (const id of member.environmentIds)
         if (
           !db
-            .prepare('SELECT id FROM directory_environments WHERE project_id=? AND id=?')
+            .prepare(
+              "SELECT id FROM directory_environments WHERE project_id=? AND id=? AND state='active'",
+            )
             .get(project, id)
         )
           fail(400, 'PROJECT_MEMBER_SCOPE_INVALID', '环境不属于当前项目')

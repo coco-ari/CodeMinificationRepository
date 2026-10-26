@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { createBusinessResourceCatalog } from '../agent-demo/t3-adapters/resources.mjs'
 import { createBusinessRunInputs } from '../agent-demo/t3-adapters/thread-inputs.ts'
+import { environmentRunScope } from '../agent-demo/t3-adapters/environment-run-inputs.ts'
 import { businessToolRun } from '../vendor/t3code/apps/server/src/autoops/businessToolScope.ts'
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../agent-demo/t3-adapters/access.mjs'
 
@@ -54,6 +55,22 @@ test('每轮输入固定真实调用者，原收据不改写，读取时即时�
   assert.throws(() => f.access.bindRunInput('shared', 'run', 'input', 'owner'), { code: 'THREAD_INPUT_CONFLICT' })
   f.membership.status = 'disabled'
   assert.throws(() => f.access.requireRunInput('shared', 'input'), { code: 'THREAD_SCOPE_REVOKED' })
+})
+
+test('环境工具范围只取本轮实际调用者和固定环境，不能借创建者身份或另一轮输入', t => {
+  const f = fixture(t)
+  f.access.bindRunInput('shared', 'caller-run', 'caller-input', 'caller')
+  f.access.bindRunInput('shared', 'owner-run', 'owner-input', 'owner')
+  assert.deepEqual(environmentRunScope(f.access, 'shared', 'caller-run'), {
+    actorId: 'caller', projectId: 'project', environmentId: 'test', threadId: 'shared', runId: 'caller-run',
+  })
+  assert.equal(f.access.getThreadBinding('shared').ownerId, 'owner')
+  assert.throws(() => environmentRunScope(f.access, 'private', 'caller-run'), {code: 'THREAD_ACTOR_UNVERIFIED'})
+  assert.throws(() => environmentRunScope(f.access, 'shared', 'missing'), {code: 'THREAD_ACTOR_UNVERIFIED'})
+  f.bindingDb.prepare('UPDATE t3_thread_inputs SET actor_verified=0 WHERE run_id=?').run('owner-run')
+  assert.throws(() => environmentRunScope(f.access, 'shared', 'owner-run'), {code: 'THREAD_ACTOR_UNVERIFIED'})
+  f.membership.environmentIds = ['prod']
+  assert.throws(() => environmentRunScope(f.access, 'shared', 'caller-run'), {code: 'ENVIRONMENT_FORBIDDEN'})
 })
 
 

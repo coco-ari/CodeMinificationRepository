@@ -427,9 +427,9 @@ export function WorkspaceCredentialDialog({
             disabled={controller.busy}
           />
         </AuthoringField>
-        <AuthoringField label="Git 用户名">
+        <AuthoringField label="用户名">
           <Input
-            aria-label="Git 用户名"
+            aria-label="用户名"
             autoComplete="off"
             value={username}
             onChange={(event) => setUsername(event.target.value)}

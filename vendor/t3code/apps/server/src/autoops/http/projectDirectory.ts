@@ -4,23 +4,55 @@ import * as Layer from 'effect/Layer'
 import * as HttpIncomingMessage from 'effect/http/HttpIncomingMessage'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { configuredAutoOpsProjectDirectory } from '../../../../../../../agent-demo/t3-adapters/access.mjs'
-import { synchronizeProject } from '../projects.ts'
+import {
+  synchronizeProject,
+  deleteBusinessProject,
+  projectSynchronizationReferences,
+} from '../projects.ts'
+import type { ProjectDeletionInspection } from '../../../../../../../agent-demo/t3-adapters/project-deletion.ts'
 import type { BusinessHttpContext } from './context.ts'
 import { responseError } from './responses.ts'
 
-export function projectDirectoryRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'list' | 'settings' | 'create' | 'save' | 'environment' | 'member') =>
+export function projectDirectoryRoutes(
+  { access, principal }: BusinessHttpContext,
+  inspection?: ProjectDeletionInspection,
+) {
+  const inspect = (project: string, environment?: string) => {
+    if (!inspection)
+      throw Object.assign(new Error('引用检查尚未完整装配，尚未删除'), {
+        status: 503,
+        code: 'PROJECT_DELETE_INSPECTION_UNAVAILABLE',
+      })
+    return inspection(project, environment)
+  }
+  const handle = (
+    operation:
+      | 'list'
+      | 'settings'
+      | 'create'
+      | 'save'
+      | 'environment'
+      | 'member'
+      | 'delete-project'
+      | 'delete-environment'
+      | 'preview-project'
+      | 'preview-environment',
+  ) =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
       const parts = new URL(request.url, 'http://localhost').pathname.split('/')
       const project = yield* Effect.try(() => decodeURIComponent(parts[4] ?? ''))
-      const write = !['list', 'settings'].includes(operation)
+      const write = !['list', 'settings', 'preview-project', 'preview-environment'].includes(
+        operation,
+      )
       const directory = yield* Effect.try(configuredAutoOpsProjectDirectory)
       if (write)
         yield* Effect.try(() => {
           access.requireCsrf(current, request.headers['x-demo-csrf'])
-          if (operation !== 'create')
+          if (operation === 'delete-project' || operation === 'delete-environment')
+            directory.requireDeletionAccess(current.id, project)
+          else if (operation !== 'create')
             access.requireProjectAction(
               current,
               project,
@@ -37,6 +69,23 @@ export function projectDirectoryRoutes({ access, principal }: BusinessHttpContex
           yield* Effect.try(() => directory.settings(current.id, project)),
           { headers: { 'cache-control': 'private, no-store' } },
         )
+      if (operation === 'preview-project' || operation === 'preview-environment') {
+        const environment =
+          operation === 'preview-environment' ? decodeURIComponent(parts[6] ?? '') : null
+        const value = yield* Effect.try(() =>
+          directory.deletionPreview(current.id, project, environment, () => [
+            ...inspect(project, environment ?? undefined),
+            ...(environment === null ? projectSynchronizationReferences(project) : []),
+          ]),
+        )
+        yield* Effect.try(() => {
+          access.refresh(current)
+          access.requireProjectAction(current, project, 'project.manage')
+        })
+        return HttpServerResponse.jsonUnsafe(value, {
+          headers: { 'cache-control': 'private, no-store' },
+        })
+      }
       const input = yield* request.json.pipe(
         Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.kibibytes(64)),
         Effect.mapError(() => ({
@@ -45,6 +94,28 @@ export function projectDirectoryRoutes({ access, principal }: BusinessHttpContex
           message: '配置正文无效或超过大小限制',
         })),
       )
+      if (operation === 'delete-project')
+        return HttpServerResponse.jsonUnsafe(
+          yield* deleteBusinessProject({
+            actorId: current.id,
+            projectId: project,
+            command: input,
+            directory,
+            inspect,
+          }),
+          { headers: { 'cache-control': 'private, no-store' } },
+        )
+      if (operation === 'delete-environment') {
+        const environment = decodeURIComponent(parts[6] ?? '')
+        return HttpServerResponse.jsonUnsafe(
+          yield* Effect.try(() =>
+            directory.deleteEnvironment(current.id, project, environment, input, () =>
+              inspect(project, environment),
+            ),
+          ),
+          { headers: { 'cache-control': 'private, no-store' } },
+        )
+      }
       const value = yield* Effect.try(() => {
         if (operation === 'create') return directory.create(current.id, input)
         if (operation === 'save') return directory.saveProject(current.id, project, input)
@@ -86,5 +157,17 @@ export function projectDirectoryRoutes({ access, principal }: BusinessHttpContex
     HttpRouter.add('POST', `${base}/:projectId/environments`, handle('environment')),
     HttpRouter.add('POST', `${base}/:projectId/environments/:environmentId`, handle('environment')),
     HttpRouter.add('POST', `${base}/:projectId/members`, handle('member')),
+    HttpRouter.add('GET', `${base}/:projectId/deletion-preview`, handle('preview-project')),
+    HttpRouter.add(
+      'GET',
+      `${base}/:projectId/environments/:environmentId/deletion-preview`,
+      handle('preview-environment'),
+    ),
+    HttpRouter.add('DELETE', `${base}/:projectId`, handle('delete-project')),
+    HttpRouter.add(
+      'DELETE',
+      `${base}/:projectId/environments/:environmentId`,
+      handle('delete-environment'),
+    ),
   )
 }

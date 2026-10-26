@@ -2,6 +2,8 @@
 import { createHash } from 'node:crypto'
 import { AutoOpsAccessError, configuredAutoOpsAccess, type AutoOpsAccess } from './access.mjs'
 import { configuredWorkspaceManagement, type WorkspaceManagement } from './workspace-management.ts'
+import { configuredEnvironmentMcp } from './environment-mcp-runtime.ts'
+import { environmentRunScope } from './environment-run-inputs.ts'
 
 type WorkspaceInputs = Pick<
   WorkspaceManagement,
@@ -141,6 +143,9 @@ export async function prepareBusinessRunContext(
     configuredWorkspaceManagement(access),
   ).prepare(threadId, runId, inheritedRunId, signal, messageId, editCommandId, modelSelection)
   const run = access.getRunInput(threadId, runId)!
+  const environmentMcp = configuredEnvironmentMcp(access).prepareRun(
+    environmentRunScope(access, threadId, runId), inheritedRunId,
+  )
   const instructions = access.questionInstructions(run.actorId, threadId, modelSelection)
   return {
     key: 'autoops_turn_input',
@@ -152,6 +157,7 @@ export async function prepareBusinessRunContext(
         workspaceType: capture.workspaceType,
         capturedAt: capture.createdAt,
         revision: capture.revision,
+        environmentMcp,
         sourceErrors: capture.sourceErrors ?? [],
         sourceWarnings: capture.sourceWarnings ?? [],
         root: `autoops/${capture.projectId}/inputs/${capture.id}`,

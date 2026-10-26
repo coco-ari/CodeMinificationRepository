@@ -9,6 +9,29 @@ const now = () => new Date().toISOString()
 const requestId = (value) => { if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/.test(value)) fail(400, 'DEPLOYMENT_ID_INVALID', '请求标识无效'); return value }
 const sourceRequestFields = input => ({ serviceId: input.serviceId, environmentId: input.environmentId, sources: input.sources, contexts: input.contexts, configKey: input.configKey || null })
 
+export function projectDeploymentReferences(state, projectId, environmentId) {
+  const bindings = state.autoopsDeploymentBindings
+  if (!bindings) return []
+  if (bindings.version !== 1 || !Array.isArray(bindings.projects) || (bindings.nodeAccessVersion !== undefined && bindings.nodeAccessVersion !== 1) || (bindings.configurationVersion !== undefined && bindings.configurationVersion !== 1)) fail(503,'PROJECT_DELETE_INSPECTION_UNAVAILABLE','部署项目映射不可读，尚未删除')
+  const map = bindings.projects.find(value => value.projectId === projectId)
+  if (!map) return []
+  const data = state.deployments
+  const legacy = environmentId === undefined ? undefined : map.environments.find(value => value.environmentId === environmentId)?.legacyEnvironmentId
+  const targets = data.targets.filter(value => value.applicationId === map.applicationId && (environmentId === undefined || value.environmentId === legacy))
+  const ids = new Set(targets.map(value => value.id))
+  return [
+    {kind:'deployment-bindings',count:map.servers.filter(value => environmentId === undefined || value.environmentId === environmentId).length,message:'仍有部署节点绑定'},
+    {kind:'deployment-targets',count:targets.length,message:'仍有部署位置'},
+    {kind:'deployment-tasks',count:data.tasks.filter(value => value.applicationId === map.applicationId && (environmentId === undefined || ids.has(value.targetId))).length,message:'仍有部署任务或恢复历史'},
+    {kind:'deployment-versions',count:data.releases.filter(value => ids.has(value.targetId)).length,message:'仍有部署版本链'},
+    {kind:'deployment-sources',count:(map.serviceSources ?? []).filter(value => environmentId === undefined || value.environmentId === environmentId).length,message:'仍有部署默认来源'},
+    ...(environmentId === undefined ? [
+      {kind:'deployment-services',count:data.services.filter(value => value.applicationId === map.applicationId).length,message:'项目仍有部署服务'},
+      {kind:'deployment-node-access',count:(map.allowedServerIds ?? []).length,message:'项目仍有平台节点准入'},
+    ] : []),
+  ].filter(value => value.count > 0)
+}
+
 export function normalizeDeploymentSourceSelection(input, selected, validateConfig) {
   if (!Array.isArray(input.sources) || !input.sources.length || input.sources.length > 32) fail(400, 'DEPLOYMENT_SOURCE_INVALID', '请选择 1 至 32 个源码来源')
   const sources = input.sources.map(entry => {
@@ -169,6 +192,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
       })
     },
     target, service, server, serviceSource,
+    deletionReferences(projectId, environmentId) { return projectDeploymentReferences(store.state,projectId,environmentId) },
     serviceSourceRequest(projectId, input) {
       authorize(projectId, 'configure', input, input.environmentId)
       return replayReceipt(mapping(projectId), 'service-source', input, sourceRequestFields(input))

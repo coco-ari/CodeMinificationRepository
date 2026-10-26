@@ -66,6 +66,7 @@ export function initializeAutoOpsAccessSchema(db) {
       child_thread_id TEXT PRIMARY KEY, parent_thread_id TEXT NOT NULL,
       native_thread_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS t3_native_subagent_bindings_parent ON t3_native_subagent_bindings(parent_thread_id);
     CREATE TABLE IF NOT EXISTS t3_attachment_access (
       attachment_id TEXT PRIMARY KEY,
       owner_id TEXT NOT NULL,
@@ -428,8 +429,29 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       return bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? ORDER BY rowid').all(identifier(threadId, '会话ID'))
         .map(row => ({ threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at }))
     },
+    // 可信原生终态协调只读取持久身份事实，不将撤权后的调用者改成管理员。
+    runResourceReferences(threadId, runId) {
+      return bindingDb.prepare('SELECT i.*,b.project_id,b.environment_id FROM t3_thread_inputs i JOIN t3_thread_bindings b ON b.thread_id=i.thread_id WHERE i.thread_id=? AND i.run_id=?').all(identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
+        .map(row => ({ threadId: row.thread_id, runId: row.run_id, projectId: row.project_id, environmentId: row.environment_id || null, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at }))
+    },
+    nativeSubagentRunReferenced(threadId, runId) {
+      return Boolean(bindingDb.prepare('SELECT 1 FROM t3_native_subagent_bindings n JOIN t3_thread_inputs i ON i.thread_id=n.child_thread_id WHERE n.parent_thread_id=? AND i.run_id=? LIMIT 1').get(identifier(threadId, '会话ID'), identifier(runId, '任务ID')))
+    },
     workspaceVersionReferences(projectId) {
       return bindingDb.prepare('SELECT DISTINCT workspace_version_id AS id FROM t3_thread_bindings WHERE project_id=? AND workspace_version_id IS NOT NULL').all(identifier(projectId, '项目ID')).map(row => row.id)
+    },
+    deletionReferences(projectId, environmentId) {
+      const count = Number(bindingDb.prepare(`SELECT COUNT(*) AS n FROM t3_thread_bindings WHERE project_id=? AND revoked_at IS NULL${environmentId === undefined ? '' : ' AND environment_id=?'}`).get(projectId,...(environmentId === undefined ? [] : [environmentId]))?.n ?? 0)
+      const resources = catalog.projects.find(project => project.id === projectId)?.resources?.filter(value => environmentId === undefined || value.environmentId === environmentId).length ?? 0
+      return [
+        ...(count ? [{kind:'bound-threads',count,message:'仍有会话或待接受提交（包含私有及归档会话）'}] : []),
+        ...(resources ? [{kind:'environment-resources',count:resources,message:'仍有环境资源'}] : []),
+        ...customerRegistry.deletionReferences(projectId,environmentId),
+      ]
+    },
+    canReceiveProjectRemoval(principal, projectId) {
+      const current = refresh(principal)
+      return current.role === 'admin' && current.kind !== 'external' || (catalog.removedProjectAudience?.(projectId) ?? []).includes(current.id)
     },
     retainInputReference(threadId, inputId, actorId, callerId) {
       this.requireToolThread(threadId, callerId)
@@ -545,6 +567,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     requireProjectAction: (principal, projectId, action) => requireProjectActionForUser(refresh(principal).id, projectId, action),
     requireProjectActionForActor: requireProjectActionForUser,
     requireEnvironmentQuery: (principal, projectId, environmentId) => requireEnvironmentQueryForUser(refresh(principal).id, projectId, environmentId),
+    requireEnvironmentQueryForActor: (actorId, projectId, environmentId) => requireEnvironmentQueryForUser(actorId,projectId,environmentId),
     requireDeploymentAction: (principal, projectId, action, environmentId) => deploymentActionForUser(refresh(principal).id, projectId, action, environmentId),
     requireDeploymentActionForActor: deploymentActionForUser,
     requireWorkspaceActor: requireWorkspaceManagerForUser,

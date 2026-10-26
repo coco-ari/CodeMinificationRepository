@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import { HttpRouter } from 'effect/http'
 import { AuthSessionId } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -15,14 +16,17 @@ import * as EnvironmentAuth from '../../auth/EnvironmentAuth.ts'
 import { createBusinessHttpContext } from './context.ts'
 import { createProjectDirectory, type ProjectDirectory } from '../../../../../../../agent-demo/t3-adapters/project-directory/index.ts'
 
-const mocks = vi.hoisted(() => ({ directory: undefined as ProjectDirectory | undefined, synchronize: vi.fn() }))
+const mocks = vi.hoisted(() => ({ directory: undefined as ProjectDirectory | undefined, synchronize: vi.fn(), blockers: [] as Array<{kind:string;count:number;message:string}>, nativeDelete: vi.fn(), nativeExists: false }))
 vi.mock(import('../../../../../../../agent-demo/t3-adapters/access.mjs'), async original => ({ ...await original(), configuredAutoOpsProjectDirectory: () => mocks.directory! }))
-vi.mock(import('../projects.ts'), () => ({ synchronizeProject: (...args: unknown[]) => Effect.sync(() => mocks.synchronize(...args)) }))
+vi.mock(import('../projects.ts'), async original => ({ ...await original(), synchronizeProject: (...args: unknown[]) => Effect.sync(() => mocks.synchronize(...args)) }))
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../../../../../../../agent-demo/t3-adapters/access.mjs'
 import { projectDirectoryRoutes } from './projectDirectory.ts'
 
 function setup() {
   mocks.synchronize.mockReset()
+  mocks.blockers = []
+  mocks.nativeExists = false
+  mocks.nativeDelete.mockReset()
   const dataDir = mkdtempSync(join(tmpdir(), 'directory-http-'))
   const sessions = new DatabaseSync(':memory:'), bindings = new DatabaseSync(':memory:')
   sessions.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)')
@@ -35,13 +39,16 @@ function setup() {
   mocks.directory = directory
   access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, catalog: directory.catalog, now: () => 1000 })
   for (const id of ['actor', 'reader', 'outside']) access.recordNativeSession(access.authenticateCookie(`demo_session=${id}`), id)
-  const app = HttpRouter.toWebHandler(projectDirectoryRoutes(createBusinessHttpContext(access)).pipe(
-    HttpRouter.provideRequest(Layer.mergeAll(NodeServices.layer, Layer.mock(ProjectService.ProjectService)({}), Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
+  const app = HttpRouter.toWebHandler(projectDirectoryRoutes(createBusinessHttpContext(access), () => mocks.blockers).pipe(
+    HttpRouter.provideRequest(Layer.mergeAll(NodeServices.layer, Layer.mock(ProjectService.ProjectService)({
+      getById: () => Effect.succeed(mocks.nativeExists ? Option.some({} as never) : Option.none()),
+      delete: input => mocks.nativeDelete(input) ?? Effect.succeed({} as never),
+    }), Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
       authenticateHttpRequest: (request: { headers: Record<string, string> }) => Effect.succeed({ sessionId: AuthSessionId.make(request.headers['x-test-session'] ?? 'missing'), subject: 'test', method: 'bearer-access-token', scopes: [] }),
     } as unknown as EnvironmentAuth.EnvironmentAuth['Service']))),
   ), { disableLogger: true })
-  const request = (path = '', body?: object, user = 'actor', csrf = true) => new Request('http://localhost/api/v1/projects' + path, {
-    method: body ? 'POST' : 'GET', headers: { 'x-test-session': user, ...(csrf ? { 'x-demo-csrf': 'test-csrf' } : {}), 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
+  const request = (path = '', body?: object, user = 'actor', csrf = true, method?: string) => new Request('http://localhost/api/v1/projects' + path, {
+    method: method ?? (body ? 'POST' : 'GET'), headers: { 'x-test-session': user, ...(csrf ? { 'x-demo-csrf': 'test-csrf' } : {}), 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
   })
   return { access, directory, request, handle: app.handler, async [Symbol.asyncDispose]() { await app.dispose(); directory.close(); sessions.close(); bindings.close(); rmSync(dataDir, { recursive: true, force: true }); mocks.directory = undefined } }
 }
@@ -102,4 +109,117 @@ it('业务已保存后被撤权，仅确认保存而不返回项目详情，避�
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({ saved: true, available: false })
   expect(f.directory.settings('reader', project.id).project.name).toBe('已保存的新名称')
+})
+
+it('环境删除、修订冲突和原请求恢复经真实 HTTP 保留最小结果', async () => {
+  await using f = setup()
+  const project = (await (await f.handle(f.request('', create))).json()) as { id: string }
+  const env = (await (
+    await f.handle(
+      f.request(`/${project.id}/environments`, {
+        requestId: 'env',
+        expectedRevision: 0,
+        value: { name: '空环境' },
+      }),
+    )
+  ).json()) as { id: string }
+  const path = `/${project.id}/environments/${env.id}`
+  expect(await (await f.handle(f.request(`${path}/deletion-preview`))).json()).toMatchObject({
+    canDelete: true,
+    revision: 1,
+  })
+  expect(
+    (
+      await f.handle(
+        f.request(path, { requestId: 'stale-env', expectedRevision: 2 }, 'actor', true, 'DELETE'),
+      )
+    ).status,
+  ).toBe(409)
+  const command = { requestId: 'delete-env', expectedRevision: 1 }
+  for (let round = 0; round < 2; round++) {
+    const response = await f.handle(f.request(path, command, 'actor', true, 'DELETE'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      deleted: true,
+      projectId: project.id,
+      environmentId: env.id,
+    })
+  }
+  expect(f.directory.settings('actor', project.id).project.environments).toEqual([])
+})
+
+it('越权删除与缺 CSRF 不解析正文，引用在预检后变化仍拒绝，配置错误不被吞作空引用', async () => {
+  await using f = setup()
+  const project = (await (await f.handle(f.request('', create))).json()) as { id: string }
+  for (const [user, csrf] of [
+    ['outside', true],
+    ['actor', false],
+  ] as const) {
+    const request = f.request(
+      `/${project.id}`,
+      { requestId: 'denied', expectedRevision: 1 },
+      user,
+      csrf,
+      'DELETE',
+    )
+    expect((await f.handle(request)).status).toBe(403)
+    expect(request.bodyUsed).toBe(false)
+  }
+  expect((await f.handle(f.request(`/${project.id}/deletion-preview`))).status).toBe(200)
+  mocks.blockers = [{ kind: 'test-active', count: 1, message: '仍有活动输入' }]
+  const response = await f.handle(
+    f.request(
+      `/${project.id}`,
+      { requestId: 'blocked', expectedRevision: 1 },
+      'actor',
+      true,
+      'DELETE',
+    ),
+  )
+  expect(response.status).toBe(409)
+  expect(await response.json()).toMatchObject({ code: 'PROJECT_DELETE_BLOCKED' })
+  expect(f.directory.list('actor')).toHaveLength(1)
+})
+
+it('原生结果未知保持 deleting，恢复同命令且删除完成后重复不重建原生项目', async () => {
+  await using f = setup()
+  const project = (await (await f.handle(f.request('', create))).json()) as { id: string }
+  mocks.nativeExists = true
+  mocks.nativeDelete.mockImplementationOnce(() =>
+    Effect.fail(
+      new ProjectService.ProjectOperationError({
+        operation: 'dispatch-project-command',
+        cause: '隔离结果未知',
+      }),
+    ),
+  )
+  const command = { requestId: 'delete-original', expectedRevision: 1 }
+  expect(
+    (await f.handle(f.request(`/${project.id}`, command, 'actor', true, 'DELETE'))).status,
+  ).toBe(503)
+  expect(f.directory.list('actor')).toEqual([])
+  expect(
+    (
+      await f.handle(
+        f.request(`/${project.id}/settings`, {
+          ...create,
+          requestId: 'late-save',
+          expectedRevision: 2,
+        }),
+      )
+    ).status,
+  ).toBe(404)
+  const recovered = await f.handle(f.request(`/${project.id}`, command, 'actor', true, 'DELETE'))
+  expect(recovered.status).toBe(200)
+  expect(await recovered.json()).toEqual({ deleted: true, projectId: project.id })
+  const commands = mocks.nativeDelete.mock.calls.map(
+    ([value]) => value as { commandId: string; force: boolean },
+  )
+  expect(commands[0]?.commandId).toBe(commands[1]?.commandId)
+  expect(commands.every((value) => value.force === false)).toBe(true)
+  expect(
+    (await f.handle(f.request(`/${project.id}`, command, 'actor', true, 'DELETE'))).status,
+  ).toBe(200)
+  expect(mocks.nativeDelete).toHaveBeenCalledTimes(2)
+  expect(mocks.synchronize).toHaveBeenCalledTimes(1)
 })

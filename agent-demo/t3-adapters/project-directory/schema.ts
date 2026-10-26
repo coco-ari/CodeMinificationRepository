@@ -37,4 +37,19 @@ export const migrations: readonly Migration[] = [
     CREATE TABLE directory_seed (id INTEGER PRIMARY KEY CHECK(id=1)) STRICT;
   `,
   },
+  {
+    version: 2,
+    name: '项目环境删除墓碑与原请求恢复',
+    sql: `
+      ALTER TABLE directory_projects ADD COLUMN state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','deleting','deleted'));
+      ALTER TABLE directory_environments ADD COLUMN state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','deleting','deleted'));
+      CREATE TABLE directory_deletions (
+        request_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, project_id TEXT NOT NULL,
+        environment_id TEXT, payload TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('pending','deleted','blocked')),
+        blockers TEXT NOT NULL, created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE UNIQUE INDEX directory_project_deletion_pending ON directory_deletions(project_id) WHERE environment_id IS NULL AND state='pending';
+    `,
+  },
 ]

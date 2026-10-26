@@ -197,6 +197,22 @@ export function createAssistantDirectory(options: Options) {
   }
   return {
     catalog,
+    deletionReferences(project: string, environment?: string) {
+      const presets = all(project).filter(
+        (preset) =>
+          preset.enabled &&
+          (environment === undefined || preset.configuration.environmentId === environment),
+      )
+      return presets.length
+        ? [
+            {
+              kind: 'assistant-presets',
+              count: presets.length,
+              message: '仍有启用的助手预设引用此范围',
+            },
+          ]
+        : []
+    },
     choices(actor: string, project: string) {
       manage(actor, project)
       if (!options.choices)

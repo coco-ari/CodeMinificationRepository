@@ -14,6 +14,7 @@ import { createWorkspaceAuthoring } from '../agent-demo/t3-adapters/workspace-au
 import { createWorkspaceManagement } from '../agent-demo/t3-adapters/workspace-management.ts'
 import { createProjectCredentialService } from '../agent-demo/t3-adapters/credentials.ts'
 import { createNativeSubagentBindings } from '../agent-demo/t3-adapters/subagents.mjs'
+import { environmentRunScope } from '../agent-demo/t3-adapters/environment-run-inputs.ts'
 
 function createBusinessRunInputs(access, workspace) {
   const inputs = createInputs(access, workspace)
@@ -132,11 +133,14 @@ test('原生子任务只继承事件所属父轮输入，深层子任务与重�
   const second = await f.inputs.prepare('one', 'run-two')
   native.register('one', 'child', 'native-child', 'run-one')
   native.register('child', 'grandchild', 'native-grandchild', 'run-one')
+  assert.deepEqual(environmentRunScope(f.access, 'child', 'run-one'), environmentRunScope(f.access, 'one', 'run-one'))
+  assert.deepEqual(environmentRunScope(f.access, 'grandchild', 'run-one'), environmentRunScope(f.access, 'one', 'run-one'))
   assert.equal(f.inputs.require('child', first.id).input.runId, 'run-one')
   assert.equal(f.inputs.require('grandchild', first.id).capture.id, first.id)
   assert.throws(() => f.inputs.require('child', second.id), { code: 'THREAD_INPUT_FORBIDDEN' })
   assert.throws(() => native.register('one', 'unbound', 'native-unbound', 'missing'), /尚未固定/)
   f.access.markThreadDeleted('one')
+  assert.throws(() => environmentRunScope(f.access, 'grandchild', 'run-one'))
   assert.throws(() => f.inputs.require('grandchild', first.id))
 })
 

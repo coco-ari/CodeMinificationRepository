@@ -2,6 +2,8 @@ import { EventEmitter } from 'node:events';
 import { mkdir, copyFile, readFile, stat, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { sourceKey, validateRevision, validateBranch } from './archive.mjs';
 import { SourceArchives, checksum } from './source-archives.mjs';
 import { migrateWorkspaces, sourceSnapshot } from './workspaces.mjs';
@@ -9,7 +11,18 @@ import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
 import { DEFAULT_STORAGE_POLICY, storagePolicy, artifactId } from '../agent/storage-policy.mjs';
 import { networkIdentity } from '../agent/config.mjs';
-import { createProjectDeployments, normalizeDeploymentSourceSelection } from './deployment-projects.mjs';
+import { createProjectDeployments, normalizeDeploymentSourceSelection, projectDeploymentReferences } from './deployment-projects.mjs';
+
+export function readDeploymentDeletionReferences(directory, projectId, environmentId) {
+  const file = path.join(directory,'state.sqlite');
+  if (!existsSync(file)) return [];
+  const db = new DatabaseSync(file,{readOnly:true});
+  try {
+    if (db.prepare('PRAGMA user_version').get().user_version !== 1) throw new HttpError(503,'部署存储版本不可读，尚未删除');
+    const row = db.prepare('SELECT value FROM application_state WHERE id=1').get();
+    return projectDeploymentReferences(JSON.parse(row.value),projectId,environmentId);
+  } finally { db.close(); }
+}
 
 const now = () => new Date().toISOString();
 const terminal = new Set(['succeeded', 'failed', 'rolled_back', 'interrupted']);

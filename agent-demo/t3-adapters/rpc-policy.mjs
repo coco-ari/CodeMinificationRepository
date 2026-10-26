@@ -240,6 +240,7 @@ export function filterAutoOpsShellItem(access, principal, item) {
   if (item.kind === 'thread.updated' || item.kind === 'thread.removed')
     return access.canSeeThread(principal, item.thread?.id ?? item.threadId, item.kind === 'thread.removed') ? item : null
   if (item.kind === 'project.updated' || item.kind === 'project.removed') {
+    if (item.kind === 'project.removed' && access.canReceiveProjectRemoval?.(principal,item.projectId)) return item
     try { access.requireProject(principal, item.project?.id ?? item.projectId); return item.project ? {...item,project:projectForViewer(access,principal,item.project)} : item } catch (error) {
       if (error.status === 404) return null
       throw error

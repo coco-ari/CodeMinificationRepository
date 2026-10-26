@@ -6,6 +6,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as ServerConfig from "../../../config.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
+import { environmentMcpOperation } from "../../../autoops/environmentMcpSchema.ts";
 
 const text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_048_576));
 const id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512));
@@ -32,9 +33,13 @@ const attachment = Tool.make("read_attachment", {
   parameters: Schema.Struct({ inputId: id, id }),
 }).annotate(Tool.Title, "读取附件").annotate(Tool.Readonly, true);
 const environment = Tool.make("query_environment", {
-  ...shared, description: "查询会话固定环境的只读快照，必须说明来源和采集时间。",
-  parameters: Schema.Struct({ inputId: id, environmentId: id }),
+  ...shared, description: "列出本轮固定环境中实际已启用且通过测试的只读连接及允许操作。没有连接时明确报告未配置，不返回演示数据。",
+  parameters: Schema.Struct({ inputId: id }),
 }).annotate(Tool.Title, "查询环境").annotate(Tool.Readonly, true);
+const environmentRead = Tool.make("read_environment", {
+  ...shared, description: "按 query_environment 返回的连接和操作读取本轮固定环境；仅支持明确列出的只读操作，返回真实来源和采集时间。不能指定其他项目、环境、执行身份或任意命令。",
+  parameters: Schema.Struct({ inputId: id, operation: environmentMcpOperation }),
+}).annotate(Tool.Title, "读取环境").annotate(Tool.Readonly, true);
 const ask = Tool.make("ask_user", {
   ...shared, description: "缺少业务条件时，通过运行器的原生 MCP 表单向用户提问并等待回答。",
   parameters: Schema.Struct({ inputId: id, prompt: text, options: Schema.optional(Schema.Array(Schema.String).check(Schema.isMaxLength(6))) }),
@@ -44,4 +49,4 @@ const report = Tool.make("create_report", {
   parameters: Schema.Struct({ inputId: id, name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160)), mime: Schema.Literals(["text/markdown", "text/plain", "text/csv", "application/json", "application/pdf"]), content: text }),
 }).annotate(Tool.Title, "生成报告").annotate(Tool.Readonly, false).annotate(Tool.Destructive, false);
 
-export const AutoOpsToolkit = Toolkit.make(list, read, material, attachment, environment, ask, report);
+export const AutoOpsToolkit = Toolkit.make(list, read, material, attachment, environment, environmentRead, ask, report);

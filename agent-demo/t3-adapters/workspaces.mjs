@@ -346,6 +346,20 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
 
   return {
     ensureProject,
+    deletionReferences(id, environmentId) {
+      if (environmentId !== undefined) return []
+      const values = []
+      if (initializing.has(id)) values.push({kind:'workspace-initializing',count:1,message:'工作区正在初始化'})
+      if (!existsSync(stateFile(id))) return values
+      const state = load(id)
+      for (const [kind, count, message] of [
+        ['workspace-tasks',state.tasks.filter(task => ['queued','running'].includes(task.status)).length,'工作区仍有活动任务'],
+        ['workspace-versions',state.versions.length,'工作区仍有当前资料或历史版本'],
+        ['workspace-packages',state.releases.length,'工作区仍有源码包'],
+        ['workspace-protection',Object.keys(state.protectedReferences ?? {}).length,'工作区仍有活动或未知输入保护'],
+      ]) if (count) values.push({kind,count,message})
+      return values
+    },
     stopAccepting: jobs.stopAccepting,
     async whenIdle() { await Promise.allSettled([...initializing.values()]); await jobs.whenIdle() },
     async close(options) { jobs.stopAccepting(); await Promise.all([Promise.allSettled([...initializing.values()]), jobs.close(options)]) },

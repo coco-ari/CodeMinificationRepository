@@ -251,6 +251,11 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
     resetPresence() { db.exec('UPDATE customer_devices SET connected=0') },
     // Internal service enumeration only; HTTP handlers must use owner-scoped listDevices.
     listRegisteredDevices() { return db.prepare('SELECT * FROM customer_devices ORDER BY created_at').all().map(publicDevice) },
+    deletionReferences(projectId, environmentId) {
+      if (environmentId !== undefined) return []
+      const count = Number(db.prepare("SELECT COUNT(*) AS n FROM customer_workspaces WHERE project_id=? AND status='active'").get(projectId)?.n ?? 0)
+      return count ? [{kind:'customer-workspaces',count,message:'仍有提供者登记的电脑目录'}] : []
+    },
     subscribeChanges(listener) { listeners.add(listener); return () => listeners.delete(listener) },
   }
   for (const name of ['consumePairing','registerWorkspace','updateCapabilities','setDeviceStatus','revokeCredential','revokeWorkspace','markConnected','markDisconnected']) {

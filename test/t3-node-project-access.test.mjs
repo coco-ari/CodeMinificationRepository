@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { RepositoryService } from '../src/service.mjs'
-import { DeploymentService } from '../src/deployment.mjs'
+import { DeploymentService, readDeploymentDeletionReferences } from '../src/deployment.mjs'
 
 const command = (value) => ({ ...value, requestId: randomUUID(), actor: { id: 'platform-admin' } })
 async function fixture(t) {
@@ -196,4 +196,22 @@ test('缺少版本或未知版本的节点准入拒绝初始化，不覆盖已�
     await assert.rejects(f.projects.initialize(), /节点准入/)
     assert.deepEqual(f.repository.store.state.autoopsDeploymentBindings, previous)
   }
+})
+
+test('删除预检只读节点准入和实际环境绑定，功能停用后的冷库仍保留引用保护',async t=>{
+  const f=await fixture(t)
+  assert.deepEqual(f.projects.deletionReferences('one'),[])
+  const created=await f.projects.createGlobalServer(command({name:'不能被项目删除级联撤销的全局节点'}))
+  await f.projects.setServerAccess('one',command({serverId:created.server.id,allowed:true,expectedRevision:1}))
+  assert.equal(f.projects.deletionReferences('one').find(value=>value.kind==='deployment-node-access').count,1)
+  assert.deepEqual(f.projects.deletionReferences('one','test'),[])
+  const binding=command({serverId:created.server.id,environmentId:'test'})
+  await f.projects.bindServer('one',binding)
+  assert.equal(f.projects.deletionReferences('one','test')[0].kind,'deployment-bindings')
+  assert.deepEqual(readDeploymentDeletionReferences(f.dataDir,'one','test'),f.projects.deletionReferences('one','test'))
+  assert.deepEqual(readDeploymentDeletionReferences(f.dataDir,'two'),[])
+  await f.projects.unbindServer('one',command({serverId:created.server.id,environmentId:'test'}))
+  await f.projects.setServerAccess('one',command({serverId:created.server.id,allowed:false,expectedRevision:2}))
+  assert.deepEqual(readDeploymentDeletionReferences(f.dataDir,'one'),[])
+  assert.equal(f.projects.globalNodeCatalog(command({})).servers.length,1)
 })

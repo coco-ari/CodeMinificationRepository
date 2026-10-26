@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, writeFile, rm, readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { RepositoryService } from '../../src/service.mjs'
-import { DeploymentService } from '../../src/deployment.mjs'
+import { DeploymentService, readDeploymentDeletionReferences } from '../../src/deployment.mjs'
 import { handleAgentRequest } from '../../src/deploy-http.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
 import { configuredAutoOpsAccess } from './access.mjs'
@@ -95,6 +95,7 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
   const servers = createDeploymentServers({deployment})
   let initializing, pending = Promise.resolve(), listener, listenerClosing, closing, closed = false
   const operations = new Set()
+  const projectInitializations = new Map()
   const accept = (work) => {
     if (closed) return Promise.reject(Object.assign(new Error('部署服务正在停止，请稍后重试'), {status:503, code:'DEPLOYMENT_STOPPING'}))
     const operation = Promise.resolve().then(work)
@@ -176,10 +177,18 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
       return initializing
     },
     async ensureProject(project) {
-      return accept(async () => {
+      projectInitializations.set(project.id,(projectInitializations.get(project.id) ?? 0)+1)
+      try { return await accept(async () => {
         await store.initialize()
         await deployment.projects.ensureProject(project)
-      })
+      }) } finally {
+        const remaining = projectInitializations.get(project.id)-1
+        if (remaining) projectInitializations.set(project.id,remaining); else projectInitializations.delete(project.id)
+      }
+    },
+    deletionReferences(projectId, environmentId) {
+      const pending = projectInitializations.get(projectId) ?? 0
+      return [...(pending ? [{kind:'deployment-initializing',count:pending,message:'部署目录正在初始化'}] : []),...deployment.projects.deletionReferences(projectId,environmentId)]
     },
     overview(project, environmentIds) {
       const all = deployment.projects.snapshot(project.id), map = all.mapping, allowed = new Set(environmentIds)
@@ -310,6 +319,13 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
 }
 
 let configured, configuredStopped = false
+export function configuredDeploymentDeletionReferences(projectId, environmentId) {
+  if (configuredStopped) fail(503,'DEPLOYMENT_STOPPING','部署服务正在停止，无法核对删除引用')
+  if (configured) return configured.store.deletionReferences(projectId,environmentId)
+  const dataDir = process.env.AUTOOPS_T3_DATA_DIR
+  if (!dataDir) fail(503,'DEPLOYMENT_NOT_CONFIGURED','部署存储尚未配置，无法核对删除引用')
+  return readDeploymentDeletionReferences(join(resolve(dataDir),'deployment-center'),projectId,environmentId)
+}
 export function stopConfiguredDeploymentStore() { configuredStopped = true; configured?.store.stopAccepting() }
 export async function closeConfiguredDeploymentStore() { stopConfiguredDeploymentStore(); await configured?.store.close() }
 export function configuredDeploymentStore() {

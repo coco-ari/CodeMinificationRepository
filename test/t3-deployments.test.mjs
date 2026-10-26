@@ -87,6 +87,14 @@ test('部署监听器使用宿主指定的发行资源提供安装脚本和执�
   }
 })
 
+test('已接纳但尚未落盘的部署目录初始化阻止删除，完成后空映射不被误判业务引用',async t=>{
+  const f=await fixture(t)
+  const pending=f.store.ensureProject(projects[0])
+  assert.equal(f.store.deletionReferences('p-one')[0]?.kind,'deployment-initializing')
+  await pending
+  assert.deepEqual(f.store.deletionReferences('p-one'),[])
+})
+
 test('真实成员排队后撤权、重启后撤权均不能领取，权限服务故障保留排队并在恢复后可执行', async (t) => {
   const sessionDb = new DatabaseSync(':memory:'), bindingDb = new DatabaseSync(':memory:')
   t.after(() => { sessionDb.close(); bindingDb.close() })

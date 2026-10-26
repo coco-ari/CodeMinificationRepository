@@ -6,5 +6,5 @@ export function isolateBusinessHtml(html) {
   // an opportunity to run before this restrictive policy. CSPs only intersect.
   return `<meta http-equiv="Content-Security-Policy" content="${AUTOOPS_HTML_CSP}">` + html
 }
-export const businessAppToolAllowed = (server, name) => server === 't3-code' && new Set(['list_project_materials', 'read_project_document', 'read_project_material', 'read_attachment', 'query_environment']).has(name)
+export const businessAppToolAllowed = (server, name) => server === 't3-code' && new Set(['list_project_materials', 'read_project_document', 'read_project_material', 'read_attachment', 'query_environment', 'read_environment']).has(name)
 export const businessAppResourceAllowed = (server, uri) => server === 't3-code' && /^ui:\/\/autoops\/[a-z0-9._/-]+$/i.test(uri) && !uri.split('/').includes('..')

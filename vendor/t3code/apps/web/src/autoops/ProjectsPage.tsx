@@ -45,6 +45,8 @@ import { ProjectRepositoryPanel } from './ProjectRepositoryPanel'
 import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
 import { ProjectConfigurationFields } from './ProjectConfigurationFields'
 import { DeploymentServers } from './deployment'
+import { ProjectRemovalAction, ProjectRemovalDialog, type ProjectRemovalTarget } from './ProjectRemovalDialog'
+import { EnvironmentMcpDialog } from './EnvironmentMcpDialog'
 import {
   isConfigurationEditor,
   configurationMutation,
@@ -62,15 +64,23 @@ type Editor =
     }
 export function AutoOpsProjectsPage() {
   const location = useLocation()
+  const focusDirectory = useRef(false)
   return (
     <ModuleErrorBoundary label="项目管理" resetKey={location.href}>
       <ProjectsContent
         key={String((location.search as { projectId?: string }).projectId ?? 'all')}
+        focusDirectory={focusDirectory}
       />
     </ModuleErrorBoundary>
   )
 }
-function ProjectsContent() {
+function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}}) {
+  const [mcpEnvironment, setMcpEnvironment] = useState<{id: string; name: string} | null>(null)
+  const mcpTrigger = useRef<HTMLButtonElement | null>(null)
+  const [removalTarget, setRemovalTarget] = useState<ProjectRemovalTarget | null>(null)
+  const [removalLocked, setRemovalLocked] = useState(false)
+  const removalReturn = useRef<HTMLButtonElement | null>(null)
+  const refreshButton = useRef<HTMLButtonElement | null>(null)
   const [nodeScope, setNodeScope] = useState<{ scope: 'platform' } | { scope: 'project'; projectId: string; environmentId: string } | null>(null)
   const nodeTrigger = useRef<HTMLButtonElement | null>(null)
   const [credentialLocked, setCredentialLocked] = useState(false)
@@ -205,6 +215,16 @@ function ProjectsContent() {
       if (alive.current) setBusy(false)
     }
   }
+  useEffect(() => {
+    if (!loading && !explicit && focusDirectory.current) {
+      focusDirectory.current = false
+      refreshButton.current?.focus()
+    }
+  }, [loading, explicit, focusDirectory])
+  const beginRemoval = (target: ProjectRemovalTarget, button: HTMLButtonElement) => {
+    removalReturn.current = button
+    setRemovalTarget(target)
+  }
   const current = projects.find((project) => project.id === explicit)
   return (
     <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-project-directory>
@@ -235,7 +255,7 @@ function ProjectsContent() {
         actions={
           <>
             {host?.canManageDeploymentNodes ? (
-              <Button variant="outline" size="sm" disabled={busy || !!pending || credentialLocked}
+              <Button variant="outline" size="sm" disabled={busy || !!pending || credentialLocked || removalLocked}
                 onClick={(event) => {
                   nodeTrigger.current = event.currentTarget
                   setNodeScope({ scope: 'platform' })
@@ -246,6 +266,7 @@ function ProjectsContent() {
             <Button
               variant="ghost"
               size="icon-sm"
+              ref={refreshButton}
               aria-label="刷新项目"
               disabled={loading || busy}
               onClick={() => {
@@ -265,7 +286,7 @@ function ProjectsContent() {
                     event.currentTarget,
                   )
                 }
-                disabled={busy || !!pending || credentialLocked}
+                disabled={busy || !!pending || credentialLocked || removalLocked}
               >
                 <PlusIcon />
                 创建项目
@@ -275,7 +296,7 @@ function ProjectsContent() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busy || !!pending || credentialLocked}
+                disabled={busy || !!pending || credentialLocked || removalLocked}
                 onClick={(event) =>
                   open(
                     {
@@ -291,6 +312,11 @@ function ProjectsContent() {
                 编辑项目
               </Button>
             ) : null}
+            {manageable && settings ? <ProjectRemovalAction
+              target={{projectId: settings.project.id, name: settings.project.name, revision: settings.project.revision}}
+              disabled={busy || !!pending || credentialLocked || removalLocked}
+              onSelect={beginRemoval}
+            /> : null}
           </>
         }
       />
@@ -372,7 +398,7 @@ function ProjectsContent() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      disabled={busy || !!pending || credentialLocked}
+                      disabled={busy || !!pending || credentialLocked || removalLocked}
                       onClick={(event) =>
                         open(
                           { kind: 'environment', revision: 0, name: '', description: '' },
@@ -395,8 +421,17 @@ function ProjectsContent() {
                         manageable ? (
                           <div className="flex items-center gap-1">
                           <Button variant="ghost" size="sm"
+                            aria-label={`管理${env.name} MCP`}
+                            disabled={busy || !!pending || credentialLocked || removalLocked}
+                            onClick={(event) => {
+                              mcpTrigger.current = event.currentTarget
+                              setMcpEnvironment({id: env.id, name: env.name})
+                            }}>
+                            MCP
+                          </Button>
+                          <Button variant="ghost" size="sm"
                             aria-label={`管理${env.name}节点`}
-                            disabled={busy || !!pending || credentialLocked}
+                            disabled={busy || !!pending || credentialLocked || removalLocked}
                             onClick={(event) => {
                               nodeTrigger.current = event.currentTarget
                               setNodeScope({ scope: 'project', projectId: current!.id, environmentId: env.id })
@@ -406,7 +441,7 @@ function ProjectsContent() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            disabled={busy || !!pending || credentialLocked}
+                            disabled={busy || !!pending || credentialLocked || removalLocked}
                             onClick={(event) =>
                               open(
                                 {
@@ -422,6 +457,11 @@ function ProjectsContent() {
                           >
                             编辑
                           </Button>
+                          <ProjectRemovalAction
+                            target={{projectId: current!.id, environmentId: env.id, name: env.name, revision: env.revision}}
+                            disabled={busy || !!pending || credentialLocked || removalLocked}
+                            onSelect={beginRemoval}
+                          />
                           </div>
                         ) : undefined
                       }
@@ -446,7 +486,7 @@ function ProjectsContent() {
                   key={settings.project.id}
                   projectId={settings.project.id}
                   revision={configurationRevision}
-                  disabled={busy || !!pending || credentialLocked}
+                  disabled={busy || !!pending || credentialLocked || removalLocked}
                   onOpen={open}
                   addButtonRef={repositoryAddButton}
                 />
@@ -455,7 +495,7 @@ function ProjectsContent() {
                 <ProjectConfigurationPanel
                   project={settings}
                   revision={configurationRevision}
-                  disabled={busy || !!pending || credentialLocked}
+                  disabled={busy || !!pending || credentialLocked || removalLocked}
                   onOpen={open}
                 />
               ) : null}
@@ -463,6 +503,37 @@ function ProjectsContent() {
           )}
         </WorkspacePageContainer>
       </div>
+      {removalTarget ? <ProjectRemovalDialog
+        key={`${removalTarget.projectId}:${removalTarget.environmentId ?? 'project'}`}
+        target={removalTarget} finalFocus={removalReturn}
+        onLockChange={setRemovalLocked}
+        onClose={() => setRemovalTarget(null)}
+        onAccessDenied={(cause) => {
+          setError(cause instanceof Error ? cause.message : '当前管理权限不可用')
+          void refreshProjectHost().catch(() => {})
+        }}
+        onRemoved={() => {
+          removalReturn.current = refreshButton.current
+          if (removalTarget.environmentId) {
+            setRemovalTarget(null)
+            void load(true)
+          } else {
+            focusDirectory.current = true
+            go()
+          }
+        }}
+      /> : null}
+      {mcpEnvironment && explicit ? <EnvironmentMcpDialog
+        key={`${explicit}:${mcpEnvironment.id}`}
+        projectId={explicit} environmentId={mcpEnvironment.id} environmentName={mcpEnvironment.name}
+        open finalFocus={mcpTrigger}
+        onOpenChange={(value) => { if (!value) setMcpEnvironment(null) }}
+        onChanged={() => setConfigurationRevision(value => value + 1)}
+        onAccessDenied={(cause) => {
+          setError(cause instanceof Error ? cause.message : '当前环境管理权限不可用')
+          void refreshProjectHost().catch(() => {})
+        }}
+      /> : null}
       {nodeScope ? <DeploymentServers {...nodeScope} open
         finalFocus={nodeTrigger}
         onOpenChange={(value) => { if (!value) setNodeScope(null) }}
@@ -514,7 +585,7 @@ function ProjectsContent() {
                 {editor && isConfigurationEditor(editor) ? (
                   <ProjectConfigurationFields
                     editor={editor}
-                    disabled={busy || !!pending || credentialLocked}
+                    disabled={busy || !!pending || credentialLocked || removalLocked}
                     onChange={setEditor}
                   />
                 ) : (
@@ -526,7 +597,7 @@ function ProjectsContent() {
                         value={editor?.name ?? ''}
                         maxLength={120}
                         required
-                        disabled={busy || !!pending || credentialLocked}
+                        disabled={busy || !!pending || credentialLocked || removalLocked}
                         onChange={(event) =>
                           setEditor((value) =>
                             value ? { ...value, name: event.target.value } : null,
@@ -542,7 +613,7 @@ function ProjectsContent() {
                           id="directory-description"
                           value={editor?.description ?? ''}
                           maxLength={2000}
-                          disabled={busy || !!pending || credentialLocked}
+                          disabled={busy || !!pending || credentialLocked || removalLocked}
                           onChange={(event) =>
                             setEditor((value) =>
                               value ? { ...value, description: event.target.value } : null,
@@ -561,7 +632,7 @@ function ProjectsContent() {
             <Button
               variant="outline"
               type="button"
-              disabled={busy || !!pending || credentialLocked}
+              disabled={busy || !!pending || credentialLocked || removalLocked}
               onClick={() => setEditor(null)}
             >
               取消

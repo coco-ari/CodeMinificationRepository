@@ -35,6 +35,7 @@ export async function refreshProjectHost() {
 }
 export type PendingProjectWrite = {
   path: string
+  method?: 'DELETE'
   body: { requestId: string; expectedRevision: number } & Record<string, unknown>
 }
 const pendingKey = () => autoOpsStorageKey('project-directory:pending')
@@ -58,9 +59,10 @@ export function prepareProjectMutation(
   path: string,
   expectedRevision: number,
   payload: object,
+  method?: 'DELETE',
 ): PendingProjectWrite {
   if (readPendingProjectWrite()) throw new Error('请先核对上一次保存结果')
-  const pending = { path, body: { ...payload, requestId: randomUUID(), expectedRevision } }
+  const pending = { path, ...(method ? { method } : {}), body: { ...payload, requestId: randomUUID(), expectedRevision } }
   autoOpsStorage(window.sessionStorage).setItem(pendingKey(), JSON.stringify(pending))
   return pending
 }
@@ -71,6 +73,7 @@ export async function submitProjectWrite(pending: PendingProjectWrite) {
     const result = await autoOpsRequest<Record<string, unknown>>(pending.path, {
       label: '配置',
       body: pending.body,
+      ...(pending.method ? { method: pending.method } : {}),
     })
     if (readAutoOpsHost()?.principal.id !== host?.principal.id)
       throw new DOMException('登录已经改变', 'AbortError')

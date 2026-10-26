@@ -144,7 +144,7 @@ it('集中创建凭证保留字段标签，保存后只展示元数据并恢复�
   await expect.element(add).toBeEnabled()
   await add.click()
   await page.getByRole('textbox', { name: '凭证名称', exact: true }).fill('新凭证')
-  await page.getByRole('textbox', { name: 'Git 用户名', exact: true }).fill('isolated-reader')
+  await page.getByRole('textbox', { name: '用户名', exact: true }).fill('isolated-reader')
   await page.getByLabelText('访问令牌或密码', { exact: true }).fill('fixture-only-secret')
   await page.getByRole('button', { name: '保存凭证', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()

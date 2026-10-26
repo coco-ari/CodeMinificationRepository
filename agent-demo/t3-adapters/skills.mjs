@@ -6,7 +6,7 @@ import { BUILTIN_BUSINESS_SKILLS } from './builtin-skills.mjs'
 import { AutoOpsAccessError } from './access.mjs'
 import { prepareScopedBusinessSkills, scopedBusinessSkillsForCwd } from './scoped-skills.mjs'
 
-export const BUSINESS_SKILL_TOOLS = Object.freeze(['list_project_materials','read_project_document','read_project_material','read_attachment','query_environment','ask_user','create_report'])
+export const BUSINESS_SKILL_TOOLS = Object.freeze(['list_project_materials','read_project_document','read_project_material','read_attachment','query_environment','read_environment','ask_user','create_report'])
 const allowedTools = new Set(BUSINESS_SKILL_TOOLS)
 export function readBusinessSkillRegistry(dataDirectory) {
   const library = join(dataDirectory,'t3','skills-library.json')

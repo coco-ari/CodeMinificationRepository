@@ -37,6 +37,8 @@ destination = realpathSync(destination)
 for (const path of ['agent-demo', 'agent', 'src', 'autoops/contracts', 'autoops/server/platform/database.ts', 'autoops/server/platform/ports.ts', 'dist/web', 'vendor/t3code/apps/server/dist', 'vendor/t3code/.autoops-source', 'vendor/t3code/LICENSE', 'vendor/t3code/package.json', 'vendor/t3code/pnpm-lock.yaml', 'vendor/t3code/pnpm-workspace.yaml', 'vendor/t3code/patches', 'vendor/skills-manager', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts/start-t3-worker.mjs', 'scripts/t3-migrate-data.mjs', 'scripts/t3-recovery-data.mjs', 'scripts/t3-storage-audit.mjs', 'scripts/verify-t3-release.mjs', 'scripts/deployment-agent-bundle.mjs', 'scripts/verify-t3-workspace-release.mjs']) {
   cpSync(join(root, path), join(destination, path), { recursive: true, verbatimSymlinks: true, filter: (source) => !/\/(?:data|node_modules|\.DS_Store)(?:\/|$)/.test(relative(root, source)) })
 }
+// Redis 发布包未附许可证文件，随同版上游原文和网页许可证清单一起分发。
+cpSync(join(root, 'vendor/t3code/third-party-notices'), join(destination, 'vendor/t3code/third-party-notices'), {recursive: true})
 // Preserve pnpm's real dependency graph, including duplicate versions. Only
 // dynamic business workers need root packages; UI and T3 are already bundled.
 const store = realpathSync(join(root, 'node_modules/.pnpm'))
@@ -61,7 +63,7 @@ function collect(target) {
   }
   walk(directory)
 }
-for (const name of ['officeparser', 'pdfkit', 'fflate', 'pdfjs-dist', 'effect']) {
+for (const name of ['officeparser', 'pdfkit', 'fflate', 'pdfjs-dist', 'effect', 'mysql2', 'redis', 'ssh2', 'node-sql-parser']) {
   const source = join(root, 'node_modules', name)
   collect(source)
   const link = join(destination, 'node_modules', name)

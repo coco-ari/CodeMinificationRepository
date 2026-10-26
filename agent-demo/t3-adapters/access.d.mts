@@ -42,6 +42,8 @@ export class AutoOpsAccessError extends Error { constructor(status:number,code:s
 export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding;question?: AssistantSelection};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
 export interface AutoOpsAccess {
+  deletionReferences(projectId: string, environmentId?: string): import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
+  canReceiveProjectRemoval(principal: AutoOpsPrincipal, projectId: string): boolean;
   assertAccepting(): void;
   stopAccepting(): void;
   readonly customerRegistry: CustomerRegistry;
@@ -55,6 +57,7 @@ export interface AutoOpsAccess {
   requireProjectAction(principal: AutoOpsPrincipal, projectId: string, action: ProjectAction): ProjectMembership;
   requireProjectActionForActor(userId: string, projectId: string, action: ProjectAction): ProjectMembership;
   requireEnvironmentQuery(principal: AutoOpsPrincipal, projectId: string, environmentId: string): ProjectMembership;
+  requireEnvironmentQueryForActor(actorId: string, projectId: string, environmentId: string): ProjectMembership;
   requireEnvironment(principal: AutoOpsPrincipal, projectId: string, environmentId: string): ProjectMembership;
   requireWorkspace(principal: AutoOpsPrincipal, projectId: string, type: 'internal' | 'external', versionId?: string, environmentId?: string | null): ProjectMembership;
   requireWorkspaceManager(principal: AutoOpsPrincipal, projectId: string): ProjectMembership;
@@ -80,6 +83,10 @@ export interface AutoOpsAccess {
   getRunInput(threadId: string, runId: string): ThreadInputBinding | undefined;
   bindRunInput(threadId: string, runId: string, inputId: string, actorId?: string, inputOwnerId?: string): ThreadInputBinding;
   listThreadInputs(threadId: string): ThreadInputBinding[];
+  /** 仅供可信原生终态协调读取持久引用；不授予内容访问权。 */
+  runResourceReferences(threadId: string, runId: string): Array<ThreadInputBinding & {projectId: string; environmentId: string | null}>;
+  /** 子任务仍继承原父轮时保留环境输入，不能凭父轮终态推断子任务已结束。 */
+  nativeSubagentRunReferenced(threadId: string, runId: string): boolean;
   workspaceVersionReferences(projectId: string): string[];
   retainInputReference(threadId: string, inputId: string, actorId: string, callerId?:string): void;
   inputReferences(threadId: string): Array<{inputId:string;actorId:string}>;
@@ -133,7 +140,7 @@ export function getThreadBinding(threadId: string): ThreadBinding | undefined;
 export function requireToolThread(threadId: string, actorId?: string): ToolScope;
 
 export function initializeAutoOpsAccessSchema(db: DatabaseSync): void;
-export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;kind?:'internal'|'external';status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean;questions?: () => import("./assistants/index.ts").AssistantDirectoryService}): AutoOpsAccess;
+export function createAutoOpsAccess(options: {sessionDb: DatabaseSync; bindingDb: DatabaseSync; catalog?: {users: Array<{id:string;name:string;role:string;kind?:'internal'|'external';status?:string}>;projects:AutoOpsProject[];agents:AutoOpsAgent[];removedProjectAudience?:(projectId:string)=>string[]}; now?: () => number; workspaceStore?: WorkspaceStore; customerRegistry?: CustomerRegistry; deploymentEnabled?: () => boolean;questions?: () => import("./assistants/index.ts").AssistantDirectoryService}): AutoOpsAccess;
 
 export function stopConfiguredAutoOpsAccess(): void;
 export function closeConfiguredAutoOpsAccess(): void;

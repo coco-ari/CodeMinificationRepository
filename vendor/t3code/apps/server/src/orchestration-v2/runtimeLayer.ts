@@ -1,3 +1,4 @@
+import * as AutoOpsRunResourceLifecycle from "../autoops/runResourceLifecycle.ts";
 import * as RemoteRunRecovery from "../autoops/RemoteRunRecovery.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -364,6 +365,7 @@ export const layer = Layer.mergeAll(
 );
 
 export const layerProduction = Layer.mergeAll(
+  AutoOpsRunResourceLifecycle.layer.pipe(Layer.provide(Layer.mergeAll(layerEventSinkProvided, layerEventStoreProvided, ProjectionStore.layer, EffectOutbox.layer))),
   layer.pipe(Layer.provide(layerProjectService)),
   layerProjectService,
   layerManagedProjectFoldersProvided,

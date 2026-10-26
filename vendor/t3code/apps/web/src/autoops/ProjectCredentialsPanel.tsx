@@ -137,7 +137,7 @@ export function ProjectCredentialsPanel({
       ) : null}
       {editor?.kind === 'revoke' ? (
         <WorkspaceAuthoringConfirm
-          title="撤回仓库凭证"
+          title="撤回项目凭证"
           controller={controller}
           onClose={() => setEditor(null)}
           onConfirm={() =>

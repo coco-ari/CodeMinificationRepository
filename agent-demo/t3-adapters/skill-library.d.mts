@@ -9,6 +9,7 @@ export interface ResolvedLibrarySkill { id:string;skillId:string;name:string;ver
 export class SkillLibraryError extends Error { constructor(status:number,code:string,message:string);status:number;code:string }
 export function skillLibraryRevision(state:SkillLibraryState):string;
 export function readSkillLibrary(dataDirectory:string):SkillLibraryState;
+export function projectSkillDeletionReferences(dataDirectory:string,projectId:string,environmentId?:string):import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
 export function resolveSkillLibrary(dataDirectory:string,scope:{projectId:string;agentId:string;workspaceType:'internal'|'external';skillIds?:readonly string[];question?: {configuration: {skillIds:readonly string[]}}}):ResolvedLibrarySkill[];
 export function readSkillLibraryVersion(dataDirectory:string,skillId:string,versionId:string):ResolvedLibrarySkill & {instructions:string};
 export function createSkillLibrary(dataDirectory:string):{

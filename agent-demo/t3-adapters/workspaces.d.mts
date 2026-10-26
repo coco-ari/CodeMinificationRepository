@@ -1,6 +1,7 @@
 import type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent, WorkspaceBuildContext } from '../../autoops/contracts/workspaces.ts'
 export type { WorkspaceSource, WorkspaceVersion, WorkspaceFile, WorkspaceTask, WorkspaceRelease, WorkspaceOverview, WorkspaceTreeEntry, WorkspaceContent } from '../../autoops/contracts/workspaces.ts'
 export interface WorkspaceStore {
+  deletionReferences(projectId: string, environmentId?: string): import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
   whenIdle(): Promise<void>;
   stopAccepting(): void;
   close(options?: {force?: boolean}): Promise<void>;

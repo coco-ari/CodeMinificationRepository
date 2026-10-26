@@ -17,7 +17,7 @@ const MAX_FILES = 512, MAX_BYTES = 16 * 1024 * 1024, MAX_FILE_BYTES = 4 * 1024 *
 const MAX_READ_BYTES = 256 * 1024
 const IGNORED = new Set(['.git', '.DS_Store', 'Thumbs.db', '.gitignore', '__pycache__'])
 const HOSTS = new Set(['github.com', 'gitlab.com', 'gitee.com', 'codeberg.org'])
-const TOOL_NAMES = new Set(['list_project_materials', 'read_project_document', 'read_project_material', 'read_attachment', 'query_environment', 'ask_user', 'create_report'])
+const TOOL_NAMES = new Set(['list_project_materials', 'read_project_document', 'read_project_material', 'read_attachment', 'query_environment', 'read_environment', 'ask_user', 'create_report'])
 const sha = value => createHash('sha256').update(value).digest('hex')
 const now = () => new Date().toISOString()
 const clone = value => structuredClone(value)
@@ -237,6 +237,13 @@ function libraryRoot(dataDirectory) {
   return root
 }
 export function readSkillLibrary(dataDirectory) { const root = libraryRoot(dataDirectory); return clone(loadState(root)) }
+export function projectSkillDeletionReferences(dataDirectory, projectId, environmentId) {
+  if (environmentId !== undefined) return []
+  const root = resolve(dataDirectory,'t3','skill-library-v2')
+  if (!existsSync(join(root,'index.json'))) return []
+  const count = loadState(root).assignments.filter(value => value.targetType === 'project' && value.targetId === projectId).length
+  return count ? [{kind:'project-skills',count,message:'项目仍有技能分配'}] : []
+}
 function getVersion(state, skillId, versionId) {
   const skill = state.skills.find(entry => entry.id === safeId(skillId)), version = skill?.versions.find(entry => entry.id === safeId(versionId))
   if (!skill || !version) missing()

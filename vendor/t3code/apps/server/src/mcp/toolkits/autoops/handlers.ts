@@ -19,6 +19,8 @@ import { configuredHostResourceCatalog as configuredBusinessResourceCatalog } fr
 import { businessToolRun } from "../../../autoops/businessToolScope.ts";
 import { createBusinessRunInputs } from "../../../../../../../../agent-demo/t3-adapters/thread-inputs.ts";
 import { configuredWorkspaceManagement } from "../../../../../../../../agent-demo/t3-adapters/workspace-management.ts";
+import { configuredEnvironmentMcp } from "../../../../../../../../agent-demo/t3-adapters/environment-mcp-runtime.ts";
+import { environmentRunScope } from "../../../../../../../../agent-demo/t3-adapters/environment-run-inputs.ts";
 
 function artifacts() {
   const store = configuredBusinessArtifactStore();
@@ -100,7 +102,7 @@ const current = (inputId: string) => Effect.gen(function* () {
   });
   const catalog = configuredBusinessResourceCatalog({ attachmentsDir: config.attachmentsDir, readFile: (path) => Effect.runPromise(fs.readFile(path)) });
   const resourceHistory = { runId, actorId: authorized.actorId, referencePaths, attachmentIds: files.map((file) => file.id), acceptedAt: historyRun ? DateTime.formatIso(historyRun.requestedAt) : "" };
-  return { caller, authorized, runId, tools, catalog, referenceInputIds, resourceHistory };
+  return { caller, authorized, runId, tools, catalog, referenceInputIds, resourceHistory, access };
 });
 const invoke = (inputId: string, operation: (context: Effect.Success<ReturnType<typeof current>>) => Promise<Record<string, unknown>>) => current(inputId).pipe(
   Effect.flatMap((context) => Effect.tryPromise({ try: () => operation(context), catch: toolFailure }).pipe(
@@ -116,7 +118,20 @@ export const layer = Access.toLayer(AutoOpsToolkit, {
     return catalog.readForThread(caller.thread.threadId, path, inputId, referenceInputIds, resourceHistory);
   })),
   read_attachment: Access.readsAsCaller(({ inputId, id }) => invoke(inputId, ({ caller, tools }) => tools.readAttachment(caller.thread.threadId, id))),
-  query_environment: Access.readsAsCaller(({ inputId, environmentId }) => invoke(inputId, ({ caller, tools }) => tools.queryEnvironment(caller.thread.threadId, environmentId))),
+  query_environment: Access.readsAsCaller(({ inputId }) => invoke(inputId, async ({ caller, runId, access }) => ({
+    source: 'environment_mcp_catalog',
+    ...configuredEnvironmentMcp(access).readRun(environmentRunScope(access, caller.thread.threadId, runId)),
+  }))),
+  read_environment: Access.readsAsCaller(({ inputId, operation }) => current(inputId).pipe(
+    Effect.flatMap(context => Effect.tryPromise({
+      try: async signal => {
+        const scope = environmentRunScope(context.access, context.caller.thread.threadId, context.runId)
+        return { ...await configuredEnvironmentMcp(context.access).invoke(scope, operation, signal) }
+      }, catch: toolFailure,
+    }).pipe(Effect.tap(() => current(inputId).pipe(Effect.flatMap(latest =>
+      latest.runId === context.runId && latest.authorized.actorId === context.authorized.actorId ? Effect.void : unavailable(),
+    ))))),
+  )),
   create_report: Access.readsAsCaller((input) => invoke(input.inputId, ({ caller, runId, tools }) => tools.createReport(caller.thread.threadId, runId, input))),
   ask_user: Access.readsAsCaller((input) => current(input.inputId).pipe(Effect.flatMap(() => Effect.gen(function* () {
     // 表单客户端只属于本次调用，不能跨用户或提供商会话保留。

@@ -1012,6 +1012,13 @@
       "version": "2.0.0",
       "license": "MIT",
       "sourceUrl": "https://github.com/devongovett/png.js"
+    },
+    {
+      "repositoryUrl": "https://github.com/redis/node-redis",
+      "version": "6.3.0",
+      "license": "MIT",
+      "noticeFile": "third-party-notices/node-redis-6.3.0-LICENSE.txt",
+      "sourceUrl": "https://github.com/redis/node-redis/blob/redis%406.3.0/LICENSE"
     }
   ]
 }

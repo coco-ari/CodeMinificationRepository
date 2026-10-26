@@ -5,6 +5,7 @@ import type {WorkspaceStore} from './workspaces.mjs';
 import type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
 export type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
 export interface DeploymentStore {
+ deletionReferences(projectId:string,environmentId?:string):import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
  initialize():Promise<DeploymentStore>;
  ensureProject(project:AutoOpsProject):Promise<void>;
  overview(project:AutoOpsProject,environmentIds:string[]):DeploymentOverview;
@@ -42,6 +43,7 @@ export interface DeploymentStore {
 }
 export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;workspaceManagement?:WorkspaceManagement;access:Pick<AutoOpsAccess,'requireDeploymentActor'|'requireDeploymentActionForActor'|'requireDeploymentNodeManagerForActor'|'requireDeploymentNodeManager'>;agentPort?:number;installAssetsRoot?:string;publicOrigin?:string}):DeploymentStore;
 export function configuredDeploymentStore():DeploymentStore|undefined;
+export function configuredDeploymentDeletionReferences(projectId:string,environmentId?:string):import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
 
 export function stopConfiguredDeploymentStore():void;
 export function closeConfiguredDeploymentStore():Promise<void>;

@@ -731,6 +731,36 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         limits: { ...limits },
       }
     },
+    deletionReferences(projectId: string, environmentId?: string) {
+      if (environmentId !== undefined) return []
+      const count = (query: string) => Number(db.prepare(query).get(projectId)?.n ?? 0)
+      return [
+        {
+          kind: 'workspace-current',
+          count: count('SELECT COUNT(*) AS n FROM authoring_entries WHERE project_id=?'),
+          message: '工作区仍有当前资料',
+        },
+        {
+          kind: 'project-repositories',
+          count: count('SELECT COUNT(*) AS n FROM authoring_repositories WHERE project_id=?'),
+          message: '项目仍有仓库连接',
+        },
+        {
+          kind: 'workspace-inputs',
+          count: count(
+            "SELECT COUNT(*) AS n FROM authoring_captures WHERE project_id=? AND status='active'",
+          ),
+          message: '资料仍有活动或未知输入',
+        },
+        {
+          kind: 'workspace-fixed-inputs',
+          count: count(
+            "SELECT COUNT(*) AS n FROM authoring_inputs WHERE project_id=? AND json_extract(value,'$.status')='active'",
+          ),
+          message: '仍有活动或未知固定输入',
+        },
+      ].filter((value) => value.count > 0)
+    },
     removeSource(
       projectId: string,
       sourceId: string,

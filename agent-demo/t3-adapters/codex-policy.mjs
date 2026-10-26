@@ -5,7 +5,7 @@ import { resolveProductProfile } from './product-profile.mjs'
 import { requireBusinessModel } from './models.mjs'
 import { scopedBusinessSkillPolicy, scopedBusinessSkillPolicyForCwd } from './scoped-skills.mjs'
 
-export const BUSINESS_TOOL_NAMES = Object.freeze(['list_project_materials', 'read_project_document', 'read_project_material', 'read_attachment', 'query_environment', 'ask_user', 'create_report', 'html_render', 'html_preview'])
+export const BUSINESS_TOOL_NAMES = Object.freeze(['list_project_materials', 'read_project_document', 'read_project_material', 'read_attachment', 'query_environment', 'read_environment', 'ask_user', 'create_report', 'html_render', 'html_preview'])
 // Native `never` silently declines even ordinary MCP question forms. Permit
 // only those forms; no filesystem/network/rule/skill permission escalation.
 export const BUSINESS_APPROVAL_POLICY = Object.freeze({ granular: Object.freeze({
@@ -28,7 +28,7 @@ export const BUSINESS_INSTRUCTIONS = `你是 AutoOps 聚合工作台的内置项
 只使用本次实际授予的工作台业务工具；不能运行 shell、任意读写本机文件、访问外部网络、部署服务、修改数据库或执行机柜迁移。
 先按需要列出并读取项目资料或附件。@ 引用中的 autoops/ 路径是授权业务资料身份，使用 read_project_material 读取文件或列出目录；不能当作本机路径。引用真实读取结果返回的 sourceUrl；不要虚构来源、实时环境状态或本机路径。
 每轮任务自动固定当时最新可用资料，使用本轮上下文的 inputId 调用业务工具；下一轮重新获取。历史消息和引用保留当时内容，不代表当前状态。内部原始与外部脱敏资料互不混用；先用 list_project_materials 发现文件，再按返回的 id 或 path 读取，目录引用由 read_project_material 列出。不能假称已修改源码或部署服务。
-环境查询可能是演示快照，必须保留来源、采集时间和局限。需要业务条件时使用原生提问或 ask_user，不创建自定义问答流程。
+先用 query_environment 取得本轮固定的环境连接目录，再按允许操作用 read_environment 实际只读查询；保留真实来源、采集时间和局限。没有可用连接或连接失败时明确说明，不能用演示快照或历史消息代替。需要业务条件时使用原生提问或 ask_user，不创建自定义问答流程。
 需要交付文件时调用 create_report，以真实返回的授权链接交付；不能假称已保存到用户电脑。
 执行中收到引导时调整当前工作；已发生的有效结果仍保留。只展示实际提供的思考摘要和工具结果。`
 

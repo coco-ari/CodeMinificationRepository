@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 /** Internal only: never serialize a device principal or put it in logs. */
 export interface CustomerDevicePrincipal { deviceId: string; ownerId: string; tokenHash: string }
 export interface CustomerRegistry {
+  deletionReferences(projectId: string, environmentId?: string): import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
   createPairing(ownerId: string, input?: {label?: string}): {pairingCode: string; expiresAt: string};
   consumePairing(pairingCode: string, input: {label: string; platform?: string; connectorVersion?: string}): {device: CustomerDevice; deviceToken: string};
   authenticateToken(token: string): CustomerDevicePrincipal;

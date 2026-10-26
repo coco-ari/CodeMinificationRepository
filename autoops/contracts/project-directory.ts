@@ -47,6 +47,32 @@ export const SaveEnvironmentCommand = S.Struct({
   value: EnvironmentDetails,
 })
 export const SaveMemberCommand = S.Struct({ ...DirectoryCommand.fields, value: MembershipDetails })
+export const DeleteDirectoryCommand = S.Struct({
+  requestId: DirectoryId,
+  expectedRevision: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1)),
+})
+export interface DeletionBlocker {
+  kind: string
+  count: number
+  message: string
+}
+export interface DeletionPreview {
+  revision: number
+  canDelete: boolean
+  blockers: DeletionBlocker[]
+  truncated: boolean
+}
+export interface DirectoryDeletionResult {
+  deleted: true
+  projectId: string
+  environmentId?: string
+}
+export interface ProjectDeletionReceipt {
+  state: 'pending' | 'deleted' | 'blocked'
+  projectId: string
+  requestId: string
+  blockers: DeletionBlocker[]
+}
 
 export interface ProjectWriteUnavailable {
   saved: true

@@ -95,7 +95,9 @@ export default mergeConfig(
         // would still be bundled — which silently inlined native loaders such
         // as node-gyp-build, losing native acceleration.
         alwaysBundle: shouldBundleCliDependency,
-        neverBundle: (id: string) => isExternalCliDependency(id),
+        // 业务协议 SDK 随根发行保留完整锁定依赖，不能展开可选的本机加速模块。
+        neverBundle: (id: string) => isExternalCliDependency(id) ||
+          ['mysql2', 'redis', 'ssh2', 'node-sql-parser'].some(name => id === name || id.startsWith(`${name}/`)),
         onlyBundle: false,
       },
       banner: {

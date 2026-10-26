@@ -35,7 +35,7 @@ function secret(input: GitCredential): GitCredential {
   // 保留秘密本身的空格，不能用展示字段的规范化改变有效凭证。
   if (typeof input.username !== 'string' || !input.username || input.username.length > 1000 || /[\x00-\x1f\x7f]/.test(input.username)
     || typeof input.password !== 'string' || !input.password || input.password.length > 16000 || /[\x00-\x1f\x7f]/.test(input.password))
-    return fail(400, 'CREDENTIAL_SECRET_INVALID', '请提供有效的 Git 用户名与访问令牌')
+    return fail(400, 'CREDENTIAL_SECRET_INVALID', '请提供有效的用户名与访问令牌或密码')
   return { username: input.username, password: input.password }
 }
 function protectedKey(options: ProjectCredentialOptions): Buffer {
@@ -169,6 +169,15 @@ export function createProjectCredentialService(options: ProjectCredentialOptions
     list(actorId: string, projectId: string): WorkspaceCredentialMetadata[] {
       authorize(actorId, projectId, 'credential.use')
       return db.prepare('SELECT * FROM credentials WHERE project_id=? ORDER BY created_at,id').all(projectId).map(metadata)
+    },
+    deletionReferences(projectId: string, environmentId?: string) {
+      if (environmentId !== undefined) return []
+      const count = Number(
+        db
+          .prepare('SELECT COUNT(*) AS n FROM credentials WHERE project_id=? AND revoked=0')
+          .get(projectId)?.n ?? 0,
+      )
+      return count ? [{ kind: 'project-credentials', count, message: '项目仍有有效凭证' }] : []
     },
     create(actorId: string, projectId: string, input: CredentialCreate): WorkspaceCredentialMetadata {
       const name = text(input.name, '凭证名称'), value = secret(input)
