@@ -43,7 +43,7 @@ export class SourceArchives {
       const actual = await checksum(archive.file);
       if (actual.sha256 !== archive.sha256 || actual.size !== archive.size) throw new HttpError(409, '源码包校验失败，未登记版本档案');
       const existing = this.store.state.deployments.sourceArchives.find(item => item.applicationId === task.applicationId && item.sha256 === actual.sha256);
-      const record = { ...(existing || { id: randomUUID(), applicationId: task.applicationId, createdAt: stamp() }), ...actual, deletedAt: null, integrity: 'verified' };
+      const record = { ...(existing || { id: randomUUID(), applicationId: task.applicationId, createdAt: stamp() }), ...actual, deletedAt: null, purgedAt: null, integrity: 'verified' };
       record.origins ||= [];
       const origin = task.sourceKind === 'workspace-package'
         ? { sourceKind: task.sourceKind, sourceIdentity: structuredClone(task.sourceIdentity), revision: archive.revision }
@@ -147,6 +147,9 @@ export class SourceArchives {
           const repeated = data.sourceClearRequests.find(item => item.requestId === input.requestId);
           if (repeated) {
             if (repeated.fingerprint !== fingerprint) throw new HttpError(409, '同一请求标识不能用于不同清理操作或操作人');
+            const release = data.releases.find(item => item.id === releaseId && item.applicationId === applicationId);
+            const record = data.sourceArchives.find(item => item.id === release?.sourceArchiveId);
+            if (record?.deletedAt && !record.purgedAt) discarded = { ...record };
             return;
           }
         }
@@ -165,10 +168,25 @@ export class SourceArchives {
         state.events.unshift({ id: randomUUID(), projectId: release.sourceSnapshot?.id || null, applicationId, action: 'archive-clear', message: `已清理版本源码档案：${releaseId}`, at: stamp() });
         if (input) data.sourceClearRequests.push({ requestId:input.requestId, fingerprint });
       });
-      if (discarded) await rm(this.file(discarded), { force: true });
+      if (discarded) await this.#purge([discarded]);
       this.deployment.changed('releases', releaseId, applicationId);
       return { ok: true };
     });
+  }
+  async #purge(records) {
+    const removed = [], errors = [];
+    for (const record of records) {
+      try { await rm(this.file(record), { force: true }); removed.push(record); }
+      catch (error) { errors.push(error); }
+    }
+    if (removed.length) await this.store.change(state => {
+      for (const item of removed) {
+        const record = state.deployments.sourceArchives.find(value => value.id === item.id);
+        // 物理删除与持久标记分开；落盘失败时下次继续核对，不撤销已完成的逻辑清理。
+        if (record?.deletedAt === item.deletedAt) record.purgedAt = stamp();
+      }
+    });
+    if (errors.length) throw new AggregateError(errors, '部分源码档案清理未完成，将在下次维护时重试');
   }
   async cleanup() {
     return this.serial(async () => {
@@ -178,9 +196,14 @@ export class SourceArchives {
         for (const task of data.tasks) if (!terminal.has(task.status) || Date.now() - Date.parse(task.finishedAt || task.createdAt) < 7 * 86400000) {
           keep.add(task.sourceArchiveId); keep.add(task.baselineSource?.archiveId);
         }
-        for (const record of data.sourceArchives) if (!record.deletedAt && !keep.has(record.id) && Date.now() - Date.parse(record.createdAt) >= 7 * 86400000) { record.deletedAt = stamp(); discarded.push({ ...record }); }
+        for (const record of data.sourceArchives) {
+          if (keep.has(record.id) || record.purgedAt) continue;
+          if (!record.deletedAt && Date.now() - Date.parse(record.createdAt) >= 7 * 86400000) record.deletedAt = stamp();
+          // 包含旧发行留下的删除标记，进程重启后仍能补完物理回收。
+          if (record.deletedAt) discarded.push({ ...record });
+        }
       });
-      for (const record of discarded) await rm(this.file(record), { force: true });
+      await this.#purge(discarded);
     });
   }
 }
