@@ -124,3 +124,11 @@ export const ApiError = S.Struct({
   }),
 })
 export const LoginResult = S.Struct({ user: User, csrfToken: S.String, expiresAt: S.Number })
+
+/** 合同由定义它的 Schema 实例解析，避免宿主独立依赖中的内部标识混用。 */
+export function decodeContract<T extends S.ConstraintDecoder<unknown>>(
+  schema: T,
+  input: unknown,
+): T['Type'] {
+  return S.decodeUnknownSync(schema, { onExcessProperty: 'error' })(input)
+}

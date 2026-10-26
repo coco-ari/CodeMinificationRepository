@@ -1,6 +1,6 @@
 import * as ByteSize from 'effect/ByteSize'
 import * as HttpIncomingMessage from 'effect/http/HttpIncomingMessage'
-import * as S from 'effect/Schema'
+import { decodeContract } from '../../../../../../../autoops/contracts/index.ts'
 import { ThreadBindingRequest } from '../../../../../../../autoops/contracts/assistants.ts'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -56,7 +56,7 @@ HttpRouter.add("POST", "/autoops/thread-bindings", Effect.gen(function* () {
       if (typeof input !== "object" || input === null || Array.isArray(input)) {
         return HttpServerResponse.jsonUnsafe({ code: "INVALID_BINDING", error: "会话绑定格式无效" }, { status: 400 });
       }
-      const binding = yield* S.decodeUnknownEffect(ThreadBindingRequest, { onExcessProperty: 'error' })(input).pipe(Effect.mapError(() => ({ status: 400, code: 'INVALID_BINDING', message: '会话参数字段、格式或长度无效' })));
+      const binding = yield* Effect.try(() => decodeContract(ThreadBindingRequest,input)).pipe(Effect.mapError(() => ({ status: 400, code: 'INVALID_BINDING', message: '会话参数字段、格式或长度无效' })));
       // 未完成业务绑定的原生会话不能由当前用户自行认领。
       if (typeof binding.threadId === "string") {
         const existing = access.getThreadBinding(binding.threadId);

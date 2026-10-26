@@ -151,7 +151,9 @@ it('受限成员自动载入默认助手，参数可见但没有范围调整入�
   await expect.element(screen.getByRole('button', { name: '助手', exact: true })).toHaveFocus()
   await userEvent.tab()
   await expect.element(screen.getByLabelText('资料范围', { exact: true })).toHaveFocus()
-  await expect.element(page.getByRole('tooltip')).toHaveTextContent('外部当前资料')
+  await expect
+    .element(page.getByRole('tooltip'))
+    .toHaveTextContent('外部当前资料 · 由项目管理员设置')
   const scope = readAutoOpsThreadScope(id, 'assistant-project')!
   expect(scope.question?.assistantId).toBe('second')
   expect(scope.environmentId).toBeNull()

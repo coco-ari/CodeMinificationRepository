@@ -59,7 +59,7 @@ it('紧凑布局的只读参数可用键盘查看实际值，不产生调整菜�
   )
   await userEvent.tab()
   await expect.element(screen.getByLabelText('业务环境', { exact: true })).toHaveFocus()
-  await expect.element(page.getByRole('tooltip')).toHaveTextContent('测试环境')
+  await expect.element(page.getByRole('tooltip')).toHaveTextContent('测试环境 · 由项目管理员设置')
   await userEvent.keyboard('{Enter}')
   await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
   expect(onChange).not.toHaveBeenCalled()

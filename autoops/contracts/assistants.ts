@@ -31,6 +31,7 @@ export const QuestionConfiguration = S.Struct({
   model: AssistantModel,
   skillIds: S.Array(RunnerReferenceId).check(S.isMaxLength(32)),
 })
+export const QuestionSkillIdsJson = S.fromJsonString(QuestionConfiguration.fields.skillIds)
 export type QuestionConfiguration = typeof QuestionConfiguration.Type
 export const AssistantDetails = S.Struct({
   name: Name,

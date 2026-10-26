@@ -48,6 +48,8 @@ it('客户工作区读取失败后可用键盘重试，恢复显示但不改变�
     workspaces: [{ ...scope.executionBinding, label: '已登记测试目录', status: 'active' }],
   })
   await userEvent.tab()
+  await expect.element(screen.getByLabelText('对话工作区', { exact: true })).toHaveFocus()
+  await userEvent.tab()
   await expect.element(page.getByRole('button', { name: '工作区读取失败，重试' })).toHaveFocus()
   await userEvent.keyboard('{Enter}')
   await vi.waitFor(() => expect(screen.container.textContent).toContain('已登记测试目录'))
