@@ -34,7 +34,6 @@ import type {
   WorkspaceMoveInput,
   WorkspaceRepositorySource,
   WorkspaceResolvedRepository,
-  WorkspaceSourceInput,
   WorkspaceTextSaveInput,
   WorkspaceUploadInput,
 } from '../../../autoops/contracts/workspace-authoring.ts'
@@ -349,9 +348,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
     authorize(
       projectId,
       actorId,
-      ['save-source', 'save-repository', 'remove-repository'].includes(operation)
-        ? 'source-manage'
-        : 'manage',
+      ['save-repository', 'remove-repository'].includes(operation) ? 'source-manage' : 'manage',
       true,
     )
     const requestId = id(input.requestId),
@@ -733,23 +730,6 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         entries: rows(projectId).map(entryFrom),
         limits: { ...limits },
       }
-    },
-    saveSource(
-      projectId: string,
-      input: WorkspaceSourceInput & WorkspaceAuthoringMutation,
-      actorId: string,
-    ) {
-      const sourceId = input.id === undefined ? undefined : id(input.id)
-      const normalized = normalizeSource(input, sourceId ?? 'new-source')
-      return mutation(projectId, actorId, 'save-source', input, normalized, () => {
-        if (sourceId && !repositoryRows(projectId).some((source) => source.id === sourceId))
-          fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '仓库来源不存在')
-        if (!sourceId && repositoryRows(projectId).length >= 32)
-          fail(413, 'REPOSITORY_LIMIT', '每个项目最多配置 32 个仓库连接')
-        const value = { ...normalized, id: sourceId ?? randomUUID() }
-        persistRepository(projectId, value)
-        return persistSource(projectId, value)
-      })
     },
     removeSource(
       projectId: string,

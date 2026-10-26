@@ -43,7 +43,11 @@ async function fixture(t) {
   const memberships = [owner, 'second', 'reader', 'external'].map((userId) => ({
     userId,
     workspaceAccess: userId === 'external' ? 'external' : 'internal',
-    role: ['manager', 'second'].includes(userId) ? 'project_admin' : userId === 'external' ? 'external' : 'reader',
+    role: ['manager', 'second'].includes(userId)
+      ? 'project_admin'
+      : userId === 'external'
+        ? 'external'
+        : 'reader',
     status: 'active',
     environmentIds: userId === 'external' ? [] : ['env-test'],
   }))
@@ -236,15 +240,26 @@ async function fixture(t) {
     return { input, bytes, result: body }
   }
   const source = async (role, credentialId) => {
+    const connection = authoring.saveRepository(
+      projectId,
+      null,
+      {
+        ...mutation(),
+        value: {
+          name: `${role} 仓库`,
+          url: `https://github.com/fixtures/${role}.git`,
+          ...(credentialId ? { credentialId } : {}),
+        },
+      },
+      owner,
+    ).repository
     const input = {
       ...mutation(),
-      name: `${role} 仓库`,
+      id: connection.id,
       role,
-      url: `https://github.com/fixtures/${role}.git`,
       refKind: 'default',
       ref: '',
       mountPath: role === 'frontend' ? 'apps/web' : 'services/api',
-      ...(credentialId ? { credentialId } : {}),
     }
     return (await http('sources', { method: 'POST', input: { action: 'save', input } })).body.source
   }
@@ -764,14 +779,16 @@ test('只沿用当前配置已同步的源码，未同步和改过配置的仓�
     partial.sourceWarnings.map((issue) => issue.sourceId),
     [source.id],
   )
-  const updated = await f.http('sources', {
-    method: 'POST',
-    input: {
-      action: 'save',
-      input: { ...source, ...f.mutation(), url: 'https://github.com/fixtures/changed.git' },
+  const updated = f.authoring.saveRepository(
+    projectId,
+    source.id,
+    {
+      ...f.mutation(),
+      value: { name: source.name, url: 'https://github.com/fixtures/changed.git' },
     },
-  })
-  assert.equal(updated.status, 200)
+    owner,
+  )
+  assert.equal(updated.repository.url, 'https://github.com/fixtures/changed.git')
   const changed = await capture('changed-source')
   assert.equal(changed.repositories.length, 0)
   assert.equal(changed.sourceWarnings, undefined)
@@ -844,7 +861,13 @@ test('已选源码引用在新轮Git失败时仍能按所选原件读取，未�
   f.control.failResolve = true
   const inputs = createBusinessRunInputs(f.access, f.service)
   f.access.recordMessageActor(principal, 'selected', 'current-command', 'current-message')
-  const current = await inputs.prepare('selected', 'current', undefined, undefined, 'current-message')
+  const current = await inputs.prepare(
+    'selected',
+    'current',
+    undefined,
+    undefined,
+    'current-message',
+  )
   assert.equal(current.repositories.length, 1)
   assert.equal(current.sourceErrors, undefined)
   assert.equal(current.sourceWarnings[0].code, 'WORKSPACE_GIT_FAILED')
@@ -1404,4 +1427,58 @@ test('跨API复用原请求时失败部署不释放活跃Agent捕获或其他任
     f.service.readInputFile(projectId, recovered.id, 'apps/web/README.md', owner).bytes.toString(),
     /固定源码/,
   )
+})
+
+test('工作区 HTTP 只保存项目仓库使用配置，拒绝 URL 凭证和跨项目来源', async (t) => {
+  const f = await fixture(t)
+  const source = await f.source('frontend')
+  const usage = {
+    id: source.id,
+    role: 'documentation',
+    refKind: 'branch',
+    ref: 'workspace-only',
+    mountPath: 'repositories/code',
+  }
+  const input = { ...f.mutation(), ...usage }
+  const updated = await f.http('sources', { method: 'POST', input: { action: 'save', input } })
+  assert.equal(updated.body.source.ref, 'workspace-only')
+  assert.equal(updated.body.source.url, source.url)
+  assert.deepEqual(f.authoring.repositories(projectId, owner).items, [
+    { id: source.id, name: source.name, url: source.url },
+  ])
+  assert.deepEqual(
+    (await f.http('sources', { method: 'POST', input: { action: 'save', input } })).body,
+    updated.body,
+  )
+  for (const forged of [
+    { url: 'https://github.com/fixtures/other.git' },
+    { credentialId: 'foreign-credential' },
+    { password: 'fictional-secret' },
+    { name: '改写连接' },
+  ]) {
+    await assert.rejects(
+      f.http('sources', {
+        method: 'POST',
+        input: { action: 'save', input: { ...f.mutation(), ...usage, ...forged } },
+      }),
+      (error) => error.status === 400 && error.code === 'WORKSPACE_REQUEST_INVALID',
+    )
+  }
+  await assert.rejects(
+    f.http('sources', {
+      method: 'POST',
+      actor: 'reader',
+      input: { action: 'save', input: { ...f.mutation(), ...usage } },
+    }),
+    (error) => error.status === 403,
+  )
+  await assert.rejects(
+    f.http('sources', {
+      method: 'POST',
+      input: { action: 'save', input: { ...f.mutation(), ...usage, id: 'foreign-repository' } },
+    }),
+    (error) => error.status === 404,
+  )
+  assert.equal(f.authoring.overview(projectId, owner).sources[0].ref, 'workspace-only')
+  assert.equal(f.calls.fetch.length, 0)
 })

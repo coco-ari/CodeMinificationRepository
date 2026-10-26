@@ -9,13 +9,13 @@ import type {
   WorkspaceAuthoringResult,
   WorkspaceCredentialMetadata,
   WorkspaceMaterialContent,
-  WorkspaceSourceInput,
+  WorkspaceRepositoryUsageInput,
   WorkspaceUploadInput,
 } from "../../../../../../autoops/contracts/workspace-authoring";
 export type * from "../../../../../../autoops/contracts/workspace-authoring";
 
 export type AuthoringCommand =
-  | { kind: "source"; action: "save"; source: WorkspaceSourceInput }
+  | { kind: "source"; action: "save"; source: WorkspaceRepositoryUsageInput }
   | { kind: "source"; action: "remove"; id: string }
   | {
       kind: "credential";

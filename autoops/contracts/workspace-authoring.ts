@@ -22,6 +22,10 @@ export interface WorkspaceRepositoryUsage extends WorkspaceAuthoringMutation {
   mountPath: string
   sourcePath?: string
 }
+export type WorkspaceRepositoryUsageInput = Omit<
+  WorkspaceRepositoryUsage,
+  keyof WorkspaceAuthoringMutation
+>
 
 export interface WorkspaceRepositorySource {
   id: string

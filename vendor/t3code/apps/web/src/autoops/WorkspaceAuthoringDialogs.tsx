@@ -31,10 +31,11 @@ import {
   type WorkspaceCredentialMetadata,
   type WorkspaceMaterialEntry,
   type WorkspaceRepositorySource,
-  type WorkspaceSourceInput,
+  type WorkspaceRepositoryUsageInput,
   type WorkspaceUploadInput,
 } from './workspaceAuthoring'
 import type { WorkspaceAuthoringController } from './useWorkspaceAuthoring'
+import { loadProjectRepositories, type ProjectRepositoryConnection } from './projectRepositories'
 import { WorkspaceSubmissionNotice } from './WorkspaceActions'
 
 export const WorkspaceAuthoringFocus = createContext<(() => HTMLElement | null) | undefined>(
@@ -58,7 +59,7 @@ export function AuthoringSelect({
 }: {
   label: string
   value: string
-  options: ReadonlyArray<{ value: string; label: string }>
+  options: ReadonlyArray<{ value: string; label: string; disabled?: boolean }>
   onChange: (value: string) => void
   disabled?: boolean
 }) {
@@ -78,7 +79,7 @@ export function AuthoringSelect({
         </SelectTrigger>
         <SelectPopup>
           {options.map((option) => (
-            <SelectItem value={option.value} key={option.value}>
+            <SelectItem value={option.value} key={option.value} disabled={option.disabled ?? false}>
               {option.label}
             </SelectItem>
           ))}
@@ -188,44 +189,60 @@ function AuthoringDialog({
 export function WorkspaceSourceDialog({
   controller,
   source,
+  projectId,
   onClose,
-}: EditorProps & { source?: WorkspaceRepositorySource | undefined }) {
-  const initial: WorkspaceSourceInput = source ?? {
-    name: '',
-    role: 'other',
-    url: '',
-    refKind: 'default',
-    ref: '',
-    mountPath: '',
-    sourcePath: '',
+}: EditorProps & { projectId: string; source?: WorkspaceRepositorySource | undefined }) {
+  const initial: WorkspaceRepositoryUsageInput = {
+    id: source?.id ?? '',
+    role: source?.role ?? 'other',
+    refKind: source?.refKind ?? 'default',
+    ref: source?.ref ?? '',
+    mountPath: source?.mountPath ?? '',
+    ...(source?.sourcePath ? { sourcePath: source.sourcePath } : {}),
   }
+  const [repositories, setRepositories] = useState<ProjectRepositoryConnection[] | null>(null)
+  const [readError, setReadError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    const abort = new AbortController()
+    setRepositories(null)
+    setReadError(null)
+    void loadProjectRepositories(projectId, abort.signal)
+      .then((result) => {
+        if (!abort.signal.aborted) setRepositories(result.items)
+      })
+      .catch((cause: unknown) => {
+        if (abort.signal.aborted) return
+        setReadError(cause instanceof Error ? cause.message : '项目仓库暂时不可用')
+      })
+    return () => abort.abort()
+  }, [projectId, attempt])
   const [input, setInput] = useState(initial)
   const [error, setError] = useState<string | null>(null)
   const form = useId()
-  const field = <K extends keyof WorkspaceSourceInput>(key: K, value: WorkspaceSourceInput[K]) =>
-    setInput((current) => ({ ...current, [key]: value }))
+  const field = <K extends keyof WorkspaceRepositoryUsageInput>(
+    key: K,
+    value: WorkspaceRepositoryUsageInput[K],
+  ) => setInput((current) => ({ ...current, [key]: value }))
   const save = async () => {
     setError(null)
     try {
-      const url = new URL(input.url)
-      if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
-        throw new Error('请填写不含账号、密码或查询参数的 HTTPS 仓库地址。')
+      if (!repositories?.some((repository) => repository.id === input.id))
+        throw new Error('请选择当前项目可用的仓库。')
       if (
-        !input.name.trim() ||
         !validMaterialPath(input.mountPath) ||
         (input.sourcePath && !validMaterialPath(input.sourcePath))
       )
-        throw new Error('请填写名称和有效的项目相对目录。')
+        throw new Error('请填写有效的项目相对目录。')
       if (input.refKind !== 'default' && !input.ref.trim())
         throw new Error('请填写分支、标签或提交。')
-      const { credentialId, sourcePath, ...definition } = input
+      const { sourcePath, ...definition } = input
       if (
         await controller.submit({
           kind: 'source',
           action: 'save',
           source: {
             ...definition,
-            ...(credentialId ? { credentialId } : {}),
             ...(sourcePath ? { sourcePath } : {}),
             ref: input.refKind === 'default' ? '' : input.ref.trim(),
           },
@@ -243,7 +260,13 @@ export function WorkspaceSourceDialog({
       busy={controller.busy}
       dirty={JSON.stringify(input) !== JSON.stringify(initial)}
       footer={
-        <Button type="submit" form={form} disabled={controller.busy}>
+        <Button
+          type="submit"
+          form={form}
+          disabled={
+            controller.busy || !repositories?.some((repository) => repository.id === input.id)
+          }
+        >
           保存来源
         </Button>
       }
@@ -256,36 +279,58 @@ export function WorkspaceSourceDialog({
           void save()
         }}
       >
-        <AuthoringField label="名称">
-          <Input
-            aria-label="来源名称"
-            value={input.name}
-            disabled={controller.busy}
-            onChange={(event) => field('name', event.target.value)}
-          />
-        </AuthoringField>
-        <AuthoringField label="HTTPS 仓库地址">
-          <Input
-            aria-label="HTTPS 仓库地址"
-            value={input.url}
-            disabled={controller.busy}
-            placeholder="https://github.com/team/repository.git"
-            onChange={(event) => field('url', event.target.value)}
-          />
-        </AuthoringField>
+        <AuthoringSelect
+          label="项目仓库"
+          value={input.id}
+          options={[
+            { value: '', label: '请选择仓库' },
+            ...(repositories ?? []).map((repository) => ({
+              value: repository.id,
+              label: repository.name,
+              disabled:
+                !source && !!controller.overview?.sources.some((item) => item.id === repository.id),
+            })),
+            ...(source && !repositories?.some((repository) => repository.id === source.id)
+              ? [{ value: source.id, label: `${source.name} · 已不可用`, disabled: true }]
+              : []),
+          ]}
+          disabled={controller.busy || !!source || !repositories}
+          onChange={(value) => field('id', value)}
+        />
+        {readError ? (
+          <Alert variant="error">
+            <AlertDescription>{readError}</AlertDescription>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={controller.busy}
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              重试项目仓库
+            </Button>
+          </Alert>
+        ) : null}
+        {repositories?.length === 0 ? (
+          <p className="text-sm">
+            尚无项目仓库。
+            <a href={`/projects?projectId=${encodeURIComponent(projectId)}`}>配置项目仓库</a>
+          </p>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <AuthoringSelect
             label="作用"
             value={input.role}
             options={sourceRoles}
-            onChange={(value) => field('role', value as WorkspaceSourceInput['role'])}
+            onChange={(value) => field('role', value as WorkspaceRepositoryUsageInput['role'])}
             disabled={controller.busy}
           />
           <AuthoringSelect
             label="版本引用"
             value={input.refKind}
             options={refKinds}
-            onChange={(value) => field('refKind', value as WorkspaceSourceInput['refKind'])}
+            onChange={(value) =>
+              field('refKind', value as WorkspaceRepositoryUsageInput['refKind'])
+            }
             disabled={controller.busy}
           />
         </div>
@@ -317,18 +362,6 @@ export function WorkspaceSourceDialog({
             onChange={(event) => field('sourcePath', event.target.value)}
           />
         </AuthoringField>
-        <AuthoringSelect
-          label="仓库凭证"
-          value={input.credentialId ?? ''}
-          options={[
-            { value: '', label: '公开仓库，无凭证' },
-            ...controller.credentials
-              .filter((entry) => !entry.revoked)
-              .map((entry) => ({ value: entry.id, label: entry.name })),
-          ]}
-          onChange={(value) => field('credentialId', value)}
-          disabled={controller.busy}
-        />
         {error ? (
           <Alert variant="error">
             <AlertDescription>{error}</AlertDescription>

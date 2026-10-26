@@ -42,7 +42,11 @@ async function fixture(t) {
   const memberships = [owner, 'second', 'reader', 'external'].map((userId) => ({
     userId,
     workspaceAccess: userId === 'external' ? 'external' : 'internal',
-    role: ['manager', 'second'].includes(userId) ? 'project_admin' : userId === 'external' ? 'external' : 'reader',
+    role: ['manager', 'second'].includes(userId)
+      ? 'project_admin'
+      : userId === 'external'
+        ? 'external'
+        : 'reader',
     status: 'active',
     environmentIds: userId === 'external' ? [] : ['env-test'],
   }))
@@ -229,15 +233,26 @@ async function fixture(t) {
     return { input, bytes, result: body }
   }
   const source = async (role, credentialId) => {
+    const connection = authoring.saveRepository(
+      projectId,
+      null,
+      {
+        ...mutation(),
+        value: {
+          name: `${role} 仓库`,
+          url: `https://github.com/fixtures/${role}.git`,
+          ...(credentialId ? { credentialId } : {}),
+        },
+      },
+      owner,
+    ).repository
     const input = {
       ...mutation(),
-      name: `${role} 仓库`,
+      id: connection.id,
       role,
-      url: `https://github.com/fixtures/${role}.git`,
       refKind: 'default',
       ref: '',
       mountPath: role === 'frontend' ? 'apps/web' : 'services/api',
-      ...(credentialId ? { credentialId } : {}),
     }
     return (await http('sources', { method: 'POST', input: { action: 'save', input } })).body.source
   }
@@ -448,7 +463,14 @@ test('多仓与产品运维资料固定为真实版本，显式服务上下文�
     ),
     0,
   )
-  const changedSource = { ...frontend, ...f.mutation(), refKind: 'branch', ref: 'next' }
+  const changedSource = {
+    id: frontend.id,
+    role: frontend.role,
+    mountPath: frontend.mountPath,
+    ...f.mutation(),
+    refKind: 'branch',
+    ref: 'next',
+  }
   await f.http('sources', { method: 'POST', input: { action: 'save', input: changedSource } })
   assert.equal(
     f.service

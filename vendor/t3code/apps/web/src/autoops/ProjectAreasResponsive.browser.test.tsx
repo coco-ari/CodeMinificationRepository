@@ -56,6 +56,7 @@ vi.mock(import('./workspaces'), async (original) => ({
   })),
   searchWorkspaceFiles: vi.fn(async () => ({ entries: [], truncated: false })),
 }))
+vi.mock(import('./projectRepositories'), async original => ({ ...await original(), loadProjectRepositories: vi.fn(async () => ({ revision: 1, items: [] })) }))
 vi.mock(import('./workspaceAuthoring'), async (original) => ({
   ...(await original()),
   loadAuthoring: mocks.authoring,

@@ -61,63 +61,125 @@ function rejectsCode(callback, code) {
   assert.throws(callback, (error) => error.code === code)
 }
 
-test('来源定义持久化、多来源路径互斥和配置修订防止覆盖', async (t) => {
+function saveWorkspaceSource(service, projectId, input, actor) {
+  const connection = input.id
+    ? service.repositories(projectId, actor).items.find((item) => item.id === input.id)
+    : service.saveRepository(
+        projectId,
+        null,
+        {
+          ...request(input.expectedRevision),
+          value: {
+            name: input.name,
+            url: input.url,
+            ...(input.credentialId ? { credentialId: input.credentialId } : {}),
+          },
+        },
+        actor,
+      ).repository
+  return service.configureSource(
+    projectId,
+    {
+      requestId: input.requestId,
+      expectedRevision: service.overview(projectId, actor).revision,
+      id: connection.id,
+      role: input.role,
+      refKind: input.refKind,
+      ref: input.ref,
+      mountPath: input.mountPath,
+      ...(input.sourcePath ? { sourcePath: input.sourcePath } : {}),
+    },
+    actor,
+  )
+}
+
+test('仓库连接与使用配置分别持久化、路径互斥和修订防止覆盖', async (t) => {
   const f = await fixture(t),
     service = f.service
-  const input = { ...request(0), ...source() }
-  const first = service.saveSource('project', input, 'owner')
-  assert.equal(first.revision, 1)
+  const firstConnection = service.saveRepository(
+    'project',
+    null,
+    { ...request(0), value: { name: '前端', url: source().url } },
+    'owner',
+  ).repository
+  const usage = {
+    ...mutation(service),
+    id: firstConnection.id,
+    role: 'frontend',
+    refKind: 'default',
+    ref: '',
+    mountPath: 'frontend',
+  }
+  const first = service.configureSource('project', usage, 'owner')
+  assert.equal(first.revision, 2)
   assert.equal(first.source.refKind, 'default')
   assert.equal(first.source.ref, '')
-  assert.deepEqual(service.saveSource('project', input, 'owner'), first)
+  assert.deepEqual(service.configureSource('project', usage, 'owner'), first)
   rejectsCode(
-    () => service.saveSource('project', { ...input, name: '另一个输入' }, 'owner'),
+    () => service.configureSource('project', { ...usage, mountPath: 'other' }, 'owner'),
     'WORKSPACE_REQUEST_CONFLICT',
   )
   rejectsCode(
-    () => service.saveSource('project', { ...request(0), ...source('backend') }, 'owner'),
+    () => service.configureSource('project', { ...usage, ...request(0) }, 'owner'),
     'WORKSPACE_REVISION_CONFLICT',
   )
+  const backend = service.saveRepository(
+    'project',
+    null,
+    {
+      ...mutation(service),
+      value: { name: '后端', url: source().url, credentialId: 'credential-one' },
+    },
+    'owner',
+  ).repository
   rejectsCode(
     () =>
-      service.saveSource(
+      service.configureSource(
         'project',
-        { ...mutation(service), ...source('frontend/nested') },
+        { ...usage, ...mutation(service), id: backend.id, mountPath: 'frontend/nested' },
         'owner',
       ),
     'WORKSPACE_MOUNT_CONFLICT',
   )
   rejectsCode(
     () =>
-      service.saveSource('project', { ...mutation(service), ...source('docs/product') }, 'owner'),
+      service.configureSource(
+        'project',
+        { ...usage, ...mutation(service), id: backend.id, mountPath: 'docs/product' },
+        'owner',
+      ),
     'WORKSPACE_MOUNT_CONFLICT',
   )
   rejectsCode(
     () =>
-      service.saveSource(
+      service.saveRepository(
         'project',
-        { ...mutation(service), ...source('other'), url: 'https://user:secret@github.com/a/b.git' },
+        null,
+        {
+          ...mutation(service),
+          value: { name: '非法', url: 'https://user:secret@github.com/a/b.git' },
+        },
         'owner',
       ),
     'WORKSPACE_SOURCE_INVALID',
   )
-  const backend = service.saveSource(
+  const saved = service.configureSource(
     'project',
     {
       ...mutation(service),
-      ...source('backend'),
+      id: backend.id,
       role: 'backend',
       refKind: 'tag',
       ref: 'v1.0.0',
+      mountPath: 'backend',
       sourcePath: 'apps/api',
-      credentialId: 'credential-one',
     },
     'owner',
   )
-  assert.equal(backend.source.sourcePath, 'apps/api')
+  assert.equal(saved.source.sourcePath, 'apps/api')
   await f.reopen()
   assert.equal(current(f.service).sources.length, 2)
-  assert.equal(current(f.service).revision, 2)
+  assert.equal(current(f.service).revision, 4)
 })
 
 test('上传真实原件、同名策略、摘要和幂等收据不覆盖并发变更', async (t) => {
@@ -230,7 +292,8 @@ test('捕获保护原件与空目录，替换删除清理和重启后仍读原�
 test('仓库解析与凭证版本一次冻结，同标识不重新选分支', async (t) => {
   const f = await fixture(t),
     service = f.service
-  const created = service.saveSource(
+  const created = saveWorkspaceSource(
+    service,
     'project',
     { ...request(0), ...source(), credentialId: 'private-token' },
     'owner',
@@ -286,7 +349,7 @@ test('仓库解析与凭证版本一次冻结，同标识不重新选分支', as
 
 test('目录移动删除和仅文件名搜索，Git挂载和路径穿越拒绝写入', async (t) => {
   const { service } = await fixture(t)
-  service.saveSource('project', { ...request(0), ...source('repo') }, 'owner')
+  saveWorkspaceSource(service, 'project', { ...request(0), ...source('repo') }, 'owner')
   await assert.rejects(upload(service, 'repo/config.txt', '拒绝'), {
     code: 'WORKSPACE_GIT_READ_ONLY',
   })
@@ -488,7 +551,8 @@ test('文本保存不能省略内容修订条件，超提取预算保留原件�
 
 test('完整提交冻结不能替换配置指定提交，分支解析不能冒充其他分支', async (t) => {
   const { service } = await fixture(t)
-  const fixed = service.saveSource(
+  const fixed = saveWorkspaceSource(
+    service,
     'project',
     { ...mutation(service), ...source(), refKind: 'commit', ref: 'a'.repeat(40) },
     'owner',
@@ -513,7 +577,8 @@ test('完整提交冻结不能替换配置指定提交，分支解析不能冒�
     'WORKSPACE_CAPTURE_RESOLUTION',
   )
   service.releaseCapture('project', capture.id, 'owner')
-  service.saveSource(
+  saveWorkspaceSource(
+    service,
     'project',
     { ...fixed, ...mutation(service), refKind: 'branch', ref: 'release' },
     'owner',

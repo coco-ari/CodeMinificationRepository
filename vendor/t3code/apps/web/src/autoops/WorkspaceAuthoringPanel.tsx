@@ -480,7 +480,12 @@ export function WorkspaceAuthoring({
           </div>
         )}
         {dialog?.type === 'source' ? (
-          <WorkspaceSourceDialog controller={controller} source={dialog.source} onClose={close} />
+          <WorkspaceSourceDialog
+            projectId={projectId}
+            controller={controller}
+            source={dialog.source}
+            onClose={close}
+          />
         ) : null}
         {dialog?.type === 'file' ? (
           <WorkspaceFileEditDialog

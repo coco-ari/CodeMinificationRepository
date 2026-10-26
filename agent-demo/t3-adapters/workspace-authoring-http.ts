@@ -1,7 +1,9 @@
 import type { AutoOpsAccess, AutoOpsPrincipal } from './access.mjs'
 import { configuredWorkspaceStore, WorkspaceError, type WorkspaceStore } from './workspaces.mjs'
 import { configuredWorkspaceManagement, type WorkspaceManagement } from './workspace-management.ts'
-import type { WorkspaceAuthoringMutation, WorkspaceDeploymentSourceInput, WorkspaceExtractionRetryInput, WorkspaceDeleteInput, WorkspaceMoveInput, WorkspaceRepositorySource, WorkspaceSourceInput, WorkspaceTextSaveInput, WorkspaceUploadInput } from '../../autoops/contracts/workspace-authoring.ts'
+import type { WorkspaceAuthoringMutation, WorkspaceDeploymentSourceInput, WorkspaceExtractionRetryInput, WorkspaceDeleteInput, WorkspaceMoveInput, WorkspaceTextSaveInput, WorkspaceUploadInput } from '../../autoops/contracts/workspace-authoring.ts'
+import { decodeContract } from '../../autoops/contracts/index.ts'
+import { ConfigureRepositoryWorkspace } from '../../autoops/contracts/project-repositories.ts'
 import type { CredentialCreate, CredentialReplace, CredentialRevoke } from './credentials.ts'
 
 export interface WorkspaceAuthoringHttpResult {
@@ -67,9 +69,10 @@ export async function handleWorkspaceAuthoringRequest({ access, principal, url, 
     const command = object(body.input)
     if (action === 'sources') {
       if (body.action === 'save') {
-        service.validateSource({ ...command, id: typeof command.id === 'string' ? command.id : 'new-source' } as unknown as WorkspaceRepositorySource)
-        if (command.credentialId) service.credentials.referenceVersion(actor, projectId, identifier(command.credentialId))
-        return ok(service.authoring.saveSource(projectId, command as unknown as WorkspaceSourceInput & WorkspaceAuthoringMutation, actor))
+        let usage
+        try { usage = decodeContract(ConfigureRepositoryWorkspace, command) }
+        catch { return fail(400, 'WORKSPACE_REQUEST_INVALID', '请选择项目仓库并填写有效的工作区使用配置，不接受仓库地址或凭证字段') }
+        return ok(service.authoring.configureSource(projectId, usage, actor))
       }
       if (body.action === 'remove') {
         const sourceId = identifier(command.id)
