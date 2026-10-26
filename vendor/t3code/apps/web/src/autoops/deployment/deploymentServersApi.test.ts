@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { loadDeploymentServers, mutateDeploymentServer, loadGlobalDeploymentNodes, mutateGlobalDeploymentNode } from "./deploymentServersApi";
+import { loadDeploymentServers, mutateDeploymentServer, loadGlobalDeploymentNodes, mutateGlobalDeploymentNode, loadGlobalDeploymentNodeReceipt, loadDeploymentNodeReceipt, matchesDeploymentNodeReceipt, type DeploymentNodeReceipt, type DeploymentServerMutation } from "./deploymentServersApi";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("../apiClient", () => ({ autoOpsRequest: mocks.request }));
@@ -82,4 +82,38 @@ describe("部署节点请求边界", () => {
       label: "平台节点", method: "POST", body: revoke,
     });
   });
+});
+
+
+it("未知结果核对仅GET原requestId并固定平台/项目环境，不携带写入正文", async () => {
+  mocks.request.mockReset().mockResolvedValue(null);
+  const signal = new AbortController().signal;
+  expect(await loadGlobalDeploymentNodeReceipt("original/request", signal)).toBeNull();
+  expect(mocks.request).toHaveBeenLastCalledWith("/autoops/deployment-servers/receipts/original%2Frequest", { label: "平台节点原收据", allowNull: true, signal });
+  expect(await loadDeploymentNodeReceipt("project/one", "env/two", "original/request", signal)).toBeNull();
+  expect(mocks.request).toHaveBeenLastCalledWith(`/autoops/projects/project%2Fone/deployments/servers/receipts/original%2Frequest?${new URLSearchParams({ environmentId: "env/two" })}`, { label: "部署节点原收据", allowNull: true, signal });
+});
+
+it("七类节点收据逐项核对公开原参数，参数篡改及缺失不能确认原pending", () => {
+  const requestId = "original-request", serverId = "node-one";
+  const cases: Array<{ pending: DeploymentServerMutation; intent: DeploymentNodeReceipt["publicIntent"]; scope: { projectId?: string; environmentId?: string } }> = [
+    { pending: { kind: "create", input: { requestId, name: "原节点" } }, intent: { name: "原节点" }, scope: {} },
+    { pending: { kind: "access", serverId, projectId: "project-one", input: { requestId, allowed: true, expectedRevision: 3 } }, intent: { serverId, projectId: "project-one", allowed: true, expectedRevision: 3 }, scope: {} },
+    { pending: { kind: "storage", serverId, input: { requestId, expectedRevision: 3, retainedVersions: 4, buildCacheGiB: 6 } }, intent: { serverId, expectedRevision: 3, retainedVersions: 4, buildCacheGiB: 6 }, scope: {} },
+    ...(["bind", "unbind"] as const).map(kind => ({ pending: { kind, serverId, input: { requestId, environmentId: "test" } }, intent: { serverId, environmentId: "test" }, scope: { projectId: "project-one", environmentId: "test" } })),
+    ...(["revoke", "delete"] as const).map(kind => ({ pending: { kind, serverId, input: { requestId } }, intent: { serverId }, scope: {} })),
+  ];
+  for (const { pending, intent, scope } of cases) {
+    const original = structuredClone(pending);
+    const receipt: DeploymentNodeReceipt = { state: "completed", requestId, operation: pending.kind, projectId: scope.projectId ?? null, environmentId: scope.environmentId ?? null, serverId, ...(pending.kind === "access" ? { targetProjectId: pending.projectId } : {}), publicIntent: intent, result: { ok: true } };
+    expect(matchesDeploymentNodeReceipt(pending, receipt, scope)).toBe(true);
+    for (const [key, value] of Object.entries(intent)) {
+      const changed = typeof value === "boolean" ? !value : typeof value === "number" ? value + 1 : `${value}-changed`;
+      expect(matchesDeploymentNodeReceipt(pending, { ...receipt, publicIntent: { ...intent, [key]: changed } }, scope)).toBe(false);
+    }
+    expect(matchesDeploymentNodeReceipt(pending, { ...receipt, publicIntent: undefined as unknown as DeploymentNodeReceipt["publicIntent"] }, scope)).toBe(false);
+    const extraIntent = { ...intent, extra: "不属于原参数" };
+    expect(matchesDeploymentNodeReceipt(pending, { ...receipt, publicIntent: extraIntent }, scope)).toBe(false);
+    expect(pending).toEqual(original);
+  }
 });

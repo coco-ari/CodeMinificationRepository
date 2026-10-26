@@ -59,6 +59,7 @@ export function deploymentsRoutes({ access, principal }: BusinessHttpContext) {
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments', deploymentRequest),
     HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),
+    HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/servers/receipts/:requestId', deploymentRequest),
     HttpRouter.add(
       'POST',
       '/autoops/projects/:projectId/deployments/servers/:serverId/bind',

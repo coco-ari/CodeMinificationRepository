@@ -1186,3 +1186,27 @@ B4 准备真实项目管理员/只读身份回归时，另发现已存节点原�
 实际 Web PID373558、Worker launcher373429/native373441 的目录均为固定发行，原 DATA_DIR、Node24.22.0、发行和官方原生清单逐项匹配；loopback/公共健康、HTML 和两个 Worker 字节通过。独立只读复核 `.deployment/current-release-switch/3e496ce7-live-independent-v2.json` SHA256 `25f39d67660533649e7b33c8408cebb21efb8886c4ca7d217242b43c697b76ec` 另确认：原引用释放完整表精确不变、395 个原文件和凭证主密钥保留、原 12 条部署任务及 9 条版本摘要不变，原部署 Agent 59368 的实际根目录/启动身份保持。root 进程读取复用已验证的固定只读 helper，没有更改 Agent。原存储维护真实失败仍保留失败；只重建原节点存储报告后，整体部署摘要命中原基线，迁移报告没有重复刷新。未恢复数据库、未执行备份或清理业务数据。S1 四类状态现为代码完成、自动测试通过、部署已生效、真实启动和数据保留验收通过；这只关闭 S1，账号、真实问答、定时更新、共享电脑、部署版本链/回退及整页验收仍继续。
 
 账号修复已固定并正常推送为 `305af444`，[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40349345502)和[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40349349865)均通过：Node 846 通过/2 条件跳过，Linux 真实锁回归已运行；原生 251 通过/2 跳过及过滤回归 2/1 项通过，Web 631/631（含新增 8 项账号交互）、客户 76/76，类型、边界、构建、语言和 Markdown 全过。日志 `.deployment/ci-305af444.log` SHA256 `54e23daef550d374dddc1513f66df5fd40e74784cc0aed8738e453c812d69607`。独占源码归档、fresh 构建、实际包内正常账号初始化/创建/重开/登录/收据冒烟、完整发行正文与官方 Linux 原生依赖均核对通过；独立发行已准备，发行清单 `6faafe0d8f71f0a647d1e5ca641eb685c264d1821836550cfc5caaa8d17e24b5`、原生清单 `132ace6313d4ca57331b5ba40c54699f2a85663bf16149e3926d53d62061258c`。以上仅补代码与自动证据；实际接管、部署生效、旧合法会话和真实账号流程仍待验。
+
+账号首次实际升级已正常执行 `--adopt-existing`，原四用户 ID、原 235 条会话（含升级前四次正常登录）及完整项目目录、林晓/陈一待分配状态精确保留，只新增五张账号表。接管收据 `.deployment/account-adopt-switch-305af444-evidence-v1/adoption.json` SHA256 `932f4df062b2c3555b9c29d527198de1dd623492186a5792fb50212a89da8cb3`。同次切换 Worker 完整核对通过，Web 两轮 owner 也通过，但继承工具最后活动检查后的联合快照再次变化，拒绝切换并自动恢复 `3e496ce7` 及当前数据；未恢复数据库，也未重复接管。尾部实际快照未在旧工具落盘，不能将阶段初始四条线程差异直接当作尾部原因；分别验证原附着事件迟到和 native 连接观测变化，只有每个新候选都通过三库、原授权、存储及完整 owner 才能继续有限等待。
+
+恢复后独立只读比较与接管后摘要精确一致，仍为原四账号，全部旧行、五张新表及项目授权均保留；当前 Web375380、Worker375260 实际目录均为 `3e496ce7`。证据 `.deployment/account-adopt-switch-305af444-evidence-v1/account-adopted-after-rollback-readonly.json`。本轮失败收据保持失败，账号部署生效、旧 Cookie 实际读取和新账号管理业务均未计完成；接续必须从已成功接管事实开始，不再运行接管 CLI。
+
+## 节点未知结果只读恢复（2026-10-27）
+
+先复现两处缺口：[引擎收据](../src/deployment-projects.mjs) 原来缺少可核对的 actor、平台或项目/环境与操作元数据，不能从摘要猜归属；[HTTP](../vendor/t3code/apps/server/src/autoops/http/deploymentNodes.ts) 原收据 GET 实际返回 404，Dialog 的“重试”会重新 POST。现沿原引擎事务、部署适配器、原生 HTTP 和同一 T3 Dialog 补平台及项目两个只读入口，旧记录不改写。当前实际 actor、原范围及当前权限均独立核对，元数据损坏 503、他人或未知收据 null，撤权/注销拒绝；null、503 和未知都保留原标识，不再发写请求。登记的一次性 token 和安装命令不进入收据存储或 GET。
+
+独立审查另确认两条恢复缺陷并最小修复：已保存后撤权曾在检查 `available=false` 前清掉 pending，现保留原账号/范围元数据，恢复权限后仅 GET；同 UUID 修改参数的写入会 409，但旧 GET 没有原参数而被 UI 误确认，现返回可信原 `publicIntent` 并逐项比较七类原参数，不匹配保留待确认。红测、原调用链、14 个影响文件和逐字摘要在 `.deployment/b4-receipt-recovery/{handoff-v3.md,freeze-v3.json,exact-v3.patch}`，旧 v2 证据保留。
+
+根代理独立复跑 Node 29/29、真实临时 SQLite/原生 HTTP 9/9、Web 单测 22/22，Web/native/adapter 严格类型通过。20 条浏览器用例待 Linux CI，本机未启动浏览器；完整 CI、正式发行及真实角色节点业务尚未通过，不把辅助测试记为 B4 整项完成。新恢复没有新增界面层级，继续复用 T3 Dialog、SettingsRow 和 Alert；同一合法表单的断线任务原为“生成→关闭→重开→重试”4 次（最后重写），现为“生成→关闭→重开→核对结果”4 次（最后只读），等待分别按原写/读响应记录，不宣称减少步骤。丢失首次口令时保留明确的撤销、删除未接入节点、再登记入口，10 次完整步骤已记录，尚未真实交互验证。用户可辨未知与明确拒绝，开发沿原所有者和公开合同维护，Agent 可按同 actor/scope 的原收据及原参数判断结果；标签、错误与键盘入口保留。
+
+最终质量复核仅格式化公共合同，14 个源码/测试文件的最终冻结为 `.deployment/b4-receipt-recovery/freeze-root-v4.json`，SHA256 `91e2b2312e418df5ac0bbeb01f6015155d70cccd22d48d36c029aaed06e3462b`，逐字补丁 `exact-root-v4.patch`；原 v2/v3 失败与审查证据保留。根代理独立 29/9/22 项日志分别为 `root-node-v3.log`、`root-http-v3.log`、`root-web-unit-v3.log`。公共合同与本模块文档格式检查、`git diff --check` 通过。
+
+## 账号发行接续与真实 HTTP（2026-10-27）
+
+沿首次成功接管的当前数据接续同一固定候选 `305af444`，未再次执行接管 CLI、恢复数据库或清理业务数据。原尾部守卫在两个真实临时 SQLite 复现中分别覆盖迟到附着事件和连接观测变化；新有限稳态回调在每次新候选上先复核三库、完整 owner、原授权及存储，未知/真实业务变化仍立即拒绝，17 项回归由根代理及两个独立代理复跑通过，原操作守卫 179 项通过。冻结附加包 `final-owner-v4-addon.zip` SHA256 `1bdab9680dff9cd1d1f706ad98a9ef57df05489cc20eef16c4d7a20ba86297ef`；旧工具和首次失败收据均未修改。
+
+接续只增加四次正常升级前登录，原 235 会话及五张已接管账号表完整保留；两阶段完整 owner 通过后才写成功切换收据，再由内存中的四个原 Cookie 实际 GET 本人账号，均 200 且原 ID 匹配，三位非管理员 GET 目录均 403。实际成功证据 `.deployment/account-resume-switch-305af444-evidence-v1/result.json` SHA256 `580627fd47c33f3e07890008c092b904bbe1089ea2104e1fefd1fa7ff436f868`，切换收据 `5366b333b012872b700f4685d05febcfe0bcff8790a477a9b01a771b7a6206ba`，正常登录证明 `8753e21344fd37066cb917a38a0880c55b14876474a5caa7863bc824b58147d9`。独立只读复核 `305af444-live-independent-v3.json` SHA256 `65fbc0fb4a211fdb9b5cdc02f41281013fdc4c0655bb5f8561f0a567d777a4f8` 核对 Web376822/Worker376694 实际 cwd、Node、原 DATA_DIR、完整发行/原生清单、loopback 与公开 HTML/Worker 字节、395 个原文件、密钥、原 12 任务和 9 版本。林晓/陈一仍待管理员分配。
+
+通过公开 HTTPS、正常登录和既有原生 HTTP 真实创建四个隔离非管理员，未授项目角色；四人读取账号目录及提交平台管理员提权均 403。只在新 reader `89dde30b-7a12-4c60-a20a-fb82617ef109` 执行管理员重置、旧 Cookie/旧密码拒绝、错误当前密码不注销、本人改密及原收据、停用后 Cookie/登录拒绝、启用后正常登录、注销后 Cookie 拒绝，最终 enabled=true/revision=5。证据 `.deployment/accounts-http-create-v1/fixtures.json`、`.deployment/accounts-http-reader-lifecycle-v1/lifecycle.json`；密码仅内存派生并经 stdin 使用，没有伪造 Cookie、直接写业务库或修改原用户。本节完成账号部署及 HTTP 生命周期验收，真实页面、后台 RPC/MCP/共享流撤回仍未完成。
+
+同版真实原生问答已连续完成两轮，实际工具读取原有效当前资料；第二轮真实 RPC Exit 返回后验收端丢弃响应并断开，仅查询原消息恢复，两个原输入均正常释放。证据 `.deployment/d123-mcp-scope-fix-v1-evidence/{state.json,native-1-tools.json,native-2-tools.json}`，线程 `015bfe9b-7fdc-4520-bc12-430331d204e3`。本次手动 Git 更新原请求返回 504，正常 GET 原收据确认 failed，旧有效当前版本仍为 `de8e0b8f-c87b-4ce0-bd11-64bd81563750`，没有重发原请求。观察器仅捕获该次 ls-remote、尚缺成功 fetch 正对照，因此两轮零 Git 均仍 pending；工具成功及原消息恢复不代替 D1 全项或 D2 定期更新成功。

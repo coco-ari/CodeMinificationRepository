@@ -73,6 +73,11 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
       },
     }
   }
+  if (method === 'GET' && parts.length === 3 && parts[0] === 'servers' && parts[1] === 'receipts') {
+    const environmentId = requireEnvironment(url.searchParams.get('environmentId'))
+    authorize('server.bind', environmentId)
+    return { status: 200, body: store.projectNodeRequest(projectId, parts[2], environmentId, principal) }
+  }
   if (parts[0] === 'servers' && parts.length >= 2) {
     if (method === 'POST' && parts.length === 3 && ['bind', 'unbind'].includes(parts[2])) {
       const environmentId = requireEnvironment(body.environmentId)

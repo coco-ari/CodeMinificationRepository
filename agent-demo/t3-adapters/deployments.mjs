@@ -212,6 +212,18 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
     },
     availableServers(projectId) { return servers.availableServers(projectId) },
     globalNodeCatalog(principal) { access.requireDeploymentNodeManager(principal); const value = deployment.projects.globalNodeCatalog({ actor: safeActor(principal) }); return { ...value, servers: value.servers.map(server => safeServer(server)) } },
+    globalNodeRequest(id, principal) {
+      access.requireDeploymentNodeManager(principal)
+      const value = deployment.projects.globalNodeRequest(id, { actor: safeActor(principal) })
+      return value ? { ...value, result: ['create', 'storage'].includes(value.operation) ? safeServer(value.result) : value.result } : null
+    },
+    projectNodeRequest(projectId, id, environmentId, principal) {
+      const value = deployment.projects.projectNodeRequest(projectId, id, { actor: safeActor(principal), environmentId })
+      if (!value || value.operation !== 'bind') return value
+      // 原收据证明绑定已接受；准入撤回后仍只展示当前允许公开的最小节点信息。
+      const allowed = deployment.projects.snapshot(projectId).mapping.allowedServerIds.includes(value.serverId)
+      return { ...value, result: safeServer({ ...value.result, projectAllowed: allowed }, environmentId) }
+    },
     createGlobalServer(input, principal) { return accept(async () => { const value = await deployment.projects.createGlobalServer({ ...input, actor: safeActor(principal) }); return { ...value, server: safeServer(value.server) } }) },
     mutateGlobalServer(id, operation, input, principal) { return accept(async () => { const value = await deployment.projects.mutateGlobalServer(id, operation, { ...input, actor: safeActor(principal) }); return operation === 'storage' ? safeServer(value) : value }) },
     setServerAccess(projectId, input, principal) { return accept(() => deployment.projects.setServerAccess(projectId, { ...input, actor: safeActor(principal) })) },

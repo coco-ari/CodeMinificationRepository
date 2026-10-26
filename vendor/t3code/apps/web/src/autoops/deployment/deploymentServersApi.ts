@@ -1,12 +1,13 @@
 import { autoOpsRequest } from "../apiClient";
 import type {
+  DeploymentNodeReceipt,
   DeploymentServer,
   DeploymentServerManagement,
   DeploymentServerRegistration,
   DeploymentGlobalNodeCatalog,
 } from "../../../../../../../autoops/contracts/deployments";
 
-export type { DeploymentServer, DeploymentServerManagement, DeploymentServerRegistration, DeploymentGlobalNodeCatalog };
+export type { DeploymentNodeReceipt, DeploymentServer, DeploymentServerManagement, DeploymentServerRegistration, DeploymentGlobalNodeCatalog };
 
 export type DeploymentServerMutation =
   | { kind: "create"; input: { name: string; requestId: string } }
@@ -84,4 +85,42 @@ export function mutateGlobalDeploymentNode(mutation: DeploymentServerMutation, s
       ...(signal ? { signal } : {}),
     },
   );
+}
+
+
+export function loadGlobalDeploymentNodeReceipt(requestId: string, signal?: AbortSignal) {
+  return autoOpsRequest<DeploymentNodeReceipt | null>(
+    `/autoops/deployment-servers/receipts/${encodeURIComponent(requestId)}`,
+    { label: "平台节点原收据", allowNull: true, ...(signal ? { signal } : {}) },
+  );
+}
+
+export function loadDeploymentNodeReceipt(projectId: string, environmentId: string, requestId: string, signal?: AbortSignal) {
+  return autoOpsRequest<DeploymentNodeReceipt | null>(
+    `${endpoint(projectId)}/receipts/${encodeURIComponent(requestId)}?${new URLSearchParams({ environmentId })}`,
+    { label: "部署节点原收据", allowNull: true, ...(signal ? { signal } : {}) },
+  );
+}
+
+export function matchesDeploymentNodeReceipt(
+  operation: DeploymentServerMutation,
+  receipt: DeploymentNodeReceipt,
+  scope: { projectId?: string | undefined; environmentId?: string | undefined },
+) {
+  if (receipt.state !== "completed" || receipt.requestId !== operation.input.requestId ||
+    receipt.operation !== operation.kind || receipt.projectId !== (scope.projectId ?? null) ||
+    receipt.environmentId !== (scope.environmentId ?? null) ||
+    (operation.kind !== "create" && receipt.serverId !== operation.serverId) ||
+    ((operation.kind === "bind" || operation.kind === "unbind") && operation.input.environmentId !== scope.environmentId) ||
+    (operation.kind === "access" && receipt.targetProjectId !== operation.projectId)) return false;
+  const expected: Record<string, unknown> = operation.kind === "create" ? { name: operation.input.name }
+    : operation.kind === "access" ? { projectId: operation.projectId, serverId: operation.serverId, allowed: operation.input.allowed, expectedRevision: operation.input.expectedRevision }
+    : operation.kind === "storage" ? { serverId: operation.serverId, expectedRevision: operation.input.expectedRevision, retainedVersions: operation.input.retainedVersions, buildCacheGiB: operation.input.buildCacheGiB }
+    : operation.kind === "bind" || operation.kind === "unbind" ? { serverId: operation.serverId, environmentId: operation.input.environmentId }
+    : { serverId: operation.serverId };
+  const actual = receipt.publicIntent;
+  // 原标识只能证明有过请求；原参数也须一致，不能把本地冲突意图确认成成功。
+  return !!actual && typeof actual === "object" && !Array.isArray(actual) &&
+    Object.keys(actual).length === Object.keys(expected).length &&
+    Object.entries(expected).every(([key, value]) => Object.hasOwn(actual, key) && actual[key as keyof typeof actual] === value);
 }

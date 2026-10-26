@@ -255,6 +255,26 @@ export interface DeploymentGlobalNodeCatalog {
   projectAccess: Array<{ projectId: string; serverIds: string[]; revision: number }>
   bindings: Array<{ projectId: string; environmentId: string; serverId: string }>
 }
+export type DeploymentNodePublicIntent =
+  | { name: string }
+  | { serverId: string }
+  | { serverId: string; environmentId: string }
+  | { serverId: string; expectedRevision: number; retainedVersions: number; buildCacheGiB: number }
+  | { projectId: string; serverId: string; allowed: boolean; expectedRevision: number }
+export interface DeploymentNodeReceipt {
+  state: 'completed'
+  requestId: string
+  operation: 'create' | 'bind' | 'unbind' | 'revoke' | 'delete' | 'storage' | 'access'
+  projectId: string | null
+  environmentId: string | null
+  serverId: string
+  targetProjectId?: string
+  publicIntent: DeploymentNodePublicIntent
+  result:
+    | DeploymentServer
+    | { ok: true }
+    | { projectId: string; serverId: string; allowed: boolean; revision: number }
+}
 export interface DeploymentServerRegistration {
   server: DeploymentServer
   registrationToken: string | null

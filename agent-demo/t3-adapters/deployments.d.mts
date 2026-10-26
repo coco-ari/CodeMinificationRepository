@@ -1,6 +1,6 @@
 import type {AutoOpsPrincipal, AutoOpsProject, AutoOpsAccess} from './access.mjs';
 import type { WorkspaceManagement } from './workspace-management.ts';
-import type { DeploymentService, DeploymentServiceSource, DeploymentRepositoryRefs, DeploymentRepositoryHistory, DeploymentGlobalNodeCatalog, DeploymentServerRegistration } from '../../autoops/contracts/deployments.ts';
+import type { DeploymentService, DeploymentServiceSource, DeploymentRepositoryRefs, DeploymentRepositoryHistory, DeploymentGlobalNodeCatalog, DeploymentNodeReceipt, DeploymentServerRegistration } from '../../autoops/contracts/deployments.ts';
 import type {WorkspaceStore} from './workspaces.mjs';
 import type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
 export type { StaticDeploymentConfig, DeploymentRelease, DeploymentTarget, DeploymentTask, DeploymentLog, DeploymentTaskDetails, DeploymentOverview, DeploymentSubmission, DeploymentTargetSubmission, DeploymentServer, DeploymentSourceIdentity } from '../../autoops/contracts/deployments.ts'
@@ -12,6 +12,8 @@ export interface DeploymentStore {
  createServer(projectId:string,input:Record<string,unknown>):Promise<{server:DeploymentServer;registrationToken:string|null;expiresAt:string|null;repeated?:boolean}>;
  availableServers(projectId:string):DeploymentServer[];
  globalNodeCatalog(principal:AutoOpsPrincipal):Omit<DeploymentGlobalNodeCatalog,'projects'>;
+ globalNodeRequest(id:string,principal:AutoOpsPrincipal):DeploymentNodeReceipt|null;
+ projectNodeRequest(projectId:string,id:string,environmentId:string,principal:AutoOpsPrincipal):DeploymentNodeReceipt|null;
  createGlobalServer(input:Record<string,unknown>,principal:AutoOpsPrincipal):Promise<DeploymentServerRegistration>;
  mutateGlobalServer(id:string,operation:'revoke'|'delete'|'storage',input:Record<string,unknown>,principal:AutoOpsPrincipal):Promise<DeploymentServer|{ok:true}>;
  setServerAccess(projectId:string,input:Record<string,unknown>,principal:AutoOpsPrincipal):Promise<{projectId:string;serverId:string;allowed:boolean;revision:number}>;

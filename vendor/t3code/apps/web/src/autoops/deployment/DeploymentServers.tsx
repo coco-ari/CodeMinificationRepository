@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useId,
   useRef,
@@ -16,6 +15,7 @@ import {
   RefreshCwIcon,
   ServerIcon,
 } from "lucide-react";
+import { useStableCallback } from "~/hooks/useStableCallback";
 import { SettingsRow, SettingsSection } from "~/components/settings/settingsLayout";
 import { Alert, AlertAction, AlertDescription } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
@@ -37,7 +37,10 @@ import { readAutoOpsHost } from "../hostSnapshot";
 import { Choice } from "./DeploymentControls";
 import {
   loadDeploymentServers,
+  loadDeploymentNodeReceipt,
+  loadGlobalDeploymentNodeReceipt,
   loadGlobalDeploymentNodes,
+  matchesDeploymentNodeReceipt,
   mutateGlobalDeploymentNode,
   type DeploymentGlobalNodeCatalog,
   mutateDeploymentServer,
@@ -197,10 +200,8 @@ function DeploymentServersScope(props: Props & { identity: string }) {
   const active = useRef(true);
   const submitting = useRef(false);
   const mutationController = useRef<AbortController | null>(null);
-  const callbacks = useRef({ onAccessDenied, onChanged, onOpenChange });
-  callbacks.current = { onAccessDenied, onChanged, onOpenChange };
-
-  const accessDenied = useCallback(
+  const changed = useStableCallback(onChanged);
+  const accessDenied = useStableCallback(
     (cause: unknown) => {
       active.current = false;
       setData(null);
@@ -212,15 +213,10 @@ function DeploymentServersScope(props: Props & { identity: string }) {
       setPending(null);
       setError(null);
       mutationController.current?.abort();
-      try {
-        sessionStorage.removeItem(pendingKey);
-      } catch {
-        /* 撤权后不再展示本地待处理数据。 */
-      }
-      callbacks.current.onAccessDenied(cause);
-      callbacks.current.onOpenChange(false);
+      // 原操作仍由原账号/范围保存；恢复授权后只能 GET 核对，不重新提交。
+      onAccessDenied(cause);
+      onOpenChange(false);
     },
-    [pendingKey],
   );
 
   useEffect(() => {
@@ -268,8 +264,8 @@ function DeploymentServersScope(props: Props & { identity: string }) {
   }
 
   async function submit(input: DeploymentServerMutation) {
-    if (submitting.current || !active.current) return;
-    const operation = pending ?? input;
+    if (submitting.current || !active.current || pending) return;
+    const operation = input;
     try {
       sessionStorage.setItem(pendingKey, JSON.stringify(operation));
     } catch {
@@ -287,23 +283,26 @@ function DeploymentServersScope(props: Props & { identity: string }) {
         ? await mutateGlobalDeploymentNode(operation, controller.signal)
         : await mutateDeploymentServer(projectId!, operation, controller.signal);
       if (!active.current || controller.signal.aborted) return;
-      setPending(null);
-      try {
-        sessionStorage.removeItem(pendingKey);
-      } catch {
-        /* 原请求再次核对仍由服务端幂等返回。 */
-      }
       if ("available" in result && result.available === false) {
         accessDenied(new AutoOpsRequestError("操作已保存，当前管理权限已撤销。", "ACCESS_DENIED", 403));
         return;
       }
+      setPending(null);
+      try {
+        sessionStorage.removeItem(pendingKey);
+      } catch {
+        /* 存储清理失败时仍只按原标识读取收据。 */
+      }
       setView({ kind: "list" });
       if (operation.kind === "create" && isRegistration(result)) setRegistration(result);
       setRefresh((value) => value + 1);
-      callbacks.current.onChanged();
+      changed();
     } catch (cause) {
       if (!active.current || controller.signal.aborted) return;
       if (isAutoOpsAccessError(cause)) {
+        if (cause instanceof AutoOpsRequestError && !cause.uncertain) {
+          try { sessionStorage.removeItem(pendingKey); } catch { /* 明确拒绝未接受本次操作。 */ }
+        }
         accessDenied(cause);
         return;
       }
@@ -317,9 +316,50 @@ function DeploymentServersScope(props: Props & { identity: string }) {
       }
       setError(
         cause instanceof AutoOpsRequestError && cause.uncertain
-          ? "暂时无法确认操作结果，请重试。"
+          ? "暂时无法确认操作结果，请核对原收据。"
           : message(cause),
       );
+    } finally {
+      submitting.current = false;
+      if (active.current) setBusy(false);
+    }
+  }
+
+  async function recover() {
+    if (!pending || submitting.current || !active.current) return;
+    const operation = pending;
+    const controller = new AbortController();
+    mutationController.current = controller;
+    submitting.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      // 未知请求只读取原收据；目录变化、空收据或网络失败均不构成重新写入的依据。
+      const receipt = platform
+        ? await loadGlobalDeploymentNodeReceipt(operation.input.requestId, controller.signal)
+        : await loadDeploymentNodeReceipt(projectId!, environmentId!, operation.input.requestId, controller.signal);
+      if (!active.current || controller.signal.aborted) return;
+      if (!receipt) {
+        setError("尚未找到可核对的原收据，操作仍待确认。请稍后再次核对。");
+        return;
+      }
+      if (!matchesDeploymentNodeReceipt(operation, receipt, { projectId, environmentId })) {
+        throw new Error("返回的原收据与当前操作范围不符，操作仍待确认。");
+      }
+      if (operation.kind === "create") {
+        if (!("id" in receipt.result) || typeof receipt.result.name !== "string")
+          throw new Error("原节点事实不可核对，操作仍待确认。");
+        setRegistration({ server: receipt.result, registrationToken: null, expiresAt: null, repeated: true });
+      }
+      setPending(null);
+      try { sessionStorage.removeItem(pendingKey); } catch { /* 重开仍只 GET 原收据。 */ }
+      setView({ kind: "list" });
+      setRefresh(value => value + 1);
+      changed();
+    } catch (cause) {
+      if (!active.current || controller.signal.aborted) return;
+      if (isAutoOpsAccessError(cause)) accessDenied(cause);
+      else setError(message(cause));
     } finally {
       submitting.current = false;
       if (active.current) setBusy(false);
@@ -437,7 +477,7 @@ function DeploymentServersScope(props: Props & { identity: string }) {
             {error || (pending && !busy) ? (
               <Alert variant="error">
                 <AlertDescription>
-                  {error ?? `${operationLabels[pending!.kind]}尚未确认，请重试。`}
+                  {error ?? `${operationLabels[pending!.kind]}尚未确认，请核对原收据。`}
                 </AlertDescription>
                 {pending ? (
                   <AlertAction>
@@ -445,9 +485,9 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                       variant="outline"
                       size="sm"
                       disabled={busy}
-                      onClick={() => void submit(pending)}
+                      onClick={() => void recover()}
                     >
-                      {busy ? <Spinner size="sm" /> : null}重试
+                      {busy ? <Spinner size="sm" /> : null}核对结果
                     </Button>
                   </AlertAction>
                 ) : null}
@@ -459,7 +499,7 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                   title={registration.server.name}
                   description={
                     registration.repeated
-                      ? "节点已创建。安装口令仅在首次创建时提供，请使用已保存的安装命令。"
+                      ? "节点已创建，口令仅提供一次。若未保存且尚未接入，请返回节点列表，撤销并删除后再接入新节点。"
                       : `在目标服务器执行安装命令，连接后即可部署。口令有效期至 ${time(registration.expiresAt)}。`
                   }
                 />

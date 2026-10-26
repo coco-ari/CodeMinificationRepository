@@ -15,7 +15,7 @@ import { responseError } from './responses.ts'
 import type { BusinessHttpContext } from './context.ts'
 
 export function deploymentNodesRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'list' | 'create' | 'revoke' | 'delete' | 'storage' | 'project') =>
+  const handle = (operation: 'list' | 'receipt' | 'create' | 'revoke' | 'delete' | 'storage' | 'project') =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -25,7 +25,7 @@ export function deploymentNodesRoutes({ access, principal }: BusinessHttpContext
       }
       yield* Effect.try(() => {
         check()
-        if (operation !== 'list') access.requireCsrf(current, request.headers['x-demo-csrf'])
+        if (!['list', 'receipt'].includes(operation)) access.requireCsrf(current, request.headers['x-demo-csrf'])
       })
       const store = configuredDeploymentStore()
       if (!store)
@@ -36,6 +36,12 @@ export function deploymentNodesRoutes({ access, principal }: BusinessHttpContext
         })
       const parts = new URL(request.url, 'http://localhost').pathname.split('/')
       const serverId = yield* Effect.try(() => decodeURIComponent(parts[3] ?? ''))
+      if (operation === 'receipt') {
+        const requestId = yield* Effect.try(() => decodeURIComponent(parts[4] ?? ''))
+        const receipt = yield* Effect.try(() => store.globalNodeRequest(requestId, current))
+        yield* Effect.try(check)
+        return HttpServerResponse.jsonUnsafe(receipt, { headers: { 'cache-control': 'private, no-store' } })
+      }
       if (operation === 'list') {
         const catalog = yield* Effect.try(() => store.globalNodeCatalog(current))
         const projects = yield* Effect.try(() =>
@@ -105,6 +111,7 @@ export function deploymentNodesRoutes({ access, principal }: BusinessHttpContext
     }).pipe(Effect.catch((cause) => Effect.succeed(responseError(cause))))
   return Layer.mergeAll(
     HttpRouter.add('GET', '/autoops/deployment-servers', handle('list')),
+    HttpRouter.add('GET', '/autoops/deployment-servers/receipts/:requestId', handle('receipt')),
     HttpRouter.add('POST', '/autoops/deployment-servers', handle('create')),
     HttpRouter.add('POST', '/autoops/deployment-servers/:serverId/revoke', handle('revoke')),
     HttpRouter.add('DELETE', '/autoops/deployment-servers/:serverId', handle('delete')),

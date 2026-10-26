@@ -580,3 +580,26 @@ test('默认来源已保存后仓库移除和目录变化不阻断原请求核�
   await assert.rejects(f.request(route, 'PUT', { ...input, requestId: randomUUID() }), { status: 404, code: 'DEPLOYMENT_SOURCE_NOT_FOUND' })
   await assert.rejects(f.request(route, 'PUT', input, { ...principal, allowed: [] }), { status: 403 })
 })
+
+
+test('项目节点GET原收据在重开owner后仍固定原请求，跨环境拒绝且未命中不重发', async t => {
+  const f = await fixture(t), platform = { id: 'platform', displayName: '平台节点管理者' }
+  await f.store.ensureProject(projects[0])
+  const createdInput = { name: '持久原节点', requestId: randomUUID() }
+  const created = await f.store.createGlobalServer(createdInput, platform)
+  await f.store.setServerAccess('p-one', { serverId: created.server.id, allowed: true, expectedRevision: 1, requestId: randomUUID() }, platform)
+  const input = { requestId: randomUUID(), environmentId: 'env-one' }
+  await f.request(`/servers/${created.server.id}/bind`, 'POST', input)
+  await f.reopen()
+  const before = readState(f.dataDir)
+  const receipt = (await f.request(`/servers/receipts/${input.requestId}?environmentId=env-one`)).body
+  assert.equal(receipt.operation, 'bind')
+  assert.equal(receipt.requestId, input.requestId)
+  assert.equal(receipt.result.id, created.server.id)
+  assert.equal((await f.request(`/servers/receipts/${randomUUID()}?environmentId=env-one`)).body, null)
+  await assert.rejects(f.request(`/servers/receipts/${input.requestId}?environmentId=env-two`), { status: 403 })
+  assert.deepEqual(readState(f.dataDir), before)
+  const original = f.store.globalNodeRequest(createdInput.requestId, platform)
+  assert.equal(original.result.id, created.server.id)
+  assert(!JSON.stringify(original).includes(created.registrationToken))
+})

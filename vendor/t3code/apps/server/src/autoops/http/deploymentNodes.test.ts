@@ -38,12 +38,16 @@ async function setup() {
   const users = [
     { id: 'admin', name: '平台管理员', role: 'admin', kind: 'internal' as const },
     { id: 'manager', name: '项目管理员', role: 'member', kind: 'internal' as const },
+    { id: 'other-manager', name: '其他管理员', role: 'member', kind: 'internal' as const },
+    { id: 'reader', name: '只读成员', role: 'member', kind: 'internal' as const },
   ]
   const project = {
     id: 'project',
     name: '项目',
-    memberIds: ['manager'],
+    memberIds: ['manager', 'other-manager', 'reader'],
     memberships: [
+      { userId: 'other-manager', role: 'project_admin' as const, workspaceAccess: 'internal' as const, environmentIds: ['test'], status: 'active' as const },
+      { userId: 'reader', role: 'reader' as const, workspaceAccess: 'internal' as const, environmentIds: ['test'], status: 'active' as const },
       {
         userId: 'manager',
         role: 'project_admin' as const,
@@ -107,6 +111,7 @@ async function setup() {
     store,
     request,
     users,
+    project,
     sessions,
     access,
     handle: app.handler,
@@ -255,10 +260,9 @@ it('节点已登记后撤回管理权限只确认已保存，恢复权限按原�
   expect(await response.json()).toEqual({ saved: true, available: false })
   f.users[0]!.role = 'admin'
   _write.mockRestore()
-  const replay = (await (await f.handle(f.request(base, input))).json()) as {
-    registrationToken: null
-  }
-  expect(replay.registrationToken).toBeNull()
+  const restored = await (await f.handle(f.request(`${base}/receipts/${input.requestId}`))).json()
+  expect(restored).toMatchObject({ state: 'completed', requestId: input.requestId, operation: 'create' })
+  expect(JSON.stringify(restored)).not.toContain('registrationToken')
   const catalog = (await (await f.handle(f.request(base))).json()) as { servers: unknown[] }
   expect(catalog.servers).toHaveLength(1)
 })
@@ -346,4 +350,72 @@ it('目录读取期间撤回平台角色时不返回已读到的全局节点和�
   const response = await f.handle(f.request(base))
   expect(response.status).toBe(403)
   expect(await response.text()).not.toContain('不可泄露的目录')
+})
+
+
+it('未知节点结果用GET同actor原范围收据恢复，不返回一次性口令或跨范围结果', async () => {
+  await using f = await setup()
+  const requestId = randomUUID()
+  const created = await (await f.handle(f.request(base, { requestId, name: 'GET 原收据' }))).json() as { server: { id: string }; registrationToken: string }
+  const response = await f.handle(f.request(`${base}/receipts/${requestId}`, undefined, 'admin', false))
+  expect(response.status).toBe(200)
+  const receipt = await response.json() as { requestId: string; operation: string; result: { id: string } }
+  expect(receipt).toMatchObject({ requestId, operation: 'create', state: 'completed', result: { id: created.server.id } })
+  expect(receipt).toHaveProperty('publicIntent', { name: 'GET 原收据' })
+  expect(JSON.stringify(receipt)).not.toContain(created.registrationToken)
+  expect(JSON.stringify(receipt)).not.toContain('registrationToken')
+  expect((await f.handle(f.request(`${base}/receipts/${requestId}`, undefined, 'manager'))).status).toBe(403)
+  f.users.find(value => value.id === 'other-manager')!.role = 'admin'
+  expect(await (await f.handle(f.request(`${base}/receipts/${requestId}`, undefined, 'other-manager'))).json()).toBeNull()
+  expect(await (await f.handle(f.request(`${base}/receipts/${randomUUID()}`))).json()).toBeNull()
+  await f.handle(f.request(`${base}/${created.server.id}/projects/project`, { requestId: randomUUID(), allowed: true, expectedRevision: 1 }))
+  const binding = { requestId: randomUUID(), environmentId: 'test' }
+  expect((await f.handle(f.request(`${projectNodes}/${created.server.id}/bind`, binding, 'manager'))).status).toBe(200)
+  const path = `${projectNodes}/receipts/${binding.requestId}?environmentId=test`
+  expect(await (await f.handle(f.request(path, undefined, 'manager', false))).json()).toMatchObject({ requestId: binding.requestId, operation: 'bind', projectId: 'project', environmentId: 'test', publicIntent: { serverId: created.server.id, environmentId: 'test' }, result: { id: created.server.id } })
+  expect(await (await f.handle(f.request(path))).json()).toBeNull()
+  expect((await f.handle(f.request(`${projectNodes}/receipts/${binding.requestId}?environmentId=other`, undefined, 'manager'))).status).toBe(403)
+  f.sessions.prepare('DELETE FROM sessions WHERE uid=?').run('manager')
+  expect((await f.handle(f.request(path, undefined, 'manager'))).status).toBe(401)
+})
+
+
+it('项目收据拒绝其他操作人和只读成员，撤回准入只返回最小绑定事实', async () => {
+  await using f = await setup()
+  const created = await (await f.handle(f.request(base, { requestId: randomUUID(), name: '绑定原件' }))).json() as { server: { id: string } }
+  const grantPath = `${base}/${created.server.id}/projects/project`
+  await f.handle(f.request(grantPath, { requestId: randomUUID(), allowed: true, expectedRevision: 1 }))
+  const binding = { requestId: randomUUID(), environmentId: 'test' }
+  await f.handle(f.request(`${projectNodes}/${created.server.id}/bind`, binding, 'manager'))
+  const path = `${projectNodes}/receipts/${binding.requestId}?environmentId=test`
+  expect(await (await f.handle(f.request(path, undefined, 'other-manager'))).json()).toBeNull()
+  expect((await f.handle(f.request(path, undefined, 'reader'))).status).toBe(403)
+  await f.handle(f.request(grantPath, { requestId: randomUUID(), allowed: false, expectedRevision: 2 }))
+  const restored = await (await f.handle(f.request(path, undefined, 'manager'))).json() as { result: unknown }
+  expect(restored.result).toEqual({ id: created.server.id, name: '绑定原件', environmentId: 'test', projectAllowed: false })
+  f.project.memberships.find(value => value.userId === 'manager')!.role = 'reader'
+  expect((await f.handle(f.request(path, undefined, 'manager'))).status).toBe(403)
+})
+
+it('原收据读取前后均核对真实权限和会话，不泄露等待中的旧结果', async () => {
+  await using f = await setup()
+  const input = { requestId: randomUUID(), name: '读取中撤权' }
+  await f.handle(f.request(base, input))
+  const path = `${base}/receipts/${input.requestId}`
+  const original = f.store.globalNodeRequest
+  using _read = vi.spyOn(f.store, 'globalNodeRequest').mockImplementationOnce((...args) => {
+    const result = original(...args)
+    f.users[0]!.role = 'member'
+    return result
+  })
+  const denied = await f.handle(f.request(path))
+  expect(denied.status).toBe(403)
+  expect(JSON.stringify(await denied.json())).not.toContain('读取中撤权')
+  f.users[0]!.role = 'admin'
+  _read.mockImplementationOnce((...args) => {
+    const result = original(...args)
+    f.sessions.prepare('DELETE FROM sessions WHERE uid=?').run('admin')
+    return result
+  })
+  expect((await f.handle(f.request(path))).status).toBe(401)
 })

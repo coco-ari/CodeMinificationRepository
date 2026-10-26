@@ -215,3 +215,109 @@ test('删除预检只读节点准入和实际环境绑定，功能停用后的�
   assert.deepEqual(readDeploymentDeletionReferences(f.dataDir,'one'),[])
   assert.equal(f.projects.globalNodeCatalog(command({})).servers.length,1)
 })
+
+
+test('节点原收据能只读核对同一操作人及范围，登记口令不重现且不重发写入', async (t) => {
+  const f = await fixture(t), input = command({ name: '原收据恢复' })
+  const created = await f.projects.createGlobalServer(input)
+  const before = JSON.stringify(f.repository.store.state)
+  const saved = f.projects.globalNodeRequest(input.requestId, { actor: input.actor })
+  assert.equal(saved.state, 'completed')
+  assert.equal(saved.operation, 'create')
+  assert.equal(saved.result.id, created.server.id)
+  assert.equal(JSON.stringify(f.repository.store.state), before)
+  assert(!JSON.stringify(saved).includes(created.registrationToken))
+  assert(!Object.hasOwn(saved.result, 'registrationToken'))
+  assert.equal(f.projects.globalNodeRequest(randomUUID(), { actor: input.actor }), null)
+  assert.throws(() => f.projects.globalNodeRequest(input.requestId, { actor: { id: 'project-admin' } }), { status: 403 })
+  await f.projects.setServerAccess('one', command({ serverId: created.server.id, allowed: true, expectedRevision: 1 }))
+  const bind = { ...command({ serverId: created.server.id, environmentId: 'test' }), actor: { id: 'project-admin' } }
+  await f.projects.bindServer('one', bind)
+  const bound = f.projects.projectNodeRequest('one', bind.requestId, { actor: bind.actor, environmentId: 'test' })
+  assert.equal(bound.operation, 'bind')
+  assert.equal(bound.result.id, created.server.id)
+  assert.equal(bound.projectId, 'one')
+  assert.equal(bound.environmentId, 'test')
+  assert.equal(f.projects.projectNodeRequest('two', bind.requestId, { actor: bind.actor, environmentId: 'test' }), null)
+  assert.equal(f.projects.projectNodeRequest('one', bind.requestId, { actor: input.actor, environmentId: 'test' }), null)
+  assert.equal(f.projects.globalNodeRequest(bind.requestId, { actor: input.actor }), null)
+  await f.projects.setServerAccess('one', command({ serverId: created.server.id, allowed: false, expectedRevision: 2 }))
+  assert.equal(f.projects.projectNodeRequest('one', bind.requestId, { actor: bind.actor, environmentId: 'test' }).result.id, created.server.id)
+})
+
+test('缺少可信范围的旧节点收据保留原件但GET不猜测归属', async (t) => {
+  const f = await fixture(t), input = command({ name: '旧格式原件' })
+  await f.projects.createGlobalServer(input)
+  await f.repository.store.change(state => { delete state.autoopsDeploymentBindings.nodeMutationRequests[0].nodeRequest })
+  const before = JSON.stringify(f.repository.store.state)
+  await f.projects.initialize()
+  assert.equal(f.projects.globalNodeRequest(input.requestId, { actor: input.actor }), null)
+  assert.equal(JSON.stringify(f.repository.store.state), before)
+})
+
+
+test('节点收据范围元数据或摘要损坏时拒绝恢复，不套用当前范围', async (t) => {
+  const f = await fixture(t), input = command({ name: '范围完整性' })
+  const created = await f.projects.createGlobalServer(input)
+  await f.projects.setServerAccess('one', command({ serverId: created.server.id, allowed: true, expectedRevision: 1 }))
+  const bind = { ...command({ serverId: created.server.id, environmentId: 'test' }), actor: { id: 'project-admin' } }
+  await f.projects.bindServer('one', bind)
+  const saved = structuredClone(f.projects.snapshot('one').mapping.mutationRequests.find(value => value.requestId === bind.requestId))
+  for (const change of [value => { value.nodeRequest.projectId = 'two' }, value => { value.nodeRequest.fields[1] = 'production' }, value => { value.nodeRequest.actorId = 'platform-admin' }]) {
+    await f.repository.store.change(state => {
+      const map = state.autoopsDeploymentBindings.projects.find(value => value.projectId === 'one')
+      const index = map.mutationRequests.findIndex(value => value.requestId === bind.requestId)
+      map.mutationRequests[index] = structuredClone(saved)
+      change(map.mutationRequests[index])
+    })
+    assert.throws(() => f.projects.projectNodeRequest('one', bind.requestId, { actor: bind.actor, environmentId: 'test' }), { status: 503, code: 'DEPLOYMENT_RECEIPT_INVALID' })
+  }
+})
+
+
+test('策略、准入、解绑、撤销及删除各按原操作核对，删除后仍不需要重放写入', async t => {
+  const f = await fixture(t), actor = { id: 'platform-admin' }
+  const created = await f.projects.createGlobalServer(command({ name: '各操作原收据' }))
+  const access = command({ serverId: created.server.id, allowed: true, expectedRevision: 1 })
+  await f.projects.setServerAccess('one', access)
+  assert.deepEqual(f.projects.globalNodeRequest(access.requestId, { actor }).result, { projectId: 'one', serverId: created.server.id, allowed: true, revision: 2 })
+  assert.equal(f.projects.globalNodeRequest(access.requestId, { actor }).targetProjectId, 'one')
+  const bind = command({ serverId: created.server.id, environmentId: 'test' })
+  await f.projects.bindServer('one', bind)
+  assert.deepEqual(f.projects.projectNodeRequest('one', bind.requestId, { actor, environmentId: 'test' }).publicIntent, { serverId: created.server.id, environmentId: 'test' })
+  const unbind = { ...bind, requestId: randomUUID() }
+  await f.projects.unbindServer('one', unbind)
+  assert.equal(f.projects.projectNodeRequest('one', unbind.requestId, { actor, environmentId: 'test' }).operation, 'unbind')
+  assert.deepEqual(f.projects.projectNodeRequest('one', unbind.requestId, { actor, environmentId: 'test' }).publicIntent, { serverId: created.server.id, environmentId: 'test' })
+  const storage = command({ expectedRevision: 1, retainedVersions: 3, buildCacheGiB: 4 })
+  await f.projects.mutateGlobalServer(created.server.id, 'storage', storage)
+  const revoked = command({}), removed = command({})
+  await f.projects.mutateGlobalServer(created.server.id, 'revoke', revoked)
+  await f.projects.mutateGlobalServer(created.server.id, 'delete', removed)
+  const before = JSON.stringify(f.repository.store.state)
+  assert.equal(f.projects.globalNodeRequest(storage.requestId, { actor }).operation, 'storage')
+  assert.equal(f.projects.globalNodeRequest(storage.requestId, { actor }).result.storagePolicy.revision, 2)
+  assert.equal(f.projects.globalNodeRequest(revoked.requestId, { actor }).operation, 'revoke')
+  assert.deepEqual(f.projects.globalNodeRequest(revoked.requestId, { actor }).publicIntent, { serverId: created.server.id })
+  assert.deepEqual(f.projects.globalNodeRequest(removed.requestId, { actor }).result, { ok: true })
+  assert.deepEqual(f.projects.globalNodeRequest(removed.requestId, { actor }).publicIntent, { serverId: created.server.id })
+  assert.equal(JSON.stringify(f.repository.store.state), before)
+})
+
+test('原节点收据公开原参数，同UUID篡改准入或策略不能被误认完成', async t => {
+  const f = await fixture(t), actor = { id: 'platform-admin' }
+  const create = command({ name: '固定公开意图' })
+  const created = await f.projects.createGlobalServer(create)
+  const access = command({ serverId: created.server.id, allowed: true, expectedRevision: 1 })
+  await f.projects.setServerAccess('one', access)
+  await assert.rejects(f.projects.setServerAccess('one', { ...access, allowed: false }), { status: 409, code: 'DEPLOYMENT_REQUEST_CONFLICT' })
+  const granted = f.projects.globalNodeRequest(access.requestId, { actor })
+  assert.equal(granted.state, 'completed')
+  assert.equal(granted.result.allowed, true)
+  assert.deepEqual(granted.publicIntent, { projectId: 'one', serverId: created.server.id, allowed: true, expectedRevision: 1 })
+  assert.deepEqual(f.projects.globalNodeRequest(create.requestId, { actor }).publicIntent, { name: create.name })
+  const storage = command({ expectedRevision: 1, retainedVersions: 3, buildCacheGiB: 4 })
+  await f.projects.mutateGlobalServer(created.server.id, 'storage', storage)
+  await assert.rejects(f.projects.mutateGlobalServer(created.server.id, 'storage', { ...storage, retainedVersions: 5 }), { status: 409, code: 'DEPLOYMENT_REQUEST_CONFLICT' })
+  assert.deepEqual(f.projects.globalNodeRequest(storage.requestId, { actor }).publicIntent, { serverId: created.server.id, expectedRevision: 1, retainedVersions: 3, buildCacheGiB: 4 })
+})
