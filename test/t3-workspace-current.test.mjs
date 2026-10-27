@@ -99,6 +99,37 @@ test('当前普通文件引用准入后只读本轮固定输入，下一新轮�
   assert.equal(f.calls.fetch.length, 2)
 })
 
+test('当前文件别名的准入修订必须匹配本轮固定输入，不能改读后来正文', async t => {
+  const f = await fixture(t)
+  const path = 'docs/current-alias.txt', threadId = 'alias-revision-thread'
+  await f.upload(path, '资料 A')
+  const picker = await f.service.captureAvailableInput(projectId, { workspaceType: 'internal' }, 'reader')
+  const principal = f.access.refresh({ id: 'reader', sessionHash: 'session-reader' })
+  f.access.bindThread(principal, { threadId, projectId, environmentId: 'env-test', agentId: 'a-project', visibility: 'private', workspaceType: 'internal' })
+  const catalog = createBusinessResourceCatalog({ access: f.access, workspaceStore: f.store, workspaceInputs: f.service })
+  catalog.requireContext(threadId, { records: [{ kind: 'mention', path: `autoops/${projectId}/inputs/${picker.id}/${path}` }] }, 'reader')
+  f.service.releaseInput(projectId, picker.id, 'reader')
+  const first = f.authoring.overview(projectId, owner).entries.find(file => file.path === path)
+  f.authoring.saveText(projectId, { ...f.mutation(), path, expectedContentRevision: first.revision, contents: '资料 B' }, owner)
+  const alias = catalog.resolveWorkspaceFileReference(principal, { projectId, threadId, inputId: picker.id, path, workspaceType: 'internal' })
+  const context = { records: [{ kind: 'mention', path: alias.resourcePath }] }
+  for (const message of ['before-change', 'pending-before-change']) {
+    catalog.requireContext(threadId, context, 'reader', { kind: 'context', commandId: message, messageId: message })
+    f.access.recordMessageActor(principal, threadId, message, message)
+  }
+  const inputs = createBusinessRunInputs(f.access, f.service)
+  const fixedB = await inputs.prepare(threadId, 'fixed-B', undefined, undefined, 'before-change')
+  const history = { referencePaths: [alias.resourcePath], attachmentIds: [], acceptedAt: new Date().toISOString(), runId: 'fixed-B' }
+  assert.equal((await catalog.readForThread(threadId, alias.resourcePath, fixedB.id, [], history)).content, '资料 B')
+  const current = f.authoring.overview(projectId, owner).entries.find(file => file.path === path)
+  assert.equal(current.id, first.id)
+  f.authoring.saveText(projectId, { ...f.mutation(), path, expectedContentRevision: current.revision, contents: '后来资料 C' }, owner)
+  assert.equal((await catalog.readForThread(threadId, alias.resourcePath, fixedB.id, [], history)).content, '资料 B')
+  const fixedC = await inputs.prepare(threadId, 'fixed-C', undefined, undefined, 'pending-before-change')
+  await assert.rejects(catalog.readForThread(threadId, alias.resourcePath, fixedC.id, [], { ...history, runId: 'fixed-C' }), { code: 'WORKSPACE_REFERENCE_CHANGED' })
+  assert.deepEqual(f.calls.fetch, [])
+})
+
 test('新外部输入保留最小文件身份，原版本回收后仍解析真实更新的外部当前文件', async t => {
   const f = await fixture(t)
   await f.upload('docs/external-reference.md', '第一份公开资料')

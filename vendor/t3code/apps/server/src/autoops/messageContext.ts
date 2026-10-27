@@ -65,7 +65,7 @@ export function prepareBusinessMessagePayload(
   for (const token of collectComposerInlineTokens(message.text + '\n')) {
     if (
       token.type !== 'mention' ||
-      !/^autoops\/[^/]+\/(?:inputs|workspaces|documents|environments|threads)\//.test(
+      !/^autoops\/[^/]+\/(?:inputs|current-input-files|workspaces|documents|environments|threads)\//.test(
         token.value,
       ) ||
       paths.has(token.value)

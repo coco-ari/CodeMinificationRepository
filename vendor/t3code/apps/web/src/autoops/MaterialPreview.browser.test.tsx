@@ -641,6 +641,197 @@ describe('当前对话文件预览的输入和范围边界', () => {
       ),
     ).toBe(true)
   })
+  it.each(['直接成功', '503后原重试', '旧定位迟到'] as const)(
+    '同一历史标签已打开时再次点击会重读当前文件并添加新正文引用（%s）',
+    async (mode) => {
+      mocks.realFiles = true
+      const originalPath = 'autoops/p-one/inputs/old-input/README.md'
+      const currentPath =
+        'autoops/p-one/current-input-files/preview-thread/old-input/reopened-revision/README.md'
+      const textA = 'HISTORY-OPEN-A-715'
+      const textB = 'HISTORY-REOPEN-B-715'
+      let updated = false
+      let retried = false
+      let referenceCalls = 0
+      let lateDelivered = false
+      let resolveLate!: (response: Response) => void
+      const originalPanels = useRightPanelStore.getState().byThreadKey
+      using _panels = {
+        [Symbol.dispose]: () => useRightPanelStore.setState({ byThreadKey: originalPanels }),
+      }
+      useRightPanelStore.setState({ byThreadKey: {} })
+      useRightPanelStore.getState().openFile(threadRef, originalPath)
+      mocks.execute.mockImplementation(async (_registry, query) =>
+        query?.input?.directoryPath !== undefined
+          ? result(updated ? 'picker-current' : 'old-input')
+          : {
+              _tag: 'Success',
+              value: {
+                entries: [{ kind: 'file', byteLength: textA.length, mimeType: 'text/plain' }],
+              },
+            },
+      )
+      using fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = new URL(String(input), location.origin)
+        if (url.pathname === '/gateway/api/v1/projects/p-one/workspace/file-reference') {
+          referenceCalls += 1
+          const response = Response.json({
+            projectId: 'p-one',
+            threadId: 'preview-thread',
+            viewerThreadId: 'preview-thread',
+            workspaceType: 'internal',
+            originalInputId: 'old-input',
+            originalPath: 'README.md',
+            currentPath: 'README.md',
+            mode: updated ? 'current' : 'original',
+            resourcePath: updated ? currentPath : originalPath,
+            revision: updated ? 'reopened-revision' : 'old-revision',
+            sha256: (updated ? 'b' : 'a').repeat(64),
+            changed: updated,
+          })
+          if (mode === '旧定位迟到' && referenceCalls === 2)
+            return new Promise<Response>((resolve) => {
+              resolveLate = resolve
+            }).then((value) => {
+              lateDelivered = true
+              return value
+            })
+          if (updated && mode === '503后原重试' && !retried)
+            return Response.json(
+              { code: 'WORKSPACE_STOPPING', error: '当前资料暂时不可用，请重试' },
+              { status: 503 },
+            )
+          return response
+        }
+        if (url.pathname === '/gateway/autoops/resources') {
+          const path = url.searchParams.get('path')
+          if (path === originalPath || path === currentPath) {
+            const contents = path === currentPath ? textB : textA
+            if (url.searchParams.get('metadata') === '1')
+              return Response.json({
+                name: 'README.md',
+                mime: 'text/plain',
+                size: contents.length,
+              })
+            if (url.searchParams.get('inline') === '1')
+              return new Response(contents, { headers: { 'content-type': 'text/plain' } })
+          }
+        }
+        throw new Error('此测试不允许其他请求')
+      })
+      function OpenHistoricalFile() {
+        const [text, setText] = useState('请读取 ')
+        const panel = useRightPanelStore((state) =>
+          selectThreadRightPanelState(state.byThreadKey, threadRef),
+        )
+        const surface = panel.surfaces.find((value) => value.id === panel.activeSurfaceId)
+        const handle = useRef({
+          insertTextAtEnd: (value: string) => {
+            setText((previous) => previous + value)
+            return true
+          },
+        } as ChatComposerHandle)
+        return (
+          <ComposerHandleContext value={handle}>
+            <textarea aria-label="本轮待发问题" value={text} readOnly />
+            <section aria-label="原历史消息">
+              <ChatMarkdown
+                cwd={undefined}
+                text={`[README.md](${originalPath})`}
+                threadRef={threadRef}
+              />
+            </section>
+            <div style={{ display: 'flex', width: 900, height: 480 }}>
+              {surface?.kind === 'file' ? (
+                <AutoOpsMaterialPreview
+                  {...props(surface.relativePath)}
+                  revealRequestId={surface.revealRequestId}
+                />
+              ) : null}
+            </div>
+          </ComposerHandleContext>
+        )
+      }
+      await using screen = await render(<OpenHistoricalFile />, { router: false })
+      const displayedText = () =>
+        screen.container.textContent +
+        [...screen.container.querySelectorAll('diffs-container')]
+          .map((element) => element.shadowRoot?.textContent ?? '')
+          .join('')
+      await vi.waitFor(() => expect(displayedText()).toContain(textA))
+      const originalRevealId = selectThreadRightPanelState(
+        useRightPanelStore.getState().byThreadKey,
+        threadRef,
+      ).surfaces.find((surface) => surface.kind === 'file')
+      const link = screen
+        .getByRole('region', { name: '原历史消息' })
+        .getByRole('link', { name: 'README.md', exact: true })
+        .element()
+      if (!(link instanceof HTMLAnchorElement)) throw new Error('原历史标签必须沿原生链接打开')
+      if (mode === '旧定位迟到') {
+        link.click()
+        await vi.waitFor(() => expect(referenceCalls).toBe(2))
+        await expect
+          .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+          .not.toBeInTheDocument()
+      }
+      updated = true
+      link.click()
+      await vi.waitFor(() => {
+        const reopened = selectThreadRightPanelState(
+          useRightPanelStore.getState().byThreadKey,
+          threadRef,
+        ).surfaces.find((surface) => surface.kind === 'file')
+        expect(reopened?.kind === 'file' ? reopened.revealRequestId : null).toBe(
+          originalRevealId?.kind === 'file'
+            ? originalRevealId.revealRequestId + (mode === '旧定位迟到' ? 2 : 1)
+            : null,
+        )
+      })
+      if (mode === '503后原重试') {
+        await expect
+          .element(
+            screen.getByRole('alert').getByText('当前资料暂时不可用，请重试', { exact: true }),
+          )
+          .toBeVisible()
+        await expect
+          .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+          .not.toBeInTheDocument()
+        expect(displayedText()).not.toContain(textA)
+        retried = true
+        clickButton(screen.getByRole('button', { name: '重试', exact: true }).element())
+      }
+      await vi.waitFor(() => expect(displayedText()).toContain(textB), { timeout: 1000 })
+      if (mode === '旧定位迟到') {
+        resolveLate(
+          Response.json({
+            ...currentReference(),
+            mode: 'original',
+            resourcePath: originalPath,
+            revision: 'old-revision',
+            sha256: 'a'.repeat(64),
+            changed: false,
+          }),
+        )
+        await vi.waitFor(() => expect(lateDelivered).toBe(true))
+        expect(displayedText()).toContain(textB)
+      }
+      expect(displayedText()).not.toContain(textA)
+      await expect.element(screen.getByText('当前文件已更新', { exact: true })).toBeVisible()
+      clickButton(screen.getByRole('button', { name: '添加到对话', exact: true }).element())
+      await expect
+        .element(screen.getByRole('textbox', { name: '本轮待发问题' }))
+        .toHaveValue(expect.stringContaining(currentPath))
+      expect(
+        fetcher.mock.calls.filter(([input]) =>
+          new URL(String(input), location.origin).pathname.endsWith('/workspace/file-reference'),
+        ),
+      ).toHaveLength(mode === '直接成功' ? 2 : 3)
+      expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(
+        true,
+      )
+    },
+  )
   it('回收但版本未变时标明当前文件，不虚报已更新', async () => {
     const reference = { ...currentReference(), changed: false }
     mocks.execute.mockResolvedValue(result('picker-current'))

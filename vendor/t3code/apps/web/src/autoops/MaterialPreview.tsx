@@ -182,7 +182,7 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
     !versionId &&
     !alias
   )
-  const inputReadKey = `${readAutoOpsHost()?.principal.id ?? ''}:${props.environmentId}:${scopeCwd ?? ''}:${draftPickerInput ? 'draft-picker' : 'reference'}:${referencedFile ? canonical : (referencedInput ?? 'current')}`
+  const inputReadKey = `${readAutoOpsHost()?.principal.id ?? ''}:${props.environmentId}:${scopeCwd ?? ''}:${props.revealRequestId}:${draftPickerInput ? 'draft-picker' : 'reference'}:${referencedFile ? canonical : (referencedInput ?? 'current')}`
   const [resolved, setResolved] = useState<{
     key: string
     prefix: string | null

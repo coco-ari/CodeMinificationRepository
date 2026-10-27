@@ -51,8 +51,10 @@ const client = McpSchema.McpServerClient.of({ clientId: 1, protocolVersion: '202
 
 function workspacePort() {
   return {
-    readInput: vi.fn(() => ({ id: inputId, projectId: 'project', workspaceType: 'internal', createdAt: '2026-10-26T00:00:00Z', revision: 1, repositories: [], sourceErrors: [], sourceWarnings: [] })),
+    readInput: vi.fn(() => ({ id: inputId, projectId: 'project', workspaceType: 'internal', createdAt: '2026-10-26T00:00:00Z', revision: 1, directories: [], repositories: [], sourceErrors: [], sourceWarnings: [] })),
     inputFiles: vi.fn(() => [{ path: 'proof.md', mime: 'text/markdown', size: 14 }]),
+    readInputReference: vi.fn(() => ({ workspaceType: 'internal' })),
+    fixedInputFileReference: vi.fn(() => ({ path: 'proof.md', file: { path: 'proof.md', mime: 'text/markdown', revision: 'selected-revision' }, capturedAt: '2026-10-26T00:00:00Z' })),
     readInputContent: vi.fn(async () => ({ contents: '本轮固定正文', extraction: {} })),
   }
 }
@@ -122,6 +124,35 @@ it.effect('真实 MCP UUID 与原生逻辑 session 不同仍按当前线程配�
     expect(declaredFailure(result)).toBeUndefined()
     expect(result.structuredContent).toMatchObject({ content: '本轮固定正文', inputId, source: 'workspace_input' })
     expect(f.workspace.readInputContent).toHaveBeenCalledWith('project', inputId, 'proof.md', 'reader')
+  }).pipe(Effect.provide(f.layer))
+}))
+
+it.effect.each(['current', 'previous'] as const)('当前文件别名只接受本轮明确引用，%s 轮记录不借给其他轮次', kind => Effect.gen(function* () {
+  using f = setup()
+  const at = DateTime.makeUnsafe('2026-10-26T00:00:00Z'), oldRun = C.RunId.make('previous-run')
+  const alias = `autoops/project/current-input-files/${threadId}/picker/selected-revision/proof.md`
+  const record = { version: 1, kind: 'mention', contextId: 'current-file', label: 'proof.md', path: alias }
+  const message = (id: string, run: C.RunId, mentioned: boolean) => ({
+    id, threadId, runId: run, nodeId: null, role: 'user', createdBy: 'user', creationSource: 'web',
+    text: '读取已添加的文件', attachments: [], streaming: false, createdAt: at, updatedAt: at,
+    ...(mentioned ? { context: { version: 1, records: [record] } } : {}),
+  })
+  const p = f.state.projection
+  f.state.projection = decodeProjection({ ...p,
+    runs: [{ ...p.runs[0]!, id: oldRun, ordinal: 1, status: 'completed', completedAt: at }, { ...p.runs[0]!, ordinal: 2 }],
+    messages: [message('previous-message', oldRun, kind === 'previous'), message('message', runId, kind === 'current')],
+  })
+  yield* Effect.gen(function* () {
+    const { scope } = yield* issuedScope()
+    const result = yield* call(scope, 'read_project_material', { inputId, path: alias })
+    if (kind === 'current') {
+      expect(declaredFailure(result)).toBeUndefined()
+      expect(result.structuredContent).toMatchObject({ path: alias, inputId, source: 'workspace_input', content: '本轮固定正文' })
+      expect(f.workspace.readInputContent).toHaveBeenCalledOnce()
+    } else {
+      expect(declaredFailure(result)).toMatchObject({ code: 'invalid_request' })
+      expect(f.workspace.readInputContent).not.toHaveBeenCalled()
+    }
   }).pipe(Effect.provide(f.layer))
 }))
 

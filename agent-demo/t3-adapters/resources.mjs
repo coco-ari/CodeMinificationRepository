@@ -428,6 +428,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
         const scope = toolReferenceScope(threadId, current, actorId)
         const fixed = threadInput(threadId, inputId, false, actorId)
         const resolved = inputs().fixedInputFileReference(current.projectId, current.inputId, current.path, scope.owner, inputId, fixed.actorId, scope.actor, scope.binding.workspaceType)
+        if (resolved.file.revision !== current.revision) throw new AutoOpsAccessError(409, 'WORKSPACE_REFERENCE_CHANGED', '本轮固定资料与所选文件修订不符，请重新打开预览')
         const content = await inputs().readInputContent(current.projectId, inputId, resolved.path, fixed.actorId)
         toolReferenceScope(threadId, current, actorId); threadInput(threadId, inputId, false, actorId)
         return { path, name: resolved.file.path.split('/').at(-1), mime: resolved.file.mime, content: requireExtractedText({ content: content.contents, extraction: content.extraction }, '正文暂不可用，请查看原件'), source: 'workspace_input', inputId, capturedAt: resolved.capturedAt,

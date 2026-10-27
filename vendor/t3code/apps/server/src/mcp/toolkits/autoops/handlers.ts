@@ -77,7 +77,13 @@ const current = Effect.fn("AutoOps.current")(function* (inputId: string) {
   const knownRuns = new Set(historyProjection.runs.filter((run) => ordinal !== undefined && run.ordinal <= ordinal).map((run) => run.id));
   // 迟到调用不能看到下一轮的新附件，子任务使用已验证的原父轮历史。
   const history = historyProjection.messages.filter((message) => message.runId !== null ? knownRuns.has(message.runId) : historyRun !== undefined && DateTime.toEpochMillis(message.createdAt) <= DateTime.toEpochMillis(historyRun.requestedAt));
-  const referencePaths = history.flatMap((message) => message.context?.records ?? []).flatMap((record) => record.kind === "mention" && "path" in record && typeof record.path === "string" ? [record.path] : []);
+  const referencePaths = history.flatMap((message) => (message.context?.records ?? []).flatMap((record) => {
+    if (record.kind !== "mention" || !("path" in record) || typeof record.path !== "string") return [];
+    // 当前文件别名只授权本轮明确选择；其他历史输入与附件仍沿原历史合同读取。
+    if (/^autoops\/[^/]+\/current-input-files\//.test(record.path) &&
+      (message.role !== "user" || message.id !== historyRun?.userMessageId)) return [];
+    return [record.path];
+  }));
   const referenceInputIds = referencePaths.flatMap((path) => path.match(/^autoops\/[^/]+\/inputs\/([^/]+)(?:\/|$)/)?.[1] ?? []);
   const files = [...new Map(history.flatMap((message) => message.attachments).map((file) => [file.id, file] as const)).values()];
   const capture = authorized.capture;

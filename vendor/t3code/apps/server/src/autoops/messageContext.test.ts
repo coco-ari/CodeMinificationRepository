@@ -11,6 +11,34 @@ const contextOf = (value: unknown) =>
   Schema.decodeUnknownSync(OrchestrationMessageContext)((value as { context: unknown }).context)
 
 describe('业务文件标签的消息授权上下文', () => {
+  it('当前文件别名从原生标签进入本轮授权上下文，原别名及文字逐字保留', () => {
+    const alias = 'autoops/p-autoops/current-input-files/thread/picker/selected-revision/docs/current.txt'
+    const body = `${serializeComposerFileLink(alias)} 读取刚添加的文件`
+    for (const type of ['message.dispatch', 'queued-run.edit']) {
+      const command = { threadId: 'thread', type, text: body }
+      const normalized = prepareBusinessMessagePayload(access, 'orchestration.dispatchCommand', command)
+      expect(contextOf(normalized).records).toEqual([
+        expect.objectContaining({ kind: 'mention', path: alias, label: 'current.txt' }),
+      ])
+      expect((normalized as typeof command).text).toBe(body)
+      expect(prepareBusinessMessagePayload(access, 'orchestration.dispatchCommand', normalized)).toBe(normalized)
+    }
+    const launch = prepareBusinessMessagePayload(access, 'orchestration.launchThread', {
+      threadId: 'thread', initialMessage: { text: body },
+    }) as { initialMessage: { text: string; context: unknown } }
+    expect(contextOf(launch.initialMessage).records).toHaveLength(1)
+    const customer: Parameters<typeof prepareBusinessMessagePayload>[0] = {
+      getThreadBinding: () => ({
+        threadId: 'thread', projectId: 'project', environmentId: 'test', agentId: 'helper', ownerId: 'owner',
+        executionBinding: { kind: 'customer', deviceId: 'device', registeredWorkspaceId: 'workspace', workspaceBindingRevision: 1, runtimeId: 'codex' },
+        visibility: 'private', createdAt: '2026-10-26T00:00:00Z', scopeState: 'locked', scopeLocked: true,
+        compatibilityReadOnly: false, continuationVerified: false,
+      }),
+    }
+    const command = { threadId: 'thread', type: 'message.dispatch', text: body }
+    expect(prepareBusinessMessagePayload(customer, 'orchestration.dispatchCommand', command)).toBe(command)
+  })
+
   it('首次发送、继续对话和编辑待发消息保存同一文件身份，原生文字保持不变', () => {
     const message = { text, context: { version: 1, records: [] } }
     const launch = prepareBusinessMessagePayload(access, 'orchestration.launchThread', {
