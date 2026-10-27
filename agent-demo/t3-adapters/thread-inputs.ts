@@ -29,7 +29,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
           '旧共享任务缺少可核验的实际调用者，不能继承创建者执行权限',
         )
       if (existing) {
-        const scope = access.requireRunInputThread(threadId, existing.actorId,runId)
+        const scope = access.requireToolThread(threadId, existing.actorId)
         access.requireQuestionForActor(existing.actorId, threadId, modelSelection)
         if (messageId) {
           try {
@@ -80,7 +80,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
           throw error
         actorId = original.actorId
       }
-      const { binding } = access.requireRunInputThread(threadId, actorId,runId)
+      const { binding } = access.requireToolThread(threadId, actorId)
       access.requireQuestionForActor(actorId, threadId, modelSelection)
       if (original) {
         workspace.retainInputForNativeBinding({projectId:binding.projectId,inputId:original.inputId,inputOwnerId:original.inputOwnerId,workspaceType:binding.workspaceType??'internal'})
@@ -106,7 +106,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
         !created,
       )
       access.completeRunInputRequest({threadId,runId,projectId:binding.projectId,requestId,actorId,workspaceType:binding.workspaceType??'internal'},captured.id)
-      access.requireRunInputThread(threadId, actorId,runId)
+      access.requireToolThread(threadId, actorId)
       access.requireQuestionForActor(actorId, threadId, modelSelection)
       access.bindRunInput(threadId, runId, captured.id, actorId)
       workspace.retainInputForNativeBinding({projectId:binding.projectId,inputId:captured.id,inputOwnerId:actorId,workspaceType:binding.workspaceType??'internal'})
@@ -114,7 +114,7 @@ export function createBusinessRunInputs(access: AutoOpsAccess, workspace: Worksp
     },
     require(threadId: string, inputId: string, runId?: string) {
       const input = access.requireRunInput(threadId, inputId, runId)
-      const scope = access.requireRunInputThread(threadId, input.actorId,input.runId)
+      const scope = access.requireToolThread(threadId, input.actorId)
       const capture = workspace.readInput(
         scope.binding.projectId,
         input.inputId,
@@ -145,15 +145,7 @@ export async function prepareBusinessRunContext(
   const binding = access.getThreadBinding(threadId)
   if (binding?.executionBinding.kind === 'customer') {
     access.prepareCustomerRun(threadId, runId, messageId, editCommandId, modelSelection, inheritedRunId)
-    if(!binding.question?.configuration.workspaceType&&!binding.question?.configuration.environmentId)return undefined
-    const context=access.prepareCustomerToolRun(threadId,runId,messageId,editCommandId,modelSelection,inheritedRunId)
-    if(context.scope.configuration.workspaceType!==null)
-      await createBusinessRunInputs(access,configuredWorkspaceManagement(access)).prepare(threadId,runId,inheritedRunId,signal,messageId,editCommandId,modelSelection)
-    access.requireCustomerToolRun(context.reference)
-    configuredEnvironmentMcp(access).prepareRun({threadId,runId,actorId:context.scope.actorId,projectId:context.scope.projectId,environmentId:context.scope.configuration.environmentId},inheritedRunId)
-    access.requireCustomerToolRun(context.reference)
-    access.completeCustomerToolRun(threadId,runId)
-    return {key:'autoops_customer_tool_input',text:'本轮已固定所选平台资料和环境只读工具输入；未选择的范围不可读取，后续更新不替换本轮原件。'}
+    return undefined
   }
   const capture = await createBusinessRunInputs(
     access,

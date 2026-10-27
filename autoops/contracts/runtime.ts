@@ -59,7 +59,6 @@ export interface CustomerSkill {
   description: string
 }
 export interface CustomerCapabilityInput {
-  platformToolsVersion?: 1
   sharedProfile?: SharedProfileCapability
   workspaceFiles?: boolean
   assistantConfiguration?: boolean

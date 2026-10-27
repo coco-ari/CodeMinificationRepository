@@ -124,7 +124,6 @@ import * as AuthHttp from "./auth/http.ts";
 import * as AutoOpsHttp from "./autoops/http.ts";
 import * as AutoOpsBusinessRuntime from "./autoops/BusinessRuntime.ts";
 import * as CustomerHttp from './autoops/customerHttp.ts';
-import * as CustomerPlatformToolsHttp from './autoops/customerPlatformToolsHttp.ts';
 import * as CustomerFilesHttp from './autoops/customerFilesHttp.ts';
 import * as CustomerSocket from './autoops/customerSocket.ts';
 import * as CustomerAttachmentHttp from './autoops/customerAttachmentHttp.ts';
@@ -716,7 +715,6 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerOtlpTracesProxyRoute,
     AutoOpsHttp.layer,
     CustomerHttp.layer,
-    CustomerPlatformToolsHttp.layer,
     CustomerFilesHttp.layer,
     CustomerSocket.layer,
     CustomerStatusHttp.layer,

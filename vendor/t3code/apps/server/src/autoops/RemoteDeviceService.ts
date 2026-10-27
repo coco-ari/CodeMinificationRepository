@@ -6,7 +6,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { CUSTOMER_FILE_LIMITS, decodeCustomerFileResult, type CustomerFileInput, type CustomerFileResult } from '../../../../packages/contracts/src/customerFiles.ts';
 import type { CustomerExecutionBinding } from '../../../../../../autoops/contracts/runtime.ts';
-import type { CustomerPlatformToolRequest } from '../../../../../../autoops/contracts/customer-platform-tools.ts';
 import { EventEmitter } from 'node:events';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
@@ -24,7 +23,7 @@ import { customerProviderInstanceId,customerWorkspaceKey } from '../../../../../
 import { createCustomerTransportJournal, customerCommandId, CustomerTransportError, type CustomerTransportJournal, type TransportSession, type TransportReceipt } from '../../../../../../agent-demo/t3-adapters/customer-transport.mjs';
 
 type Send = (frame: CustomerAgentServerFrame) => Promise<void>;
-type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; platformToolsVersion?:1; sharedExecutionVersion?:1; receiptQueries:Map<string,{sessionId:string;runtimeEpoch:string;grantId?:string|undefined}>; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
+type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; sharedExecutionVersion?:1; receiptQueries:Map<string,{sessionId:string;runtimeEpoch:string;grantId?:string|undefined}>; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
 type Delivery = {sessionId:string;epoch:string;seq:number};
 type AppliedTerminalRetry = Delivery & {connection:Connection;event:ProviderAdapterV2Event;body:string;delivered:boolean;completion:Promise<void>;resolve:()=>void;reject:(cause:unknown)=>void};
 const error = (code:string,message:string) => new CustomerTransportError(code,message);
@@ -204,7 +203,6 @@ export class RemoteDeviceHub {
           connection.attachmentTransfers = frame.attachmentTransfers === true;
           connection.workspaceFiles = frame.workspaceFiles === true;
           connection.assistantConfiguration = frame.assistantConfiguration === true;
-          if(frame.platformToolsVersion===1)connection.platformToolsVersion=1;
           if(frame.sharedExecutionVersion===1)connection.sharedExecutionVersion = 1;
           const registered=this.access.customerRegistry.listWorkspaces(principal.ownerId);
           for(const workspace of frame.workspaces)if(!registered.some(item=>item.deviceId===principal.deviceId&&item.projectId===workspace.projectId&&item.registeredWorkspaceId===workspace.registeredWorkspaceId&&item.workspaceBindingRevision===workspace.workspaceBindingRevision&&item.runtimeId===workspace.runtimeId))throw error('WORKSPACE_SCOPE','客户设备声明了未登记的工作区');
@@ -220,7 +218,6 @@ export class RemoteDeviceHub {
               // Only previously journaled commands are retried. The local ledger decides
               // accepted/completed/unknown; a new prompt is never synthesized here.
               for(const command of this.journal.pendingCommands(session.sessionId)) {
-                if(command.platformTools&&connection.platformToolsVersion!==1){await send({type:'error',code:'PLATFORM_TOOLS_PROTOCOL_REQUIRED',message:'原工具上下文需要支持受控桥的连接程序，原命令未重发'});continue;}
                 if(command.executionScope && connection.sharedExecutionVersion!==1) {
                   await send({type:'error',code:'SHARED_PROTOCOL_REQUIRED',message:'共享执行恢复需要支持隔离的连接程序，原命令未重发'});continue;
                 }
@@ -372,20 +369,6 @@ export class RemoteDeviceHub {
     if(saved.command.executionScope)this.access.requireSharedExecutionScope(saved.command.executionScope,principal);
     return delivered.bytes;
   }
-  authorizePlatformTool(principal:CustomerDevicePrincipal,request:CustomerPlatformToolRequest) {
-    this.access.assertAccepting();
-    const connection=this.connections.get(principal.deviceId),saved=this.journal.command(request.commandId),session=this.journal.session(request.sessionId);
-    if(!connection?.hello||connection.platformToolsVersion!==1||connection.principal.tokenHash!==principal.tokenHash)throw error('PLATFORM_TOOLS_CONNECTION','原设备只读工具连接不可用');
-    if(!saved||!session||saved.command.method!=='startTurn'||saved.command.sessionId!==session.sessionId||session.deviceId!==principal.deviceId||(session.providerId??session.ownerId)!==principal.ownerId)throw error('PLATFORM_TOOLS_COMMAND_SCOPE','平台工具不属于此设备原轮命令');
-    if(saved.command.platformTools?.version!==request.reference.version||saved.command.platformTools.contextId!==request.reference.contextId)throw error('PLATFORM_TOOLS_CONTEXT_SCOPE','不能替换原命令的平台工具引用');
-    if(session.runtimeEpoch!==request.runtimeEpoch||saved.command.runtimeEpoch!==request.runtimeEpoch||connection.sessions.get(session.sessionId)?.runtimeEpoch!==request.runtimeEpoch)throw error('PLATFORM_TOOLS_RUNTIME_EPOCH','平台工具不属于原运行代次');
-    if(saved.receipt&&['failed','unknown'].includes(saved.receipt.state))throw error('PLATFORM_TOOLS_OUTCOME_UNKNOWN','原命令结果未知或失败，不能发起新工具调用');
-    const authorized=this.access.requireCustomerToolRun(request.reference,principal),input=saved.command.input as {runId?:string;attemptId?:string};
-    if(authorized.context.threadId!==session.threadId||authorized.context.runId!==input.runId||customerWorkspaceKey(authorized.binding.executionBinding as CustomerExecutionBinding)!==customerWorkspaceKey({kind:'customer',deviceId:session.deviceId,...session.target}))throw error('PLATFORM_TOOLS_RUN_SCOPE','平台工具不属于原线程任务与登记目录');
-    if(saved.command.executionScope)this.access.requireSharedExecutionScope(saved.command.executionScope,principal);
-    if((saved.command.executionScope?.grantId??null)!==authorized.context.scope.grantId)throw error('PLATFORM_TOOLS_GRANT_SCOPE','平台工具不属于原命令执行授权');
-    return {authorized,session,command:saved.command,runId:authorized.context.runId,attemptId:input.attemptId};
-  }
   async command(sessionId:string,method:CustomerAgentMethod,input:unknown,key:unknown,signal?:AbortSignal):Promise<unknown> {
     const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');
     const connection=this.connections.get(session.deviceId);
@@ -396,8 +379,6 @@ export class RemoteDeviceHub {
     const target={kind:'customer' as const,deviceId:session.deviceId,...session.target};
     const commandId=customerCommandId(sessionId,method,key);
     const prior=this.journal.command(commandId);
-    const platformTools=prior?.command.platformTools??(method==='startTurn'?this.access.customerToolReference(session.threadId,String((input as {runId:string}).runId)):undefined);
-    if(platformTools&&connection?.platformToolsVersion!==1)throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED','此连接程序未启用平台只读工具桥'),{outcome:'not_started'});
     const executionScope=prior?.command.executionScope ?? (method==='startTurn' && session.executionScope
       ? this.access.customerRunScope(session.threadId,String((input as {runId:string}).runId)) : session.executionScope);
     const authorize = () => {
@@ -420,7 +401,7 @@ export class RemoteDeviceHub {
     const capabilities=names.length?this.access.customerRegistry.getCapabilities(executionScope?.providerId ?? session.ownerId,target):undefined;
     const catalog=executionScope?capabilities?.sharedProfile:capabilities;
     const skillBindings=names.map(name=>{const matches=catalog?.skills.filter(skill=>skill.name===name)??[];if(matches.length!==1)throw error('CUSTOMER_SKILL_UNAVAILABLE','所选本机技能已变更或有重名，请刷新后重选');return {id:matches[0]!.id,name};});
-    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method,...(method!=='openSession'&&session.runtimeEpoch?{runtimeEpoch:session.runtimeEpoch}:{}),...(executionScope?{executionScope}:{}),...(platformTools?{platformTools}:{}),...(skillBindings.length?{skillBindings}:{}),...(attachments?.length?{attachments}:{}),input};
+    const command=prior?.command??{type:'command' as const,commandId,sessionId,target:session.target,method,...(method!=='openSession'&&session.runtimeEpoch?{runtimeEpoch:session.runtimeEpoch}:{}),...(executionScope?{executionScope}:{}),...(skillBindings.length?{skillBindings}:{}),...(attachments?.length?{attachments}:{}),input};
     this.journal.saveCommand(command);
     const settle=(receipt:TransportReceipt)=>{if(receipt.state==='completed'){authorize();return receipt.result;}if(receipt.state!=='accepted'){const failure=error(receipt.error?.code??'CUSTOMER_OUTCOME_UNKNOWN',receipt.error?.message??'客户执行结果尚未确认，请先检查本机任务');if(receipt.state==='failed'&&['startTurn','steerTurn'].includes(method))Object.assign(failure,{outcome:'not_started'});throw failure;}};
     if(prior?.receipt&&prior.receipt.state!=='accepted')return settle(prior.receipt);

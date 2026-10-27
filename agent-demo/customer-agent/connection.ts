@@ -8,7 +8,7 @@ import { ConnectorError } from "./store.ts";
 import { CUSTOMER_FILE_LIMITS } from "../../vendor/t3code/packages/contracts/src/customerFiles.ts";
 
 export interface DeviceCredentials { deviceId: string; token: string; baseUrl: string; allowInsecure?: boolean; }
-export const CONNECTOR_VERSION = "0.4.4";
+export const CONNECTOR_VERSION = "0.4.3";
 export function validateBaseUrl(value: string, allowInsecure = false): string {
   const url = new URL(value);
   if (url.username || url.password || url.hash || url.search) throw new Error("中心地址不能包含账号、密码、查询参数或片段");
@@ -27,21 +27,15 @@ export class CustomerAgentHttpClient {
     this.baseUrl = validateBaseUrl(baseUrl, allowInsecure); this.token = token;
   }
   async request<T>(path: string, body?: unknown, signal?:AbortSignal): Promise<T> {
-    const encoded=body===undefined?undefined:JSON.stringify(body);
-    if(path==='connector/platform-tools' && encoded && Buffer.byteLength(encoded)>128*1024)throw new Error('平台工具请求超过大小限制');
     const response = await fetch(endpoint(this.baseUrl, path), {
       method: body === undefined ? "GET" : "POST", dispatcher: this.dispatcher,
       headers: { ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), "content-type": "application/json" },
-      ...(encoded === undefined ? {} : { body: encoded }), signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000), redirect: "error",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000), redirect: "error",
     });
     if (!response.ok) { await response.body?.cancel(); throw new Error(`中心请求失败（HTTP ${response.status}），请检查设备授权与地址`); }
-    const chunks:Uint8Array[]=[];let bytes=0;
-    if(response.body)for await(const chunk of response.body){
-      bytes+=chunk.length;
-      if(bytes>1024*1024){await response.body.cancel().catch(()=>{});throw new Error("中心响应超过大小限制");}
-      chunks.push(chunk);
-    }
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
+    const text = await response.text();
+    if (Buffer.byteLength(text) > 1024 * 1024) throw new Error("中心响应超过大小限制");
+    return JSON.parse(text) as T;
   }
   async *downloadAttachment(commandId: string, attachmentId: string, signal: AbortSignal): AsyncGenerator<Uint8Array> {
     const response = await fetch(endpoint(this.baseUrl, `connector/attachments/${encodeURIComponent(commandId)}/${encodeURIComponent(attachmentId)}`), {
@@ -88,7 +82,6 @@ export class CustomerAgentConnection {
     this.beforeConnect = options.beforeConnect ?? (async () => {}); this.onReady = options.onReady ?? (async () => {});
     this.attachmentClient = new CustomerAgentHttpClient(this.credentials.baseUrl, this.credentials.token, this.credentials.allowInsecure);
     this.executor = new CustomerAgentExecutor({ store: this.store, deviceId: this.credentials.deviceId,
-      callPlatformTool:(request,signal)=>this.attachmentClient.request('connector/platform-tools',request,signal),
       authorizeShared:async (scope,signal)=>{const admitted=await this.attachmentClient.request<{grantId:string;available:boolean}>('connector/shared-admission',scope,signal);if(admitted.grantId!==scope.grantId||admitted.available!==true)throw new ConnectorError('shared_admission_denied','共享执行授权已失效')},
       downloadAttachment: (commandId, attachmentId, signal) => this.attachmentClient.downloadAttachment(commandId, attachmentId, signal),
       runnerFactory: options.runnerFactory, notify: (frame) => this.enqueue(frame), onState: this.onState });
@@ -115,7 +108,7 @@ export class CustomerAgentConnection {
       if (this.socket !== socket || this.stopped) return;
       this.lastReceived = Date.now(); this.sent.clear();
       socket.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: this.credentials.deviceId,
-        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, ...(this.executor.platformToolsVersion?{platformToolsVersion:this.executor.platformToolsVersion}:{}), attachmentTransfers: true, workspaceFiles: true, assistantConfiguration: true,sharedExecutionVersion:1,receiptQueries:true,
+        connectorVersion: CONNECTOR_VERSION, connectorEpoch: this.connectorEpoch, attachmentTransfers: true, workspaceFiles: true, assistantConfiguration: true,sharedExecutionVersion:1,receiptQueries:true,
         workspaces: this.store.workspaces().filter((workspace) => !workspace.revoked && workspace.published).map((workspace) => ({
           registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
           runtimeId: workspace.runtimeId, projectId: workspace.projectId, label: workspace.label,

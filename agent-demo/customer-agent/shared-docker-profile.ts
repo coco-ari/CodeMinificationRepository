@@ -184,7 +184,6 @@ export interface SharedDockerRuntime {
   updateScope(scope:SharedExecutionScope):Promise<void>
   assertCurrent():Promise<void>
   close():Promise<void>
-  readonly platformToolsSocketPath:string
   readonly attachmentDirectory:string
   attachmentPath(path:string):string
   setModelDefaults(models:ReadonlyArray<{id:string;effort:string|null}>):void
@@ -285,7 +284,6 @@ export async function createSharedDockerRuntime(input:{directory:string;workspac
     })()}
   }
   return {options:{homePath:'/home/autoops/.codex',environment:{PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/home/autoops',LANG:'C.UTF-8'},agentScope,externalSandbox:true,openCatalogProcess},
-    platformToolsSocketPath:join(gatewayDirectory,'tools.sock'),
     attachmentDirectory:attachments,attachmentPath:path=>{if(dirname(path)!==attachments)return fail('shared_attachment_scope','附件不属于此隔离会话');return `/autoops/attachments/${basename(path)}`},
     setModelDefaults:models=>{modelDefaults.clear();for(const model of models)modelDefaults.set(model.id,model.effort)},
     configureSkillCatalog:async skills=>{

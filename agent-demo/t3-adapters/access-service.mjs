@@ -4,7 +4,6 @@ import { createCustomerRegistry, normalizeExecutionBinding, requireCustomerAgent
 import { createAccessIdentity, initializeAccessIdentitySchema } from './access-identity.mjs'
 import { createAccessInputLifecycle, initializeInputLifecycleSchema } from './access-input-lifecycle.mjs'
 import { projectAccessBootstrap } from './access-bootstrap.mjs'
-import { randomUUID } from 'node:crypto'
 
 // 业务授权拥有线程和附件的业务绑定，原生运行与事件仍由 T3 管理。
 export class AutoOpsAccessError extends Error {
@@ -80,11 +79,6 @@ export function initializeAutoOpsAccessSchema(db) {
       created_at TEXT NOT NULL, PRIMARY KEY(thread_id, run_id)
     );
     CREATE INDEX IF NOT EXISTS t3_thread_inputs_identity ON t3_thread_inputs(input_id);
-    CREATE TABLE IF NOT EXISTS t3_customer_tool_runs (
-      context_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, run_id TEXT NOT NULL,
-      scope_json TEXT NOT NULL, input_id TEXT, created_at TEXT NOT NULL, prepared_at TEXT,
-      UNIQUE(thread_id,run_id)
-    );
     CREATE TABLE IF NOT EXISTS t3_request_actors (
       command_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, kind TEXT NOT NULL,
       target_id TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL
@@ -191,10 +185,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     if (binding.revokedAt) fail(404, 'THREAD_NOT_FOUND', '会话已删除')
     if (binding.executionBinding?.kind === 'customer') {
       normalizeExecutionBinding(binding.executionBinding)
-      const source=customerRegistry.sourceOwner(binding.executionBinding)
-      const platformTools=customerRegistry.getCapabilities(source.ownerId,binding.executionBinding)?.platformToolsVersion===1
-      if (binding.visibility !== 'private' || binding.workspaceVersionId || binding.agentId !== 'a-project' ||
-        ((binding.workspaceType || binding.question?.configuration.environmentId) && !platformTools))
+      if (binding.visibility !== 'private' || binding.workspaceType || binding.workspaceVersionId || binding.agentId !== 'a-project')
         fail(400, 'INVALID_CUSTOMER_SCOPE', '客户工作区仅支持私有开发对话，不接入平台工作区或报告助手')
     }
     if (binding.workspaceType) {
@@ -441,76 +432,6 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       }
       return scope
     },
-    requireCustomerToolThread(threadId, actorId, modelSelection) {
-      const scope=requireActorThread(threadId,actorId),{binding}=scope
-      if(binding.executionBinding.kind!=='customer')fail(403,'CUSTOMER_TARGET_REQUIRED','工具范围必须属于客户运行来源')
-      const selected=this.requireQuestionForActor(actorId,threadId,modelSelection)
-      if(!selected || (selected.configuration.workspaceType===null && selected.configuration.environmentId===null))fail(403,'CUSTOMER_PLATFORM_TOOLS_NOT_SELECTED','本轮未选择平台资料或环境')
-      const source=customerRegistry.sourceOwner(binding.executionBinding)
-      customerRegistry.validateTarget(source.ownerId,source.projectId,binding.executionBinding,{requireOnline:true})
-      const capabilities=customerRegistry.getCapabilities(source.ownerId,binding.executionBinding)
-      if(capabilities?.platformToolsVersion!==1)fail(409,'CUSTOMER_PLATFORM_TOOLS_UNAVAILABLE','所选运行器尚未接入平台只读工具桥')
-      requireProjectActionForUser(actorId,binding.projectId,'chat.use')
-      if(binding.workspaceType!==undefined)workspaceForUser(actorId,binding.projectId,binding.workspaceType)
-      if(binding.environmentId!==null)requireEnvironmentQueryForUser(actorId,binding.projectId,binding.environmentId)
-      return {...scope,selected,capabilityRevision:capabilities.revision}
-    },
-    prepareCustomerToolRun(threadId,runId,messageId,editCommandId,modelSelection,inheritedRunId) {
-      const original=inheritedRunId?this.customerToolRun(threadId,inheritedRunId):undefined
-      if(inheritedRunId&&!original)fail(409,'CUSTOMER_TOOL_CONTEXT_MISSING','原轮平台工具输入不存在，不能改用最新资料恢复')
-      let actorId
-      try {if(!messageId&&!editCommandId)fail(409,'MESSAGE_ACTOR_MISSING','客户工具输入缺少原消息调用者');actorId=(editCommandId?this.requireQueuedEditActor(threadId,editCommandId,runId):this.requireMessageActor(threadId,messageId)).actorId}
-      catch(error){if(error.code!=='MESSAGE_ACTOR_MISSING'||!original)throw error;actorId=original.scope.actorId}
-      const current=this.requireCustomerToolThread(threadId,actorId,modelSelection)
-      const grant=this.customerRunScope(threadId,runId)
-      if(grant)this.requireSharedExecutionScope(grant)
-      const scope={actorId,projectId:current.binding.projectId,configuration:current.selected.configuration,assistantId:current.selected.assistantId,presetRevision:current.selected.presetRevision,capabilityRevision:current.capabilityRevision,grantId:grant?.grantId??null}
-      if(original){const identity=({grantId,...value})=>JSON.stringify(value);if(identity(original.scope)!==identity(scope))fail(409,'CUSTOMER_TOOL_CONTEXT_FIXED','原轮工具范围和能力已改变，不能改抓最新资料')}
-      bindingDb.prepare('INSERT INTO t3_customer_tool_runs VALUES(?,?,?,?,NULL,?,NULL) ON CONFLICT(thread_id,run_id) DO NOTHING').run(randomUUID(),identifier(threadId,'会话ID'),identifier(runId,'任务ID'),JSON.stringify(scope),new Date(now()).toISOString())
-      const stored=this.customerToolRun(threadId,runId)
-      if(JSON.stringify(stored.scope)!==JSON.stringify(scope))fail(409,'CUSTOMER_TOOL_CONTEXT_CONFLICT','原轮已固定其他平台工具范围')
-      return stored
-    },
-    customerToolRun(threadId,runId) {
-      const row=bindingDb.prepare('SELECT * FROM t3_customer_tool_runs WHERE thread_id=? AND run_id=?').get(identifier(threadId,'会话ID'),identifier(runId,'任务ID'))
-      return row?{reference:{version:1,contextId:row.context_id},threadId:row.thread_id,runId:row.run_id,scope:JSON.parse(row.scope_json),inputId:row.input_id,createdAt:row.created_at,preparedAt:row.prepared_at}:undefined
-    },
-    completeCustomerToolRun(threadId,runId) {
-      const context=this.customerToolRun(threadId,runId)
-      if(!context)fail(409,'CUSTOMER_TOOL_CONTEXT_MISSING','本轮尚未准备平台工具输入')
-      this.requireCustomerToolRun(context.reference)
-      if(context.scope.configuration.workspaceType!==null&&!context.inputId)fail(409,'CUSTOMER_TOOL_INPUT_MISSING','本轮资料输入尚未准备完成')
-      bindingDb.prepare('UPDATE t3_customer_tool_runs SET prepared_at=COALESCE(prepared_at,?) WHERE context_id=?').run(new Date(now()).toISOString(),context.reference.contextId)
-      return context.reference
-    },
-    customerToolReference(threadId,runId) {
-      const binding=getThreadBinding(threadId)
-      if(binding?.executionBinding.kind!=='customer'||(!binding.question?.configuration.workspaceType&&!binding.question?.configuration.environmentId))return undefined
-      const context=this.customerToolRun(threadId,runId)
-      if(!context?.preparedAt)fail(409,'CUSTOMER_TOOL_CONTEXT_MISSING','原轮平台工具尚未准备完成，不能静默忽略配置')
-      this.requireCustomerToolRun(context.reference)
-      return context.reference
-    },
-    requireCustomerToolRun(reference,principal) {
-      const row=bindingDb.prepare('SELECT * FROM t3_customer_tool_runs WHERE context_id=?').get(identifier(reference.contextId,'工具上下文ID'))
-      if(reference.version!==1||!row)fail(403,'CUSTOMER_TOOL_CONTEXT_FORBIDDEN','本轮平台工具引用无效')
-      const stored=this.customerToolRun(row.thread_id,row.run_id),scope=stored.scope
-      const current=this.requireCustomerToolThread(row.thread_id,scope.actorId,{instanceId:scope.configuration.model.instanceId,model:scope.configuration.model.model,options:scope.configuration.model.reasoningEffort===null?[]:[{id:'reasoningEffort',value:scope.configuration.model.reasoningEffort}]})
-      if(current.capabilityRevision!==scope.capabilityRevision||JSON.stringify(current.selected.configuration)!==JSON.stringify(scope.configuration))fail(403,'CUSTOMER_TOOL_CONTEXT_CHANGED','本轮平台工具范围或能力已失效')
-      const source=customerRegistry.sourceOwner(current.binding.executionBinding)
-      if(principal&&(principal.deviceId!==current.binding.executionBinding.deviceId||principal.ownerId!==source.ownerId))fail(403,'CUSTOMER_TOOL_DEVICE_FORBIDDEN','本轮工具不属于此设备')
-      const grant=this.customerRunScope(row.thread_id,row.run_id)
-      if((grant?.grantId??null)!==scope.grantId)fail(403,'CUSTOMER_TOOL_GRANT_CHANGED','本轮工具不属于原执行授权')
-      if(grant)this.requireSharedExecutionScope(grant,principal)
-      return {...current,context:stored,actorId:scope.actorId}
-    },
-    requireRunInputThread(threadId,actorId,runId) {
-      const binding=getThreadBinding(threadId)
-      if(binding?.executionBinding.kind!=='customer')return this.requireToolThread(threadId,actorId)
-      const context=this.customerToolRun(threadId,runId)
-      if(!context||context.scope.actorId!==actorId||!context.scope.configuration.workspaceType)fail(403,'CUSTOMER_TOOL_INPUT_FORBIDDEN','客户资料必须来自本轮已授权的工具输入')
-      return this.requireCustomerToolRun(context.reference)
-    },
     customerRunScope(threadId, runId) {
       const binding = getThreadBinding(threadId)
       if (!binding || binding.executionBinding.kind !== 'customer') fail(404, 'THREAD_NOT_FOUND', '客户会话不存在')
@@ -597,13 +518,11 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       return row ? { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at } : undefined
     },
     bindRunInput(threadId, runId, inputId, actorId = getThreadBinding(threadId)?.ownerId, inputOwnerId = actorId) {
-      this.requireRunInputThread(threadId, actorId,runId)
+      this.requireToolThread(threadId, actorId)
       for (const [value, label] of [[runId, '任务ID'], [inputId, '资料输入ID']]) identifier(value, label)
       bindingDb.prepare('INSERT INTO t3_thread_inputs(thread_id,run_id,input_id,created_at,actor_id,input_owner_id,actor_verified) VALUES(?,?,?,?,?,?,1) ON CONFLICT(thread_id,run_id) DO NOTHING').run(threadId, runId, inputId, new Date(now()).toISOString(), identifier(actorId, '调用者ID'), identifier(inputOwnerId, '资料所有者ID'))
       const stored = this.getRunInput(threadId, runId)
       if (stored.inputId !== inputId || stored.actorId !== actorId || stored.inputOwnerId !== inputOwnerId) fail(409, 'THREAD_INPUT_CONFLICT', '此任务已经固定另一份资料输入')
-      const context=this.customerToolRun(threadId,runId)
-      if(context){if(context.inputId!==null&&context.inputId!==inputId)fail(409,'CUSTOMER_TOOL_INPUT_CONFLICT','原轮平台资料输入已经固定');bindingDb.prepare('UPDATE t3_customer_tool_runs SET input_id=? WHERE context_id=? AND input_id IS NULL').run(inputId,context.reference.contextId)}
       return stored
     },
     listThreadInputs(threadId) {
@@ -612,11 +531,8 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     },
     // 可信原生终态协调只读取持久身份事实，不将撤权后的调用者改成管理员。
     runResourceReferences(threadId, runId) {
-      const references=bindingDb.prepare('SELECT i.*,b.project_id,b.environment_id FROM t3_thread_inputs i JOIN t3_thread_bindings b ON b.thread_id=i.thread_id WHERE i.thread_id=? AND i.run_id=?').all(identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
+      return bindingDb.prepare('SELECT i.*,b.project_id,b.environment_id FROM t3_thread_inputs i JOIN t3_thread_bindings b ON b.thread_id=i.thread_id WHERE i.thread_id=? AND i.run_id=?').all(identifier(threadId, '会话ID'), identifier(runId, '任务ID'))
         .map(row => ({ threadId: row.thread_id, runId: row.run_id, projectId: row.project_id, environmentId: row.environment_id || null, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at }))
-      const context=this.customerToolRun(threadId,runId)
-      if(!references.length&&context)references.push({threadId,runId,projectId:context.scope.projectId,environmentId:context.scope.configuration.environmentId,inputId:null,actorId:context.scope.actorId,inputOwnerId:context.scope.actorId,actorVerified:true,createdAt:context.createdAt})
-      return references
     },
     inputResourceSnapshot: inputLifecycle.inputResourceSnapshot,
     workspaceVersionResourceSnapshot:inputLifecycle.workspaceVersionResourceSnapshot,
@@ -629,7 +545,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       return {projectId:binding.projectId,inputId:input.inputId,inputOwnerId:input.inputOwnerId,workspaceType:binding.workspaceType??'internal'}
     },
     recordRunInputRequest(threadId,runId,requestId,actorId) {
-      const {binding}=this.requireRunInputThread(threadId,actorId,runId)
+      const {binding}=this.requireToolThread(threadId,actorId)
       return inputLifecycle.recordRunInputRequest(threadId,runId,binding.projectId,requestId,actorId,binding.workspaceType??'internal')
     },
     completeRunInputRequest: inputLifecycle.completeRunInputRequest,
@@ -667,7 +583,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       identifier(inputId, '资料输入ID')
       const row = runId ? bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND input_id=? AND run_id=?').get(threadId, inputId, identifier(runId, '任务ID')) : bindingDb.prepare('SELECT * FROM t3_thread_inputs WHERE thread_id=? AND input_id=? ORDER BY rowid LIMIT 1').get(threadId, inputId)
       if (!row) fail(403, 'THREAD_INPUT_FORBIDDEN', '资料输入不属于此会话任务，请使用本轮输入标识')
-      this.requireRunInputThread(threadId, row.actor_id,row.run_id)
+      this.requireToolThread(threadId, row.actor_id)
       return { threadId: row.thread_id, runId: row.run_id, inputId: row.input_id, actorId: row.actor_id, inputOwnerId: row.input_owner_id, actorVerified: Boolean(row.actor_verified), createdAt: row.created_at }
     },
     nativeSubagentParent,

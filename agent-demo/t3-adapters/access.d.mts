@@ -38,11 +38,6 @@ export interface ThreadBinding {
 }
 export interface ToolScope { actorId: string; binding: ThreadBinding; project: AutoOpsProject; agent: AutoOpsAgent }
 export interface ThreadInputBinding { readonly threadId: string; readonly runId: string; readonly inputId: string; readonly actorId: string; readonly inputOwnerId: string; readonly actorVerified: boolean; readonly createdAt: string }
-export interface CustomerToolRun {
-  reference: import('../../autoops/contracts/customer-platform-tools.ts').CustomerPlatformToolReference;
-  threadId: string; runId: string; inputId: string | null; createdAt: string; preparedAt: string | null;
-  scope: {actorId:string;projectId:string;configuration:import('../../autoops/contracts/assistants.ts').QuestionConfiguration;assistantId:string;presetRevision:number;capabilityRevision:string;grantId:string|null};
-}
 export interface InputReferenceClaim {readonly commandId:string;readonly kind:'context'|'fork';readonly messageId?:string;readonly runId?:string;readonly sourceThreadId?:string}
 export interface RunInputRequest {readonly threadId:string;readonly runId:string;readonly projectId:string;readonly requestId:string;readonly actorId:string;readonly workspaceType:'internal'|'external'}
 export interface WorkspaceVersionResourceSnapshot {readonly threadId:string;readonly projectId:string;readonly versionId:string;readonly scopeState:string;readonly submissionCommandId:string|null;readonly nativeThreadId:string|null;readonly truncated:boolean;readonly commands:Array<{commandId:string;targetId:string;kind:string;actorId:string}>}
@@ -72,13 +67,6 @@ export interface AutoOpsAccess {
   issueCustomerSessionScope(threadId:string,sessionId:string,modelSelection?:unknown): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;
   prepareCustomerRun(threadId:string,runId:string,messageId?:string,editCommandId?:string,modelSelection?:unknown,inheritedRunId?:string): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;
   customerRunScope(threadId:string,runId:string): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;
-  requireCustomerToolThread(threadId:string,actorId:string,modelSelection?:unknown):ToolScope & {selected:AssistantSelection;capabilityRevision:string};
-  prepareCustomerToolRun(threadId:string,runId:string,messageId?:string,editCommandId?:string,modelSelection?:unknown,inheritedRunId?:string):CustomerToolRun;
-  customerToolRun(threadId:string,runId:string):CustomerToolRun | undefined;
-  requireCustomerToolRun(reference:import('../../autoops/contracts/customer-platform-tools.ts').CustomerPlatformToolReference,principal?:import('./customer-registry.mjs').CustomerDevicePrincipal):ToolScope & {context:CustomerToolRun};
-  completeCustomerToolRun(threadId:string,runId:string):import('../../autoops/contracts/customer-platform-tools.ts').CustomerPlatformToolReference;
-  customerToolReference(threadId:string,runId:string):import('../../autoops/contracts/customer-platform-tools.ts').CustomerPlatformToolReference | undefined;
-  requireRunInputThread(threadId:string,actorId:string,runId:string):ToolScope;
   requireSharedExecutionScope(scope:import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope,principal?:import('./customer-registry.mjs').CustomerDevicePrincipal): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope;
   authenticateCookie(cookie?: string): AutoOpsPrincipal;
   refresh(principal: AutoOpsPrincipal): AutoOpsPrincipal;
@@ -114,7 +102,7 @@ export interface AutoOpsAccess {
   bindRunInput(threadId: string, runId: string, inputId: string, actorId?: string, inputOwnerId?: string): ThreadInputBinding;
   listThreadInputs(threadId: string): ThreadInputBinding[];
   /** 仅供可信原生终态协调读取持久引用；不授予内容访问权。 */
-  runResourceReferences(threadId: string, runId: string): Array<Omit<ThreadInputBinding,'inputId'> & {inputId:string|null;projectId: string; environmentId: string | null}>;
+  runResourceReferences(threadId: string, runId: string): Array<ThreadInputBinding & {projectId: string; environmentId: string | null}>;
   /** 可信维护只读取持久引用，不授予已撤权身份内容访问权。 */
   inputResourceSnapshot(projectId:string,inputId:string):InputResourceSnapshot;
   workspaceVersionResourceSnapshot(threadId:string):WorkspaceVersionResourceSnapshot|null;

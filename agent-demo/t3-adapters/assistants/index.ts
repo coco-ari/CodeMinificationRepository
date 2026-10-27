@@ -445,7 +445,7 @@ export function createAssistantDirectory(options: Options) {
         return fail(403,'ASSISTANT_SOURCE_FIXED','不能改变助手的运行来源或业务身份')
       if(!adjustable(member)&&stable(configuration)!==stable(original))
         return fail(403,'ASSISTANT_PARAMETERS_FIXED','当前成员只能使用已分配预设的参数')
-      if(configuration.executionBinding.kind!=='customer'||configuration.agentId!=='a-project'||configuration.visibility!=='private')
+      if(configuration.executionBinding.kind!=='customer'||configuration.agentId!=='a-project'||configuration.environmentId!==null||configuration.workspaceType!==null||configuration.visibility!=='private')
         return fail(403,'CUSTOMER_CONTEXT_UNSUPPORTED','此目录只支持当前助手的私有客户来源')
       const source=providerRegistry().sourceOwner(configuration.executionBinding)
       if((source.ownerId!==actor||source.projectId!==project)&&member.workspaceAccess!=='internal')
@@ -602,11 +602,11 @@ export function createAssistantDirectory(options: Options) {
           }
           if (
             value.value.configuration.agentId !== 'a-project' ||
+            value.value.configuration.environmentId !== null ||
+            value.value.configuration.workspaceType !== null ||
             value.value.configuration.visibility !== 'private'
           )
             fail(403, 'CUSTOMER_CONTEXT_UNSUPPORTED', '此运行来源尚未支持平台资料、环境及共享会话')
-          if((value.value.configuration.environmentId!==null||value.value.configuration.workspaceType!==null)&&source.capabilities?.platformToolsVersion!==1)
-            fail(403,'CUSTOMER_CONTEXT_UNSUPPORTED','所选运行器尚未接入平台只读工具桥')
           if (
             new Set(value.value.configuration.skillIds).size !==
             value.value.configuration.skillIds.length
@@ -721,7 +721,7 @@ export function createAssistantDirectory(options: Options) {
                   binding,
                   { requireOnline: true },
                 )
-                validateSharedAllocationConfiguration(item.configuration, profile, source.capabilities?.platformToolsVersion)
+                validateSharedAllocationConfiguration(item.configuration, profile)
               }
               options.validate(actor, project, item.configuration, membership(actor, project))
             } catch (error) {
@@ -937,7 +937,8 @@ export function createAssistantDirectory(options: Options) {
                     'CUSTOMER_SHARED_ISOLATION_UNVERIFIED',
                     '此运行器尚未取得实际隔离验证许可',
                   )
-                const capabilities = providerRegistry().getCapabilities(item.providedBy.id, target), profile = capabilities?.sharedProfile
+                const profile = providerRegistry().getCapabilities(item.providedBy.id, target)
+                  ?.sharedProfile
                 options.verifySharedProfile({
                   providerId: item.providedBy.id,
                   sourceProjectId: item.providedBy.sourceProjectId,
@@ -950,7 +951,7 @@ export function createAssistantDirectory(options: Options) {
                   target,
                   { requireOnline: true },
                 )
-                validateSharedAllocationConfiguration(item.configuration, profile, capabilities?.platformToolsVersion)
+                validateSharedAllocationConfiguration(item.configuration, profile)
               }
               // 角色模板只验证合法配置和固定外部边界，不借配置者环境权给未来成员扩权。
               options.validate(actor, project, item.configuration, membership(actor, project))
