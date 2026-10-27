@@ -14,7 +14,7 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { compileResolvedKeybindingsConfig } from "@t3tools/shared/keybindings";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { prepareHostThreadLaunch } from "@t3tools/client-runtime/host-integration";
-import { render, stubGlobal } from "../../../test/render";
+import { fakeTimers, render, stubGlobal } from "../../../test/render";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { makeThreadFixture } from "~/test-fixtures";
 import { ComposerHandleContext } from "~/composerHandleContext";
@@ -28,6 +28,7 @@ import {
   customerInstanceId,
   customerScopedProviders,
   useCustomerRuntime,
+  type CustomerRuntime,
 } from "~/autoops/customerAgents";
 import { useAutoOpsThreadScope } from "~/autoops/useThreadScope";
 import { AutoOpsThreadScopeControl } from "~/autoops/ThreadScopeControl";
@@ -231,10 +232,12 @@ function Harness({
   fixture: f,
   providers = [f.provider],
   reason = null,
+  customerRuntime,
 }: {
   fixture: Fixture;
   providers?: ServerProvider[];
   reason?: string | null;
+  customerRuntime?: CustomerRuntime | undefined;
 }) {
   const promptRef = useRef("");
   const thread = makeThreadFixture({
@@ -416,6 +419,7 @@ function Harness({
             draftTarget={f.draftId}
             submitting={false}
             hasAcceptedMessage={false}
+            customerRuntime={customerRuntime}
           />
         </ComposerSurface.Shell>
       </div>
@@ -439,6 +443,7 @@ function ConnectedHarness({ fixture }: { fixture: Fixture }) {
       fixture={fixture}
       providers={[...customerScopedProviders([fixture.provider], scope, runtime.catalog)]}
       reason={reason}
+      customerRuntime={runtime}
     />
   );
 }
@@ -658,6 +663,7 @@ it("本机离线期间保留原模型及草稿，不选平台或其他本机来�
 });
 
 it("真实客户能力读取迟到并报告离线后，输入器保留原模型和草稿且不按新首项发送", async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true });
   await page.viewport(1280, 800);
   const f = setup("actual-composer-late-catalog", true, true);
   const original = f.fetcher.getMockImplementation()!;
