@@ -1478,3 +1478,31 @@ D2 撤权阶段已沿原 core state 正常完成：同 manager 正常启用新�
 新独占修复探针仍只用本机mock，无真实凭据/平台请求/推理。包c99f5331、manifest9509eb5d，实际 `.deployment/c6-gateway-shape-fixed-v1/root-actual-result-v1.json` SHA256 `a56fc8a139b0b7cb3244b8108712bb764879152cc9f9b46e2c0edf7afb2ca945`：通过本地校验后mock上游恰好一次，其故意502被正式网关正确公开为SHARED_MODEL_UPSTREAM_FAILED；此前为400且上游0。两次安全正文结构相同，实际wire27772/27778B，原正文只在RAM而未比较同字节；独立comparison记录该边界，不用长度相近声称请求完全相同。两owned容器正常stop/remove。四状态更新为新修复代码完成、相关自动通过、完整CI及发行待验、真实业务待验。
 
 原fbad完整中央/本机/原生只读提取 `.deployment/c6-positive-54-v1-01-actual-evidence-v1/complete-owned-ledgers-v1.json` SHA256 `33a64ddbe21a3d892ae8be25ee21e2f5c26b5f9a524179924b076be3ff093d5f`：唯一open/ensure/start三方法中央及本机均completed，startTurn完整raw语义相同；native实际failed，传输接收完成不等于模型运行成功。open.cwd及ensure四字段的raw差分保留，合法投影仍须沿正式验证器核对，不删字段凑相等。原session空闲、locks/events0，唯一streams行原session/epoch匹配且tail=ack=3，是正式Store保留的已确认游标；不删历史凑零行。六原本机命令、两session及八张完整原表继续保护，后续新发行沿正常空闲停止流程核对前后全表与收据。
+
+441402后续已沿正常单SIGTERM退出，证据 `.deployment/c6-owned-441402-stop-complete-actual-v1.json` SHA256 `c929008f6d44969465005a8585186c27eaf09b28b9a9d046a723b8b056dfd765`。本机八表、中央全部表、六原收据、三命令完整正文与收据、唯一已ack游标停前后全部相等，owned CID/name消失，无stop RPC、resolve或重发。七Python及三真实临时SQLite辅助检查由根独立通过；一次错误discover执行发现0测试，未计作七项通过，随后显式运行文件才完成实际七项。原relay440819未重置或替换，stop后正常GET显示connections=1且未arm、无original/dropped/fault，后续准入按该真实已用状态固定基线，不要求删历史归零。
+
+## 窄屏模拟触控选定验收及未完成菜单（2026-10-27）
+
+复用当前54完整T3页与原D123项目r3、authoring9、原24576B文档，无产品变更，不宣称步骤减少。v1 parent正常admin登录及两个只读GET后因旧AccountClient明确拒绝query而失败，尚未启动child/browser或建立OUT；不能记成零网络。候选一是漏网关前缀，正式api方法确实补一次前缀，排除；候选二是部署GET的environmentId query触发原安全合同，原真实helper+虚构transport红测证实。原v1不改，v2只改为读取本owned项目全部环境的任务并继续严格要求所有终态，不放宽旧loader。Node9及Python6辅助检查由根独立通过。
+
+v2实际390×520、hasTouch/isMobile manager完成长文档单项：认证三操作另计；展开侧栏、选择当前资料、触控搜索框、输入原文件名、展开目录、打开文件、向上滑动和一次反向回顶，共八核心操作。tap记录trusted touch pointer，CDP触控手势使面板scrollTop真实变化、新渲染原文行与正常metadata正文匹配，页面根滚动始终0。不是物理手机/软键盘，也未重新验全129行；原129行完整证据仍来自v11。
+
+随后菜单展开touchTap实际完成125ms，后续菜单观察失败；菜单显示等待仅4ms，catch仅留下TOUCH_OBSERVER_FAILED，不能据此认定菜单未打开或判断具体根因。Dialog未执行。原件 `.deployment/e3-touch-v2-actual-evidence-v1/e3-touch-evidence-20261027-v2/0032-result.json` SHA256 `b4a97bb054f082d7681db33e2419c71cb742a91e8f91e34d6a3280c35586da5f`。一项通过、两项未完成，继续核实际移动菜单语义/触发入口、观察器定位/ElementHandle和真实触控开闭；保存原失败，后续只定向未完项，不重跑旧50或已通过的长文档。全部HTTP守卫无拒绝、0业务写、结束九类原生活动0，parent前后工作区/部署/计划一致，owned浏览器0；原父445384/Node445397结束。
+
+四状态为现行页面代码复用、相关自动检查通过、54既有页面生效、上述长文档模拟触控单项真实通过。菜单与Dialog失败/未执行继续定位；物理触屏、完整角色/环境及非空部署整页仍未验，不能将截图或辅助测试作为整体E3通过。
+
+## 固定c261内联消息修复发行与原数据保留（2026-10-27）
+
+应用固定`c261bca3075e647b0dd9f7665077bb8afd6f6231`、tree b4b7d2226c9d7e584f2fd9f338fcfd3d75ae0c2e；[质量CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40422313692)及[完整运行CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40422313566)均通过，后者00:01:16 UTC完成。原54及全部失败保留。29502 Git blob逐字、601依赖映射、8原SPDX、19map/45关键源52正文全部核对，增加gateway/connection完整路径而未减少原43项；正式CLI0.4.2和ops两个内manifest原字节与ZIP闭包独立全核。八构建步骤均0，主tar全部10488文件/97链接再次逐字校验，未安装依赖或复制工作树产物。根只读完整证明 `.deployment/final-c261bca3-v1-root-verifier-evidence-v1.json` SHA256 `431985a7322ceb4fc28dd8467b713aaeefce58ab1a1717297380ef1bdd224767`。
+
+主上传139294720B SHA256 `f234e76743709b58a98f660f918e4791713e99f75f88f5d108c3093126401be0`、release manifest c44d3a07；正式CLI ZIP `28d8099519fabc2a241db3f30ae6643df5fb72e186b542ba7e8736a736ce2367`，ops ZIP2f620404。新独占远端prepare和第二次官方依赖验证2038文件/21包通过，第二次recorded=false，native manifest14b9d26b。CI绿色、441402已正常收束后才执行严格切换；保留13原helper pins和原compare，无historical unknown例外。独立wrapper/config审查b24b44b1；只切换原web/worker两个用户服务，不碰原Agent、Java、Jenkins或数据目录。
+
+新鲜baseline636e69c8、public-before0a2cc41f，原Agent真实新鲜维护终态窗口再采集。收据 `.deployment/switch-c261bca3-stable1-evidence/switch-c261bca3-stable1.json` SHA256 `51907b494661207630c7b9fd50cd2079351e85267a6d6a9dcd003df7ac289ece`：switched、failure/restoration均null；post-worker21ee1190、post-web1e3bf674两阶段完整owner均allowed/proofPersisted。35份排空诊断全部deploymentReadMatchesSnapshot/originalCompareUnchanged，postStopErrors空，不跳过原档案校验。
+
+根独立现场 `.deployment/switch-c261bca3-stable1-evidence/live-c261bca3-independent-v1.json` SHA256 `6b851156d0b1f1c749b453b508086be1f349069fa047e9e9db3495e92e014b26`：Web446306/ticks34285007、launcher446156/34283837、native446168/34283929实际cwd属于c261，Node24.22.0和原DATA_DIR保持。公开HTML4fdc991c、两个Worker与候选字节相同，公开及回环健康正常；buildHash da7f24b3ecfc4594d502de514ef2ac5d998b52f387c791993773fd13651d4da0。原全部档案、密钥、账号五表、完整resource-release表、原12任务/9版本摘要保持，原Agent59368/原cwd不变，九类原生活动全0。44份原证据独立索引94a13387；没有空库、数据替换、备份或重复接管。
+
+原fbad收据后续已用固定54实际decoder、CustomerEventValidation及正式encoder完整重建：三方法的中央与合法完整投影全部deepEqual，不手删字段，根stdin独立复跑及四负例通过。ensure需沿原open/bind不可变字段重建准入时视图；直接套后来startTurn的最新可变providerThread绑定会误拒，原失败也保留。历史mutable绑定未恢复、原授权未重放这两个边界明确记录；native run仍failed。证据 `.deployment/c6-positive54-root-formal-projection-v1.json`，不能将完整传输收据等于模型业务成功。
+
+四状态为本次代码完成、固定完整自动通过、平台c261及正式0.4.2安装包已生效，原设备正常新run和真实共享模型/技能/附件/只读拒绝及断线撤回继续验。正常账号配置仅更新实际Web PID/release，配置e93e19e8，原ID和namespace保持；不重发三历史失败，不因发行和保留核验而报告整体完成。
+
+原设备已正常以0.4.2运行，PID446985/ticks34325587、同device/state/profile。提供者与接收者正常HTTP目录校验 `.deployment/c6-positive-c261-v1-01-actual-evidence-v1/normal-owner-http-v1.json` SHA256 `447d9308525936f0c9cd866a1b9ac8bf31548c37b4fa425c5c7ca161955b42de`：12个真实模型、指定grok-4.6/medium与唯一所选技能可用，接收者不可调；零问答、零推理，目录通过不算模型通过。新独立case的七项准入正反例已正常通过，真实问题仅提交一次，原thread `38c46e00-5bfe-446d-a6c4-c289bb7c5604`、message `0536ec10-a640-4ca7-9a8e-64b0249b31e5`、command `e3c1fd13-419d-4ad6-8a77-e16504302e19` 已固定；结果观察中，不重发原消息。
