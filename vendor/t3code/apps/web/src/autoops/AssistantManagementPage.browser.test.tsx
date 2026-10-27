@@ -1,10 +1,11 @@
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
-import { act, render, stubGlobal } from "../../test/render";
+import { act, fakeTimers, render, stubGlobal } from "../../test/render";
 import { Sidebar, SidebarContent, SidebarProvider } from "~/components/ui/sidebar";
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from "./ModuleWorkspace";
 import { AssistantManagementPage } from "./AssistantManagementPage";
-import { installAutoOpsHost, readAutoOpsHost } from "./hostConfig";
+import { autoOpsStorage, autoOpsStorageKey, installAutoOpsHost, readAutoOpsHost } from "./hostConfig";
+import { prepareProjectMutation, prepareProjectWrite, submitProjectWrite, readPendingProjectWrite } from "./projectDirectory";
 import type {
   AssistantPreset,
   ProvidedAssistantSettings,
@@ -413,6 +414,167 @@ function App() {
     </SidebarProvider>
   );
 }
+
+it.each(['source-project', 'target-project'])(
+  '%s的名称保存未知不阻塞当前项目助手配置，保存后仍保留原UUID',
+  async (projectId) => {
+    using _timers = fakeTimers({ shouldAdvanceTime: true })
+    const f = setup(true)
+    let holdRefresh = false
+    let refreshReads = 0
+    let releaseRefresh!: () => void
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    using _refresh = { [Symbol.dispose]: () => releaseRefresh() }
+    f.fetcher.mockRejectedValueOnce(new TypeError('隔离项目保存响应丢失'))
+    using _fetch = stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (
+        holdRefresh &&
+        new URL(String(input), location.origin).pathname.endsWith('/assistants/settings')
+      ) {
+        refreshReads++
+        await refreshGate
+      }
+      return f.fetcher(input, init)
+    })
+    const original = prepareProjectWrite(`/api/v1/projects/${projectId}/settings`, 1, {
+      name: '待核对项目',
+      description: '',
+    })
+    await expect(submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+    await using screen = await render(<App />, {
+      router: '/assistants?projectId=target-project&assistantView=project',
+    })
+    const assign = screen.getByRole('button', { name: '分配助手', exact: true })
+    await expect.element(assign).toBeEnabled()
+    const originalTrigger = assign.element()
+    await userEvent.click(assign)
+    await expect
+      .element(page.getByRole('dialog', { name: '分配项目助手', exact: true }))
+      .toBeVisible()
+    await expect
+      .element(page.getByRole('checkbox', { name: '项目预设', exact: true }))
+      .toBeVisible()
+    await userEvent.click(page.getByRole('checkbox', { name: '项目预设', exact: true }))
+    await expect
+      .element(page.getByRole('checkbox', { name: '项目预设', exact: true }))
+      .toBeChecked()
+    holdRefresh = projectId === 'source-project'
+    await userEvent.click(page.getByRole('button', { name: '保存助手配置', exact: true }))
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+    if (holdRefresh) {
+      await vi.waitFor(() => expect(refreshReads).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+      await expect.element(assign).toBeDisabled()
+      expect(assign.element()).toBe(originalTrigger)
+      expect(readAutoOpsHost()?.principal.id).toBe('assistant-page-user')
+      releaseRefresh()
+      await expect.element(assign).toBeEnabled()
+    }
+    await expect.element(assign).toHaveFocus()
+    expect(f.writes).toHaveLength(1)
+    expect(f.writes[0]).toMatchObject({
+      path: '/api/v1/projects/target-project/assistant-allocations',
+      body: { assistantIds: ['project-preset'], defaultAssistantId: null },
+    })
+    expect(readPendingProjectWrite({ projectId, owner: 'directory' })).toEqual(original)
+    expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2)
+  },
+)
+
+it('项目助手保存后的迟到刷新不抢用户已选择的可用控件焦点', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup(true)
+  let holdRefresh = false
+  let releaseRefresh!: () => void
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve
+  })
+  using _refresh = { [Symbol.dispose]: () => releaseRefresh() }
+  using _fetch = stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (
+      holdRefresh &&
+      new URL(String(input), location.origin).pathname.endsWith('/assistants/settings')
+    )
+      await refreshGate
+    return f.fetcher(input, init)
+  })
+  await using screen = await render(<App />, {
+    router: '/assistants?projectId=target-project&assistantView=project',
+  })
+  const assign = screen.getByRole('button', { name: '分配助手', exact: true })
+  await expect.element(assign).toBeEnabled()
+  await userEvent.click(assign)
+  await expect.element(page.getByRole('checkbox', { name: '项目预设', exact: true })).toBeVisible()
+  await userEvent.click(page.getByRole('checkbox', { name: '项目预设', exact: true }))
+  holdRefresh = true
+  await userEvent.click(page.getByRole('button', { name: '保存助手配置', exact: true }))
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+  await expect.element(assign).toBeDisabled()
+  const refresh = screen.getByRole('button', { name: '刷新助手', exact: true })
+  await userEvent.click(refresh)
+  await expect.element(refresh).toHaveFocus()
+  releaseRefresh()
+  await expect.element(assign).toBeEnabled()
+  await expect.element(refresh).toHaveFocus()
+  expect(f.writes).toHaveLength(1)
+})
+
+it('同项目删除未知只引导本项目管理核对，保留原UUID且不发配置写入', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup(true)
+  f.fetcher.mockRejectedValueOnce(new TypeError('隔离原删除响应丢失'))
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  const original = prepareProjectMutation('/api/v1/projects/target-project', 1, {}, 'DELETE')
+  await expect(submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  await using screen = await render(<App />, {
+    router: '/assistants?projectId=target-project&assistantView=project',
+  })
+  await vi.waitFor(() =>
+    expect(screen.getByRole('alert').element().textContent?.replace(/\s+/g, '')).toBe(
+      '当前项目的删除结果尚待确认。前往项目管理核对',
+    ),
+  )
+  await expect.element(screen.getByRole('button', { name: '分配助手', exact: true })).toBeDisabled()
+  await userEvent.click(screen.getByRole('button', { name: '前往项目管理核对', exact: true }))
+  await vi.waitFor(() => expect(screen.router?.state.location.pathname).toBe('/projects'))
+  expect(screen.router?.state.location.search).toEqual({ projectId: 'target-project' })
+  expect(readPendingProjectWrite({ projectId: 'target-project' })).toEqual(original)
+  expect(f.writes).toHaveLength(0)
+  expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1)
+  expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+})
+
+it.each(['target-project', 'source-project'])(
+  '%s的未知来源旧请求只提示范围未确认，不冒称本项目删除或猜测导航',
+  async (projectId) => {
+    using _timers = fakeTimers({ shouldAdvanceTime: true })
+    const f = setup(true)
+    const original = {
+      actorId: 'assistant-page-user', submitted: true,
+      path: `/api/v1/projects/${projectId}/legacy-config`,
+      body: { requestId: 'legacy-unknown-owner', expectedRevision: 1 },
+    }
+    const raw = JSON.stringify(original)
+    const key = autoOpsStorageKey('project-directory:pending')
+    autoOpsStorage(sessionStorage).setItem(key, raw)
+    using _fetch = stubGlobal('fetch', f.fetcher)
+    await using screen = await render(<App />, { router: '/assistants?projectId=target-project&assistantView=project' })
+    await vi.waitFor(() =>
+      expect(screen.getByRole('alert').element().textContent?.replace(/\s+/g, '')).toBe(
+        '有配置操作的范围暂时无法确认，原请求已保留。前往项目管理核对',
+      ),
+    )
+    await expect.element(screen.getByRole('button', { name: '分配助手', exact: true })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: '前往项目管理核对', exact: true }))
+    await vi.waitFor(() => expect(screen.router?.state.location.pathname).toBe('/projects'))
+    expect(screen.router?.state.location.search).toEqual({})
+    expect(autoOpsStorage(sessionStorage).getItem(key)).toBe(raw)
+    expect(readPendingProjectWrite()).toEqual(original)
+    expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+  },
+)
 async function menu(name: string, item: string) {
   await page.getByRole("button", { name: `管理个人助手 ${name}`, exact: true }).click();
   await page.getByRole("menuitem", { name: item, exact: true }).click();

@@ -45,55 +45,106 @@ export type PendingProjectWrite = {
   method?: 'DELETE'
   body: { requestId: string; expectedRevision: number } & Record<string, unknown>
 }
-const pendingKey = () => autoOpsStorageKey('project-directory:pending');
-const actor = () => readAutoOpsHost()?.principal.id;
+type ProjectWriteScope = {
+  projectId: string | null
+  owner?: 'directory' | 'repository' | 'assistant'
+}
+const pendingBase = 'project-directory:pending'
+const pendingKey = (scope?: ProjectWriteScope) =>
+  autoOpsStorageKey(
+    scope
+      ? `${pendingBase}:${encodeURIComponent(scope.projectId ?? '')}:${scope.owner}`
+      : pendingBase,
+  )
+const actor = () => readAutoOpsHost()?.principal.id
 const uncertain = (
-  message = "保存结果尚待确认，请核对原请求。",
-  code = "PROJECT_REQUEST_UNCONFIRMED",
-) => new AutoOpsRequestError(message, code, undefined, true);
-export function readPendingProjectWrite(): PendingProjectWrite | null {
+  message = '保存结果尚待确认，请核对原请求。',
+  code = 'PROJECT_REQUEST_UNCONFIRMED',
+) => new AutoOpsRequestError(message, code, undefined, true)
+function writeScope(pending: PendingProjectWrite): Required<ProjectWriteScope> | null {
+  const directory = requestScope(pending)
+  if (directory) return { projectId: directory.projectId, owner: 'directory' }
+  const configuration = configurationScope(pending)
+  return configuration ? { projectId: configuration.projectId, owner: configuration.family } : null
+}
+function pendingEntries() {
+  const currentActor = actor()
+  if (!currentActor) return []
+  const storage = autoOpsStorage(window.sessionStorage)
+  const prefix = autoOpsStorageKey('')
+  const keys = Array.from({ length: window.sessionStorage.length }, (_, index) =>
+    window.sessionStorage.key(index),
+  )
+    .filter((key): key is string => key?.startsWith(prefix) === true)
+    .map((key) => key.slice(prefix.length))
+    .filter((key) => key === pendingBase || key.startsWith(pendingBase + ':'))
+  return keys.map((key) => {
+    let value: PendingProjectWrite | null = null
+    try {
+      const candidate = JSON.parse(storage.getItem(key) ?? 'null') as PendingProjectWrite | null
+      if (
+        candidate &&
+        typeof candidate.path === 'string' &&
+        candidate.path.startsWith('/api/v1/projects') &&
+        candidate.body &&
+        typeof candidate.body.requestId === 'string' &&
+        Number.isSafeInteger(candidate.body.expectedRevision) &&
+        (candidate.method === undefined || candidate.method === 'DELETE') &&
+        (candidate.actorId === undefined || candidate.actorId === currentActor) &&
+        (candidate.submitted === undefined || candidate.submitted === true)
+      ) {
+        const scope = writeScope(candidate)
+        const expectedKey = scope ? pendingKey(scope) : null
+        if (key === pendingBase || expectedKey === autoOpsStorageKey(key)) {
+          // 旧记录缺发送标记时只能核对原收据，不能补发。
+          value =
+            candidate.actorId === undefined
+              ? { ...candidate, actorId: currentActor, submitted: true }
+              : candidate
+        }
+      }
+    } catch {
+      /* 损坏记录保留原字节，并继续阻止覆盖。 */
+    }
+    return { key, value }
+  })
+}
+export function readPendingProjectWrite(scope?: ProjectWriteScope): PendingProjectWrite | null {
   try {
-    const currentActor = actor();
-    if (!currentActor) return null;
-    const value = JSON.parse(
-      autoOpsStorage(window.sessionStorage).getItem(pendingKey()) ?? 'null',
-    ) as PendingProjectWrite | null;
-    if (
-      !value ||
-      typeof value.path !== "string" ||
-      !value.path.startsWith("/api/v1/projects") ||
-      !value.body ||
-      typeof value.body.requestId !== "string" ||
-      !Number.isSafeInteger(value.body.expectedRevision) ||
-      (value.method !== undefined && value.method !== "DELETE") ||
-      (value.actorId !== undefined && value.actorId !== actor()) ||
-      (value.submitted !== undefined && value.submitted !== true)
+    if (!actor()) return null
+    return (
+      pendingEntries().find(({ value }) => {
+        if (!value) return false
+        const original = writeScope(value)
+        return (
+          !scope ||
+          !original ||
+          (original.projectId === scope.projectId &&
+            (!scope.owner || original.owner === scope.owner || isDirectoryDeletion(value)))
+        )
+      })?.value ?? null
     )
-      return null;
-    // 既有用户隔离记录没有发送标记，升级后只查原收据，不能推断它尚未发出。
-    return value.actorId === undefined
-      ? { ...value, actorId: currentActor, submitted: true }
-      : value;
   } catch {
     return null
   }
 }
 function requireOriginal(pending: PendingProjectWrite) {
-  const saved = readPendingProjectWrite();
+  const matches = pendingEntries().filter(
+    ({ value }) => value?.body.requestId === pending.body.requestId,
+  )
+  const saved = matches.length === 1 ? matches[0] : null
   if (
     !actor() ||
     pending.actorId !== actor() ||
     !saved ||
-    JSON.stringify(saved) !== JSON.stringify(pending)
+    JSON.stringify(saved.value) !== JSON.stringify(pending)
   )
-    throw uncertain("登录或原请求已经改变，请返回原账号核对。", "PROJECT_REQUEST_CONTEXT_CHANGED");
+    throw uncertain('登录或原请求已经改变，请返回原账号核对。', 'PROJECT_REQUEST_CONTEXT_CHANGED')
+  return saved.key
 }
 function clear(pending: PendingProjectWrite) {
-  if (
-    actor() === pending.actorId &&
-    readPendingProjectWrite()?.body.requestId === pending.body.requestId
-  )
-    autoOpsStorage(window.sessionStorage).removeItem(pendingKey());
+  const key = requireOriginal(pending)
+  autoOpsStorage(window.sessionStorage).removeItem(key)
 }
 export function prepareProjectWrite(
   path: string,
@@ -108,16 +159,35 @@ export function prepareProjectMutation(
   payload: object,
   method?: 'DELETE',
 ): PendingProjectWrite {
-  if (autoOpsStorage(window.sessionStorage).getItem(pendingKey()) !== null)
-    throw new Error('请先核对上一次保存结果')
-  const currentActor = actor();
-  if (!currentActor) throw new Error("登录上下文不可用");
+  const currentActor = actor()
+  if (!currentActor) throw new Error('登录上下文不可用')
   const pending = {
     actorId: currentActor,
-    path, ...(method ? { method } : {}), body: { ...payload, requestId: randomUUID(), expectedRevision },
+    path,
+    ...(method ? { method } : {}),
+    body: { ...payload, requestId: randomUUID(), expectedRevision },
   }
-  autoOpsStorage(window.sessionStorage).setItem(pendingKey(), JSON.stringify(pending))
+  const scope = writeScope(pending)
+  if (
+    !scope ||
+    pendingEntries().some(({ value }) => {
+      const original = value ? writeScope(value) : null
+      return (
+        !value ||
+        !original ||
+        (original.projectId === scope.projectId &&
+          (original.owner === scope.owner ||
+            isDirectoryDeletion(value) ||
+            isDirectoryDeletion(pending)))
+      )
+    })
+  )
+    throw new Error('请先核对上一次保存结果')
+  autoOpsStorage(window.sessionStorage).setItem(pendingKey(scope), JSON.stringify(pending))
   return pending
+}
+function isDirectoryDeletion(pending: PendingProjectWrite) {
+  return pending.method === 'DELETE' && requestScope(pending) !== null
 }
 function requestScope(pending: PendingProjectWrite) {
   const match =
@@ -372,11 +442,11 @@ export async function resumeProjectDeletion(pending: PendingProjectWrite) {
   return recoveredDirectoryResult(pending, scope, raw);
 }
 export async function submitProjectWrite(pending: PendingProjectWrite) {
-  requireOriginal(pending);
+  const key = requireOriginal(pending);
   // 发送前固定标记；任何旧调用入口再次提交都会转原收据GET，不能重发写请求。
   if (pending.submitted) return recoverProjectWrite(pending);
   pending.submitted = true;
-  autoOpsStorage(window.sessionStorage).setItem(pendingKey(), JSON.stringify(pending));
+  autoOpsStorage(window.sessionStorage).setItem(key, JSON.stringify(pending));
   try {
     const result = await autoOpsRequest<Record<string, unknown>>(pending.path, {
       label: '配置',

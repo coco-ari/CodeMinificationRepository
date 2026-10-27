@@ -100,7 +100,7 @@ it("删除未知收据保存 method、范围和修订，模块重开只GET原收
   expect(reopened.readPendingProjectWrite()).toBeNull()
 })
 
-it("断线保留删除原请求并阻止跨项目新操作，显式核对不更换requestId或执行DELETE", async () => {
+it("断线保留删除原请求并阻止同项目其他配置，显式核对不更换requestId或执行DELETE", async () => {
   const directory = await import('./projectDirectory')
   const original = directory.prepareProjectMutation('/api/v1/projects/p', 2, {}, 'DELETE')
   const fetcher = vi
@@ -110,7 +110,9 @@ it("断线保留删除原请求并阻止跨项目新操作，显式核对不更�
   vi.stubGlobal('fetch', fetcher)
   await expect(directory.submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
   expect(directory.readPendingProjectWrite()).toEqual(original)
-  expect(() => directory.prepareProjectMutation('/api/v1/projects/other', 1, {}, 'DELETE')).toThrow(
+  expect(() => directory.prepareProjectMutation('/api/v1/projects/p/assistant-allocations', 0, {
+    target: { kind: 'member', id: 'member' }, assistantIds: ['helper'], defaultAssistantId: null,
+  })).toThrow(
     '请先核对上一次保存结果',
   )
   await directory.recoverProjectWrite(directory.readPendingProjectWrite()!)
@@ -520,4 +522,186 @@ it('显式继续原删除成功后核同scope收据清理原记录；已完成�
   await expect(directory.submitProjectWrite(next)).rejects.toMatchObject({ uncertain: true })
   expect(await directory.resumeProjectDeletion(next)).toMatchObject({ deleted: true })
   expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['DELETE', 'GET', 'POST', 'DELETE', 'GET'])
+})
+
+it('项目A保存未知后项目B仍能保存，分别核原收据且不覆盖或重发A', async () => {
+  const directory = await import('./projectDirectory')
+  const first = directory.prepareProjectWrite('/api/v1/projects/p/settings', 2, {
+    name: '项目A',
+    description: '',
+  })
+  const originals = [first]
+  const fetcher = vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method === 'POST') throw new TypeError('隔离保存响应丢失')
+    const original = originals.find((value) => path.endsWith('/' + value.body.requestId))!
+    const projectId = original === first ? 'p' : 'other'
+    return Response.json(
+      receipt(original, {
+        projectId,
+        operation: 'project.save',
+        nativeSynchronization: 'current-verified',
+        result: {
+          id: projectId,
+          name: (original.body.value as { name: string }).name,
+          description: '',
+          environments: [],
+          revision: 5,
+          createdBy: original.actorId,
+          createdAt: '2026-10-27T00:00:00Z',
+        },
+      }),
+    )
+  })
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(first)).rejects.toMatchObject({ uncertain: true })
+  const second = directory.prepareProjectWrite('/api/v1/projects/other/settings', 4, {
+    name: '项目B',
+    description: '',
+  })
+  originals.push(second)
+  await expect(directory.submitProjectWrite(second)).rejects.toMatchObject({ uncertain: true })
+  expect(await directory.recoverProjectWrite(second)).toMatchObject({ id: 'other', name: '项目B' })
+  expect(directory.readPendingProjectWrite()).toEqual(first)
+  expect(await directory.recoverProjectWrite(first)).toMatchObject({ id: 'p', name: '项目A' })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'POST', 'GET', 'GET'])
+  expect(directory.readPendingProjectWrite()).toBeNull()
+})
+
+it('同项目名称保存未知不阻塞助手分配，助手保存后原项目请求仍只能GET核对', async () => {
+  const directory = await import('./projectDirectory')
+  const first = directory.prepareProjectWrite('/api/v1/projects/p/settings', 2, {
+    name: '原名称',
+    description: '',
+  })
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError('隔离项目响应丢失'))
+    .mockResolvedValueOnce(
+      Response.json({ revision: 1, assistantIds: ['helper'], defaultAssistantId: null }),
+    )
+    .mockResolvedValueOnce(
+      Response.json(
+        receipt(first, {
+          operation: 'project.save',
+          nativeSynchronization: 'current-verified',
+          result: {
+            id: 'p',
+            name: '原名称',
+            description: '',
+            environments: [],
+            revision: 3,
+            createdBy: first.actorId,
+            createdAt: '2026-10-27T00:00:00Z',
+          },
+        }),
+      ),
+    )
+  vi.stubGlobal('fetch', fetcher)
+  await expect(directory.submitProjectWrite(first)).rejects.toMatchObject({ uncertain: true })
+  const allocation = directory.prepareProjectMutation(
+    '/api/v1/projects/p/assistant-allocations',
+    0,
+    {
+      target: { kind: 'member', id: 'member' },
+      assistantIds: ['helper'],
+      defaultAssistantId: null,
+    },
+  )
+  expect(await directory.submitProjectWrite(allocation)).toMatchObject({ assistantIds: ['helper'] })
+  expect(directory.readPendingProjectWrite()).toEqual(first)
+  expect(await directory.submitProjectWrite(first)).toMatchObject({ id: 'p' })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'POST', 'GET'])
+  expect(directory.readPendingProjectWrite()).toBeNull()
+})
+
+it('同目标未知请求仍互锁，项目删除与本项目其他owner双向互锁而不阻塞其他项目', async () => {
+  const directory = await import('./projectDirectory')
+  const first = directory.prepareProjectWrite('/api/v1/projects/p/settings', 2, {
+    name: '待核对项目',
+  })
+  expect(() =>
+    directory.prepareProjectWrite('/api/v1/projects/p/settings', 2, { name: '重复保存' }),
+  ).toThrow('请先核对上一次保存结果')
+  expect(() => directory.prepareProjectMutation('/api/v1/projects/p', 2, {}, 'DELETE')).toThrow(
+    '请先核对上一次保存结果',
+  )
+  const deletion = directory.prepareProjectMutation('/api/v1/projects/other', 1, {}, 'DELETE')
+  expect(() =>
+    directory.prepareProjectMutation('/api/v1/projects/other/assistant-allocations', 0, {
+      target: { kind: 'member', id: 'member' },
+      assistantIds: [],
+      defaultAssistantId: null,
+    }),
+  ).toThrow('请先核对上一次保存结果')
+  expect(directory.readPendingProjectWrite({ projectId: 'p', owner: 'directory' })).toEqual(first)
+  expect(directory.readPendingProjectWrite({ projectId: 'p', owner: 'assistant' })).toBeNull()
+  expect(directory.readPendingProjectWrite({ projectId: 'other', owner: 'assistant' })).toEqual(
+    deletion,
+  )
+})
+
+it('旧单条未知记录保持原字节，独立owner保存不会覆盖它且重开仍GET原UUID', async () => {
+  const directory = await import('./projectDirectory')
+  const { autoOpsStorage, autoOpsStorageKey } = await import('./hostConfig')
+  const key = autoOpsStorageKey('project-directory:pending')
+  const raw = JSON.stringify({
+    path: '/api/v1/projects/p',
+    method: 'DELETE',
+    body: { requestId: 'legacy-pending-id', expectedRevision: 2 },
+  })
+  autoOpsStorage(window.sessionStorage).setItem(key, raw)
+  const original = directory.readPendingProjectWrite()!
+  const second = directory.prepareProjectWrite('/api/v1/projects/other/settings', 1, {
+    name: '独立项目',
+  })
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ id: 'other', name: '独立项目' }))
+    .mockResolvedValueOnce(Response.json(receipt(original)))
+  vi.stubGlobal('fetch', fetcher)
+  await directory.submitProjectWrite(second)
+  expect(autoOpsStorage(window.sessionStorage).getItem(key)).toBe(raw)
+  vi.resetModules()
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost(bootstrap(), 'https://work.test')
+  const reopened = await import('./projectDirectory')
+  expect(await reopened.submitProjectWrite(original)).toMatchObject({
+    deleted: true,
+    projectId: 'p',
+  })
+  expect(fetcher.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'GET'])
+  expect(fetcher.mock.calls[1]?.[0]).toBe(
+    '/api/agent-demo/t3/api/v1/projects/receipts/legacy-pending-id',
+  )
+  expect(reopened.readPendingProjectWrite()).toBeNull()
+})
+
+it('切换实际登录账号后不读取或提交原actor的未知请求，恢复原账号仍保留原UUID', async () => {
+  const directory = await import('./projectDirectory')
+  const original = directory.prepareProjectWrite('/api/v1/projects/p/settings', 2, {
+    name: '原账号项目',
+  })
+  vi.resetModules()
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost(
+    { ...bootstrap(), principal: { id: 'other-actor', displayName: '另一账号' } },
+    'https://work.test',
+  )
+  const next = await import('./projectDirectory')
+  const fetcher = vi.fn()
+  vi.stubGlobal('fetch', fetcher)
+  expect(next.readPendingProjectWrite()).toBeNull()
+  await expect(next.submitProjectWrite(original)).rejects.toMatchObject({
+    code: 'PROJECT_REQUEST_CONTEXT_CHANGED',
+  })
+  const own = next.prepareProjectWrite('/api/v1/projects/p/settings', 2, {
+    name: '另一账号独立请求',
+  })
+  expect(own.body.requestId).not.toBe(original.body.requestId)
+  expect(fetcher).not.toHaveBeenCalled()
+  vi.resetModules()
+  const currentHost = await import('./hostConfig')
+  currentHost.installAutoOpsHost(bootstrap(), 'https://work.test')
+  const reopened = await import('./projectDirectory')
+  expect(reopened.readPendingProjectWrite()).toEqual(original)
 })

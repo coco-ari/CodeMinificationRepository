@@ -123,19 +123,29 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   const [fresh, setFresh] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null),
     [pending, setPending] = useState<PendingProjectWrite | null>(null),
-    [otherPending, setOtherPending] = useState(false),
+    [otherPending, setOtherPending] = useState<"delete" | "unknown" | null>(null),
     [busy, setBusy] = useState(false);
   const trigger = useRef<HTMLButtonElement | null>(null),
     alive = useRef(true),
-    writing = useRef(false);
+    writing = useRef(false),
+    savedFocus = useRef(false);
   const scoped = (value: PendingProjectWrite) =>
     value.path.startsWith(`/api/v1/projects/${encodeURIComponent(projectId)}/assistants`) ||
     value.path === `/api/v1/projects/${encodeURIComponent(projectId)}/assistant-allocations`;
+  const readPending = () => readPendingProjectWrite({ projectId, owner: 'assistant' });
   useEffect(() => {
     alive.current = true;
-    const value = readPendingProjectWrite();
+    const value = readPendingProjectWrite({ projectId, owner: 'assistant' });
     if (value && scoped(value)) setPending(value);
-    setOtherPending(!!value && !scoped(value));
+    const projectPath = `/api/v1/projects/${encodeURIComponent(projectId)}`;
+    const environmentPath = `${projectPath}/environments/`;
+    const deleting =
+      value?.method === "DELETE" &&
+      (value.path === projectPath ||
+        (value.path.startsWith(environmentPath) &&
+          /^[^/]+$/.test(value.path.slice(environmentPath.length))));
+    // 旧记录范围无法核实时继续保留阻写，不把它冒称为当前项目删除。
+    setOtherPending(value && !scoped(value) ? (deleting ? "delete" : "unknown") : null);
     return () => {
       alive.current = false;
     };
@@ -165,6 +175,22 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
       });
     return () => controller.abort();
   }, [projectId, manage, attempt]);
+  useEffect(() => {
+    // 保存后目录会短暂禁用入口；恢复可用时只归还尚未被用户移走的焦点。
+    if (savedFocus.current && editor === null && fresh && !busy && !pending && !otherPending) {
+      savedFocus.current = false
+      const focused = document.activeElement
+      if (
+        (!focused ||
+          focused === document.body ||
+          focused === trigger.current ||
+          !focused.isConnected) &&
+        trigger.current?.isConnected &&
+        !trigger.current.disabled
+      )
+        trigger.current.focus()
+    }
+  }, [editor, fresh, busy, pending, otherPending])
   async function submit(original: PendingProjectWrite) {
     if (writing.current) return;
     writing.current = true;
@@ -174,6 +200,8 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
     try {
       await submitProjectWrite(original);
       if (!alive.current) return;
+      savedFocus.current = true;
+      setFresh(false);
       setPending(null);
       setEditor(null);
       setAttempt((value) => value + 1);
@@ -206,7 +234,7 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
         setEditor(null);
       }
       setError(message(cause));
-      const saved = readPendingProjectWrite();
+      const saved = readPending();
       setPending(saved && scoped(saved) ? saved : null);
       if (cause instanceof AutoOpsRequestError && cause.status === 409 && !saved) {
         setEditor(null);
@@ -293,11 +321,20 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
       {otherPending ? (
         <Alert variant="info">
           <AlertDescription>
-            其他项目配置操作尚未确认。
+            {otherPending === "delete"
+              ? "当前项目的删除结果尚待确认。"
+              : "有配置操作的范围暂时无法确认，原请求已保留。"}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void navigate({ href: "/projects" })}
+              onClick={() =>
+                void navigate({
+                  href:
+                    otherPending === "delete"
+                      ? `/projects?projectId=${encodeURIComponent(projectId)}`
+                      : "/projects",
+                })
+              }
             >
               前往项目管理核对
             </Button>
@@ -343,14 +380,14 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy || !!pending || otherPending || !context || !fresh}
+                disabled={busy || !!pending || !!otherPending || !context || !fresh}
                 onClick={(event) => allocate(event.currentTarget)}
               >
                 分配助手
               </Button>
               <Button
                 size="sm"
-                disabled={busy || !!pending || otherPending || !context || !fresh}
+                disabled={busy || !!pending || !!otherPending || !context || !fresh}
                 onClick={(event) => edit(null, event.currentTarget)}
               >
                 添加项目助手
@@ -410,7 +447,7 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy || !!pending || otherPending || !fresh}
+                      disabled={busy || !!pending || !!otherPending || !fresh}
                       aria-label={`编辑项目助手 ${preset.name}`}
                       onClick={(event) => edit(preset, event.currentTarget)}
                     >

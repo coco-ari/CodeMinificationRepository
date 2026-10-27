@@ -1,7 +1,7 @@
 import { StrictMode, useRef, useState } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
-import { render, stubGlobal } from '../../test/render'
+import { fakeTimers, render, stubGlobal } from '../../test/render'
 import {
   ProjectRemovalAction,
   ProjectRemovalDialog,
@@ -296,7 +296,8 @@ it("删除响应丢失后原收据null锁定关闭，再核对只GET同一reques
   expect(readPendingProjectWrite()).toBeNull()
 })
 
-it('另一项目待核对收据不能被当前环境删除替换或发送到当前范围', async () => {
+it('另一项目待核对收据不阻塞当前环境删除，也不会被当前删除覆盖或发送', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
   const f = setup()
   const original = prepareProjectMutation('/api/v1/projects/other', 9, {}, 'DELETE')
   using _fetch = stubGlobal('fetch', f.fetcher)
@@ -304,9 +305,11 @@ it('另一项目待核对收据不能被当前环境删除替换或发送到当�
     <App f={f} value={{ ...target, environmentId: 'test', name: '测试环境' }} />,
   )
   await open('测试环境', true)
-  await page.getByRole('button', { name: '核对原请求', exact: true }).click()
-  await expect.element(page.getByRole('alert')).toHaveTextContent('请先核对另一项配置保存结果')
-  expect(f.requests).toHaveLength(0)
+  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  expect(f.requests).toHaveLength(1)
+  expect(f.requests[0]!.body.requestId).not.toBe(original.body.requestId)
+  expect(f.receiptQueries).toHaveLength(0)
   expect(readPendingProjectWrite()).toEqual(original)
 })
 

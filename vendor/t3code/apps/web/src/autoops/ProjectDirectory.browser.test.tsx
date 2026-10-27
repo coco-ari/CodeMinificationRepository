@@ -1,12 +1,15 @@
 import { StrictMode } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
-import { render, stubGlobal } from '../../test/render'
+import { fakeTimers, render, stubGlobal } from '../../test/render'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
+import { projectAssistantReceiptIntent } from '../../../../../../autoops/contracts/project-management-receipts.ts'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
-import { installAutoOpsHost } from './hostConfig'
-import { prepareProjectMutation, submitProjectWrite, readPendingProjectWrite } from "./projectDirectory";
+import { installAutoOpsHost, readAutoOpsHost } from './hostConfig'
+import { prepareProjectMutation, prepareProjectWrite, submitProjectWrite, readPendingProjectWrite } from "./projectDirectory";
 import '../index.css'
 
 const mocks = vi.hoisted(() => ({ select: vi.fn() }))
@@ -114,6 +117,188 @@ function App() {
   );
 }
 
+it('项目A保存未知后切到项目B仍能正常保存，不核对或覆盖A的原请求', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup()
+  f.fetch.mockRejectedValueOnce(new TypeError('隔离项目A响应丢失'))
+  using _fetch = stubGlobal('fetch', f.fetch)
+  const original = prepareProjectWrite('/api/v1/projects/other/settings', 1, {
+    name: '待核对项目A',
+    description: '',
+  })
+  await expect(submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  await using screen = await render(<App />, { router: '/projects?projectId=directory-project' })
+  const edit = screen.getByRole('button', { name: '编辑项目', exact: true })
+  await expect.element(edit).toBeEnabled()
+  await userEvent.click(edit)
+  await expect.element(page.getByRole('dialog', { name: '编辑项目', exact: true })).toBeVisible()
+  await userEvent.click(page.getByRole('button', { name: '保存', exact: true }))
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  await expect.element(edit).toHaveFocus()
+  expect(f.bodies).toHaveLength(1)
+  expect(f.queries).toHaveLength(0)
+  expect(readPendingProjectWrite({ projectId: 'other' })).toEqual(original)
+})
+
+it('核对一项项目配置后仍显示同项目另一项未知结果，不提前解锁删除或丢弃原UUID', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup()
+  let seeding = true
+  const queries: string[] = []
+  let original: ReturnType<typeof prepareProjectWrite>
+  let assistant: ReturnType<typeof prepareProjectMutation>
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (seeding) throw new TypeError('隔离原写回复丢失')
+    const url = String(input)
+    if (url.endsWith(`/projects/receipts/${original.body.requestId}`)) {
+      queries.push(url)
+      const { requestId, ...publicIntent } = original.body
+      return Response.json({
+        state: 'completed',
+        actorId: original.actorId,
+        requestId,
+        projectId: f.project.id,
+        environmentId: null,
+        operation: 'project.save',
+        saved: true,
+        available: true,
+        publicIntent,
+        createdAt: '2026-10-27T00:00:00Z',
+        nativeSynchronization: 'current-verified',
+        result: f.project,
+      })
+    }
+    if (url.endsWith(`/projects/directory-project/assistants/receipts/${assistant.body.requestId}`)) {
+      queries.push(url)
+      return Response.json({
+        state: 'completed', actorId: assistant.actorId, requestId: assistant.body.requestId,
+        projectId: f.project.id, operation: 'allocation.save:member:member', saved: true,
+        available: false, createdAt: '2026-10-27T00:00:00Z',
+        publicIntent: { algorithm: 'sha256', digest: bytesToHex(sha256(new TextEncoder().encode(projectAssistantReceiptIntent('allocation.save:member:member', assistant.body)))) },
+      })
+    }
+    return f.fetch(input, init)
+  })
+  using _fetch = stubGlobal('fetch', fetcher)
+  original = prepareProjectWrite('/api/v1/projects/directory-project/settings', 1, {
+    name: f.project.name,
+    description: '',
+  })
+  await expect(submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
+  assistant = prepareProjectMutation(
+    '/api/v1/projects/directory-project/assistant-allocations',
+    0,
+    {
+      target: { kind: 'member', id: 'member' },
+      assistantIds: ['helper'],
+      defaultAssistantId: null,
+    },
+  )
+  await expect(submitProjectWrite(assistant)).rejects.toMatchObject({ uncertain: true })
+  seeding = false
+  const first = readPendingProjectWrite({ projectId: 'directory-project' })!
+  const remaining = first.body.requestId === original.body.requestId ? assistant : original
+  await using screen = await render(<App />, { router: '/projects?projectId=directory-project' })
+  const retry = screen.getByRole('button', { name: '重试', exact: true })
+  await expect.element(retry).toBeEnabled()
+  await userEvent.click(retry)
+  await vi.waitFor(() => expect(queries).toHaveLength(1))
+  await vi.waitFor(() =>
+    expect(readPendingProjectWrite({ projectId: 'directory-project' })).toEqual(remaining),
+  )
+  expect(queries[0]).toContain(`/receipts/${first.body.requestId}`)
+  await expect
+    .element(screen.getByRole('button', { name: `管理项目 ${f.project.name}`, exact: true }))
+    .toBeDisabled()
+  await expect.element(screen.getByText('上一次保存结果尚待确认', { exact: true })).toBeVisible()
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2)
+})
+
+it('项目A保存未知后关闭表单继续保存B，返回A只核原收据且不重发', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup({ loseResponse: true })
+  f.setReceiptMode('missing')
+  const second = { ...f.project, id: 'other-project', name: '另一项目', environments: [] }
+  const host = readAutoOpsHost()!
+  const secondWrites: Array<Record<string, unknown>> = []
+  const bootstrap = () => ({
+    ...host,
+    projects: [
+      { ...host.projects[0]!, name: f.project.name },
+      { ...host.projects[0]!, id: second.id, name: second.name, environments: [] },
+    ],
+  })
+  installAutoOpsHost(bootstrap(), window.location.origin)
+  using _fetch = stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), window.location.origin).pathname
+      if (path.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
+      if (path.endsWith('/api/v1/projects')) {
+        const items = [f.project, second]
+        expect(new Set(items.map((project) => project.id)).size).toBe(items.length)
+        return Response.json({ items })
+      }
+      if (path.endsWith('/projects/other-project/settings')) {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as { value: { name: string } }
+          secondWrites.push(body)
+          second.name = body.value.name
+          second.revision++
+          return Response.json(second)
+        }
+        return Response.json({ project: second, members: [], candidates: [] })
+      }
+      if (path.endsWith('/projects/other-project/workspace/authoring'))
+        return Response.json({
+          projectId: second.id,
+          revision: 0,
+          sources: [],
+          entries: [],
+          limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 },
+        })
+      return f.fetch(input, init)
+    }),
+  )
+  await using screen = await render(<App />, { router: '/projects?projectId=directory-project' })
+  await expect.element(screen.getByRole('button', { name: '编辑项目', exact: true })).toBeEnabled()
+  await userEvent.click(screen.getByRole('button', { name: '编辑项目', exact: true }))
+  await page.getByRole('textbox', { name: '名称', exact: true }).fill('待核对的项目A')
+  await userEvent.click(page.getByRole('button', { name: '保存', exact: true }))
+  const dialog = page.getByRole('dialog', { name: '编辑项目', exact: true })
+  await expect.element(dialog).toBeVisible()
+  await expect.element(dialog.getByRole('button', { name: '重试', exact: true })).toBeEnabled()
+  const original = readPendingProjectWrite({ projectId: 'directory-project' })!
+  await expect
+    .element(dialog.getByRole('button', { name: '关闭', exact: true }).filter({ hasText: '关闭' }))
+    .toBeEnabled()
+  await userEvent.keyboard('{Escape}')
+  await expect.element(dialog).not.toBeInTheDocument()
+  await expect.element(screen.getByRole('button', { name: '刷新项目', exact: true })).toHaveFocus()
+  expect(readPendingProjectWrite({ projectId: 'directory-project' })).toEqual(original)
+  await userEvent.click(screen.getByRole('button', { name: '另一项目', exact: true }))
+  await vi.waitFor(() =>
+    expect(screen.router?.state.location.search).toMatchObject({ projectId: 'other-project' }),
+  )
+  await expect.element(screen.getByRole('button', { name: '编辑项目', exact: true })).toBeEnabled()
+  await userEvent.click(screen.getByRole('button', { name: '编辑项目', exact: true }))
+  await page.getByRole('textbox', { name: '名称', exact: true }).fill('已保存的项目B')
+  await userEvent.click(page.getByRole('button', { name: '保存', exact: true }))
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  expect(secondWrites).toHaveLength(1)
+  expect(readPendingProjectWrite({ projectId: 'directory-project' })).toEqual(original)
+  f.setReceiptMode('completed')
+  await userEvent.click(screen.getByRole('button', { name: '待核对的项目A', exact: true }))
+  await userEvent.click(screen.getByRole('button', { name: '重试', exact: true }))
+  await vi.waitFor(() =>
+    expect(readPendingProjectWrite({ projectId: 'directory-project' })).toBeNull(),
+  )
+  expect(f.bodies).toHaveLength(1)
+  expect(f.queries).toHaveLength(2)
+  expect(f.queries[0]).toBe(f.queries[1])
+  expect(f.queries[1]).toContain(original.body.requestId)
+})
+
 it('管理员编辑项目到可见保存结果，保留待分配成员，关闭表单恢复入口焦点', async () => {
   await page.viewport(390, 500)
   const f = setup()
@@ -191,36 +376,45 @@ it('从全部项目打开创建表单，提交名称并进入原返回项目，�
   })
 });
 
-it.each(["missing", "unavailable", "mismatch"] as const)(
-  "原收据%s保留表单和原标识，手动重试仅GET同收据后恢复",
+it.each(['missing', 'unavailable', 'mismatch'] as const)(
+  '原收据%s允许关闭表单但保留原标识，手动核对仅GET同收据后恢复',
   async (mode) => {
-    const f = setup({ loseResponse: true });
-    f.setReceiptMode(mode);
-    using _fetch = stubGlobal("fetch", f.fetch);
-    await using screen = await render(<App />, { router: "/projects?projectId=directory-project" });
-    const edit = screen.getByRole("button", { name: "编辑项目", exact: true });
-    await expect.element(edit).toBeVisible();
-    await edit.click();
-    await page.getByRole("textbox", { name: "名称", exact: true }).fill("原未知修改");
-    await page.getByRole("button", { name: "保存", exact: true }).click();
-    const dialog = page.getByRole("dialog");
-    await expect.element(dialog.getByRole("button", { name: "重试", exact: true })).toBeEnabled();
-    await expect.element(dialog.getByRole("button", { name: "取消", exact: true })).toBeDisabled();
-    await userEvent.keyboard("{Escape}");
-    await expect.element(dialog).toBeVisible();
-    const original = readPendingProjectWrite();
-    expect(original?.submitted).toBe(true);
-    expect(f.bodies).toHaveLength(1);
-    expect(f.queries).toHaveLength(1);
-    f.setReceiptMode("completed");
-    await dialog.getByRole("button", { name: "重试", exact: true }).click();
-    await expect.element(dialog).not.toBeInTheDocument();
-    await expect.element(edit).toHaveFocus();
-    expect(f.queries).toEqual([f.queries[0], f.queries[0]]);
-    expect(f.bodies).toHaveLength(1);
-    expect(readPendingProjectWrite()).toBeNull();
+    using _timers = fakeTimers({ shouldAdvanceTime: true })
+    const f = setup({ loseResponse: true })
+    f.setReceiptMode(mode)
+    using _fetch = stubGlobal('fetch', f.fetch)
+    await using screen = await render(<App />, { router: '/projects?projectId=directory-project' })
+    const edit = screen.getByRole('button', { name: '编辑项目', exact: true })
+    await expect.element(edit).toBeVisible()
+    await edit.click()
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill('原未知修改')
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await expect.element(dialog.getByRole('button', { name: '重试', exact: true })).toBeEnabled()
+    await expect
+      .element(
+        dialog.getByRole('button', { name: '关闭', exact: true }).filter({ hasText: '关闭' }),
+      )
+      .toBeEnabled()
+    const original = readPendingProjectWrite()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(dialog).not.toBeInTheDocument()
+    await expect
+      .element(screen.getByRole('button', { name: '刷新项目', exact: true }))
+      .toHaveFocus()
+    expect(readPendingProjectWrite()).toEqual(original)
+    expect(original?.submitted).toBe(true)
+    expect(f.bodies).toHaveLength(1)
+    expect(f.queries).toHaveLength(1)
+    f.setReceiptMode('completed')
+    await userEvent.click(screen.getByRole('button', { name: '重试', exact: true }))
+    await expect.element(dialog).not.toBeInTheDocument()
+    await expect.element(edit).toBeEnabled()
+    expect(f.queries).toEqual([f.queries[0], f.queries[0]])
+    expect(f.bodies).toHaveLength(1)
+    expect(readPendingProjectWrite()).toBeNull()
   },
-);
+)
 
 it("原写已保存后撤权只确认最小事实，关闭旧编辑并移除管理入口不再次POST", async () => {
   const f = setup({ loseResponse: true });

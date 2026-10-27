@@ -48,7 +48,8 @@ export function ProjectRemovalDialog({ target, finalFocus, initialCanResume = fa
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [pending, setPending] = useState(readPendingProjectWrite)
+  const readPending = () => readPendingProjectWrite({ projectId: target.projectId })
+  const [pending, setPending] = useState(readPending)
   const [attempt, setAttempt] = useState(0)
   const [confirmed, setConfirmed] = useState(false)
   const [canResume, setCanResume] = useState(initialCanResume)
@@ -66,7 +67,7 @@ export function ProjectRemovalDialog({ target, finalFocus, initialCanResume = fa
     const controller = new AbortController()
     setLoading(true)
     setError(null)
-    const original = readPendingProjectWrite()
+    const original = readPendingProjectWrite({ projectId: target.projectId })
     // 已接受的删除只核原收据，不以活动目录的新预检替换原操作。
     if (original?.method === 'DELETE' && original.path === path) {
       setLoading(false)
@@ -84,7 +85,7 @@ export function ProjectRemovalDialog({ target, finalFocus, initialCanResume = fa
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [path, attempt])
+  }, [path, target.projectId, attempt])
   const changed = preview !== null && preview.revision !== target.revision
   const canRemove = !loading && preview?.canDelete && !changed && !pending
   async function remove() {
@@ -115,7 +116,7 @@ export function ProjectRemovalDialog({ target, finalFocus, initialCanResume = fa
       callbacks.current.onRemoved()
     } catch (cause) {
       if (!alive.current) return
-      setPending(readPendingProjectWrite())
+      setPending(readPending())
       setCanResume(cause instanceof PendingProjectDeletion && cause.canResume)
       if (isAutoOpsAccessError(cause)) {
         callbacks.current.onAccessDenied(cause)

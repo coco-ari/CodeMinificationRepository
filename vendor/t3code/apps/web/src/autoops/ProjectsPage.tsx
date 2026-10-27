@@ -101,7 +101,8 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   const [editor, setEditor] = useState<Editor | null>(null)
   const [busy, setBusy] = useState(false)
   const [configurationRevision, setConfigurationRevision] = useState(0)
-  const [pending, setPending] = useState(readPendingProjectWrite)
+  const readPending = () => readPendingProjectWrite(explicit ? { projectId: explicit } : undefined)
+  const [pending, setPending] = useState(readPending)
   const alive = useRef(true)
   useEffect(() => {
     alive.current = true
@@ -133,7 +134,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
         if (isAutoOpsAccessError(cause)) {
           setProjects([])
           setSettings(null)
-          if (!readPendingProjectWrite()) setEditor(null)
+          if (!readPendingProjectWrite(explicit ? { projectId: explicit } : undefined)) setEditor(null)
         }
         setError(cause instanceof Error ? cause.message : '项目读取失败')
       } finally {
@@ -161,7 +162,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
     setError(null)
     try {
       const original = retry
-        ? readPendingProjectWrite()
+        ? readPending()
         : editor
           ? isConfigurationEditor(editor)
             ? prepareProjectMutation(
@@ -190,7 +191,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
         result = await recoverProjectWrite(original)
       }
       if (!alive.current) return
-      setPending(null)
+      setPending(readPending())
       const unavailable = result.saved === true && result.available === false
       const entryUnverified = result.nativeSynchronization === 'unverified'
       toastManager.add({
@@ -217,7 +218,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       }
     } catch (cause) {
       if (!alive.current) return
-      setPending(readPendingProjectWrite())
+      setPending(readPending())
       if (cause instanceof PendingProjectDeletion && cause.canResume) {
         removalReturn.current = refreshButton.current
         setRemovalCanResume(true)
@@ -537,7 +538,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
         }}
         onRemoved={() => {
           removalReturn.current = refreshButton.current
-          setPending(readPendingProjectWrite())
+          setPending(readPending())
           setRemovalTarget(null)
           if (removalTarget.environmentId) {
             void load(true)
@@ -571,10 +572,10 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       <Dialog
         open={editor !== null}
         onOpenChange={(value) => {
-          if (!value && !busy && !pending) setEditor(null)
+          if (!value && !busy) setEditor(null)
         }}
       >
-        <DialogPopup finalFocus={trigger} showCloseButton={!busy && !pending}>
+        <DialogPopup finalFocus={pending ? refreshButton : trigger} showCloseButton={!busy}>
           <DialogHeader>
             <DialogTitle>
               {editor?.kind === 'create'
@@ -657,10 +658,10 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
             <Button
               variant="outline"
               type="button"
-              disabled={busy || !!pending || credentialLocked || removalLocked}
+              disabled={busy || credentialLocked || removalLocked}
               onClick={() => setEditor(null)}
             >
-              取消
+              {pending ? '关闭' : '取消'}
             </Button>
             <Button
               form="directory-editor-form"
