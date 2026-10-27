@@ -77,7 +77,7 @@ test('真实连接程序 HELLO 把旧配对版本更新到当前版本，所有�
   try {
     connection.start();await until(()=>ready)
     const device = f.registry.listDevices('owner')[0]!
-    assert.equal(CONNECTOR_VERSION,'0.4.2')
+    assert.equal(CONNECTOR_VERSION,'0.4.3')
     assert.equal(device.connectorVersion,CONNECTOR_VERSION)
     assert.equal(device.connectionEpoch,1)
     assert.equal(device.online,true)

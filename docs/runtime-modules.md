@@ -1514,3 +1514,21 @@ v2实际390×520、hasTouch/isMobile manager完成长文档单项：认证三操
 两个可验证原因均沿正式源码核对：HeadlessCodexEvent形态候选被原七条全部正常decode排除；CustomerEventValidation对原生IdAllocator派生的terminal-failure错误项要求普通customer native-item前缀，精确导致seq2..6 CUSTOMER_EVENT_SCOPE，seq7/8单独合法但批次在前项停止，故中央不save/apply/ack并反复断线。正式makeProviderRetryTurnItem/makeProviderFailureTurnItem正例红测同步复现。最小修改仅CustomerEventValidation及其安全回归：error类型、已登记knownTurn、同run/attempt、中央root node、原providerThread、无parent/nativeRef及原IdAllocator精确ID同时成立才准入；原普通ID和跨范围检查不变。原红2/29与修后安全31、关联47及服务类型通过，根安全31独立通过，实际原七事件修后均准入；辅助离线准入仍不算现场恢复。
 
 上游首次502与其后403单独待定位，不能把中央回传修复当模型成功。正常同密钥只读CPA目录GET200且grok-4.6仍在目录，证据cpa-models-readonly-v1 SHA256 `f0168197caa79bd27363c1df835792111a4d868bd2b1ad2b9fdb18f664d55f72`，未发推理。47B原proof源SHA9862b35a保持，不证明模型读取。relay原未arm、无dropped/original/protocolFault，原故障测试未开始。固定CI、正式候选、明确单原任务终态事件收束维护及原正常ack后再验；不把中央running伪称idle或放宽旧strict发行检查。四状态：代码实现/相关自动通过/发布待完成/真实恢复及模型业务待完成。
+
+### 原终态恢复候选与单次上游诊断（2026-10-27）
+
+固定候选 `acb7ea2acc77922da29948fac8c6bbaf76b0833a` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40426521075)和[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40426521072)均通过，原核验 JSON SHA256 `c0a8b5eb4b019db8ec0ec5042009b336cdeeb0ecb27c3fecb3ef65942da94ba0`。正式源码树032c4b21、源码包966e3d06、发行清单d97490cb与55个关键来源逐字匹配；根独立全包核验SHA256 `63837635ff92c725a0f3627723d178c496fc1301958e196fd170fdae5d2e886e`。远端候选仅准备，官方原生2038文件/21包两次独立核验、清单2b4e656a；尚未服务切换，不计部署或业务通过。
+
+同原模型grok-4.6/medium、锁定Linux镜像和真实能力目录的一次独占虚构资料诊断，沿正式Codex及当前共享模型网关确实到达配置上游：唯一POST于00:45:06.194发出，725ms后收到HTTP400/JSON、59字节完整自然结束。没有重定向或重试，不保存任意正文、模型答案、工具参数或响应头；两owned容器正常stop/remove，根只读Docker列表另核不存在。原38c46问答及原七事件没有重发。本次400不能倒推原问答首次502的确切原因；安全分类只得到errorCode=other、其余分类未命中，仍需最小诊断，不能据工具exit0认定推理成功。实际result SHA256 `4e27b3f794945ee989985f9b287eaf2fc6382028530b1657655941881624d379`、response SHA256 `aa4b7b87348fbd952344bd20a74d8584f05a23e708c9fba4a9dfa2c03e73df69`、根独立索引 `.deployment/c6-upstream-first-response-c261-root-independent-v1.json` SHA256 `00dcba1865b16fff5331bf81ad2d33cc28408c363b3695bfc1a2f073ecb2534e`。
+
+维护前另实际复用原固定只读snapshot，11库、531原文件与主密钥的摘要已采，DATA设备64512/inode304953；证据 `.deployment/c6-maintenance-independent-retention-before-v1.json` SHA256 `3f6cc030512998ff17fbc427722d90e8fc59b75b2c18cbcee82ba0156bc8f871`。此为维护前保护锚，尚无前后比较，不将其写为维护或部署已通过。四种状态仍为：代码完成、完整自动检查通过、部署待完成、原终态恢复及真实共享业务待完成。
+
+只读现场随后确认原38c46轮：五类平台输入均0，环境/资料范围为空；原CLI446985/startTicks34325587、原CID fca4bed0及锁定镜像63ceb822保持，原container init448307/Codex448325仍在。原本机三条和中央三条命令、七个seq2..8原事件保留，未执行任何服务动作。全局九类原生活动只有该原run/attempt/providerTurn/node各1，其余0；此为明确的中央滞后，仍不叫空闲。RO2实际原件 `.deployment/c6-ro2-root-independent-v1/actual-readonly-facts-v1.json` SHA256 `2452b6b09cae862f4273790225495d39110aea214347938b48d4536525767cc8`；根按冻结原账本/事件和fresh九类检查独立运行before门禁通过，索引SHA256 `e84dd5687f1b3ed195a7bbc434bd1696740cb72b08c0e1039ce27e8e2cecd470`。该通过只证明维护前条件，不代替原事件实际回传或部署生效。
+
+### 共享同步请求的后台参数注入（2026-10-27）
+
+第二次独占诊断沿原模型/强度/真实目录、相同请求生成与代理执行一次。上游677ms后仍返回400/59B，安全分类明确code为字符串400、error为字符串、unsupported=true，仅命中已知请求字段background；原Codex首正文中该字段不存在。实际result `.deployment/c6-upstream-first-response-c261-v2-actual-evidence-v1/result.json` SHA256 `b751a4d39f92239603499088cb2242c8146331b10f689c8720b0b228e2f02d30`，response SHA256 `ac502243f1b40f0f49d8b84fa50370fd1786d73e189ab937479ee2d57b4f5ef2`。原400/59B正文未存，不能追补它与原38问题首次502的字节相同；正式网关将非2xx映射为502的调用关系已核。两次诊断各一次新虚构请求，不重发原问答；两owned容器正常清理，根Docker列表另核不存在，均不计模型业务通过。
+
+先列并核两候选：一是锁定Codex本身提交后台请求，在正式网关入站捕获的安全形态中background=absent，排除这次输入原因；二是[共享网关](../agent-demo/customer-agent/shared-model-gateway.ts)的validateBody在全量校验后无条件补background:false，与上游unsupported/background信号相符。真实UDS回归用拒绝该字段的隔离上游复现旧同步请求502，另一条畸形后台参数旧例实际200。红测 `.deployment/c6-background-parameter-fix-v1/red.log` 保留，未先改实现；修复后网关24/24、完整客户155/155、客户类型及296源边界通过。明确这是隔离回归，真实修复后的上游和完整问答仍须执行。
+
+最小修改只在原网关：拒绝非false/null后台参数，全量校验后省略可选background，继续固定store:false；模型、强度、授权、执行位置、远端引用拒绝及迟到撤权检查沿原合同。可选字段和显式启用后台语义核对[Responses接口](https://developers.openai.com/api/reference/resources/responses/methods/create)及[后台模式](https://developers.openai.com/api/docs/guides/background)，未引入依赖或第二执行链。原正式CLI、HELLO及包清单同步0.4.3，安装仍核完整包。代码完成、相关自动通过，下一固定候选完整CI/部署及真实业务待验；当前原0.4.2进程和七事件继续保留，先完成原终态恢复。

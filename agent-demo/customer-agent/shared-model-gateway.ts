@@ -63,7 +63,7 @@ function abortable<T>(value: T | Promise<T>, signal: AbortSignal): Promise<T> {
 
 function validateBody(value: unknown, scope: Scope, effort: string | null, compact: boolean) {
   const body = object(value)
-  if (body.model !== scope.model.model || body.background === true || body.store === true ||
+  if (body.model !== scope.model.model || (body.background != null && body.background !== false) || body.store === true ||
       body.previous_response_id != null || body.conversation != null || body.prompt != null || 'reasoning_effort' in body)
     throw invalid()
   if (scope.model.reasoningEffort !== null && effort !== scope.model.reasoningEffort) throw unavailable()
@@ -182,7 +182,9 @@ function validateBody(value: unknown, scope: Scope, effort: string | null, compa
     checkTools(body.tools)
   }
   if (body.tool_choice && typeof body.tool_choice === 'object') checkTool(body.tool_choice)
-  return Buffer.from(JSON.stringify({ ...body, store: false, background: false }))
+  // 同步请求省略可选后台字段，避免向不支持该字段的上游注入新参数。
+  delete body.background
+  return Buffer.from(JSON.stringify({ ...body, store: false }))
 }
 
 /** 不缓存上游错误；即使成功流意外回显凭据，也跨分块移除精确凭据字节。 */

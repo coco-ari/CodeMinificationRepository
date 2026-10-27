@@ -81,8 +81,35 @@ test('真实UDS转发固定模型与强度、无远端持久会话，宿主凭�
   assert.equal(f.received[0]!.headers.authorization, credential)
   assert.equal(f.received[0]!.headers.cookie, undefined)
   assert.equal(f.received[0]!.headers['x-project'], undefined)
-  assert.deepEqual(f.received[0]!.body, { ...body(), store: false, background: false })
+  assert.deepEqual(f.received[0]!.body, { ...body(), store: false })
   assert.equal((await lstat(join(f.directory, 'model.sock'))).mode & 0o777, 0o600)
+})
+
+test('不支持后台参数的上游可接收同步请求，显式关闭后台也不转发该字段', async t => {
+  const f = await fixture(t, { respond(value, response) {
+    if ('background' in value.body) {
+      response.writeHead(400, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: '不支持 background 参数', code: '400' }))
+    } else {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.end('data: {"text":"同步结果"}\n\n')
+    }
+  } })
+  for (const value of [body(), { ...body(), background: false }, { ...body(), background: null }]) {
+    const result = await f.call(value)
+    assert.equal(result.status, 200)
+    assert.match(result.text, /同步结果/)
+  }
+  assert.equal(f.received.length, 3)
+  assert(f.received.every(value => !('background' in value.body) && value.body.store === false))
+})
+
+test('非法后台参数在读取提供者凭据前拒绝，不能隐式启动后台任务', async t => {
+  const f = await fixture(t)
+  for (const background of [true, 'true', 'false', 1, 0, [], {}])
+    assert.equal((await f.call({ ...body(), background })).status, 400)
+  assert.equal(f.received.length, 0)
+  assert.equal(f.secretsRead, 0)
 })
 
 test('模型、强度、远端会话/文件和托管MCP不能借提供者凭据改变范围', async t => {
