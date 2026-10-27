@@ -117,7 +117,10 @@ export function useWorkspaceAuthoring(
   const accepted = useRef(onTask);
   accepted.current = onTask;
   const currentScope = () => mounted.current && readAutoOpsHost()?.principal.id === principal;
-  const refresh = () => setGeneration((value) => value + 1);
+  const refresh = () => {
+    setError(null);
+    setGeneration((value) => value + 1);
+  };
   const clearData = () => {
     setAccessDenied(true);
     reader.current?.abort();

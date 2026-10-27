@@ -165,6 +165,10 @@ Git 分支/历史查询只固定连接及凭证版本，不随工作区分支或
 
 `11ab04ab` 的[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40264098575) 通过；[运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40264098642) 浏览器 377 通过、5 失败，仓库集中入口 7 项全部通过。凭证用例均停在项目目录加载，未进入凭证表单：可能一是管理权限未授予，夹具 bootstrap 明确 project.manage=true 且页面已识别项目标题，排除；可能二是请求前缀匹配错误，apiClient 在公开项目路径前拼接 gatewayBasePath，而新夹具对项目目录做未带前缀的精确匹配，代码及连接失败画面支持。夹具先去掉已声明的固定网关前缀再匹配，生产代码不变；新增凭证成功、恢复、撤回及秘密边界仍待新 CI 通过，不能将本次加载失败说成这些业务已验收。
 
+2026-10-27 补充凭证读取恢复：首次 authoring 或 credentials GET 503，点击原“重试凭证配置”，两 GET 已 200、原凭据菜单可用后旧 alert 仍保留。候选一是 refresh 未清旧 error，正式 hook 支持；候选二是另一 GET 继续失败，实际响应计数排除，另设 200/503 对照保留真实错误。先得到目标红例，再仅在显式 refresh 清旧提示，后续读写失败仍由原 catch 显示，不在单个 GET 成功时清错，不改权限、秘密、收据及资料。
+
+同初态、同管理员、同两次成功重读：修改前“点击重试”1 次后残留错误，修改后同 1 次恢复，等待另计；持续失败同 1 次仍显示错误。没有布局、菜单或字段变化，原 admin 页面 12 次只读菜单/弹窗/Esc 交互可复用（`.deployment/b3-reader-management-root-evidence-v1/page-read-only-v1.json`）。用户可正确判断恢复；开发者只维护原刷新入口；Agent 可用原按钮与 alert 判断真实结果。根通过锁定 Vitest preview 在内置浏览器运行新 3 例，目标红 1 失败/1 对照通过后，修复后 3/3 通过；原 5 例未在 preview 重跑，继续由候选完整 CI 验证，相关单测 17/17 通过。两次预览工具定位/计时器失败原件保留，不算产品复现。日志见 `.deployment/project-credentials-read-retry-v1/target-red-v3.log`、`target-green-v1.log`；代码已修，完整 CI、部署与正式站恢复交互尚待验证，不将本地替身网络计为真实凭证业务通过。
+
 ### 工作区独立使用配置
 
 工作区来源编辑器继续复用原 T3 Dialog/Select/Input 和 authoring 原请求控制器，只选择项目已登记仓库、作用、自己的分支/标签/提交、挂载及子目录。连接名称、地址与凭证从唯一目录派生，不能在工作区重新写入。编辑现有使用配置不允许替换其仓库身份；新增选择禁用已在工作区使用的仓库，目录错误有原表单重试，来源被撤回时不能自动选择其他仓库。工作区 POST sources/save 严格解析 ConfigureRepositoryWorkspace，拒绝 URL、凭证、秘密、名称及未知字段；模块不再提供旧组合 saveSource 方法。测试夹具改为调用独立保存连接/配置使用两个公开入口，既有存储升级、修订冲突、路径互斥与固定输入断言保留。

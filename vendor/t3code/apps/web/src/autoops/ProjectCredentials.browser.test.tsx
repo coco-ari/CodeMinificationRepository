@@ -9,9 +9,20 @@ import { installAutoOpsHost } from './hostConfig'
 import type { WorkspaceCredentialMetadata } from './workspaceAuthoring'
 import '../index.css'
 
-function setup({ lost = false, denyWrite = false } = {}) {
+function setup({ lost = false, denyWrite = false, readFailure = null }: {
+  lost?: boolean
+  denyWrite?: boolean
+  readFailure?: 'authoring' | 'credentials' | null
+} = {}) {
   window.sessionStorage.clear()
   let lose = lost
+  let failingRead = readFailure
+  const reads: Array<{ kind: 'authoring' | 'credentials'; status: number }> = []
+  const read = (kind: 'authoring' | 'credentials', value: unknown) => {
+    const failed = failingRead === kind
+    reads.push({ kind, status: failed ? 503 : 200 })
+    return Response.json(failed ? { code: 'WORKSPACE_UNAVAILABLE', error: '凭证读取暂不可用' } : value, { status: failed ? 503 : 200 })
+  }
   const project = {
     id: 'credential-project',
     name: '凭证验收项目',
@@ -80,7 +91,7 @@ function setup({ lost = false, denyWrite = false } = {}) {
     if (path.endsWith('/repositories')) return Response.json({ revision: 0, items: [] })
     if (path.endsWith('/settings')) return Response.json({ project, members: [], candidates: [] })
     if (path.endsWith('/workspace/authoring'))
-      return Response.json({
+      return read('authoring', {
         projectId: project.id,
         revision: 0,
         sources: [],
@@ -90,7 +101,7 @@ function setup({ lost = false, denyWrite = false } = {}) {
     if (path.includes('/credentials/requests/'))
       return Response.json({ result: receipts.get(path.split('/').at(-1)!) ?? null })
     if (path.endsWith('/workspace/credentials')) {
-      if (init?.method !== 'POST') return Response.json({ credentials: metadata })
+      if (init?.method !== 'POST') return read('credentials', { credentials: metadata })
       const body = JSON.parse(String(init.body)) as (typeof writes)[number]
       writes.push(body)
       if (denyWrite)
@@ -119,7 +130,7 @@ function setup({ lost = false, denyWrite = false } = {}) {
     if (path === '/api/v1/projects') return Response.json({ items: [project] })
     throw new Error(`未处理测试请求 ${path}`)
   })
-  return { fetch, writes, metadata, receipts, project }
+  return { fetch, writes, metadata, receipts, project, reads, setReadFailure(value: typeof failingRead) { failingRead = value } }
 }
 function App() {
   return (
@@ -232,4 +243,52 @@ it('撤回凭证需确认并保存原修订，返回列表可见撤回状态与�
     action: 'revoke',
     input: { id: 'credential-one', expectedRevision: 1 },
   })
+})
+
+it.each(['authoring', 'credentials'] as const)('首次%s读取503后，原按钮重试两GET成功清除旧错误并保留凭据', async (readFailure) => {
+  const f = setup({ readFailure })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=credential-project' })
+  const heading = screen.getByRole('heading', { name: '项目凭证', exact: true })
+  await expect.element(heading).toBeVisible()
+  const section = heading.element().closest<HTMLElement>('section')!
+  await vi.waitFor(() => expect(section.querySelector('[role="alert"]')?.textContent).toBe('凭证读取暂不可用'))
+  const retry = [...section.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '重试凭证配置')!
+  expect(retry).toBeDefined()
+  const offset = f.reads.length
+  f.setReadFailure(null)
+  retry.click()
+  await vi.waitFor(() => expect(f.reads.slice(offset)).toEqual(expect.arrayContaining([
+    { kind: 'authoring', status: 200 },
+    { kind: 'credentials', status: 200 },
+  ])))
+  await vi.waitFor(() => {
+    const menu = section.querySelector<HTMLButtonElement>('[aria-label="管理凭证 原凭证"]')
+    expect(menu).not.toBeNull()
+    expect(menu!.disabled).toBe(false)
+  })
+  await vi.waitFor(() => expect(section.querySelector('[role="alert"]')).toBeNull())
+  expect([...section.querySelectorAll('button')].some(button => button.textContent === '重试凭证配置')).toBe(false)
+  expect(f.writes).toHaveLength(0)
+})
+
+it('重试时另一GET仍失败必须保留错误，不能用单项成功覆盖', async () => {
+  const f = setup({ readFailure: 'credentials' })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=credential-project' })
+  const heading = screen.getByRole('heading', { name: '项目凭证', exact: true })
+  await expect.element(heading).toBeVisible()
+  const section = heading.element().closest<HTMLElement>('section')!
+  await vi.waitFor(() => expect(section.querySelector('[role="alert"]')?.textContent).toBe('凭证读取暂不可用'))
+  const offset = f.reads.length
+  const retry = [...section.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '重试凭证配置')!
+  expect(retry).toBeDefined()
+  retry.click()
+  await vi.waitFor(() => expect(f.reads.slice(offset)).toEqual(expect.arrayContaining([
+    { kind: 'authoring', status: 200 },
+    { kind: 'credentials', status: 503 },
+  ])))
+  expect(section.querySelector('[role="alert"]')?.textContent).toBe('凭证读取暂不可用')
+  expect([...section.querySelectorAll('button')].some(button => button.textContent === '重试凭证配置')).toBe(true)
+  expect(f.writes).toHaveLength(0)
 })
