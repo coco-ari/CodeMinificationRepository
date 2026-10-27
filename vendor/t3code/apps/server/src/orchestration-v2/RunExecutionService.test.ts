@@ -1399,14 +1399,26 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
   }),
 );
 
-it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as const)(
+const runPreparationScenarios = [
+  "failure",
+  "interruption",
+  "stale-attempt",
+  "start-guard",
+  "customer-resume",
+] as const;
+
+it.effect.each(runPreparationScenarios)(
   "handles %s before the provider turn starts",
   (scenario) =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread:run-execution-settings-failure");
       const runId = RunId.make("run:run-execution-settings-failure");
       const attemptId = RunAttemptId.make("attempt:run-execution-settings-failure");
-      const providerInstanceId = ProviderInstanceId.make("codex");
+      const providerInstanceId = ProviderInstanceId.make(
+        scenario === "customer-resume"
+          ? "customer-11111111-1111-1111-1111-111111111111-codex"
+          : "codex",
+      );
       const providerSessionId = ProviderSessionId.make("session:run-execution-settings-failure");
       const providerThreadId = ProviderThreadId.make(
         "provider-thread:run-execution-settings-failure",
@@ -1477,6 +1489,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
           providerSessionId,
           session: {
             events: Stream.never,
+            subscribeEvents: Effect.succeed({ events: Stream.never, close: Effect.void }),
             startTurn: () => Ref.update(providerStarts, (count) => count + 1),
           } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
           run: {
@@ -1499,6 +1512,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
           } as OrchestrationV2RunAttempt,
           attemptId,
           providerTurnOrdinal: 1,
+          ...(scenario === "customer-resume" ? { resumeOnly: true } : {}),
           ...(scenario === "start-guard"
             ? { shouldStartProviderTurn: () => Effect.succeed(false) }
             : {}),
@@ -1535,7 +1549,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
         return;
       }
       assert.isTrue(Exit.isSuccess(result));
-      if (scenario === "start-guard") {
+      if (scenario === "start-guard" || scenario === "customer-resume") {
         assert.equal(yield* Ref.get(guardedWrites), 0);
         assert.equal(yield* Ref.get(refreshes), 0);
         assert.isEmpty(events);
@@ -4383,6 +4397,7 @@ function captureRootRunTermination(input: {
   readonly key: string;
   readonly providerInstanceId?: ProviderInstanceId;
   readonly resumeOnly?: boolean;
+  readonly readSettings?: ServerSettings.ServerSettingsService["Service"]["getSettings"];
   readonly acknowledgeEvent?: ProviderAdapter.ProviderAdapterV2SessionRuntime["acknowledgeEvent"];
   readonly eventPersistenceKey?: ProviderAdapter.ProviderAdapterV2SessionRuntime["eventPersistenceKey"];
   readonly captureBaseline?: Effect.Effect<void>;
@@ -4487,7 +4502,9 @@ function captureRootRunTermination(input: {
           Layer.mock(ProviderEventIngestor.ProviderEventIngestorV2)({
             ingestNormalized: input.ingestNormalized ?? (() => Effect.succeed([])),
           }),
-          ServerSettings.layerTest(),
+          input.readSettings === undefined
+            ? ServerSettings.layerTest()
+            : Layer.mock(ServerSettings.ServerSettingsService)({ getSettings: input.readSettings }),
           Layer.succeed(RunFinalizationService.RunFinalizationObserver, {
             refresh: () => Effect.void,
             refreshAfterTurn: () =>
@@ -5159,6 +5176,13 @@ it.effect(
           "customer-11111111-1111-1111-1111-111111111111-codex",
         ),
         resumeOnly: true,
+        readSettings: Effect.fail(
+          new ServerSettingsError({
+            settingsPath: "<unavailable-assistant-directory>",
+            operation: "read-file",
+            cause: { code: "DEFAULT_ASSISTANT_REQUIRED" },
+          }),
+        ),
         shouldFinalizeRun: () => Effect.succeed(true),
         captureBaseline: Effect.die("Customer files must not be checkpointed on the center."),
         appContext: Effect.die("Platform context must not be bridged."),

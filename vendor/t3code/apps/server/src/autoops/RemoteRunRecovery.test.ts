@@ -20,6 +20,7 @@ it.effect.each([
   "pending-stop",
   "operator-resolution",
   "committed-resolution",
+  "terminal-run",
 ] as const)("reconciles customer %s with the original run and attempt", (scenario) =>
   Effect.gen(function* () {
     const now = DateTime.makeUnsafe("2026-10-23T00:00:00Z");
@@ -45,7 +46,12 @@ it.effect.each([
           providerThreadId,
           userMessageId: messageId,
           providerInstanceId: instanceId,
-          status: scenario === "committed-resolution" ? "cancelled" : "running",
+          status:
+            scenario === "committed-resolution"
+              ? "cancelled"
+              : scenario === "terminal-run"
+                ? "failed"
+                : "running",
           ordinal: 7,
           threadId,
         },
@@ -55,10 +61,22 @@ it.effect.each([
           id: attemptId,
           runId,
           providerTurnId: null,
-          status: scenario === "committed-resolution" ? "cancelled" : "running",
+          status:
+            scenario === "committed-resolution"
+              ? "cancelled"
+              : scenario === "terminal-run"
+                ? "failed"
+                : "running",
         },
       ],
-      nodes: [{ id: nodeId, runId, checkpointScopeId, status: "running" }],
+      nodes: [
+        {
+          id: nodeId,
+          runId,
+          checkpointScopeId,
+          status: scenario === "terminal-run" ? "failed" : "running",
+        },
+      ],
       providerThreads: [
         {
           id: providerThreadId,
@@ -132,6 +150,7 @@ it.effect.each([
         sessionId,
         threadId,
         runtimeEpoch: "original-epoch",
+        ...(scenario === "terminal-run" ? { state: "idle" } : {}),
         ...(scenario === "pending-stop"
           ? { pendingInterrupt: { runId, attemptId, requestedAt: DateTime.formatIso(now) } }
           : {}),
@@ -165,6 +184,7 @@ it.effect.each([
           Effect.sync(() => {
             opened.push(input);
             live = true;
+            if (scenario === "terminal-run") Deferred.doneUnsafe(done, Effect.void);
             return {
               resumeThread: () => Effect.succeed(projection.providerThreads[0]!),
             } as unknown as Adapter.ProviderAdapterV2SessionRuntime;
@@ -191,7 +211,17 @@ it.effect.each([
       const recovery = yield* CustomerRuntimeRecovery;
       yield* recovery.recover(projection);
       yield* Deferred.await(done);
-      if (scenario === "committed-resolution") {
+      if (scenario === "terminal-run") {
+        assert.isEmpty(execution);
+        assert.isEmpty(writes);
+        assert.isEmpty(released);
+        assert.isEmpty(interrupted);
+        assert.equal(opened.length, 1);
+        assert.equal(opened[0]!.providerSessionId, sessionId);
+        assert.equal(opened[0]!.threadId, threadId);
+        assert.isTrue(opened[0]!.reattachOnly);
+        assert.deepEqual(opened[0]!.resumeFromSession, projection.providerSessions[0]);
+      } else if (scenario === "committed-resolution") {
         assert.isEmpty(execution);
         assert.isEmpty(writes);
         assert.equal((updates[0]?.appliedResolution as { runId: string }).runId, runId);

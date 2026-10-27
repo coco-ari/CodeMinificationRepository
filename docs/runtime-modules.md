@@ -1544,3 +1544,17 @@ v2实际390×520、hasTouch/isMobile manager完成长文档单项：认证三操
 原问题正常接收者只读提取v3已由根独立复跑Node15、Python8及默认零网络入口，并核21成员完整ZIP清单、七份固定Git源与map完整正文、四编译文件；索引 `.deployment/c6-original-native-v3-root-independent-v1.json` 与 `.deployment/c6-original-native-v3-root-source-review-v1.json`。根首次使用未含Node的PATH、误按平铺ZIP及未解析map相对路径的辅助核验失败均记录，改用已配运行时、实际单包前缀和规范化相对路径后通过，未修改正式包。新现场PID/ticks配置仍待切换后给定；没有认证读取原问题，也没有问答写入，不计真实业务验收。
 
 原七事件维护完整v2包冻结为ff9fe065，51成员/50文件、原RO2的18文件不变；根独立11主链、3真实十一库、13全表、4原存储RAM及15项协议/正式投影回归通过。经SSH仅新增32个已审文件，未覆盖既有文件。首次实际单run在fresh OS门禁报 `EXTRA_PROCESS_OR_CATALOG_PROBE_NO_IDLE_WINDOW`；runtime仍空、没有maintenance-attempt，Web446306/launcher446156及原CLI/runner保持，服务和数据均未动作。只读实际证据 `.deployment/c6-maintenance-actual-preflight-failed-v1.json` SHA256 `7c3cb88b0082aa3eb9643ddd4ec66a5af089ea70f679222e995591afb6715c29`。额外子进程实际为Docker对另一owned CID执行五秒stop；先验证未知业务活动与onReady目录发现两种原因，再按正式固定scope及完整参数鉴别，不能泛忽略Docker或据辅助绿宣称恢复。原v2包、原问题和失败记录保留；原事件恢复、正式部署和C6业务仍待完成。
+
+### 原事件已确认但未投影的恢复缺陷（2026-10-27）
+
+目录探针检查先因容器`/proc/PID/exe`的magic link被realpath解析到宿主不存在路径而误拒。真实Linux前后相同PID/ticks仍存活且readlink成功，排除了该次退出竞态；v4只改读内核链接值并保留PID/ticks/UID/argv、镜像、挂载及network:none校验。根独立Node10、Python9、追加安装4项通过，实际只读capture也通过。嵌套sudo在新PTY缺少认证缓存，原真实档案port精确失败于`owner_original_agent_storage_v2.py:19`；同终端正常sudo-v后同port通过，没有移除真实报告检查或改sudo规则。随后沿既有fresh≤8秒原Agent终态窗口进入维护；六项窗口回归独立通过。
+
+02:32 UTC的维护停止阶段完整11库、531原文件、主密钥及部署摘要比较通过，未回滚数据。acb7仅作为维护worker启动，launcher746204/ticks35168109、私有proxy746385/ticks35168594。原CLI446985、原fca4bed0容器及原relay保持，未启动新问题或重发三条原命令。原七事件沿正常连接从ack1到6再到8、pending0，但九类native检查仍有一个providerTurn为running，故不计原事件恢复完成，不计正式部署。
+
+实际领域事件5033为原session附着，5034–5038均无原event commandId；它们是同原run/attempt的准备失败及收束，错误码DEFAULT_ASSISTANT_REQUIRED，发生于02:32:54.217。原seq7的精确providerTurn failed和seq8终态随后被已终态run分支只确认、没有领域投影；原providerTurn、attempt及node标识不变。只读原件`.deployment/c6-maintenance-v4-actual-evidence-v1/c6-maintenance-original-domain-events-actual-v1.json` SHA256 `025d23b76a8f5e5088e841fa2b980a00540fe6aea8accfdb3a4e057298094187`。已核对重试项仍是running，排除其直接触发终态；启动resumeOnly路径在重接旧事件前读取动态助手目录、失败合成终态，与实际时间和错误一致。
+
+根用pidfd精确暂停自有控制器744994/ticks35165935，保留原RAM和同一操作锁，不结束原Agent或自用运行器。仅只读该自有进程的时间字符串，当前真实原Agent报告仍由固定f59源及原59368/ticks4363922校验；只替换两原时间后，完整normalized部署SHA ec453403唯一重建成功，原状态SHA为7f99df8e，未导出内存、凭据或旧报告正文，也不捏造旧文件inode/mtime。证明`.deployment/c6-maintenance-v4-actual-evidence-v1/c6-paused-baseline-readonly-v1-result.json` SHA256 `c5c3ea3c16cf724114112c9276d368c973fa0b13afc5ab5642a726f120a6c327`；它只证明原部署基线可严格重建，尚不代替维护后完整数据比较或恢复完成。
+
+本批四状态为：最小代码修复已实现、根独立自动回归177项通过但新批完整CI待跑、部署未完成、真实恢复未完成。原生155项、RemoteRunRecovery六项、HTTP四项与Hub原终态交付十二项合并复跑通过，日志`.deployment/c6-original-terminal-recovery-fix-v1/root-final-recovery-v2.log`。Hub的正常设备协议仅为已应用且已登记同轮的终态提供最多十六个RAM交付槽，同session/epoch只能一个，二十秒未获原生确认明确失败；重传确认不写游标、不发中断命令、不释放租约。完整原SQLite行与三条命令/收据保持的回归通过。共享平台工具的未提交改动独立保留，不混入本批候选。
+
+下一步只沿已冻结且来自原CLI账本的seq7字节、原device/session/epoch与原event key重传终态事件；原命令/问题不重发，cursor不回退。Hub已删除ACK事件正文，不能声称它能比对原已删body；执行来源须独立核冻结实际原件，native仍须精确原turn及幂等门禁。恢复后另做完整因果与原档案核对、正常服务恢复及新固定候选CI/部署；辅助测试通过和ack8均不冒称真实模型、技能、附件、共享隔离已通过。

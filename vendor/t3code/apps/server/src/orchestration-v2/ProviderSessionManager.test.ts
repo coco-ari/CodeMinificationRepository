@@ -4,6 +4,13 @@ import { assert, it } from "@effect/vitest";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import {
   EnvironmentId,
+  CommandId,
+  EventId,
+  MessageId,
+  NodeId,
+  ProviderTurnId,
+  RunAttemptId,
+  RunId,
   type ModelSelection,
   type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
@@ -322,6 +329,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
   options: {
     readonly failEventStream?: boolean;
     readonly acknowledgeEvent?: ProviderAdapter.ProviderAdapterV2SessionRuntime["acknowledgeEvent"];
+    readonly eventPersistenceKey?: ProviderAdapter.ProviderAdapterV2SessionRuntime["eventPersistenceKey"];
     readonly capabilities?: OrchestrationV2ProviderCapabilities;
     readonly mcpConfigs?: Ref.Ref<
       ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
@@ -407,6 +415,9 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
           ...(options.acknowledgeEvent === undefined
             ? {}
             : { acknowledgeEvent: options.acknowledgeEvent }),
+          ...(options.eventPersistenceKey === undefined
+            ? {}
+            : { eventPersistenceKey: options.eventPersistenceKey }),
           events: options.failEventStream
             ? Stream.fail(
                 new ProviderAdapter.ProviderAdapterEventStreamError({
@@ -467,6 +478,7 @@ function layerTest(input: {
   readonly maxIdlePinMs?: number;
   readonly failEventStream?: boolean;
   readonly acknowledgeEvent?: ProviderAdapter.ProviderAdapterV2SessionRuntime["acknowledgeEvent"];
+  readonly eventPersistenceKey?: ProviderAdapter.ProviderAdapterV2SessionRuntime["eventPersistenceKey"];
   readonly capabilities?: OrchestrationV2ProviderCapabilities;
   readonly mcpConfigs?: Ref.Ref<
     ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
@@ -508,6 +520,9 @@ function layerTest(input: {
     makeProviderAdapter(input.state, {
       failEventStream: input.failEventStream ?? false,
       ...(input.acknowledgeEvent === undefined ? {} : { acknowledgeEvent: input.acknowledgeEvent }),
+      ...(input.eventPersistenceKey === undefined
+        ? {}
+        : { eventPersistenceKey: input.eventPersistenceKey }),
       ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
       ...(input.mcpConfigs === undefined ? {} : { mcpConfigs: input.mcpConfigs }),
       ...(input.beforeOpen === undefined ? {} : { beforeOpen: input.beforeOpen }),
@@ -5107,4 +5122,219 @@ it.effect(
         ),
       );
     }),
+);
+
+it.effect.each([
+  "failed",
+  "completed",
+  "interrupted",
+  "cancelled",
+  "running",
+  "other-id",
+  "other-attempt",
+  "other-thread",
+  "other-node",
+  "other-provider-thread",
+  "other-native-ref",
+  "other-ordinal",
+  "other-started-at",
+  "completed-before-started-at",
+  "newer-owner",
+  "already-terminal",
+] as const)("已结束客户轮仅收束原已知provider turn：%s", (scenario) =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const acknowledged = yield* Deferred.make<void>();
+    const commandId = CommandId.make("original-customer-event:" + scenario);
+    yield* Effect.gen(function* () {
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const ids = yield* IdAllocator.IdAllocatorV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("late-terminal:" + scenario);
+      const sessionId = ids.derive.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+      });
+      const runId = RunId.make("run:" + scenario),
+        attemptId = RunAttemptId.make("attempt:" + scenario);
+      const nodeId = NodeId.make("node:" + scenario),
+        turnId = ProviderTurnId.make("turn:" + scenario);
+      yield* sink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator: ids, threadId, now })],
+      });
+      const runtime = yield* manager.open({
+        threadId,
+        providerSessionId: sessionId,
+        modelSelection,
+        runtimePolicy,
+      });
+      const providerThread = {
+        ...makeProviderThread({ idAllocator: ids, threadId, providerSessionId: sessionId, now }),
+        firstRunOrdinal: 1,
+        lastRunOrdinal: scenario === "newer-owner" ? 2 : 1,
+      };
+      const turn = {
+        id: turnId,
+        providerThreadId: providerThread.id,
+        nodeId,
+        runAttemptId: attemptId,
+        nativeTurnRef: {
+          driver: CODEX_DRIVER,
+          nativeId: "native-turn:" + scenario,
+          strength: "strong" as const,
+        },
+        ordinal: 1,
+        status: scenario === "already-terminal" ? ("failed" as const) : ("running" as const),
+        startedAt: now,
+        completedAt: scenario === "already-terminal" ? now : null,
+      };
+      const common = { threadId, occurredAt: now };
+      yield* sink.write({
+        events: [
+          {
+            ...common,
+            id: EventId.make("late:thread:" + scenario),
+            type: "provider-thread.updated",
+            payload: providerThread,
+          },
+          {
+            ...common,
+            id: EventId.make("late:run:" + scenario),
+            type: "run.created",
+            payload: {
+              id: runId,
+              threadId,
+              ordinal: 1,
+              providerInstanceId: modelSelection.instanceId,
+              modelSelection,
+              providerThreadId: providerThread.id,
+              userMessageId: MessageId.make("message:" + scenario),
+              rootNodeId: nodeId,
+              activeAttemptId: attemptId,
+              status: "failed",
+              queuePosition: null,
+              requestedAt: now,
+              startedAt: now,
+              completedAt: now,
+              checkpointId: null,
+              contextHandoffId: null,
+            },
+          },
+          {
+            ...common,
+            id: EventId.make("late:attempt:" + scenario),
+            type: "run-attempt.created",
+            payload: {
+              id: attemptId,
+              runId,
+              attemptOrdinal: 1,
+              rootNodeId: nodeId,
+              providerInstanceId: modelSelection.instanceId,
+              providerThreadId: providerThread.id,
+              providerTurnId: null,
+              reason: "initial",
+              status: "failed",
+              startedAt: now,
+              completedAt: now,
+            },
+          },
+          {
+            ...common,
+            id: EventId.make("late:turn:" + scenario),
+            type: "provider-turn.updated",
+            payload: turn,
+          },
+        ],
+      });
+      const before = yield* projections.getThreadProjection(threadId);
+      const terminalStatus =
+        scenario === "completed" || scenario === "interrupted" || scenario === "cancelled"
+          ? scenario
+          : "failed";
+      const event: ProviderAdapter.ProviderAdapterV2Event = {
+        type: "provider_turn.updated",
+        driver: CODEX_DRIVER,
+        threadId: scenario === "other-thread" ? ThreadId.make("another-thread") : threadId,
+        providerTurn: {
+          ...turn,
+          status:
+            scenario === "running"
+              ? "running"
+              : scenario === "already-terminal"
+                ? "cancelled"
+                : terminalStatus,
+          completedAt:
+            scenario === "running"
+              ? null
+              : scenario === "completed-before-started-at"
+                ? DateTime.subtract(now, { seconds: 1 })
+                : now,
+          ...(scenario === "other-id" ? { id: ProviderTurnId.make("other-turn") } : {}),
+          ...(scenario === "other-attempt"
+            ? { runAttemptId: RunAttemptId.make("other-attempt") }
+            : {}),
+          ...(scenario === "other-node" ? { nodeId: NodeId.make("other-node") } : {}),
+          ...(scenario === "other-native-ref"
+            ? { nativeTurnRef: { ...turn.nativeTurnRef, nativeId: "other-native-turn" } }
+            : {}),
+          ...(scenario === "other-ordinal" ? { ordinal: 2 } : {}),
+          ...(scenario === "other-started-at"
+            ? { startedAt: DateTime.add(now, { seconds: 1 }) }
+            : {}),
+          ...(scenario === "other-provider-thread"
+            ? {
+                providerThreadId: ids.derive.providerThread({
+                  driver: CODEX_DRIVER,
+                  nativeThreadId: "other-native-thread",
+                }),
+              }
+            : {}),
+        },
+      };
+      yield* Queue.offer((yield* Ref.get(state)).eventQueues.get(sessionId)!, event);
+      yield* Queue.offer((yield* Ref.get(state)).eventQueues.get(sessionId)!, event);
+      yield* Queue.offer((yield* Ref.get(state)).eventQueues.get(sessionId)!, {
+        type: "provider_session.updated",
+        driver: CODEX_DRIVER,
+        providerSession: runtime.providerSession,
+      });
+      yield* Deferred.await(acknowledged);
+      yield* manager.shutdown;
+      const after = yield* projections.getThreadProjection(threadId);
+      const store = yield* EventStore.EventStoreV2;
+      const originalEvents = yield* store.readByCommandId({ commandId }).pipe(Stream.runCollect);
+      assert.deepEqual(after.runs, before.runs);
+      assert.deepEqual(after.attempts, before.attempts);
+      assert.deepEqual(after.nodes, before.nodes);
+      assert.deepEqual(after.messages, before.messages);
+      if (
+        scenario === "failed" ||
+        scenario === "completed" ||
+        scenario === "interrupted" ||
+        scenario === "cancelled"
+      ) {
+        assert.equal(after.providerTurns[0]?.status, terminalStatus);
+        assert.equal(after.providerTurns[0]?.id, turnId);
+        assert.equal(originalEvents.length, 1);
+        assert.equal(originalEvents[0]?.event.type, "provider-turn.updated");
+      } else {
+        assert.deepEqual(after.providerTurns, before.providerTurns);
+        assert.isEmpty(originalEvents);
+      }
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          state,
+          idleTimeoutMs: 60_000,
+          eventPersistenceKey: (event) =>
+            event.type === "provider_turn.updated" ? commandId : undefined,
+          acknowledgeEvent: (event) =>
+            event.type === "provider_session.updated"
+              ? Deferred.succeed(acknowledged, undefined).pipe(Effect.asVoid)
+              : Effect.void,
+        }),
+      ),
+    );
+  }),
 );

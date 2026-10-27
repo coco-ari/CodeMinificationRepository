@@ -25,6 +25,7 @@ import { createCustomerTransportJournal, customerCommandId, CustomerTransportErr
 type Send = (frame: CustomerAgentServerFrame) => Promise<void>;
 type Connection = { principal:CustomerDevicePrincipal; epoch:number; connectorEpoch?:string; attachmentTransfers?:boolean; workspaceFiles?:boolean; assistantConfiguration?:boolean; sharedExecutionVersion?:1; receiptQueries:Map<string,{sessionId:string;runtimeEpoch:string;grantId?:string|undefined}>; send:Send; hello:boolean; sessions:Map<string,{runtimeEpoch:string;state:string;live?:boolean|undefined;lastSeq?:number|undefined}>; close:()=>void };
 type Delivery = {sessionId:string;epoch:string;seq:number};
+type AppliedTerminalRetry = Delivery & {connection:Connection;event:ProviderAdapterV2Event;body:string;delivered:boolean;completion:Promise<void>;resolve:()=>void;reject:(cause:unknown)=>void};
 const error = (code:string,message:string) => new CustomerTransportError(code,message);
 export class RemoteDeviceHub {
   readonly access:AutoOpsAccess;
@@ -32,6 +33,8 @@ export class RemoteDeviceHub {
   private readonly connections=new Map<string,Connection>();
   private readonly signals=new EventEmitter();
   private readonly metadata=new WeakMap<object,Delivery>();
+  private readonly appliedTerminalRetries=new Map<string,AppliedTerminalRetry>();
+  private readonly retryMetadata=new WeakMap<object,AppliedTerminalRetry>();
   private readonly waiters=new Map<string,Set<(receipt:TransportReceipt)=>void>>();
   private readonly attachments:CustomerAttachmentDelivery|undefined;
   private readonly fileWaiters = new Map<string, { connection: Connection; resolve: (value: CustomerFileResult) => void; reject: (cause: unknown) => void }>();
@@ -140,8 +143,35 @@ export class RemoteDeviceHub {
     });
   }
   identity(event:ProviderAdapterV2Event) {const delivery=this.metadata.get(event);return delivery?customerCommandId(delivery.sessionId,'event',[delivery.epoch,delivery.seq]):undefined;}
+  private cancelAppliedTerminalRetries(matches:(retry:AppliedTerminalRetry)=>boolean) {
+    for(const retry of this.appliedTerminalRetries.values())if(matches(retry))retry.reject(error('EVENT_RETRY_CANCELLED','原终态交付已断开，未确认原生处理完成'));
+  }
+  private retryAppliedTerminal(connection:Connection,delivery:Delivery,event:ProviderAdapterV2Event,body:string) {
+    const key=customerCommandId(delivery.sessionId,'event',[delivery.epoch,delivery.seq]),prior=this.appliedTerminalRetries.get(key);
+    if(prior) {
+      if(prior.connection!==connection||prior.body!==body)throw error('EVENT_RETRY_CONFLICT','同一原事件的重传内容不能替换');
+      return prior.completion;
+    }
+    if(this.appliedTerminalRetries.size>=16||[...this.appliedTerminalRetries.values()].some(retry=>retry.sessionId===delivery.sessionId&&retry.epoch===delivery.epoch))throw error('EVENT_RETRY_BUSY','原终态仍在等待原生确认，请稍后核对');
+    let resolve!:()=>void,reject!:(cause:unknown)=>void;
+    const completion=new Promise<void>((yes,no)=>{resolve=yes;reject=no;});
+    // 已清除的历史正文不能在此重新比对；原设备与原轮次校验仍先于有界交付。
+    // @effect-diagnostics-next-line globalTimers:off
+    const timer=setTimeout(()=>retry.reject(error('EVENT_RETRY_TIMEOUT','原终态尚未得到原生确认，没有改写原收据游标')),20_000);
+    const cleanup=()=>{clearTimeout(timer);if(this.appliedTerminalRetries.get(key)===retry)this.appliedTerminalRetries.delete(key);};
+    const retry:AppliedTerminalRetry={...delivery,connection,event,body,delivered:false,completion,resolve:()=>{cleanup();resolve();},reject:cause=>{cleanup();reject(cause);}};
+    this.appliedTerminalRetries.set(key,retry);this.retryMetadata.set(event,retry);this.metadata.set(event,delivery);this.signals.emit(delivery.sessionId);
+    return completion;
+  }
   async acknowledge(event:ProviderAdapterV2Event) {
     const delivery=this.metadata.get(event);if(!delivery)return;
+    const retry=this.retryMetadata.get(event);
+    if(retry) {
+      const key=customerCommandId(delivery.sessionId,'event',[delivery.epoch,delivery.seq]);
+      if(this.appliedTerminalRetries.get(key)!==retry||this.connections.get(retry.connection.principal.deviceId)!==retry.connection||this.session(delivery.sessionId)?.runtimeEpoch!==delivery.epoch)throw error('EVENT_RETRY_CANCELLED','原终态交付已失效，不能确认完成');
+      // 重传只补原persistenceKey交付，不产生interrupt、租约释放或任何游标写入。
+      retry.resolve();return;
+    }
     const saved=this.journal.session(delivery.sessionId);
     const pending=saved?.pendingInterrupt;
     if(saved&&pending&&event.type==='provider_turn.updated'&&event.providerTurn.runAttemptId===pending.attemptId) {
@@ -158,7 +188,7 @@ export class RemoteDeviceHub {
   }
   connect(principal:CustomerDevicePrincipal,send:Send,onClose:()=>void) {
     this.access.assertAccepting();
-    const prior=this.connections.get(principal.deviceId);prior?.close();
+    const prior=this.connections.get(principal.deviceId);if(prior)this.cancelAppliedTerminalRetries(retry=>retry.connection===prior);prior?.close();
     const {connectionEpoch}=this.access.customerRegistry.markConnected(principal);
     const connection:Connection={principal,epoch:connectionEpoch,send,hello:false,sessions:new Map(),receiptQueries:new Map(),close:onClose};
     this.connections.set(principal.deviceId,connection);
@@ -263,6 +293,7 @@ export class RemoteDeviceHub {
           if(pending.command.runtimeEpoch && frame.runtimeEpoch && pending.command.runtimeEpoch!==frame.runtimeEpoch)throw error('RUNTIME_EPOCH','客户回执运行代次不匹配');
           const admitted=frame.state==='completed'?{...frame,result:validateCustomerResult(session,pending.command.method,frame.result)}:frame;
           if(frame.runtimeEpoch && (!session.runtimeEpoch || pending.command.method==='openSession')) {
+            if(session.runtimeEpoch!==frame.runtimeEpoch)this.cancelAppliedTerminalRetries(retry=>retry.sessionId===session.sessionId);
             session.runtimeEpoch=frame.runtimeEpoch;
             if(frame.state==='completed'&&pending.command.method==='openSession')session.providerSession=admitted.result;
             this.journal.saveSession(session);
@@ -290,16 +321,29 @@ export class RemoteDeviceHub {
           this.signals.emit(`delta:${session.sessionId}`,decoded);return;
         }
         // Validate the whole frame before atomically admitting it to the transport inbox.
-        for(const item of frame.events)validateCustomerEvent(session,item.event);
+        const applied=this.journal.cursor(session.sessionId,frame.runtimeEpoch).applied;
+        const terminalRetries:{seq:number;event:ProviderAdapterV2Event;body:string}[]=[];
+        for(const item of frame.events) {
+          const event=validateCustomerEvent(session,item.event);
+          if(item.seq<=applied&&event.type==='provider_turn.updated'&&['completed','failed','interrupted','cancelled'].includes(event.providerTurn.status)) {
+            const original=this.journal.session(session.sessionId);
+            if(!event.providerTurn.completedAt||!original?.providerTurnBindings?.some(turn=>turn.id===event.providerTurn.id&&turn.attemptId===event.providerTurn.runAttemptId)||JSON.stringify(original)!==JSON.stringify(session))throw error('EVENT_RETRY_SCOPE','原终态必须属于已登记的同一轮次与运行尝试');
+            terminalRetries.push({seq:item.seq,event,body:JSON.stringify(item.event)});
+          }
+        }
+        if(terminalRetries.length>1)throw error('EVENT_RETRY_BUSY','一次只核对一个原终态事件');
         try {this.journal.receive(session.sessionId,frame.runtimeEpoch,frame.events);}
         catch(cause) {if(cause instanceof CustomerTransportError&&cause.code==='EVENT_GAP') {await send({type:'replay',sessionId:session.sessionId,runtimeEpoch:frame.runtimeEpoch,afterSeq:this.journal.cursor(session.sessionId,frame.runtimeEpoch).received});return;}throw cause;}
         if(frame.events.some(item=>(item.event as {type?:string}).type==='turn.terminal'))session.state='idle';
         this.journal.saveSession(session);
         this.signals.emit(session.sessionId);
+        for(const retry of terminalRetries)await this.retryAppliedTerminal(connection,{sessionId:session.sessionId,epoch:frame.runtimeEpoch,seq:retry.seq},retry.event,retry.body);
+        current();
+        if(terminalRetries.length&&this.session(session.sessionId)?.runtimeEpoch!==frame.runtimeEpoch)throw error('EVENT_RETRY_CANCELLED','原终态交付代次已更换，不能确认完成');
         // Duplicate batches can arrive after a lost ACK; reply with applied, never received.
         await send({type:'ack',sessionId:session.sessionId,runtimeEpoch:frame.runtimeEpoch,seq:this.journal.cursor(session.sessionId,frame.runtimeEpoch).applied});
       },
-      disconnect:()=>{if(this.connections.get(principal.deviceId)!==connection)return;this.connections.delete(principal.deviceId);for(const pending of this.fileWaiters.values())if(pending.connection===connection)pending.reject(error('DEVICE_OFFLINE','电脑已离线，请等待重新连接'));this.access.customerRegistry.markDisconnected(principal.deviceId,connectionEpoch);this.signals.emit('connection',principal.deviceId);},
+      disconnect:()=>{if(this.connections.get(principal.deviceId)!==connection)return;this.cancelAppliedTerminalRetries(retry=>retry.connection===connection);this.connections.delete(principal.deviceId);for(const pending of this.fileWaiters.values())if(pending.connection===connection)pending.reject(error('DEVICE_OFFLINE','电脑已离线，请等待重新连接'));this.access.customerRegistry.markDisconnected(principal.deviceId,connectionEpoch);this.signals.emit('connection',principal.deviceId);},
     };
   }
   bind(binding:ThreadBinding,sessionId:string,modelSelection?:unknown) {
@@ -310,7 +354,7 @@ export class RemoteDeviceHub {
     const executionScope=old?.executionScope ?? this.access.issueCustomerSessionScope(binding.threadId,sessionId,modelSelection);
     this.journal.saveSession({...old,sessionId,deviceId,ownerId:binding.ownerId,projectId:binding.projectId,threadId:binding.threadId,target,...(executionScope?{providerId:executionScope.providerId,executionScope}:{})});
   }
-  update(sessionId:string,update:Partial<TransportSession>) {const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');this.journal.saveSession({...session,...update});if(update.pendingInterrupt)this.signals.emit('session-state',sessionId);}
+  update(sessionId:string,update:Partial<TransportSession>) {const session=this.journal.session(sessionId);if(!session)throw error('SESSION_MISSING','客户会话尚未绑定');if(update.runtimeEpoch&&update.runtimeEpoch!==session.runtimeEpoch)this.cancelAppliedTerminalRetries(retry=>retry.sessionId===sessionId);this.journal.saveSession({...session,...update});if(update.pendingInterrupt)this.signals.emit('session-state',sessionId);}
   async readAttachment(principal:CustomerDevicePrincipal,commandId:string,attachmentId:string) {
     const saved=this.journal.command(commandId), session=saved && this.journal.session(saved.command.sessionId);
     if(!saved || !session || session.deviceId!==principal.deviceId || (session.providerId ?? session.ownerId)!==principal.ownerId || !this.attachments)throw error('ATTACHMENT_SCOPE','附件不属于此设备');
@@ -390,7 +434,9 @@ export class RemoteDeviceHub {
       try {
         const session=this.journal.session(sessionId);
         if(session?.runtimeEpoch) {
-          if(epoch!==session.runtimeEpoch){epoch=session.runtimeEpoch;delivered=this.journal.cursor(sessionId,epoch).applied;}
+          if(epoch!==session.runtimeEpoch){epoch=session.runtimeEpoch;this.cancelAppliedTerminalRetries(retry=>retry.sessionId===sessionId&&retry.epoch!==epoch);delivered=this.journal.cursor(sessionId,epoch).applied;}
+          const retry=[...this.appliedTerminalRetries.values()].find(value=>value.sessionId===sessionId&&value.epoch===epoch&&!value.delivered);
+          if(retry){retry.delivered=true;yield retry.event;continue;}
           const entries=this.journal.events(sessionId,epoch,delivered);
           if(entries.length) {
             for(const entry of entries) {const event=validateCustomerEvent(session,entry.event);this.metadata.set(event,{sessionId,epoch,seq:entry.seq});delivered=entry.seq;yield event;}
@@ -400,9 +446,9 @@ export class RemoteDeviceHub {
         if(deltas.length){for(const event of deltas.splice(0))yield event;continue;}
         await wait;
       } finally {this.signals.off(sessionId,wake);signal?.removeEventListener('abort',wake);}
-    }}finally{this.signals.off(`delta:${sessionId}`,onDelta);}
+    }}finally{this.cancelAppliedTerminalRetries(retry=>retry.sessionId===sessionId);this.signals.off(`delta:${sessionId}`,onDelta);}
   }
-  close() {for(const pending of this.fileWaiters.values())pending.reject(error('FILES_UNAVAILABLE','服务正在重启，请稍后重试'));for(const connection of this.connections.values())connection.close();this.connections.clear();this.signals.removeAllListeners();}
+  close() {this.cancelAppliedTerminalRetries(()=>true);for(const pending of this.fileWaiters.values())pending.reject(error('FILES_UNAVAILABLE','服务正在重启，请稍后重试'));for(const connection of this.connections.values())connection.close();this.connections.clear();this.signals.removeAllListeners();}
 }
 
 export class RemoteDeviceService extends Context.Service<RemoteDeviceService,{readonly hub:RemoteDeviceHub|undefined}>()('t3/autoops/RemoteDeviceService') {}

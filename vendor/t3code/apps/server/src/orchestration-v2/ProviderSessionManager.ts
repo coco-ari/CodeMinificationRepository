@@ -9,6 +9,7 @@ import {
   ModelSelection,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProviderSession,
+  OrchestrationV2ProviderRef,
   type OrchestrationV2ProviderThread,
   OrchestrationV2RuntimeRequest,
   ProviderInstanceId,
@@ -65,6 +66,7 @@ const busyTurnPrefix = (providerThreadId: ProviderThreadId) => `${providerThread
 const busyTurnKey = (providerThreadId: ProviderThreadId, runOrdinal: number) =>
   `${busyTurnPrefix(providerThreadId)}${runOrdinal}`;
 const UNLOAD_THREAD_TIMEOUT_MS = 10 * 1000;
+const sameProviderRef = Schema.toEquivalence(Schema.NullOr(OrchestrationV2ProviderRef));
 
 export const ProviderSessionReleaseReason = Schema.Literals([
   "idle_timeout",
@@ -2190,6 +2192,71 @@ export const layerWithOptions = (
                               "rolled_back",
                             ].includes(run.status)
                           ) {
+                            // 原轮已结束仍可收束其已知 provider turn；不重开轮、节点或请求。
+                            if (
+                              event.type === "provider_turn.updated" &&
+                              (event.threadId === undefined || event.threadId === threadId) &&
+                              event.driver === entry.runtime.driver &&
+                              run.providerInstanceId === entry.runtime.instanceId &&
+                              run.activeAttemptId !== null &&
+                              event.providerTurn.runAttemptId === run.activeAttemptId &&
+                              event.providerTurn.providerThreadId === run.providerThreadId &&
+                              ["completed", "interrupted", "failed", "cancelled"].includes(
+                                event.providerTurn.status,
+                              ) &&
+                              event.providerTurn.completedAt !== null &&
+                              (event.providerTurn.startedAt === null ||
+                                DateTime.toEpochMillis(event.providerTurn.completedAt) >=
+                                  DateTime.toEpochMillis(event.providerTurn.startedAt))
+                            ) {
+                              const turn = event.providerTurn;
+                              const { providerTurns } = yield* projectionStore.getThreadRecords(
+                                threadId,
+                                ["providerTurns"],
+                              );
+                              const known = providerTurns.find(
+                                (candidate) => candidate.id === turn.id,
+                              );
+                              if (
+                                known !== undefined &&
+                                (known.status === "pending" || known.status === "running") &&
+                                known.runAttemptId === turn.runAttemptId &&
+                                known.providerThreadId === turn.providerThreadId &&
+                                known.nodeId === turn.nodeId &&
+                                known.ordinal === turn.ordinal &&
+                                sameProviderRef(known.nativeTurnRef, turn.nativeTurnRef) &&
+                                (known.startedAt === null
+                                  ? turn.startedAt === null
+                                  : turn.startedAt !== null &&
+                                    DateTime.Equivalence(known.startedAt, turn.startedAt))
+                              ) {
+                                yield* eventSink.writeIfProviderThreadOwner({
+                                  providerThreadId: turn.providerThreadId,
+                                  runId: run.id,
+                                  activeAttemptId: run.activeAttemptId,
+                                  expectedLastRunOrdinal: run.ordinal,
+                                  ...(persistenceKey === undefined
+                                    ? {}
+                                    : { commandId: persistenceKey }),
+                                  events: [
+                                    {
+                                      id: yield* idAllocator.allocate.event({
+                                        threadId,
+                                        providerSessionId: entry.runtime.providerSessionId,
+                                      }),
+                                      type: "provider-turn.updated",
+                                      threadId,
+                                      runId: run.id,
+                                      nodeId: turn.nodeId,
+                                      driver: event.driver,
+                                      providerInstanceId: entry.runtime.instanceId,
+                                      occurredAt: yield* DateTime.now,
+                                      payload: turn,
+                                    },
+                                  ],
+                                });
+                              }
+                            }
                             // The canonical terminal is durable. A delayed older event must
                             // not reopen its nodes/requests or block draining this old epoch.
                             yield* entry.runtime.acknowledgeEvent?.(event) ?? Effect.void;

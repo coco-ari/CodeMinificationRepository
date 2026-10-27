@@ -905,17 +905,21 @@ export const layer: Layer.Layer<
           threadDisposition: "reusable",
         });
         const responseStreamingMode = yield* Effect.gen(function* () {
-          const responseStreamingMode = yield* serverSettings.getSettings.pipe(
-            Effect.map(
-              (settings) =>
-                applyProductSettings(
-                  resolveProjectSettings(
-                    autoOpsThreadSettings(input.appThread.id, settings),
-                    input.appThread.projectId,
-                  ).settings,
-                ).responseStreamingMode,
-            ),
-          );
+          // 原客户轮只续接持久事件，不重新选择助手或启动模型；目录暂不可用不能改写其终态。
+          const responseStreamingMode =
+            customer && input.resumeOnly
+              ? "paragraph"
+              : yield* serverSettings.getSettings.pipe(
+                  Effect.map(
+                    (settings) =>
+                      applyProductSettings(
+                        resolveProjectSettings(
+                          autoOpsThreadSettings(input.appThread.id, settings),
+                          input.appThread.projectId,
+                        ).settings,
+                      ).responseStreamingMode,
+                  ),
+                );
           if (!customer && !input.resumeOnly)
             yield* checkpointService
               .captureBaseline({
