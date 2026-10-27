@@ -146,10 +146,9 @@ export function questionConfigurationPolicy(ports: Ports) {
     if (new Set(value.skillIds).size !== value.skillIds.length)
       return fail('ASSISTANT_SKILLS_DUPLICATE', '技能不能重复选择')
     if (
-      (value.workspaceType === null && value.executionBinding.kind !== 'customer') ||
-      (member.workspaceAccess === 'external' &&
-        value.workspaceType !== null &&
-        value.workspaceType !== 'external')
+      member.workspaceAccess === 'external' &&
+      value.workspaceType !== null &&
+      value.workspaceType !== 'external'
     )
       return fail('ASSISTANT_WORKSPACE_FORBIDDEN', '助手资料范围不在成员授权内')
     if (value.executionBinding.kind === 'customer') {
@@ -197,6 +196,8 @@ export function questionConfigurationPolicy(ports: Ports) {
       return
     }
     if(value.customerProfile!==undefined)return fail('ASSISTANT_PROFILE_FORBIDDEN','平台运行来源不能选择客户隔离profile')
+    if (value.workspaceType === null)
+      return fail('ASSISTANT_WORKSPACE_FORBIDDEN', '助手资料范围不在成员授权内')
     const models = ports.models()
     if (!models.discovered)
       return fail('ASSISTANT_MODELS_UNAVAILABLE', '实际运行器的模型能力目录尚未就绪')
