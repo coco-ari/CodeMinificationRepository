@@ -35,6 +35,7 @@ import { isAutoOpsAccessError, AutoOpsRequestError } from "./apiClient";
 import {
   prepareProjectMutation,
   readPendingProjectWrite,
+  recoverProjectWrite,
   submitProjectWrite,
   refreshProjectHost,
   type PendingProjectWrite,
@@ -193,12 +194,19 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   }, [editor, fresh, busy, pending, otherPending])
   async function submit(original: PendingProjectWrite) {
     if (writing.current) return;
+    const checking = original.submitted === true;
     writing.current = true;
     setBusy(true);
     setPending(original);
     setError(null);
     try {
-      await submitProjectWrite(original);
+      try {
+        await submitProjectWrite(original);
+      } catch (cause) {
+        // 首次提交未知只自动查一次原结果；后续显式核对也不重复写入。
+        if (checking || !(cause instanceof AutoOpsRequestError) || !cause.uncertain) throw cause;
+        await recoverProjectWrite(original);
+      }
       if (!alive.current) return;
       savedFocus.current = true;
       setFresh(false);
@@ -356,7 +364,7 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
               disabled={busy || !manage}
               onClick={() => void submit(pending)}
             >
-              重试原请求
+              检查保存结果
             </Button>
           </AlertDescription>
         </Alert>

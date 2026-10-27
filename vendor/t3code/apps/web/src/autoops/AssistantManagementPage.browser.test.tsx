@@ -6,7 +6,11 @@ import { ModuleSidebarProvider, ModuleSidebarOutlet } from "./ModuleWorkspace";
 import { AssistantManagementPage } from "./AssistantManagementPage";
 import { autoOpsStorage, autoOpsStorageKey, installAutoOpsHost, readAutoOpsHost } from "./hostConfig";
 import { prepareProjectMutation, prepareProjectWrite, submitProjectWrite, readPendingProjectWrite } from "./projectDirectory";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
+import { projectAssistantReceiptIntent } from "../../../../../../autoops/contracts/project-management-receipts.ts";
 import type {
+  AssistantDetails,
   AssistantPreset,
   ProvidedAssistantSettings,
   ProvidedAssistantReceipt,
@@ -398,8 +402,134 @@ function setup(manage = false) {
     }
     throw new Error(`未处理助手管理测试请求 ${path}`);
   });
-  return { own, foreign, writes, receipts, fetcher, state };
+  return { own, platform, foreign, writes, receipts, fetcher, state };
 }
+
+function projectPresetSave(f: ReturnType<typeof setup>, loseReply: boolean) {
+  const fallback = f.fetcher.getMockImplementation()!;
+  const reads: string[] = [];
+  let mode: "completed" | "missing" | "forbidden" = "completed";
+  let received: Record<string, unknown> | null = null;
+  f.fetcher.mockImplementation(async (input, init) => {
+    const path = new URL(String(input), window.location.origin).pathname.replace(
+      /^\/api\/agent-demo\/t3/,
+      "",
+    );
+    if (path.startsWith("/api/v1/projects/target-project/assistants/receipts/")) {
+      reads.push(path.split("/").at(-1)!);
+      if (mode === "forbidden")
+        return Response.json({ code: "FORBIDDEN", error: "助手管理授权已撤回" }, { status: 403 });
+      return Response.json(mode === "missing" ? null : received);
+    }
+    if (
+      path === "/api/v1/projects/target-project/assistants/project-preset" &&
+      init?.method === "POST"
+    ) {
+      const body = JSON.parse(String(init.body)) as {
+        requestId: string;
+        expectedRevision: number;
+        value: AssistantDetails;
+      };
+      f.writes.push({ path, body });
+      const result = { ...f.platform, ...body.value, revision: body.expectedRevision + 1 };
+      Object.assign(f.platform, result);
+      const operation = "preset.save:project-preset";
+      received = {
+        state: "completed",
+        actorId: "assistant-page-user",
+        projectId: "target-project",
+        requestId: body.requestId,
+        operation,
+        saved: true,
+        available: true,
+        createdAt: "2026-10-28T00:00:00Z",
+        publicIntent: {
+          algorithm: "sha256",
+          digest: bytesToHex(
+            sha256(new TextEncoder().encode(projectAssistantReceiptIntent(operation, body))),
+          ),
+        },
+        result,
+      };
+      if (loseReply) throw new TypeError("隔离项目助手保存回复丢失");
+      return Response.json(result);
+    }
+    return fallback(input, init);
+  });
+  return {
+    reads,
+    setMode: (next: typeof mode) => {
+      mode = next;
+    },
+  };
+}
+
+it("管理员修复受限公共预设的失效技能，不取得额外问答参数权限", async () => {
+  const f = setup(true);
+  Object.assign(f.platform.configuration, { skillIds: ["removed-skill"] });
+  projectPresetSave(f, false);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using _screen = await render(<App />, {
+    router: "/assistants?projectId=target-project&assistantView=project",
+  });
+  const edit = page.getByRole("button", { name: "编辑项目助手 项目预设", exact: true });
+  await expect.element(edit).toBeEnabled();
+  await edit.click();
+  await page.getByRole("checkbox", { name: "removed-skill · 已不可用", exact: true }).click();
+  await page.getByRole("button", { name: "保存助手配置", exact: true }).click();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  expect(f.writes).toHaveLength(1);
+  expect(f.writes[0]?.body.value).toMatchObject({ configuration: { skillIds: [] } });
+  expect(
+    readAutoOpsHost()?.projects.find((x) => x.id === "target-project")?.capabilities?.[
+      "chat.configure"
+    ],
+  ).toBe(false);
+});
+
+it.each(["completed", "missing", "forbidden"] as const)(
+  "项目助手保存回复丢失后有界检查原结果：%s",
+  async (mode) => {
+    const f = setup(true),
+      receipt = projectPresetSave(f, true);
+    receipt.setMode(mode);
+    using _fetch = stubGlobal("fetch", f.fetcher);
+    await using _screen = await render(<App />, {
+      router: "/assistants?projectId=target-project&assistantView=project",
+    });
+    await expect
+      .element(page.getByRole("button", { name: "编辑项目助手 项目预设", exact: true }))
+      .toBeEnabled();
+    await page.getByRole("button", { name: "编辑项目助手 项目预设", exact: true }).click();
+    await page.getByRole("button", { name: "保存助手配置", exact: true }).click();
+    await vi.waitFor(() => expect(receipt.reads).toHaveLength(1));
+    const original = f.writes[0]!.body;
+    expect(receipt.reads).toEqual([original.requestId]);
+    if (mode === "completed") {
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+      expect(
+        readPendingProjectWrite({ projectId: "target-project", owner: "assistant" }),
+      ).toBeNull();
+    } else {
+      const pending = readPendingProjectWrite({ projectId: "target-project", owner: "assistant" });
+      expect(pending?.body).toEqual(original);
+      if (mode === "forbidden") {
+        await expect.element(page.getByText("助手管理授权已撤回", { exact: true })).toBeVisible();
+        await expect
+          .element(page.getByRole("button", { name: "添加项目助手", exact: true }))
+          .toBeDisabled();
+      } else await userEvent.keyboard("{Escape}");
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+      const check = page.getByRole("button", { name: "检查保存结果", exact: true });
+      await expect.element(check).toBeEnabled();
+      receipt.setMode("completed");
+      await check.click();
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+      expect(receipt.reads).toEqual([original.requestId, original.requestId]);
+    }
+    expect(f.writes).toHaveLength(1);
+  },
+);
 function App() {
   return (
     <SidebarProvider defaultOpen open>
