@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
-import { page } from 'vite-plus/test/browser'
-import { render, stubGlobal } from '../../test/render'
+import { page, userEvent } from 'vite-plus/test/browser'
+import { fakeTimers, render, stubGlobal } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
@@ -56,6 +56,33 @@ function setup({ lost = false, denyWrite = false, readFailure = null }: {
     }
   }> = []
   const receipts = new Map<string, WorkspaceCredentialMetadata>()
+  const usageReads: string[] = []
+  const usage = {
+    projectId: project.id,
+    credentialId: 'credential-one',
+    repositories: [{ id: 'repository-one', name: '业务仓库' }],
+    workspaces: [{ repositoryId: 'repository-one', mountPath: 'source/backend' }],
+    services: [
+      {
+        serviceId: 'service-one',
+        serviceName: '订单服务',
+        environmentId: 'environment-one',
+        environmentName: '测试环境',
+        repositoryIds: ['repository-one'],
+      },
+    ],
+    connections: [
+      {
+        connectionId: 'connection-one',
+        name: '缓存连接',
+        type: 'redis',
+        environmentId: 'environment-one',
+        environmentName: '测试环境',
+        enabled: false,
+      },
+    ],
+  }
+  let usageReply = () => Promise.resolve(Response.json(usage))
   const bootstrap = () => ({
     principal: { id: 'credential-user', displayName: '凭证管理员' },
     csrfToken: 'csrf',
@@ -100,6 +127,10 @@ function setup({ lost = false, denyWrite = false, readFailure = null }: {
       })
     if (path.includes('/credentials/requests/'))
       return Response.json({ result: receipts.get(path.split('/').at(-1)!) ?? null })
+    if (path.endsWith('/credentials/credential-one/usage')) {
+      usageReads.push(path)
+      return usageReply()
+    }
     if (path.endsWith('/workspace/credentials')) {
       if (init?.method !== 'POST') return read('credentials', { credentials: metadata })
       const body = JSON.parse(String(init.body)) as (typeof writes)[number]
@@ -130,7 +161,22 @@ function setup({ lost = false, denyWrite = false, readFailure = null }: {
     if (path === '/api/v1/projects') return Response.json({ items: [project] })
     throw new Error(`未处理测试请求 ${path}`)
   })
-  return { fetch, writes, metadata, receipts, project, reads, setReadFailure(value: typeof failingRead) { failingRead = value } }
+  return {
+    fetch,
+    writes,
+    metadata,
+    receipts,
+    project,
+    reads,
+    usageReads,
+    usage,
+    setReadFailure(value: typeof failingRead) {
+      failingRead = value
+    },
+    setUsageReply(value: typeof usageReply) {
+      usageReply = value
+    },
+  }
 }
 function App() {
   return (
@@ -290,5 +336,176 @@ it('重试时另一GET仍失败必须保留错误，不能用单项成功覆盖'
   ])))
   expect(section.querySelector('[role="alert"]')?.textContent).toBe('凭证读取暂不可用')
   expect([...section.querySelectorAll('button')].some(button => button.textContent === '重试凭证配置')).toBe(true)
+  expect(f.writes).toHaveLength(0)
+})
+
+it('替换凭证前显示当前仓库、工作区和服务使用关系', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup()
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=credential-project' })
+  const menu = screen.getByRole('button', { name: '管理凭证 原凭证', exact: true })
+  await expect.element(menu).toBeEnabled()
+  await userEvent.click(menu)
+  const replace = page.getByRole('menuitem', { name: '替换凭证', exact: true })
+  await expect.element(replace).toBeVisible()
+  await userEvent.click(replace)
+  const dialog = page.getByRole('dialog', { name: '替换仓库凭证', exact: true })
+  await expect.element(dialog).toBeVisible()
+  await expect.element(dialog.getByRole('heading', { name: '使用关系', exact: true })).toBeVisible()
+  await expect.element(dialog.getByText('业务仓库', { exact: true })).toBeVisible()
+  await expect.element(dialog.getByText('source/backend', { exact: true })).toBeVisible()
+  await expect.element(dialog.getByText('订单服务', { exact: true })).toBeVisible()
+  await expect.element(dialog.getByText('缓存连接', { exact: true })).toBeVisible()
+  expect(dialog.element().textContent).toContain('测试环境')
+  expect(dialog.element().textContent).toContain('已停用')
+  expect(f.usageReads.length).toBeGreaterThan(0)
+  expect(f.writes).toHaveLength(0)
+})
+
+it.each(['替换凭证', '撤回凭证'] as const)(
+  '%s使用关系503时禁止提交，原弹窗重试成功才允许一次原操作',
+  async (action) => {
+    using _timers = fakeTimers({ shouldAdvanceTime: true })
+    const f = setup()
+    f.setUsageReply(() =>
+      Promise.resolve(
+        Response.json(
+          { code: 'CREDENTIAL_USAGE_UNAVAILABLE', error: '使用关系暂不可用' },
+          { status: 503 },
+        ),
+      ),
+    )
+    using _fetch = stubGlobal('fetch', f.fetch)
+    await using screen = await render(<App />, { router: '/projects?projectId=credential-project' })
+    const menu = screen.getByRole('button', { name: '管理凭证 原凭证', exact: true })
+    await expect.element(menu).toBeEnabled()
+    await userEvent.click(menu)
+    await userEvent.click(page.getByRole('menuitem', { name: action, exact: true }))
+    const dialog = page.getByRole('dialog')
+    await expect.element(dialog.getByRole('alert')).toHaveTextContent('使用关系暂不可用')
+    if (action === '替换凭证')
+      await page.getByLabelText('访问令牌或密码', { exact: true }).fill('fixture-usage-secret')
+    const save = page.getByRole('button', {
+      name: action === '替换凭证' ? '保存凭证' : '确认',
+      exact: true,
+    })
+    await expect.element(save).toBeDisabled()
+    expect(dialog.element().textContent).not.toContain('无可见仓库引用')
+    expect(f.writes).toHaveLength(0)
+    f.setUsageReply(() => Promise.resolve(Response.json(f.usage)))
+    await userEvent.click(dialog.getByRole('button', { name: '重试使用关系', exact: true }))
+    await expect.element(dialog.getByText('订单服务', { exact: true })).toBeVisible()
+    await expect.element(save).toBeEnabled()
+    await userEvent.click(save)
+    await expect.element(dialog).not.toBeInTheDocument()
+    await expect.element(menu).toHaveFocus()
+    expect(f.writes).toHaveLength(1)
+    expect(f.writes[0]).toMatchObject({
+      action: action === '替换凭证' ? 'replace' : 'revoke',
+      input: { id: 'credential-one', expectedRevision: 1 },
+    })
+    expect(storageText()).not.toContain('fixture-usage-secret')
+  },
+)
+
+it('查看使用关系只GET，Escape关闭回到原入口；再次替换须等待新使用关系', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup()
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=credential-project' })
+  const menu = screen.getByRole('button', { name: '管理凭证 原凭证', exact: true })
+  await expect.element(menu).toBeEnabled()
+  await userEvent.click(menu)
+  await userEvent.click(page.getByRole('menuitem', { name: '查看使用关系', exact: true }))
+  const view = page.getByRole('dialog', { name: '原凭证的使用关系', exact: true })
+  await expect.element(view.getByText('缓存连接', { exact: true })).toBeVisible()
+  await userEvent.keyboard('{Escape}')
+  await expect.element(view).not.toBeInTheDocument()
+  await expect.element(menu).toHaveFocus()
+  let release!: (value: Response) => void
+  f.setUsageReply(
+    () =>
+      new Promise<Response>((resolve) => {
+        release = resolve
+      }),
+  )
+  await userEvent.click(menu)
+  await userEvent.click(page.getByRole('menuitem', { name: '替换凭证', exact: true }))
+  const dialog = page.getByRole('dialog', { name: '替换仓库凭证', exact: true })
+  await expect.element(dialog.getByRole('status')).toHaveTextContent('正在读取使用关系')
+  await page.getByLabelText('访问令牌或密码', { exact: true }).fill('fixture-new-read-secret')
+  const save = dialog.getByRole('button', { name: '保存凭证', exact: true })
+  await expect.element(save).toBeDisabled()
+  release(Response.json(f.usage))
+  await expect.element(save).toBeEnabled()
+  expect(f.usageReads).toHaveLength(2)
+  expect(f.writes).toHaveLength(0)
+})
+
+it('使用关系在途撤权清除弹窗秘密和引用，保留可使用元数据但禁止管理', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup()
+  let release!: (value: Response) => void
+  f.setUsageReply(
+    () =>
+      new Promise<Response>((resolve) => {
+        release = resolve
+      }),
+  )
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=credential-project' })
+  const menu = screen.getByRole('button', { name: '管理凭证 原凭证', exact: true })
+  await expect.element(menu).toBeEnabled()
+  await userEvent.click(menu)
+  await userEvent.click(page.getByRole('menuitem', { name: '替换凭证', exact: true }))
+  await page.getByLabelText('访问令牌或密码', { exact: true }).fill('fixture-usage-denied-secret')
+  release(
+    Response.json(
+      { code: 'PROJECT_ACTION_FORBIDDEN', error: '凭证管理权限已撤回' },
+      { status: 403 },
+    ),
+  )
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  const heading = screen.getByRole('heading', { name: '项目凭证', exact: true })
+  const section = heading.element().closest<HTMLElement>('section')!
+  await vi.waitFor(() =>
+    expect(section.querySelector('[role="alert"]')?.textContent).toBe('凭证管理权限已撤回'),
+  )
+  await expect.element(menu).toBeDisabled()
+  expect(section.textContent).toContain('原凭证')
+  expect(section.textContent).not.toContain('业务仓库')
+  expect(storageText()).not.toContain('fixture-usage-denied-secret')
+  expect(f.writes).toHaveLength(0)
+})
+
+it('使用关系拒绝其他项目结果，切范围后丢弃旧请求迟到引用', async () => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
+  const f = setup()
+  f.setUsageReply(() => Promise.resolve(Response.json({ ...f.usage, projectId: 'other-project' })))
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=credential-project' })
+  const menu = screen.getByRole('button', { name: '管理凭证 原凭证', exact: true })
+  await expect.element(menu).toBeEnabled()
+  await userEvent.click(menu)
+  await userEvent.click(page.getByRole('menuitem', { name: '查看使用关系', exact: true }))
+  const dialog = page.getByRole('dialog')
+  await expect
+    .element(dialog.getByRole('alert'))
+    .toHaveTextContent('凭证使用关系与当前范围不一致。')
+  expect(dialog.element().textContent).not.toContain('业务仓库')
+  let release!: (value: Response) => void
+  f.setUsageReply(
+    () =>
+      new Promise<Response>((resolve) => {
+        release = resolve
+      }),
+  )
+  await userEvent.click(dialog.getByRole('button', { name: '重试使用关系', exact: true }))
+  await vi.waitFor(() => expect(release).toBeDefined())
+  await screen.router!.navigate({ href: '/projects' })
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  release(Response.json(f.usage))
+  await vi.waitFor(() => expect(screen.container.textContent).not.toContain('业务仓库'))
   expect(f.writes).toHaveLength(0)
 })

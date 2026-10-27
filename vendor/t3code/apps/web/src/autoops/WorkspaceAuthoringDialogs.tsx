@@ -22,6 +22,7 @@ import { Label } from '~/components/ui/label'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Textarea } from '~/components/ui/textarea'
 import { Spinner } from '~/components/ui/spinner'
+import { SettingsRow, SettingsSection } from '~/components/settings/settingsLayout'
 import { formatBytes } from '~/lib/formatBytes'
 import {
   authoringDigest,
@@ -29,6 +30,7 @@ import {
   uploadDigest,
   validMaterialPath,
   type WorkspaceCredentialMetadata,
+  type CredentialUsage,
   type WorkspaceMaterialEntry,
   type WorkspaceRepositorySource,
   type WorkspaceRepositoryUsageInput,
@@ -377,7 +379,13 @@ export function WorkspaceCredentialDialog({
   controller,
   credential,
   onClose,
-}: EditorProps & { credential?: WorkspaceCredentialMetadata | undefined }) {
+  usage,
+  usageReady = true,
+}: EditorProps & {
+  credential?: WorkspaceCredentialMetadata | undefined
+  usage?: ReactNode
+  usageReady?: boolean
+}) {
   const [name, setName] = useState(credential?.name ?? '')
   const [username, setUsername] = useState('')
   const [secret, setSecret] = useState('')
@@ -389,17 +397,23 @@ export function WorkspaceCredentialDialog({
       onClose={onClose}
       dirty={!!secret || !!username || name !== (credential?.name ?? '')}
       footer={
-        <Button type="submit" form={form} disabled={controller.busy || !name.trim() || !secret}>
+        <Button
+          type="submit"
+          form={form}
+          disabled={controller.busy || !usageReady || !name.trim() || !secret}
+        >
           保存凭证
         </Button>
       }
     >
+      {usage}
       <form
         id={form}
         className="space-y-4"
         autoComplete="off"
         onSubmit={(event) => {
           event.preventDefault()
+          if (!usageReady) return
           void controller
             .submit({
               kind: 'credential',
@@ -448,6 +462,125 @@ export function WorkspaceCredentialDialog({
         </AuthoringField>
         <AuthoringNotice controller={controller} />
       </form>
+    </AuthoringDialog>
+  )
+}
+
+export type CredentialUsageView =
+  | { state: 'loading' }
+  | { state: 'error'; message: string }
+  | { state: 'ready'; value: CredentialUsage }
+
+export function WorkspaceCredentialUsage({
+  view,
+  onRetry,
+}: {
+  view: CredentialUsageView
+  onRetry(): void
+}) {
+  if (view.state === 'loading') return <p role="status">正在读取使用关系</p>
+  if (view.state === 'error')
+    return (
+      <div className="space-y-2">
+        <Alert variant="error" role="alert">
+          <AlertDescription>{view.message}</AlertDescription>
+        </Alert>
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          重试使用关系
+        </Button>
+      </div>
+    )
+  const value = view.value
+  const repositoryName = (id: string) =>
+    value.repositories.find((item) => item.id === id)?.name ?? '仓库'
+  return (
+    <SettingsSection title="使用关系">
+      <p className="px-3 text-xs text-muted-foreground sm:px-4">仅显示当前授权范围内的配置引用。</p>
+      <SettingsRow title="仓库">
+        {value.repositories.length ? (
+          <ul className="space-y-1 break-words">
+            {value.repositories.map((item) => (
+              <li key={item.id}>{item.name}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>无可见仓库引用</p>
+        )}
+      </SettingsRow>
+      <SettingsRow title="工作区">
+        {value.workspaces.length ? (
+          <ul className="space-y-1 break-words">
+            {value.workspaces.map((item) => (
+              <li key={`${item.repositoryId}:${item.mountPath}`}>
+                <span>{item.mountPath}</span>
+                <span className="text-muted-foreground">
+                  {' '}
+                  · {repositoryName(item.repositoryId)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>无可见工作区引用</p>
+        )}
+      </SettingsRow>
+      <SettingsRow title="服务">
+        {value.services.length ? (
+          <ul className="space-y-1 break-words">
+            {value.services.map((item) => (
+              <li key={`${item.environmentId}:${item.serviceId}`}>
+                <span>{item.serviceName}</span>
+                <span className="text-muted-foreground">
+                  {' '}
+                  · <span>{item.environmentName}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>无可见服务引用</p>
+        )}
+      </SettingsRow>
+      <SettingsRow title="环境连接">
+        {value.connections.length ? (
+          <ul className="space-y-1 break-words">
+            {value.connections.map((item) => (
+              <li key={item.connectionId}>
+                <span>{item.name}</span>
+                <span className="text-muted-foreground">
+                  {' '}
+                  · {item.environmentName} ·{' '}
+                  {{ server: 'SSH', mysql: 'MySQL', redis: 'Redis' }[item.type]} ·{' '}
+                  {item.enabled ? '已启用' : '已停用'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>无可见环境连接引用</p>
+        )}
+      </SettingsRow>
+    </SettingsSection>
+  )
+}
+
+export function WorkspaceCredentialUsageDialog({
+  credential,
+  children,
+  onClose,
+}: {
+  credential: WorkspaceCredentialMetadata
+  children: ReactNode
+  onClose(): void
+}) {
+  return (
+    <AuthoringDialog
+      title={`${credential.name}的使用关系`}
+      busy={false}
+      footer={null}
+      onClose={onClose}
+    >
+      {children}
     </AuthoringDialog>
   )
 }
@@ -811,7 +944,13 @@ export function WorkspaceAuthoringConfirm({
   controller,
   onClose,
   onConfirm,
-}: EditorProps & { title: string; children: ReactNode; onConfirm: () => Promise<unknown> }) {
+  disabled = false,
+}: EditorProps & {
+  title: string
+  children: ReactNode
+  onConfirm: () => Promise<unknown>
+  disabled?: boolean
+}) {
   return (
     <AuthoringDialog
       title={title}
@@ -819,7 +958,7 @@ export function WorkspaceAuthoringConfirm({
       onClose={onClose}
       footer={
         <Button
-          disabled={controller.busy}
+          disabled={controller.busy || disabled}
           onClick={() =>
             void onConfirm().then((result) => {
               if (result) onClose()

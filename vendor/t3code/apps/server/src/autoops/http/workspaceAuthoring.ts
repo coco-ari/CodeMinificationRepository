@@ -39,7 +39,7 @@ export function workspaceAuthoringRoutes({ access, principal }: BusinessHttpCont
   const base = '/api/v1/projects/:projectId/workspace'
   return Layer.mergeAll(
     HttpRouter.add('GET', `${base}/authoring`, handler),
-    ...['credentials', 'credentials/requests/:requestId', 'current/tree', 'current/search', 'current/metadata', 'current/file', 'requests/:requestId'].map(path => HttpRouter.add('GET', `${base}/${path}`, handler)),
+    ...['credentials', 'credentials/:credentialId/usage', 'credentials/requests/:requestId', 'current/tree', 'current/search', 'current/metadata', 'current/file', 'requests/:requestId'].map(path => HttpRouter.add('GET', `${base}/${path}`, handler)),
     ...['sources', 'credentials', 'documents', 'uploads', 'versions', 'sync', 'external', 'deployment-packages', 'cleanup'].map(path => HttpRouter.add('POST', `${base}/${path}`, handler)),
   )
 }

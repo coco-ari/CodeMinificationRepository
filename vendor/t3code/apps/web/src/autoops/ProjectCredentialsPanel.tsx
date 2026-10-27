@@ -3,18 +3,25 @@ import { EllipsisIcon } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from '~/components/ui/menu'
 import { SettingsSection, SettingsRow } from '~/components/settings/settingsLayout'
+import { Alert, AlertDescription } from '~/components/ui/alert'
+import { isAutoOpsAccessError } from './apiClient'
+import { readAutoOpsHost } from './hostSnapshot'
 import { useWorkspaceAuthoring } from './useWorkspaceAuthoring'
-import type { WorkspaceCredentialMetadata } from './workspaceAuthoring'
+import { loadCredentialUsage, type WorkspaceCredentialMetadata } from './workspaceAuthoring'
 import {
   AuthoringNotice,
   WorkspaceAuthoringFocus,
   WorkspaceCredentialDialog,
   WorkspaceAuthoringConfirm,
+  WorkspaceCredentialUsage,
+  WorkspaceCredentialUsageDialog,
+  type CredentialUsageView,
 } from './WorkspaceAuthoringDialogs'
 
 type Editor =
   | { kind: 'save'; credential?: WorkspaceCredentialMetadata }
   | { kind: 'revoke'; credential: WorkspaceCredentialMetadata }
+  | { kind: 'usage'; credential: WorkspaceCredentialMetadata }
 export function ProjectCredentialsPanel({
   projectId,
   disabled,
@@ -27,6 +34,17 @@ export function ProjectCredentialsPanel({
   onLockChange(locked: boolean): void
 }) {
   const [editor, setEditor] = useState<Editor | null>(null)
+  const principal = readAutoOpsHost()?.principal.id ?? ''
+  const [usageAttempt, setUsageAttempt] = useState(0)
+  const [usageRead, setUsageRead] = useState<{ key: string; view: CredentialUsageView } | null>(
+    null,
+  )
+  const [usageDenied, setUsageDenied] = useState<{
+    message: string
+    credential: WorkspaceCredentialMetadata
+  } | null>(null)
+  const credential = editor?.credential
+  const usageKey = `${principal}:${projectId}:${credential?.id ?? ''}:${editor?.kind ?? ''}:${usageAttempt}`
   const controller = useWorkspaceAuthoring(projectId, true, (receipt) => {
     if ('credential' in receipt) setEditor(null)
     onChanged()
@@ -41,12 +59,43 @@ export function ProjectCredentialsPanel({
   useEffect(() => {
     if (controller.accessDenied) setEditor(null)
   }, [controller.accessDenied])
+  useEffect(() => {
+    if (!credential || controller.accessDenied) return
+    const abort = new AbortController()
+    void loadCredentialUsage(projectId, credential.id, abort.signal)
+      .then((value) => {
+        if (abort.signal.aborted || readAutoOpsHost()?.principal.id !== principal) return
+        setUsageDenied(null)
+        setUsageRead({ key: usageKey, view: { state: 'ready', value } })
+      })
+      .catch((cause: unknown) => {
+        if (abort.signal.aborted || readAutoOpsHost()?.principal.id !== principal) return
+        const message = cause instanceof Error ? cause.message : '凭证使用关系暂不可用。'
+        if (isAutoOpsAccessError(cause)) {
+          setUsageDenied({ message, credential })
+          setUsageRead(null)
+          setEditor(null)
+        } else setUsageRead({ key: usageKey, view: { state: 'error', message } })
+      })
+    return () => abort.abort()
+  }, [projectId, principal, credential, usageKey, controller.accessDenied])
   const open = (value: Editor, button: HTMLButtonElement) => {
     trigger.current = button
     controller.clearError()
+    setUsageAttempt((attempt) => attempt + 1)
     setEditor(value)
   }
-  const unavailable = disabled || controller.busy || controller.accessDenied || !controller.overview
+  const unavailable =
+    disabled || controller.busy || controller.accessDenied || !!usageDenied || !controller.overview
+  const usageView: CredentialUsageView =
+    usageRead?.key === usageKey ? usageRead.view : { state: 'loading' }
+  const usageReady = usageView.state === 'ready'
+  const usage = (
+    <WorkspaceCredentialUsage
+      view={usageView}
+      onRetry={() => setUsageAttempt((value) => value + 1)}
+    />
+  )
   return (
     <WorkspaceAuthoringFocus
       value={() => (trigger.current?.isConnected ? trigger.current : add.current)}
@@ -66,6 +115,22 @@ export function ProjectCredentialsPanel({
         }
       >
         {!editor ? <AuthoringNotice controller={controller} /> : null}
+        {usageDenied && !editor ? (
+          <>
+            <Alert variant="error" role="alert">
+              <AlertDescription>{usageDenied.message}</AlertDescription>
+            </Alert>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={(event) =>
+                open({ kind: 'usage', credential: usageDenied.credential }, event.currentTarget)
+              }
+            >
+              重试使用关系
+            </Button>
+          </>
+        ) : null}
         {controller.error && !editor ? (
           <Button
             size="sm"
@@ -102,6 +167,14 @@ export function ProjectCredentialsPanel({
                 </MenuTrigger>
                 <MenuPopup align="end">
                   <MenuItem
+                    onClick={() => {
+                      const button = buttons.current[credential.id]
+                      if (button) open({ kind: 'usage', credential }, button)
+                    }}
+                  >
+                    查看使用关系
+                  </MenuItem>
+                  <MenuItem
                     disabled={credential.revoked}
                     onClick={() => {
                       const button = buttons.current[credential.id]
@@ -132,6 +205,8 @@ export function ProjectCredentialsPanel({
         <WorkspaceCredentialDialog
           controller={controller}
           credential={editor.credential}
+          usage={editor.credential ? usage : null}
+          usageReady={!editor.credential || usageReady}
           onClose={() => setEditor(null)}
         />
       ) : null}
@@ -139,6 +214,7 @@ export function ProjectCredentialsPanel({
         <WorkspaceAuthoringConfirm
           title="撤回项目凭证"
           controller={controller}
+          disabled={!usageReady}
           onClose={() => setEditor(null)}
           onConfirm={() =>
             controller.submit({
@@ -149,8 +225,17 @@ export function ProjectCredentialsPanel({
             })
           }
         >
-          撤回「{editor.credential.name}」后，使用此凭证的新获取操作将被拒绝。
+          <p>撤回「{editor.credential.name}」后，使用此凭证的新获取操作将被拒绝。</p>
+          {usage}
         </WorkspaceAuthoringConfirm>
+      ) : null}
+      {editor?.kind === 'usage' ? (
+        <WorkspaceCredentialUsageDialog
+          credential={editor.credential}
+          onClose={() => setEditor(null)}
+        >
+          {usage}
+        </WorkspaceCredentialUsageDialog>
       ) : null}
     </WorkspaceAuthoringFocus>
   )

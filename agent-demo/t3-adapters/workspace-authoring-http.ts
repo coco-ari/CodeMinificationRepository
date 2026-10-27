@@ -7,6 +7,10 @@ import { ConfigureRepositoryWorkspace } from '../../autoops/contracts/project-re
 import type { CredentialCreate, CredentialReplace, CredentialRevoke } from './credentials.ts'
 import { configuredWorkspaceUpdates } from './workspace-update-runtime.ts'
 import type { WorkspaceUpdates } from './workspace-updates/index.ts'
+import { configuredDeploymentStore, type DeploymentStore } from './deployments.mjs'
+import { readCredentialUsage } from './credential-usage.ts'
+import { configuredEnvironmentMcp } from './environment-mcp-runtime.ts'
+import type { EnvironmentMcp } from './environment-mcp/index.ts'
 
 export interface WorkspaceAuthoringHttpResult {
   status: number
@@ -22,8 +26,8 @@ function identifier(value: unknown): string {
   if (typeof value !== 'string' || !value || value.length > 160) fail(400, 'WORKSPACE_REQUEST_INVALID', '工作区请求缺少有效标识')
   return value
 }
-export async function handleWorkspaceAuthoringRequest({ access, principal, url, method, input, bytes, service: provided, store: supplied, updates }: {
-  access: AutoOpsAccess; principal: AutoOpsPrincipal; url: URL; method: string; input?: unknown; bytes?: Uint8Array; service?: WorkspaceManagement; store?: WorkspaceStore; updates?: WorkspaceUpdates
+export async function handleWorkspaceAuthoringRequest({ access, principal, url, method, input, bytes, service: provided, store: supplied, updates, deployments, environmentMcp }: {
+  access: AutoOpsAccess; principal: AutoOpsPrincipal; url: URL; method: string; input?: unknown; bytes?: Uint8Array; service?: WorkspaceManagement; store?: WorkspaceStore; updates?: WorkspaceUpdates; deployments?: Pick<DeploymentStore, 'ensureProject' | 'overview'>; environmentMcp?: Pick<EnvironmentMcp, 'list'>
 }): Promise<WorkspaceAuthoringHttpResult> {
   const match = /^\/api\/v1\/projects\/([^/]+)\/workspace\/(.+)$/.exec(url.pathname)
   if (!match) fail(404, 'WORKSPACE_ROUTE_NOT_FOUND', '此资料操作不存在')
@@ -39,6 +43,11 @@ export async function handleWorkspaceAuthoringRequest({ access, principal, url, 
   const actor = principal.id
   const ok = (body: unknown): WorkspaceAuthoringHttpResult => ({ status: 200, body })
   if (method === 'GET') {
+    const usage = /^credentials\/([^/]+)\/usage$/.exec(action)
+    if (usage) {
+      access.requireProjectAction(principal, projectId, 'credential.manage')
+      return ok(await readCredentialUsage({ access, principal, projectId, credentialId: identifier(usage[1]), workspace: service, deployments: deployments ?? configuredDeploymentStore(), environmentMcp: environmentMcp ?? configuredEnvironmentMcp(access) }))
+    }
     const path = url.searchParams.get('path') ?? ''
     const revision = url.searchParams.get('revision') ?? undefined
     if (action === 'authoring') return ok(service.overview(projectId, actor))

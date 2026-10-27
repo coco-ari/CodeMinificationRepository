@@ -1,5 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2";
 import { bytesToHex } from "@noble/hashes/utils";
+import { decodeContract } from "../../../../../../autoops/contracts/index.ts";
+import { CredentialUsage } from "../../../../../../autoops/contracts/credential-usage.ts";
 import { AutoOpsRequestError, autoOpsApiUrl, autoOpsRequest, errorDetails } from "./apiClient";
 import { readAutoOpsHost } from "./hostConfig";
 import { workspaceFailureMessage } from "./workspaceFeedback";
@@ -13,6 +15,7 @@ import type {
   WorkspaceUploadInput,
 } from "../../../../../../autoops/contracts/workspace-authoring";
 export type * from "../../../../../../autoops/contracts/workspace-authoring";
+export type { CredentialUsage } from "../../../../../../autoops/contracts/credential-usage.ts";
 
 export type AuthoringCommand =
   | { kind: "source"; action: "save"; source: WorkspaceRepositoryUsageInput }
@@ -80,6 +83,36 @@ export const loadAuthoringCredentials = (projectId: string, signal?: AbortSignal
     undefined,
     signal,
   );
+export async function loadCredentialUsage(
+  projectId: string,
+  credentialId: string,
+  signal?: AbortSignal,
+): Promise<CredentialUsage> {
+  const raw = await request<unknown>(
+    projectId,
+    `/credentials/${encodeURIComponent(credentialId)}/usage`,
+    undefined,
+    signal,
+  );
+  let value: CredentialUsage;
+  try {
+    value = decodeContract(CredentialUsage, raw);
+  } catch {
+    throw new AutoOpsRequestError(
+      "凭证使用关系格式无法确认，请重试。",
+      "CREDENTIAL_USAGE_INVALID",
+      undefined,
+    );
+  }
+  if (value.projectId !== projectId || value.credentialId !== credentialId) {
+    throw new AutoOpsRequestError(
+      "凭证使用关系与当前范围不一致。",
+      "CREDENTIAL_USAGE_INVALID",
+      undefined,
+    );
+  }
+  return value;
+}
 export const loadAuthoringTree = (projectId: string, path: string) =>
   request<{
     entries: Array<{ path: string; name: string; kind: "file" | "directory"; size: number }>;
