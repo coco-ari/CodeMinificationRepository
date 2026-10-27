@@ -6,7 +6,9 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 import { HttpRouter } from 'effect/http'
+import * as EnvironmentAuth from '../../auth/EnvironmentAuth.ts'
 import {
   createAutoOpsAccess,
   initializeAutoOpsAccessSchema,
@@ -52,7 +54,10 @@ vi.mock(
   }),
 )
 vi.mock(import('../../../../../../../agent-demo/t3-adapters/environment-mcp-runtime.ts'), () => ({
-  configuredEnvironmentMcp: () => configured.mcp,
+  configuredEnvironmentMcp: () => {
+    if (!configured.mcp) throw new Error('隔离环境连接所有者尚未配置')
+    return configured.mcp
+  },
 }))
 import { workspaceAuthoringRoutes } from './workspaceAuthoring.ts'
 
@@ -168,12 +173,13 @@ it('原生凭据关系 GET 接入真实所有者，秘密不返回，使用成�
     },
     'admin',
   ).repository
+  if (!repository) throw new Error('真实仓库保存未返回关联仓库')
   let actor = 'admin'
   const app = HttpRouter.toWebHandler(
     workspaceAuthoringRoutes({
       access,
       principal: Effect.sync(() => access.authenticateCookie(`demo_session=${actor}`)),
-    }),
+    }).pipe(HttpRouter.provideRequest(Layer.mock(EnvironmentAuth.EnvironmentAuth)({}))),
     { disableLogger: true },
   )
   const request = (id = credential.id) =>
