@@ -168,7 +168,21 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
       ? canonical.slice(referencedInput.length + 1)
       : null)
   const invalidAlias = canonical?.split('/')[2] === 'current-input-files' && !alias
-  const inputReadKey = `${readAutoOpsHost()?.principal.id ?? ''}:${props.environmentId}:${scopeCwd ?? ''}:${referencedFile ? canonical : (referencedInput ?? 'current')}`
+  // 本地草稿尚无持久会话，当前 picker 仍交原输入读取口核验归属与权限。
+  const draftPickerInput = !!(
+    referencedInput &&
+    typeof props.composerDraftTarget === 'string' &&
+    scope &&
+    !scope.scopeLocked &&
+    scope.scopeState !== 'locked' &&
+    scope.scopeState !== 'submitting' &&
+    !scope.compatibilityReadOnly &&
+    !scope.nativeParentThreadId &&
+    scope.executionBinding?.kind !== 'customer' &&
+    !versionId &&
+    !alias
+  )
+  const inputReadKey = `${readAutoOpsHost()?.principal.id ?? ''}:${props.environmentId}:${scopeCwd ?? ''}:${draftPickerInput ? 'draft-picker' : 'reference'}:${referencedFile ? canonical : (referencedInput ?? 'current')}`
   const [resolved, setResolved] = useState<{
     key: string
     prefix: string | null
@@ -199,7 +213,21 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
       let selectedInput = referencedInput
       let currentFile: NonNullable<typeof resolved>['currentFile']
       let readPath: string | undefined
-      if (referenceInputId && referencedFile) {
+      const picker = draftPickerInput
+        ? await executeAtomQuery(
+            appAtomRegistry,
+            projectEnvironment.listEntries({
+              environmentId: props.environmentId,
+              input: { cwd: scopeCwd, directoryPath: '' },
+            }),
+            { refresh: true, reportFailure: false, reportDefect: false },
+          )
+        : null
+      if (picker && picker._tag !== 'Success') throw Cause.squash(picker.cause)
+      const pickerEntry = picker?._tag === 'Success' ? picker.value.entries[0] : undefined
+      const currentPicker = pickerEntry ? workspaceInputRoot(pickerEntry.path, projectId) : null
+      const ownCurrentPicker = draftPickerInput && currentPicker === referencedInput
+      if (referenceInputId && referencedFile && !ownCurrentPicker) {
         const reference = await loadWorkspaceFileReference(
           projectId,
           {
@@ -228,17 +256,22 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
           readPath = reference.resourcePath
         }
       }
-      const result = await executeAtomQuery(
-        appAtomRegistry,
-        projectEnvironment.listEntries({
-          environmentId: props.environmentId,
-          input: {
-            cwd: selectedInput ? `${scopeCwd}&inputId=${selectedInput.split('/')[3]}` : scopeCwd,
-            directoryPath: selectedInput ?? '',
-          },
-        }),
-        { refresh: true, reportFailure: false, reportDefect: false },
-      )
+      const result =
+        ownCurrentPicker && picker
+          ? picker
+          : await executeAtomQuery(
+              appAtomRegistry,
+              projectEnvironment.listEntries({
+                environmentId: props.environmentId,
+                input: {
+                  cwd: selectedInput
+                    ? `${scopeCwd}&inputId=${selectedInput.split('/')[3]}`
+                    : scopeCwd,
+                  directoryPath: selectedInput ?? '',
+                },
+              }),
+              { refresh: true, reportFailure: false, reportDefect: false },
+            )
       if (cancelled) return
       if (result._tag !== 'Success') throw Cause.squash(result.cause)
       const first = result.value.entries[0]
@@ -272,6 +305,7 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
     referencedInput,
     referencedFile,
     referenceInputId,
+    draftPickerInput,
     alias?.threadId,
     invalidAlias,
     inputReadKey,

@@ -119,6 +119,12 @@ SQL v4 在保存最终输入前持久准备收据与原件引用：先保护选�
 
 本机 D1/current/实际资源相关 87 项、基础 SQLite/升级/事务/authoring/仓库相关 36 项通过（两集合不累加）；适配器、原生与纯后端类型、运行边界和 diff 检查通过。证据 `.deployment/workspace-current-*-before.log`、`workspace-current-catalog-related-after.log`、`database-open-lock-{before,after}.log`。仅暂存 D1 候选独立导出后 73 项定向、9 项真实原生资料 HTTP、全部运行类型、266 文件边界、实际 Web/Worker 构建及 10446 文件/81 动态依赖的 ZIP 冒烟通过，原输入及重复请求保持；完整 CI 继续核对（日志 `.deployment/current-index-*`）。真实发送、定期更新、服务器发行及全生命周期尚待相应批次，不把本批无 Git 单测当整体完成。
 
+### 新草稿的就绪与本人资料预览（2026-10-28，实施中）
+
+69现场先复现工作区入口早点击无效。两个候选是原生shell尚无目标项目导致Launcher静默返回，或原T3新草稿异步取消；原入口forceNew/local跳过旧稿复用和默认环境异步等待，现场自然HTTP shell含A与原客户端afterSequence5764确认已应用后，单击即到draft/composer，支持前者。实际诊断cfa4b8d4…afcb在`.deployment/d1-normal-browser-two-rounds-v1/launcher-readiness-real-v1.json`；后续辅助观察器对常规RPC的拒绝保留，不据此改平台授权。最小修复复用useProjects，仅当前项目未到达时禁用两个入口，原外部已发布条件保留；直接事件仍无项目时沿原Toast提示重试，不排队或自动补发。有效红1例与就绪正控、最终17关联浏览器及类型通过（冻结76ec0cd9…10f7b）；额外原hook单测因已有mock缺EnvironmentId在收集前失败，未计通过。前后均“打开菜单→新建”2操作，等待真实就绪另计；新修尚未部署或真实验收。
+
+改用正常HTTPS浏览器后，原管理员从工作区新建draft84922eef、选择原助手64cb revision1及grok-4.6/medium，打开文件面板、搜索唯一TXT并点击，共7操作，目录成功但文件预览显示“会话不存在或无权访问”及重试。根以路由draft849作为参数的binding及file-reference对照均404 THREAD_NOT_FOUND；该ID与实际native threadId由T3分别生成，未捕获浏览器实际请求URL，不能把此对照当其原始参数。本人实际picker1e75364e同canonical metadata/正文均200，111B原文/SHA ef979a72…774c与A一致，排除该输入归属或内容失配。正常草稿仅发送时建绑定，源码和另用不同draft/thread ID的有效组件红测（6cefc302…7284，1失败/18跳过）复现同错误，确认当前预览错误先要求持久线程。根实际红47ae95cb028f7cb0c5d0299aaf2c8705231a0ebbe942fbd5a5cc7342516435ef和7步记录在同忽略目录；未binding、未发问、未换模型。最小修复仅MaterialPreview及原浏览器测试：原T3 composerDraftTarget string识别真正本地draft，排除locked/submitting/兼容/子线程/客户/显式版本/alias；先按本caller原scope取得当前picker根，严格等选中文件input前缀才复用这次目录结果与原授权metadata/正文路径。其他可见共享active input、历史/alias仍走原locator，不捕获404回退、不预建binding、不加API/cache或Git。草稿提升改变读取key，迟到旧结果不覆盖。根整27浏览器通过（新增9+原18，green-root-v2.log，4.43秒），含原ReadOnlyWorkspaceFiles预览/Add及原问题保留、原口503→同input重试恢复、非本人可见active input不得冒充当前picker、locked/submitting/历史保护；资源/路径三组32单测通过。首轮green23/24的夹具误取executeAtomQuery首参registry而非第二参atom，生产身份校验正确拒绝，失败保留；preview runner无浏览器连接的0tests超时也保留。预览并添加核心任务修改前7操作后阻断，修后组件同路径加“添加到对话”共8操作，实站同条件步骤和等待未验、不主张减少操作。用户恢复原新草稿资料入口，开发者复用原身份和读取口，Agent能据实际文件/错误/终态判断结果；表单、ARIA、错误/重试和焦点入口保留。代码完成、定向自动通过；新候选完整CI、部署及同条件真实A/B继续，失败记录不作完成证明。
+
 ### 历史普通文件继续预览与引用（2026-10-28）
 
 历史会话 `1bea28c4` 的 `admin.html` 真实GET返回410/`WORKSPACE_INPUT_RELEASED`，input `8812906d` 已回收而claim仍在；根原件 `ROOT/d1-historical-8812906d-resource-red-root-v1.json` SHA256 `70939ea71ef5ee91384ebb400993e48cae576303f1381d524195721dd17045be`。可能原因一为当前资料已删除：同来源文件仍存在，排除本例；原因二为普通标签一直读已释放input：原入口410及owner失败用例支持。影响仅普通文件定位合同、access/resources、current/authoring及原生HTTP和预览；活动轮次、显式版本、部署包、电脑文件和私有成果保持原合同。
@@ -1401,7 +1407,13 @@ Web 两个原 UI 文件的 lint 基线已在 `git archive 10a466d7 vendor/t3code
 
 2026-10-28 补齐项目助手保存结果的有界核对。入口ProjectAssistantPanel→submitProjectWrite原合同此前首次回复丢失后仅展示pending；两项有效红测中POST各一次、原结果GET为零。另一候选是原收据UUID/actor/digest不符，沿公开43项单测及合法收据恢复排除该候选。最小变更只在首次uncertain后调用已有recoverProjectWrite一次，沿原30秒GET上限、前后requireOriginal；原submitted后手工核对不追加自动GET、不重POST。撤权或仍未知保留原UUID/body，管理恢复后只查原结果，按钮按实际行为命名“检查保存结果”。管理员修复失效公共技能已由原组件支持，在project.manage=true/chat.configure=false下的修前正控已通过，直接复用而未增加权限或重建字段。
 
-代码完成、定向自动通过，完整CI/部署/真实业务仍待验。冻结 `.deployment/e3-assistant-result-v1/freeze-v1.json` SHA256 `049e08d06e6a28098503cac10920befe519a499a3f63118ae7c7b5287e1f0bfb`；两关联组件39/39、公开请求43/43、Web类型exit0，定向lint既存区域失败未扩大修；本次仅补原页面和关联测试，无锁文件/依赖变化。相同项目、合法配置、回复已丢但原收据可确认的操作路径：修前“编辑→保存→Esc→原核对”4次，修后“编辑→保存”2次，自动原GET及30秒上限另计；原结果暂缺仍“编辑→保存→Esc→检查”4次，公共失效技能修复前后均“编辑→取消失效技能→保存”3次。此处为组件交互及路径核对，实站同条件前后步骤和等待尚待验，不以此宣称真实业务收益。用户可自动获得已确认结果，开发者复用原收据与时限，Agent可按唯一只读入口区分未知和已确认保存；字段标签、ARIA、错误及原焦点恢复保留。
+代码完成、定向自动通过；固定0259d406的[质量CI40581200599](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40581200599)和[完整运行CI40581200594](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40581200594)均通过（Web743项）。本批未部署，真实业务待验。冻结 `.deployment/e3-assistant-result-v1/freeze-v1.json` SHA256 `049e08d06e6a28098503cac10920befe519a499a3f63118ae7c7b5287e1f0bfb`；两关联组件39/39、公开请求43/43、Web类型exit0，定向lint既存区域失败未扩大修；本次仅补原页面和关联测试，无锁文件/依赖变化。相同项目、合法配置、回复已丢但原收据可确认的操作路径：修前“编辑→保存→Esc→原核对”4次，修后“编辑→保存”2次，自动原GET及30秒上限另计；原结果暂缺仍“编辑→保存→Esc→检查”4次，公共失效技能修复前后均“编辑→取消失效技能→保存”3次。此处为组件交互及路径核对，实站同条件前后步骤和等待尚待验，不以此宣称真实业务收益。用户可自动获得已确认结果，开发者复用原收据与时限，Agent可按唯一只读入口区分未知和已确认保存；字段标签、ARIA、错误及原焦点恢复保留。
+
+### 项目原请求续办与恢复（2026-10-28）
+
+正式69上首轮原B创建cd44a6c8与原A保存d7d1ac46均已完成；测试观察器拒绝正常初始化RPC导致首轮中止，原失败与注入回复丢失、一次原收据503均保留。续办只正常GET这两条原收据，按原actor/项目/path/expectedRevision3/value/UUID重建公开pending；原浏览器已关闭，未重建原未知Dialog，不能补称验证过Esc。随后同一正常页面切B、编辑/输入/保存，返回A仅点原“重试”GET核对，再编辑/输入/保存恢复A原名；核心10操作，正常登录3操作另计。没有产品UI修改，不主张步骤改善；等待逐项保存在result。B的新请求1690535a保存r1→2，A新请求be7167b9显式恢复r4→5，每个仅一次；旧两POST未重放，A/B公开pending最终均null。续办result 4ed891dc…ebd6、parent 739466e7…1fa7，来源仍为原69/原CLI，未切发行或发送模型请求。
+
+根正常GET四原UUID及A/B四组完整配置/目录，独立核验原intent、actor、项目、历史result与当前A5/B2；新两条current-verified，旧两条因当前名/修订正常变化而为unverified，历史正文和原收据其余字段完全保持，不将历史result误比当前对象。根首次把历史同步状态也要求current-verified的只读断言失败保留，未重发业务。独立证明94bae2788b2c6649bc8bee5be2dca88e1c287a5aa82feab768be4ebc29528871；24任务/16版本完整行摘要仍05e34c3a…609e／eaf8706b…d19。14份原件及索引03e9c973…0783在`.deployment/e3-project-continuation-live-v4-actual/continuation-v1/`。全配置保持只证明首轮Bcreate/A-save之后A4/B1→续办A5/B2，首轮前完整快照未持久化，不能扩大该结论。四状态为原代码完成、原相关自动测试与69完整CI通过、69已生效、这条原请求续办及恢复通过；未知Dialog关闭、整页和其余矩阵仍待验。
 
 ### 技能名称与普通草稿的合法选项（2026-10-28）
 

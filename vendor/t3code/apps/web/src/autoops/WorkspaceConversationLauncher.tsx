@@ -19,8 +19,16 @@ export function WorkspaceConversationLauncher() {
         (detail.workspaceType !== 'internal' && detail.workspaceType !== 'external')
       )
         return
+      if (!readAutoOpsHost()) return
       const project = readProjects().find((entry) => entry.id === detail.projectId)
-      if (!readAutoOpsHost() || !project) return
+      if (!project) {
+        toastManager.add({
+          type: 'error',
+          title: '无法新建工作区对话',
+          description: '对话服务尚未就绪，请稍后重试。',
+        })
+        return
+      }
       pending.current = true
       void (async () => {
         if (

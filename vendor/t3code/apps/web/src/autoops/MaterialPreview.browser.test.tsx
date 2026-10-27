@@ -7,6 +7,7 @@ import type { FilePreviewPanelProps } from '~/components/files/FilePreviewPanel'
 import AutoOpsMaterialPreview from './MaterialPreview'
 import type { AutoOpsThreadScope } from './hostConfig'
 import { ComposerHandleContext } from '~/composerHandleContext'
+import { DraftId } from '~/composerDraftStore'
 import type { ChatComposerHandle } from '~/components/chat/ChatComposer'
 import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFiles'
 import ChatMarkdown from '~/components/ChatMarkdown'
@@ -169,6 +170,286 @@ beforeEach(() => {
   mocks.search.mockImplementation((input) => input)
 })
 describe('当前对话文件预览的输入和范围边界', () => {
+  it('本地新草稿点开本人当前picker文件时保留原预览和添加动作', async () => {
+    mocks.realFiles = true
+    const canonical = 'autoops/p-one/inputs/own-picker/README.md'
+    const text = 'DRAFT-PICKER-ACTUAL-712'
+    mocks.execute.mockImplementation(async (_registry, query) =>
+      query?.input?.directoryPath !== undefined
+        ? result('own-picker')
+        : {
+            _tag: 'Success',
+            value: { entries: [{ kind: 'file', byteLength: text.length, mimeType: 'text/plain' }] },
+          },
+    )
+    using fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input), location.origin)
+      if (url.pathname === '/gateway/api/v1/projects/p-one/workspace/file-reference')
+        return Response.json(
+          { code: 'THREAD_NOT_FOUND', error: '会话不存在或无权访问' },
+          { status: 404 },
+        )
+      if (
+        url.pathname === '/gateway/autoops/resources' &&
+        url.searchParams.get('path') === canonical
+      ) {
+        if (url.searchParams.get('metadata') === '1')
+          return Response.json({ name: 'README.md', mime: 'text/plain', size: text.length })
+        if (url.searchParams.get('inline') === '1')
+          return new Response(text, { headers: { 'content-type': 'text/plain' } })
+      }
+      throw new Error('此测试不允许其他请求')
+    })
+    function DraftPickerFile() {
+      const [question, setQuestion] = useState('请读取 ')
+      const handle = useRef({
+        insertTextAtEnd: (value: string) => {
+          setQuestion((previous) => previous + value)
+          return true
+        },
+      } as ChatComposerHandle)
+      return (
+        <ComposerHandleContext value={handle}>
+          <textarea aria-label="原草稿问题" value={question} readOnly />
+          <div style={{ display: 'flex', width: 900, height: 480 }}>
+            <AutoOpsMaterialPreview
+              {...props(canonical)}
+              composerDraftTarget={DraftId.make('local-draft')}
+            />
+          </div>
+        </ComposerHandleContext>
+      )
+    }
+    // 本例复现正常文件目录点击后的原生预览，不依赖路由或创建远端会话。
+    await using screen = await render(<DraftPickerFile />, { router: false })
+    await expect
+      .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+      .toBeVisible()
+    await vi.waitFor(() => {
+      const displayed =
+        screen.container.textContent +
+        [...screen.container.querySelectorAll('diffs-container')]
+          .map((element) => element.shadowRoot?.textContent ?? '')
+          .join('')
+      expect(displayed).toContain(text)
+    })
+    clickButton(screen.getByRole('button', { name: '添加到对话', exact: true }).element())
+    await expect
+      .element(screen.getByRole('textbox', { name: '原草稿问题' }))
+      .toHaveValue(expect.stringContaining(canonical))
+    expect(
+      fetcher.mock.calls.filter(([input]) =>
+        new URL(String(input), location.origin).pathname.endsWith('/workspace/file-reference'),
+      ),
+    ).toHaveLength(0)
+    expect(fetcher.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(
+      true,
+    )
+  })
+  it('本地草稿读取暂时503后原重试恢复同一输入而不新增会话', async () => {
+    mocks.realFiles = true
+    const canonical = 'autoops/p-one/inputs/own-picker/README.md'
+    const text = 'DRAFT-PICKER-RETRY-714'
+    const message = '当前工作区暂时不可用，请重试'
+    let available = false
+    mocks.execute.mockImplementation(async (_registry, query) => {
+      if (query?.input?.directoryPath !== undefined) {
+        if (!available)
+          throw Object.assign(new Error(message), { status: 503, code: 'WORKSPACE_UNAVAILABLE' })
+        return result('own-picker')
+      }
+      return {
+        _tag: 'Success',
+        value: { entries: [{ kind: 'file', byteLength: text.length, mimeType: 'text/plain' }] },
+      }
+    })
+    using fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input), location.origin)
+      if (
+        url.pathname === '/gateway/autoops/resources' &&
+        url.searchParams.get('path') === canonical
+      ) {
+        if (url.searchParams.get('metadata') === '1')
+          return Response.json({ name: 'README.md', mime: 'text/plain', size: text.length })
+        if (url.searchParams.get('inline') === '1')
+          return new Response(text, { headers: { 'content-type': 'text/plain' } })
+      }
+      throw new Error('不允许文件定位回退或其他请求')
+    })
+    // 原重试重新读取同一公开输入；不为预览建立持久会话。
+    await using screen = await render(
+      <div style={{ display: 'flex', width: 900, height: 480 }}>
+        <AutoOpsMaterialPreview
+          {...props(canonical)}
+          composerDraftTarget={DraftId.make('local-draft')}
+        />
+      </div>,
+      { router: false },
+    )
+    await expect
+      .element(screen.getByRole('alert').getByText(message, { exact: true }))
+      .toBeVisible()
+    await expect
+      .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+      .not.toBeInTheDocument()
+    available = true
+    clickButton(
+      screen.getByRole('alert').getByRole('button', { name: '重试', exact: true }).element(),
+    )
+    await expect
+      .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+      .toBeVisible()
+    await expect.element(screen.getByRole('alert')).not.toBeInTheDocument()
+    await vi.waitFor(() =>
+      expect(
+        screen.container.textContent +
+          [...screen.container.querySelectorAll('diffs-container')]
+            .map((element) => element.shadowRoot?.textContent ?? '')
+            .join(''),
+      ).toContain(text),
+    )
+    expect(
+      mocks.list.mock.calls.every(
+        ([query]) =>
+          (query.input.cwd === base + '?workspaceType=internal' &&
+            query.input.directoryPath === '') ||
+          (query.input.cwd === base + '?workspaceType=internal&inputId=own-picker' &&
+            query.input.directoryPath.startsWith('autoops/p-one/inputs/own-picker')),
+      ),
+    ).toBe(true)
+    expect(
+      fetcher.mock.calls.every(
+        ([input, init]) =>
+          (!init?.method || init.method === 'GET') &&
+          !new URL(String(input), location.origin).pathname.endsWith('/workspace/file-reference'),
+      ),
+    ).toBe(true)
+  })
+  it('本地草稿不能把其他可见会话的输入冒充本人当前picker', async () => {
+    mocks.realFiles = true
+    const canonical = 'autoops/p-one/inputs/shared-picker/README.md'
+    mocks.execute.mockImplementation(async (_registry, query) => {
+      if (query?.input?.directoryPath === '') return result('own-picker')
+      if (query?.input?.directoryPath !== undefined) return result('shared-picker')
+      return {
+        _tag: 'Success',
+        value: { entries: [{ kind: 'file', byteLength: 8, mimeType: 'text/plain' }] },
+      }
+    })
+    using fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input), location.origin)
+      if (url.pathname.endsWith('/workspace/file-reference'))
+        return Response.json(
+          { code: 'THREAD_NOT_FOUND', error: '会话不存在或无权访问' },
+          { status: 404 },
+        )
+      if (
+        url.pathname === '/gateway/autoops/resources' &&
+        url.searchParams.get('path') === canonical
+      )
+        return Response.json({ name: 'README.md', mime: 'text/plain', size: 8 })
+      throw new Error('此测试不允许其他请求')
+    })
+    // 原读取口可合法共享输入，不等于此输入属于本人的当前 picker。
+    await using screen = await render(
+      <div style={{ display: 'flex', width: 900, height: 480 }}>
+        <AutoOpsMaterialPreview
+          {...props(canonical)}
+          composerDraftTarget={DraftId.make('local-draft')}
+        />
+      </div>,
+      { router: false },
+    )
+    await expect
+      .element(screen.getByRole('alert').getByText('会话不存在或无权访问', { exact: true }))
+      .toBeVisible()
+    await expect
+      .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+      .not.toBeInTheDocument()
+    expect(
+      fetcher.mock.calls.filter(([input]) =>
+        new URL(String(input), location.origin).pathname.endsWith('/workspace/file-reference'),
+      ),
+    ).toHaveLength(1)
+    expect(
+      fetcher.mock.calls.some(
+        ([input]) =>
+          new URL(String(input), location.origin).pathname === '/gateway/autoops/resources',
+      ),
+    ).toBe(false)
+  })
+  it('本地草稿的非本人输入仍由原读取口拒绝且不回退', async () => {
+    const message = '资料输入不存在或当前成员无权访问'
+    mocks.execute.mockRejectedValue(new Error(message))
+    using fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('不能改走其他读取口'))
+    // 保留服务端本人输入授权拒绝，不为本地草稿伪造可读结果。
+    await using screen = await render(
+      <AutoOpsMaterialPreview
+        {...props('autoops/p-one/inputs/foreign-picker/README.md')}
+        composerDraftTarget={DraftId.make('local-draft')}
+      />,
+      { router: false },
+    )
+    await expect
+      .element(screen.getByRole('alert').getByText(message, { exact: true }))
+      .toBeVisible()
+    await expect
+      .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+      .not.toBeInTheDocument()
+    expect(mocks.list).toHaveBeenCalledWith({
+      environmentId,
+      input: {
+        cwd: base + '?workspaceType=internal',
+        directoryPath: '',
+      },
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+  it.each(['服务端会话', '范围已锁定', '仅状态已锁定', '提交中', '历史别名'] as const)(
+    '%s仍经原文件定位授权，不按本地picker旁路',
+    async (mode) => {
+      if (mode === '范围已锁定')
+        mocks.scope.mockReturnValue({ ...scope(), scopeLocked: true, scopeState: 'locked' })
+      if (mode === '仅状态已锁定')
+        mocks.scope.mockReturnValue({ ...scope(), scopeLocked: false, scopeState: 'locked' })
+      if (mode === '提交中') mocks.scope.mockReturnValue({ ...scope(), scopeState: 'submitting' })
+      const canonical =
+        mode === '历史别名'
+          ? 'autoops/p-one/current-input-files/source-thread/old-input/old-revision/README.md'
+          : 'autoops/p-one/inputs/own-picker/README.md'
+      using fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        if (
+          new URL(String(input), location.origin).pathname ===
+          '/gateway/api/v1/projects/p-one/workspace/file-reference'
+        )
+          return Response.json(
+            { code: 'THREAD_NOT_FOUND', error: '会话不存在或无权访问' },
+            { status: 404 },
+          )
+        throw new Error('不允许回退资料读取')
+      })
+      // 服务端会话和受约束引用保持原定位失败，不能用本人 picker 掩盖。
+      await using screen = await render(
+        <AutoOpsMaterialPreview
+          {...props(canonical)}
+          {...(mode === '服务端会话' ? {} : { composerDraftTarget: DraftId.make('local-draft') })}
+        />,
+        { router: false },
+      )
+      await expect
+        .element(screen.getByRole('alert').getByText('会话不存在或无权访问', { exact: true }))
+        .toBeVisible()
+      await expect
+        .element(screen.getByRole('button', { name: '添加到对话', exact: true }))
+        .not.toBeInTheDocument()
+      expect(
+        fetcher.mock.calls.filter(([input]) =>
+          new URL(String(input), location.origin).pathname.endsWith('/workspace/file-reference'),
+        ),
+      ).toHaveLength(1)
+      expect(mocks.execute).not.toHaveBeenCalled()
+    },
+  )
   it('回收后的当前文件仍能用原生动作添加到待发问题并保留正文', async () => {
     mocks.realFiles = true
     const originalPath = 'autoops/p-one/inputs/old-input/README.md'

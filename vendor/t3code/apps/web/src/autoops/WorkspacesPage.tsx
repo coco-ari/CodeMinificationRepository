@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
 import { Spinner } from '~/components/ui/spinner'
 import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
+import { useProjects } from '~/state/entities'
 import { ModuleHeader, ModuleSidebar } from './ModuleWorkspace'
 import { WorkspaceAuthoring, type WorkspaceSection } from './WorkspaceAuthoringPanel'
 import { WorkspaceUpdateDialog } from './WorkspaceUpdateDialog'
@@ -89,6 +90,7 @@ function ProjectWorkspaces({
   historicalId: string | undefined
 }) {
   const navigate = useNavigate()
+  const conversationReady = useProjects().some((entry) => entry.id === projectId)
   const project = readAutoOpsHost()?.projects.find((entry) => entry.id === projectId)
   const manager = project?.capabilities?.['workspace.manage'] === true
   const externalOnly = project?.membership?.workspaceAccess === 'external'
@@ -219,7 +221,7 @@ function ProjectWorkspaces({
       ) : null}
       <FileSurfaceAction
         label="新建对话"
-        disabled={tab === 'external' && !latestPublished}
+        disabled={!conversationReady || (tab === 'external' && !latestPublished)}
         onPress={() =>
           startWorkspaceConversation(
             projectId,
@@ -269,7 +271,10 @@ function ProjectWorkspaces({
           menuTriggerRef={authoringMenuFocus}
           menuItems={
             <>
-              <MenuItem onClick={() => startWorkspaceConversation(projectId, 'internal')}>
+              <MenuItem
+                disabled={!conversationReady}
+                onClick={() => startWorkspaceConversation(projectId, 'internal')}
+              >
                 <MessageSquarePlusIcon />
                 新建对话
               </MenuItem>
