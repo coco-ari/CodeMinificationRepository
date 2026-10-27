@@ -99,7 +99,8 @@ export class SourceArchives {
         release.applicationId ||= data.targets.find(item => item.id === release.targetId)?.applicationId;
         if (task?.source?.revision && (!release.revision || release.revision === task.source.revision)) {
           release.revision ||= task.source.revision;
-          release.sourceSnapshot ||= task.sourceSnapshot ? structuredClone(task.sourceSnapshot) : undefined;
+          // 工作区包没有旧 Git 快照；启动时保留已持久化的 null，不赋 undefined 删除原字段。
+          if (!release.sourceSnapshot && task.sourceSnapshot) release.sourceSnapshot = structuredClone(task.sourceSnapshot);
           if (task.sourceKind === 'workspace-package') {
             release.sourceKind ||= task.sourceKind;
             release.sourceIdentity ||= structuredClone(task.sourceIdentity);

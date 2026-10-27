@@ -4,8 +4,10 @@ import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { RepositoryService } from '../src/service.mjs';
 import { DeploymentService } from '../src/deployment.mjs';
+import { Store } from '../src/store.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const revision = 'a'.repeat(40);
@@ -43,6 +45,32 @@ async function fixture(t, kind = 'static') {
     remoteCalls: () => remoteCalls, reopen: open };
 }
 const successful = task => ({ id: task.id, kind: 'static', artifact: `static/${task.targetId}/${task.id}`, revision: task.revision });
+
+function persisted(root) {
+  const db = new DatabaseSync(path.join(root, 'state.sqlite'), { readOnly: true });
+  try { return JSON.parse(db.prepare('SELECT value FROM application_state WHERE id=1').get().value); }
+  finally { db.close(); }
+}
+
+for (const kind of ['static', 'java']) test(`${kind} 工作区成功发布重开部署存储保留显式空 Git 快照和全部原发布字段`, async t => {
+  const f = await fixture(t, kind), task = await f.deployment.createTaskFromArchive(f.input, f.archive);
+  await f.deployment.claim(f.server.id);
+  const release = kind === 'static' ? successful(task) : { id: task.id, image: `cmr/${f.target.id}:${task.id}`, revision: task.revision };
+  await f.deployment.events(f.server.id, task.id, { seq: 1, stage: 'verifying', status: 'succeeded', result: { release } });
+  const before = persisted(f.root).deployments;
+  assert.equal(before.releases.length, 1);
+  assert.equal(before.releases[0].sourceSnapshot, null);
+  assert.equal(before.targets[0].currentRelease.sourceSnapshot, null);
+  await f.deployment.close(); await f.repository.store.close();
+  // 先只重开通用 Store，排除 JSON/SQLite 读写本身把 null 变成缺失字段。
+  const plain = new Store(f.root);
+  try { await plain.open(); assert.deepEqual(plain.state.deployments, before); }
+  finally { await plain.close(); }
+  const reopened = await f.reopen();
+  assert.deepEqual(persisted(f.root).deployments, before, '部署初始化不得改写已接受发布及当前运行版本的原字段');
+  assert.equal(reopened.deployment.data.tasks.find(item => item.id === task.id).sourceSnapshot, null);
+  assert.equal(f.remoteCalls(), 0);
+});
 
 test('工作区固定包不依赖源码仓库，输入文件变化不影响任务档案', async t => {
   const f = await fixture(t), task = await f.deployment.createTaskFromArchive(f.input, f.archive);
