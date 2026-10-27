@@ -1532,3 +1532,15 @@ v2实际390×520、hasTouch/isMobile manager完成长文档单项：认证三操
 先列并核两候选：一是锁定Codex本身提交后台请求，在正式网关入站捕获的安全形态中background=absent，排除这次输入原因；二是[共享网关](../agent-demo/customer-agent/shared-model-gateway.ts)的validateBody在全量校验后无条件补background:false，与上游unsupported/background信号相符。真实UDS回归用拒绝该字段的隔离上游复现旧同步请求502，另一条畸形后台参数旧例实际200。红测 `.deployment/c6-background-parameter-fix-v1/red.log` 保留，未先改实现；修复后网关24/24、完整客户155/155、客户类型及296源边界通过。明确这是隔离回归，真实修复后的上游和完整问答仍须执行。
 
 最小修改只在原网关：拒绝非false/null后台参数，全量校验后省略可选background，继续固定store:false；模型、强度、授权、执行位置、远端引用拒绝及迟到撤权检查沿原合同。可选字段和显式启用后台语义核对[Responses接口](https://developers.openai.com/api/reference/resources/responses/methods/create)及[后台模式](https://developers.openai.com/api/docs/guides/background)，未引入依赖或第二执行链。原正式CLI、HELLO及包清单同步0.4.3，安装仍核完整包。代码完成、相关自动通过，下一固定候选完整CI/部署及真实业务待验；当前原0.4.2进程和七事件继续保留，先完成原终态恢复。
+
+### 用户运行器平台工具目标的清单补记（2026-10-27）
+
+复核已确认客户接入方案第19行及工作台设计第251/758行，受控平台资料/环境MCP接入仍属于本次目标。当前prepareBusinessRunContext在客户分支prepareCustomerRun后直接返回，客户能力合同与正式包没有对应平台工具桥；这证明当前只承载本机输入及本机工具，不能以平台助手MCP通过或共享目录隔离替代整项实现。完整清单补C7为待实现，四类状态均待完成；保留尚不支持来源的明确拒绝，不伪装支持或静默丢弃预设。仍先关闭原七事件、固定发行及真实共享基本流程，再依赖既有T3工具协议与资料/MCP所有者完成该已定目标，无新增产品决定或第二执行链。
+
+固定同步请求修复候选 `e248f05b0b09862ea11d6b6c18b3f97fc5c5d140` 已正常推送，[质量 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40430327645)与[完整运行 CI](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40430327605)均通过，运行检查于01:15:56 UTC完成，原JSON为`.deployment/ci-e248f05b-v3.json`。仅Git归档重建八步全0，根独立29502源文件、601依赖、8SPDX、19maps/55关键来源/62完整正文、两ZIP原内层清单、全部10489文件/97链接核验通过；源码包3e12ed0c、发行0ef14843、CLI0.4.3包33882b61（内清单4258e954）。两项独立ops回归通过，先前迁移验收脚本绝对目录仍指旧随机后缀的加载失败保留，改用实际固定新归档udxh_rr_后复验2/2，不计业务成功。
+
+远端`/home/tao/autoops-agent-demo/releases/t3-confirmed-e248f05b`只完成独占解包及官方Linux依赖准备；两次逐项2038文件/21包验证均通过，native清单b56766da。根准备索引 `.deployment/final-e248f05b-v1-root-preparation-review-v1.json` SHA256 `2ec6f24e419330daa9bc694b03456184a06a18071b503c8aa524daf1c36c3402`，独立全源码/发行证据SHA256 `9ee8be8a0eb33ea05769d3f06516753cadadcf4d56026a7bd966623a2f1d816a`。候选 `dist/web/index.html` 为50d7096c，实际Web入口 `/agent-demo.html` 对应同名文件4fdc991c；两个路径分别核验，不冒称公网已切换。当前C261原进程和设备不变；正式切换继续使用原13核心owner及额外drain固定断言、fresh全局九类空闲与完整原数据保护，未放宽原任务或unknown守卫。四状态为代码完成、完整自动通过、部署待完成、真实修复问答及隔离业务待验。
+
+原问题正常接收者只读提取v3已由根独立复跑Node15、Python8及默认零网络入口，并核21成员完整ZIP清单、七份固定Git源与map完整正文、四编译文件；索引 `.deployment/c6-original-native-v3-root-independent-v1.json` 与 `.deployment/c6-original-native-v3-root-source-review-v1.json`。根首次使用未含Node的PATH、误按平铺ZIP及未解析map相对路径的辅助核验失败均记录，改用已配运行时、实际单包前缀和规范化相对路径后通过，未修改正式包。新现场PID/ticks配置仍待切换后给定；没有认证读取原问题，也没有问答写入，不计真实业务验收。
+
+原七事件维护完整v2包冻结为ff9fe065，51成员/50文件、原RO2的18文件不变；根独立11主链、3真实十一库、13全表、4原存储RAM及15项协议/正式投影回归通过。经SSH仅新增32个已审文件，未覆盖既有文件。首次实际单run在fresh OS门禁报 `EXTRA_PROCESS_OR_CATALOG_PROBE_NO_IDLE_WINDOW`；runtime仍空、没有maintenance-attempt，Web446306/launcher446156及原CLI/runner保持，服务和数据均未动作。只读实际证据 `.deployment/c6-maintenance-actual-preflight-failed-v1.json` SHA256 `7c3cb88b0082aa3eb9643ddd4ec66a5af089ea70f679222e995591afb6715c29`。额外子进程实际为Docker对另一owned CID执行五秒stop；先验证未知业务活动与onReady目录发现两种原因，再按正式固定scope及完整参数鉴别，不能泛忽略Docker或据辅助绿宣称恢复。原v2包、原问题和失败记录保留；原事件恢复、正式部署和C6业务仍待完成。
