@@ -81,10 +81,14 @@ export async function loadCustomerAssistantRuntime(projectId: string, question: 
     throw new AutoOpsRequestError('运行能力与当前助手不一致，请刷新重试。', 'CUSTOMER_RUNTIME_SCOPE_CHANGED', 409)
   return result
 }
-export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
+export function customerRuntimeRequestKey(scope: AutoOpsThreadScope | undefined) {
   const target = scope?.executionBinding?.kind === "customer" ? scope.executionBinding : null;
   const principalId = readAutoOpsHost()?.principal.id;
-  const key = target ? JSON.stringify([principalId, scope?.projectId, target, scope?.question]) : null;
+  return target ? JSON.stringify([principalId, scope?.projectId, target, scope?.question]) : null;
+}
+export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
+  const target = scope?.executionBinding?.kind === "customer" ? scope.executionBinding : null;
+  const key = customerRuntimeRequestKey(scope);
   const [state, setState] = useState<{
     key: string;
     catalog: CustomerCapabilities | null;
@@ -145,6 +149,7 @@ export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
   }, [key, attempt]);
   const current = state?.key === key ? state : null;
   return {
+    requestKey: key,
     target,
     catalog: current?.catalog ?? null,
     device: current?.device ?? null,
@@ -153,6 +158,7 @@ export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
     refresh: () => setAttempt((value) => value + 1),
   };
 }
+export type CustomerRuntime = ReturnType<typeof useCustomerRuntime>;
 const reasoningLabels: Record<string, string> = {
   none: "不思考",
   minimal: "最低",

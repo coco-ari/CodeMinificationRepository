@@ -18,7 +18,11 @@ import {
 import { ScopeReadError } from './ScopeReadError'
 import { ScopeComposerChoice } from './scopeSelection'
 import { loadSkillLibrary } from './skillLibrary'
-import { loadCustomerAssistantRuntime } from './customerAgents'
+import {
+  customerRuntimeRequestKey,
+  useCustomerRuntime,
+  type CustomerRuntime,
+} from './customerAgents'
 import type { AutoOpsThreadScope } from './threadScopes'
 import { readAutoOpsHost } from './hostConfig'
 
@@ -28,75 +32,135 @@ export function QuestionSkillsControl({
   locked,
   disabled,
   onChange,
+  onReconcileUnavailable,
+  customerRuntime,
 }: {
   scope: AutoOpsThreadScope
   locked: boolean
   disabled: boolean
   onChange(ids: string[]): void
+  onReconcileUnavailable(ids: string[]): void
+  customerRuntime?: CustomerRuntime | undefined
 }) {
   const question = scope.question
   const selected = question?.configuration.skillIds ?? []
   const target = scope.executionBinding
-  const key = JSON.stringify([readAutoOpsHost()?.principal.id, scope.projectId, scope.agentId, scope.workspaceType, target, question])
+  const customer = target?.kind === 'customer'
+  // 独立范围控件沿原运行器读取；问答页直接复用父级已复核的完整配置结果。
+  const standaloneRuntime = useCustomerRuntime(
+    customer && question && customerRuntime === undefined && (!locked || selected.length > 0)
+      ? scope
+      : undefined,
+  )
+  const runtime = customerRuntime ?? standaloneRuntime
+  const key = customer
+    ? customerRuntimeRequestKey(scope)
+    : JSON.stringify([
+        readAutoOpsHost()?.principal.id,
+        scope.projectId,
+        scope.agentId,
+        scope.environmentId,
+        scope.workspaceType,
+        target,
+        question && {
+          ...question,
+          configuration: { ...question.configuration, model: undefined, skillIds: undefined },
+        },
+      ])
   const [attempt, setAttempt] = useState(0)
   const [state, setState] = useState<{
     key: string
     items: Array<{ id: string; name: string }>
     error?: string
+    waiting: boolean
   } | null>(null)
   const floating = useComposerMenuProps()
+  const needsCatalog = !!question && (!locked || selected.length > 0)
   useEffect(() => {
-    if (!question || (locked && selected.length === 0)) return
+    if (customer || !key || !needsCatalog) return
     const controller = new AbortController()
+    let reading = false
     const read = async () => {
-      if (target?.kind === 'customer') {
-        const catalog = (await loadCustomerAssistantRuntime(scope.projectId, question, controller.signal)).capabilities
-        if (!catalog) throw new Error('电脑技能目录尚未就绪')
-        return catalog.skills.map(({ id, name }) => ({ id, name }))
-      }
-      const library = await loadSkillLibrary(controller.signal)
-      return library.skills
-        .filter((skill) => {
-          if (!skill.enabled) return false
-          const assignment =
-            library.assignments.find(
-              (value) =>
-                value.skillId === skill.id &&
-                value.targetType === 'project' &&
-                value.targetId === scope.projectId,
-            ) ??
-            library.assignments.find(
-              (value) =>
-                value.skillId === skill.id &&
-                value.targetType === 'agent' &&
-                value.targetId === scope.agentId,
+      if (reading || controller.signal.aborted) return
+      reading = true
+      setState((previous) => ({
+        key,
+        items: previous?.key === key ? previous.items : [],
+        waiting: true,
+      }))
+      try {
+        const library = await loadSkillLibrary(controller.signal)
+        const items = library.skills
+          .filter((skill) => {
+            if (!skill.enabled) return false
+            const assignment =
+              library.assignments.find(
+                (value) =>
+                  value.skillId === skill.id &&
+                  value.targetType === 'project' &&
+                  value.targetId === scope.projectId,
+              ) ??
+              library.assignments.find(
+                (value) =>
+                  value.skillId === skill.id &&
+                  value.targetType === 'agent' &&
+                  value.targetId === scope.agentId,
+              )
+            return (
+              assignment?.enabled &&
+              assignment.workspaceTypes.includes(scope.workspaceType ?? 'internal') &&
+              skill.versions.some(
+                (version) => version.id === assignment.versionId && version.readiness === 'ready',
+              )
             )
-          return (
-            assignment?.enabled &&
-            assignment.workspaceTypes.includes(scope.workspaceType ?? 'internal') &&
-            skill.versions.some(
-              (version) => version.id === assignment.versionId && version.readiness === 'ready',
-            )
-          )
-        })
-        .map(({ id, displayName }) => ({ id, name: displayName }))
-    }
-    void read()
-      .then((items) => {
-        if (!controller.signal.aborted) setState({ key, items })
-      })
-      .catch((cause: unknown) => {
+          })
+          .map(({ id, displayName }) => ({ id, name: displayName }))
+        if (!controller.signal.aborted) setState({ key, items, waiting: false })
+      } catch (cause) {
         if (!controller.signal.aborted)
           setState({
             key,
             items: [],
             error: cause instanceof Error ? cause.message : '无法读取技能目录',
+            waiting: false,
           })
-      })
-    return () => controller.abort()
-  }, [key, attempt, locked, !!question, locked && selected.length === 0])
+      } finally {
+        reading = false
+      }
+    }
+    const refresh = () => {
+      void read()
+    }
+    void read()
+    window.addEventListener('focus', refresh)
+    window.addEventListener('online', refresh)
+    window.addEventListener('autoops:skill-library-changed', refresh)
+    return () => {
+      controller.abort()
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('online', refresh)
+      window.removeEventListener('autoops:skill-library-changed', refresh)
+    }
+  }, [key, attempt, customer, needsCatalog, scope.projectId, scope.agentId, scope.workspaceType])
+  const current = customer
+    ? runtime.requestKey === key && !runtime.loading
+      ? {
+          key,
+          items: runtime.catalog?.skills.map(({ id, name }) => ({ id, name })) ?? [],
+          ...(runtime.catalog ? {} : { error: runtime.error ?? '电脑技能目录尚未就绪' }),
+          waiting: false,
+        }
+      : null
+    : state?.key === key
+      ? state
+      : null
+  useEffect(() => {
+    if (locked || disabled || !current || current.waiting || current.error) return
+    const valid = selected.filter((id) => current.items.some((item) => item.id === id))
+    if (valid.length !== selected.length) onReconcileUnavailable(valid)
+  }, [locked, disabled, current, selected, onReconcileUnavailable])
+  const retry = () => (customer ? runtime.refresh() : setAttempt((value) => value + 1))
   if (!question) return null
-  const current = state?.key === key ? state : null
   const summary = selected.length
     ? selected
         .map((id) => current?.items.find((item) => item.id === id)?.name ?? '已选技能')
@@ -121,7 +185,7 @@ export function QuestionSkillsControl({
             label="技能目录读取失败"
             error={current.error}
             busy={false}
-            onRetry={() => setAttempt((value) => value + 1)}
+            onRetry={retry}
           />
         ) : null}
       </>
@@ -144,9 +208,9 @@ export function QuestionSkillsControl({
         {current?.error ? (
           <>
             <MenuItem disabled>{current.error}</MenuItem>
-            <MenuItem onClick={() => setAttempt((value) => value + 1)}>重试读取技能</MenuItem>
+            <MenuItem onClick={retry}>重试读取技能</MenuItem>
           </>
-        ) : !current ? (
+        ) : !current || current.waiting ? (
           <MenuItem disabled>正在读取技能</MenuItem>
         ) : (
           <>

@@ -8853,6 +8853,7 @@ export default function ChatView(props: ChatViewProps) {
                               isDraft={isLocalDraftThread}
                               draftTarget={composerDraftTarget}
                               submitting={isSendBusy}
+                              customerRuntime={customerRuntime}
                               hasAcceptedMessage={
                                 committedServerMessageIds.size > 0 ||
                                 serverProjection?.messages.some(

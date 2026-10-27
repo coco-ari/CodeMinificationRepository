@@ -23,7 +23,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { toastManager } from "~/components/ui/toast";
 import { ConversationWorkspaceControl } from "./ConversationWorkspaceControl";
 import { CustomerExecutionStatus } from "./CustomerExecutionStatus";
-import { customerInstanceId } from "./customerAgents";
+import { customerInstanceId, type CustomerRuntime } from "./customerAgents";
 import { WorkspaceScopeControl, ScopeComposerChoice } from "./WorkspaceScopeControl";
 import { useAutoOpsThreadScope } from "./useThreadScope";
 import {
@@ -46,6 +46,7 @@ export function AutoOpsThreadScopeControl({
   draftTarget,
   submitting,
   hasAcceptedMessage,
+  customerRuntime,
   composerControlsHostRef,
 }: {
   threadId: string;
@@ -55,6 +56,7 @@ export function AutoOpsThreadScopeControl({
   draftTarget: ComposerThreadTarget;
   submitting: boolean;
   hasAcceptedMessage: boolean;
+  customerRuntime?: CustomerRuntime | undefined;
   composerControlsHostRef?: (element: HTMLDivElement | null) => void;
 }) {
   const host = readAutoOpsHost();
@@ -213,6 +215,36 @@ export function AutoOpsThreadScopeControl({
     (!isDraft && error !== null);
   const canAdjust = questionCanAdjust(scope);
   const configLocked = locked || !canAdjust;
+  const reconcileUnavailableSkills = (skillIds: string[]) => {
+    if (!isDraft || locked || disabled || !canAdjust) return;
+    const current = readAutoOpsThreadScope(threadId, projectId);
+    if (
+      readAutoOpsHost()?.principal.id !== host.principal.id ||
+      !current?.question ||
+      !sameAutoOpsThreadScope(current, scope) ||
+      current.scopeState === "submitting" ||
+      current.scopeState === "locked" ||
+      current.scopeLocked ||
+      current.compatibilityReadOnly ||
+      current.nativeParentThreadId ||
+      !questionCanAdjust(current)
+    )
+      return;
+    const selected = current.question.configuration.skillIds;
+    if (
+      skillIds.length >= selected.length ||
+      JSON.stringify(selected.filter((id) => skillIds.includes(id))) !== JSON.stringify(skillIds)
+    )
+      return;
+    // 目录整理只移除本草稿的失效选择，不触发用户主动切换所需的新草稿边界。
+    setAutoOpsThreadScope(threadId, {
+      ...current,
+      question: {
+        ...current.question,
+        configuration: { ...current.question.configuration, skillIds },
+      },
+    });
+  };
   const apply = async (patch: Partial<AutoOpsThreadScope>, loadPresetModel = false) => {
     if (locked || disabled || (!canAdjust && !patch.question)) return;
     const next = { ...scope, ...patch, scopeState: "draft" as const, scopeLocked: false };
@@ -479,8 +511,10 @@ export function AutoOpsThreadScopeControl({
         {host.assistantDirectoryEnabled ? (
           <QuestionSkillsControl
             scope={scope}
+            customerRuntime={customerRuntime}
             locked={configLocked}
             disabled={disabled}
+            onReconcileUnavailable={reconcileUnavailableSkills}
             onChange={(skillIds) => {
               if (scope.question)
                 void apply({

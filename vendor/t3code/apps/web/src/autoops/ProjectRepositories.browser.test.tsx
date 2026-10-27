@@ -4,7 +4,7 @@ import { repositoryReceiptIntent } from '../../../../../../autoops/contracts/pro
 import { StrictMode } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
-import { render, stubGlobal } from '../../test/render'
+import { fakeTimers, render, stubGlobal } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
@@ -225,6 +225,7 @@ it('窄短窗口创建项目连接仅保存仓库与凭证，关闭后恢复添�
 })
 
 it.each(['missing', 'mismatch'] as const)("仓库原owner GET %s 保留凭证引用和原请求，再GET恢复不重POST", async (receiptMode) => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
   const f = setup({ lost: true, receiptMode })
   using _fetch = stubGlobal('fetch', f.fetch)
   await using screen = await render(<App />, { router: '/projects?projectId=repo-project' })
@@ -237,18 +238,34 @@ it.each(['missing', 'mismatch'] as const)("仓库原owner GET %s 保留凭证引
   await page.getByRole('button', { name: '保存', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect.element(dialog.getByRole("button", { name: "重试", exact: true })).toBeEnabled()
-  await expect.element(dialog.getByRole("button", { name: "取消", exact: true })).toBeDisabled()
+  const footer = document.querySelector('[role="dialog"] [data-slot="dialog-footer"]')
+  if (!footer) throw new Error('编辑仓库对话框缺少操作栏')
+  const close = page.elementLocator(footer).getByRole('button', { name: '关闭', exact: true })
+  await expect.element(close).toBeEnabled()
+  await expect.element(dialog.getByRole('textbox', { name: 'HTTPS 仓库地址', exact: true })).toBeDisabled()
+  await expect.element(dialog.getByRole('combobox', { name: '项目凭证', exact: true })).toBeDisabled()
+  await expect.element(dialog.getByRole('button', { name: '保存', exact: true })).not.toBeInTheDocument()
   expect(f.writes).toHaveLength(1);
-  expect(readPendingProjectWrite()?.body).toEqual(f.writes[0]?.body);
+  const pending = readPendingProjectWrite()
+  expect(pending).toMatchObject({ actorId: 'repo-user', submitted: true, body: f.writes[0]?.body })
+  expect(f.receiptQueries).toHaveLength(1)
+  if (receiptMode === 'missing') await close.click()
+  else await userEvent.keyboard('{Escape}')
+  await expect.element(dialog).not.toBeInTheDocument()
+  await expect.element(screen.getByRole('button', { name: '刷新项目', exact: true })).toHaveFocus()
+  await expect.element(edit).toBeDisabled()
+  expect(readPendingProjectWrite()).toEqual(pending)
+  expect(f.writes).toHaveLength(1)
   expect(f.receiptQueries).toHaveLength(1)
   f.setReceiptMode('completed')
-  await dialog.getByRole("button", { name: "重试", exact: true }).click();
+  await screen.getByRole('button', { name: '重试', exact: true }).click()
+  await expect.element(edit).toBeEnabled()
   await expect.element(dialog).not.toBeInTheDocument()
-  await expect.element(edit).toHaveFocus()
   expect(f.receiptQueries).toHaveLength(2)
   expect(f.receiptQueries[1]).toBe(f.receiptQueries[0])
   expect(readPendingProjectWrite()).toBeNull()
   expect(f.writes).toHaveLength(1)
+  expect(f.writes[0]?.body).toEqual(pending?.body)
   expect(f.writes[0]?.body.value).toEqual({
     name: '业务仓库',
     url: 'https://isolated.invalid/changed.git',

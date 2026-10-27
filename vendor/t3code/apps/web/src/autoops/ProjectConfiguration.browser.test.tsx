@@ -4,7 +4,7 @@ import { projectAssistantReceiptIntent } from '../../../../../../autoops/contrac
 import { StrictMode } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
-import { render, stubGlobal } from '../../test/render'
+import { fakeTimers, render, stubGlobal } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
@@ -114,6 +114,7 @@ it('默认助手缺失失败保留成员表单及错误，取消恢复焦点且�
 })
 
 it.each(['missing', 'mismatch'] as const)("助手分配原owner GET %s 时保持未知，再GET恢复只授权一次", async (receiptMode) => {
+  using _timers = fakeTimers({ shouldAdvanceTime: true })
   const f = setup({ lost: true, receiptMode }); using _fetch = stubGlobal('fetch', f.fetch)
   await using screen = await render(<App />, { router: '/projects?projectId=config-project' })
   const assign = screen.getByRole('button', { name: '分配助手给 待分配成员', exact: true })
@@ -123,20 +124,36 @@ it.each(['missing', 'mismatch'] as const)("助手分配原owner GET %s 时保持
   await page.getByRole('button', { name: '保存', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect.element(dialog.getByRole("button", { name: "重试", exact: true })).toBeEnabled()
-  await expect.element(dialog.getByRole("button", { name: "取消", exact: true })).toBeDisabled()
+  const footer = document.querySelector('[role="dialog"] [data-slot="dialog-footer"]')
+  if (!footer) throw new Error('分配助手对话框缺少操作栏')
+  const close = page.elementLocator(footer).getByRole('button', { name: '关闭', exact: true })
+  await expect.element(close).toBeEnabled()
+  await expect.element(dialog.getByRole('checkbox', { name: '资料分析', exact: true })).toBeDisabled()
+  await expect.element(dialog.getByRole('combobox', { name: '默认助手', exact: true })).toBeDisabled()
+  await expect.element(dialog.getByRole('button', { name: '保存', exact: true })).not.toBeInTheDocument()
   expect(f.writes).toHaveLength(1)
   expect(f.writes[0]?.body).toMatchObject({ target: { kind: 'member', id: 'member' }, assistantIds: ['helper'], defaultAssistantId: 'helper',
   });
-  expect(readPendingProjectWrite()?.body).toEqual(f.writes[0]?.body);
+  const pending = readPendingProjectWrite()
+  expect(pending).toMatchObject({ actorId: 'config-user', submitted: true, body: f.writes[0]?.body })
+  expect(f.receiptQueries).toHaveLength(1)
+  if (receiptMode === 'missing') await close.click()
+  else await userEvent.keyboard('{Escape}')
+  await expect.element(dialog).not.toBeInTheDocument()
+  await expect.element(screen.getByRole('button', { name: '刷新项目', exact: true })).toHaveFocus()
+  await expect.element(assign).toBeDisabled()
+  expect(readPendingProjectWrite()).toEqual(pending)
+  expect(f.writes).toHaveLength(1)
   expect(f.receiptQueries).toHaveLength(1)
   f.setReceiptMode('completed')
-  await dialog.getByRole("button", { name: "重试", exact: true }).click();
+  await screen.getByRole('button', { name: '重试', exact: true }).click()
+  await expect.element(assign).toBeEnabled()
   await expect.element(dialog).not.toBeInTheDocument()
-  await expect.element(assign).toHaveFocus()
   expect(f.receiptQueries).toHaveLength(2)
   expect(f.receiptQueries[1]).toBe(f.receiptQueries[0])
   expect(readPendingProjectWrite()).toBeNull()
   expect(f.writes).toHaveLength(1)
+  expect(f.writes[0]?.body).toEqual(pending?.body)
   expect(f.allocations).toHaveLength(1)
 })
 
