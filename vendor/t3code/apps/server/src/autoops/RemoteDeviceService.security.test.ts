@@ -4,6 +4,13 @@ import { RemoteDeviceHub } from "./RemoteDeviceService.ts";
 import { createCustomerTransportJournal } from "../../../../../../agent-demo/t3-adapters/customer-transport.mjs";
 import * as C from "@t3tools/contracts";
 import { derive } from "@t3tools/provider-core/server/IdAllocator";
+import {
+  makeProviderFailure,
+  makeProviderFailureTurnItem,
+  makeProviderRetryTurnItem,
+} from "@t3tools/provider-core/server/failure";
+import * as DateTime from "effect/DateTime";
+import * as Schema from "effect/Schema";
 import { CustomerCodexCapabilities } from "../provider/HeadlessCodexRunner.ts";
 import { validateCustomerEvent, validateCustomerResult } from "./CustomerEventValidation.ts";
 import type { TransportSession } from "../../../../../../agent-demo/t3-adapters/customer-transport.mjs";
@@ -177,6 +184,104 @@ function expectScopeFailure(fn: () => unknown) {
   expect(fn).toThrowError(expect.objectContaining({ code: "CUSTOMER_EVENT_SCOPE" }));
 }
 describe("customer canonical admission", () => {
+  it("接收原生提供者为已登记轮次生成的重试与终态错误项", () => {
+    const f = fixture();
+    f.admit();
+    const input = {
+      driver: C.ProviderDriverKind.make("codex"),
+      threadId: C.ThreadId.make(f.session.threadId),
+      runId: C.RunId.make("run-one"),
+      nodeId: C.NodeId.make("root-one"),
+      providerThreadId: f.ids.thread,
+      providerTurnId: f.ids.turn,
+      itemOrdinal: 101,
+      failure: makeProviderFailure({ message: "隔离提供者连接失败", class: "transport_error" }),
+      retry: { attempt: 1, maxAttempts: 5, retryDelayMs: null },
+    };
+    const at = DateTime.makeUnsafe(now);
+    for (const row of [
+      makeProviderRetryTurnItem({ ...input, status: "running", startedAt: at, updatedAt: at }),
+      makeProviderRetryTurnItem({ ...input, status: "completed", startedAt: at, updatedAt: at }),
+      makeProviderFailureTurnItem({ ...input, occurredAt: at }),
+    ]) {
+      const json = Schema.encodeSync(C.OrchestrationV2TurnItemJson)(row);
+      expect(() =>
+        validateCustomerEvent(f.session, f.event("turn_item.updated", "turnItem", json)),
+      ).not.toThrow();
+    }
+    expect(f.session.entityBindings).toContainEqual({
+      kind: "turn-item",
+      id: derive.turnItemFromProviderItem({
+        driver: input.driver,
+        nativeItemId: `terminal-failure:${f.ids.turn}`,
+      }),
+      runId: "run-one",
+    });
+  });
+  it("合成错误项仍拒绝伪造ID、类型、实体关联和其他线程、设备或运行尝试", () => {
+    const f = fixture();
+    f.admit();
+    const row = Schema.encodeSync(C.OrchestrationV2TurnItemJson)(
+      makeProviderFailureTurnItem({
+        driver: C.ProviderDriverKind.make("codex"),
+        threadId: C.ThreadId.make(f.session.threadId),
+        runId: C.RunId.make("run-one"),
+        nodeId: C.NodeId.make("root-one"),
+        providerThreadId: f.ids.thread,
+        providerTurnId: f.ids.turn,
+        itemOrdinal: 101,
+        failure: makeProviderFailure({ message: "隔离错误", class: "provider_error" }),
+        occurredAt: DateTime.makeUnsafe(now),
+      }),
+    );
+    const other = fixture("thread-other");
+    const idFor = (id: string) =>
+      derive.turnItemFromProviderItem({
+        driver: C.ProviderDriverKind.make("codex"),
+        nativeItemId: `terminal-failure:${id}`,
+      });
+    for (const patch of [
+      { id: `${row.id}:unexpected` },
+      { id: idFor(other.ids.turn) },
+      { type: "reasoning", text: "隔离推理", streaming: false },
+      { runId: "run-two", nodeId: "root-two" },
+      { threadId: "thread-other" },
+      { providerThreadId: other.ids.thread },
+      { providerTurnId: null },
+      { nodeId: f.ids.node },
+      { nativeItemRef: f.item.nativeItemRef },
+      { parentItemId: f.ids.item },
+    ])
+      expectScopeFailure(() =>
+        validateCustomerEvent(
+          structuredClone(f.session),
+          f.event("turn_item.updated", "turnItem", { ...row, ...patch }),
+        ),
+      );
+    for (const session of [
+      { ...f.session, providerTurnBindings: [] },
+      { ...f.session, deviceId: "foreign-device" },
+      {
+        ...f.session,
+        providerTurnBindings: f.session.providerTurnBindings!.map((turn) => ({
+          ...turn,
+          attemptId: "another-attempt",
+        })),
+      },
+    ])
+      expectScopeFailure(() =>
+        validateCustomerEvent(session, f.event("turn_item.updated", "turnItem", row)),
+      );
+    expectScopeFailure(() =>
+      validateCustomerEvent(f.session, {
+        type: "command_output.delta",
+        driver: "codex",
+        threadId: f.session.threadId,
+        itemId: row.id,
+        chunk: "隔离输出",
+      }),
+    );
+  });
   it("accepts native scoped entities and binds approval replies to this provider session", () => {
     const f = fixture();
     f.admit();

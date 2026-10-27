@@ -1,6 +1,7 @@
 import * as C from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import type { ProviderAdapterV2Event } from "@t3tools/provider-core/server/ProviderAdapter";
+import { derive } from "@t3tools/provider-core/server/IdAllocator";
 import { HeadlessCodexEvent, HeadlessCodexSnapshot } from "../provider/HeadlessCodexProtocol.ts";
 import { CustomerCodexCapabilities } from "../provider/HeadlessCodexRunner.ts";
 import { customerProviderInstanceId } from "../../../../../../agent-demo/t3-adapters/customer-target.mjs";
@@ -119,6 +120,14 @@ function bindEntity(
   }
   if (kind === "turn-item" && parts[1] === "runtime-request")
     bindEntity(session, "runtime-request", decodePart(parts[2]!), runId);
+  rememberEntityRun(session, kind, id, runId);
+}
+function rememberEntityRun(
+  session: TransportSession,
+  kind: "message" | "turn-item" | "runtime-request",
+  id: string,
+  runId: string,
+) {
   const old = session.entityBindings?.find((entry) => entry.kind === kind && entry.id === id);
   if (old) same(old.runId, runId);
   else session.entityBindings = [...(session.entityBindings ?? []), { kind, id, runId }];
@@ -255,13 +264,27 @@ function validateItem(session: TransportSession, row: C.OrchestrationV2TurnItem)
   if (!allowedItemTypes.has(row.type)) reject("客户首版不支持此流程展示");
   same(row.threadId, session.threadId);
   const run = runFor(session, row.runId);
-  scopedId(session, "turn-item", row.id);
+  const turn = knownTurn(session, row.providerTurnId);
+  if (turn) same(turn.runId, run.runId);
+  // T3 的重试/终态错误项由原轮次派生；只允许该精确ID，不能扩宽远端实体命名空间。
+  const providerFailureItem =
+    row.type === "error" &&
+    turn !== undefined &&
+    turn.attemptId === run.attemptId &&
+    row.nodeId === run.rootNodeId &&
+    row.providerThreadId === session.providerThreadId &&
+    row.nativeItemRef === null &&
+    row.parentItemId === null &&
+    row.id ===
+      derive.turnItemFromProviderItem({
+        driver: C.ProviderDriverKind.make("codex"),
+        nativeItemId: `terminal-failure:${turn.id}`,
+      });
+  if (!providerFailureItem) scopedId(session, "turn-item", row.id);
   if (row.parentItemId) bindEntity(session, "turn-item", row.parentItemId, run.runId);
   nativeRef(row.nativeItemRef);
   if (row.nodeId !== null && nodeRun(session, row.nodeId) !== run.runId) reject();
   providerThreadRef(session, row.providerThreadId);
-  const turn = knownTurn(session, row.providerTurnId);
-  if (turn) same(turn.runId, run.runId);
   if (row.type === "assistant_message") {
     bindEntity(session, "message", row.messageId, run.runId);
     if (row.attachments?.length) reject();
@@ -270,7 +293,8 @@ function validateItem(session: TransportSession, row: C.OrchestrationV2TurnItem)
     bindEntity(session, "runtime-request", row.requestId, run.runId);
   if (row.type === "user_input_request") absent(row.questionAnswer);
   if (row.type === "compaction" && row.driver !== null) same(row.driver, "codex");
-  bindEntity(session, "turn-item", row.id, run.runId);
+  if (providerFailureItem) rememberEntityRun(session, "turn-item", row.id, run.runId);
+  else bindEntity(session, "turn-item", row.id, run.runId);
 }
 /** Only canonical events for this center-created session/run enter the native ingestor. */
 export function validateCustomerEvent(

@@ -1506,3 +1506,11 @@ v2实际390×520、hasTouch/isMobile manager完成长文档单项：认证三操
 四状态为本次代码完成、固定完整自动通过、平台c261及正式0.4.2安装包已生效，原设备正常新run和真实共享模型/技能/附件/只读拒绝及断线撤回继续验。正常账号配置仅更新实际Web PID/release，配置e93e19e8，原ID和namespace保持；不重发三历史失败，不因发行和保留核验而报告整体完成。
 
 原设备已正常以0.4.2运行，PID446985/ticks34325587、同device/state/profile。提供者与接收者正常HTTP目录校验 `.deployment/c6-positive-c261-v1-01-actual-evidence-v1/normal-owner-http-v1.json` SHA256 `447d9308525936f0c9cd866a1b9ac8bf31548c37b4fa425c5c7ca161955b42de`：12个真实模型、指定grok-4.6/medium与唯一所选技能可用，接收者不可调；零问答、零推理，目录通过不算模型通过。新独立case的七项准入正反例已正常通过，真实问题仅提交一次，原thread `38c46e00-5bfe-446d-a6c4-c289bb7c5604`、message `0536ec10-a640-4ca7-9a8e-64b0249b31e5`、command `e3c1fd13-419d-4ad6-8a77-e16504302e19` 已固定；结果观察中，不重发原消息。
+
+## 原重试错误事件回传阻断与最小修复（2026-10-27）
+
+原38c46线程、0536消息及e3c1命令只提交一次，business-positive观察300s后exit1，原结果SHA256 `4e4b55e292a442e7a9a44918058f52940a8b1f61898928a64bcd94f6a2da6619`。完整双账本 `.deployment/c6-positive-c261-v1-01-actual-evidence-v1/complete-owned-ledgers-v2.json` SHA256 `a8ef85e549deca9da306a8982637e4126c230edb8d30679c0c38b5e57cc91a66`：三原方法双方completed只代表传输，中央原run/attempt/providerTurn/node仍running；本机session idle、locks0，七原事件seq2..8未ack，tail8/ack1。原本机事件 `original-pending-events-v1.json` SHA256 `db850289646efd32c18b1f9fc5553a275e0536a6d0c324a992aa3d2843c9faac` 明确Codex已00:14:32 failed。保留全部原事件字节、scope和收据，不重发、不删除或伪终态。
+
+两个可验证原因均沿正式源码核对：HeadlessCodexEvent形态候选被原七条全部正常decode排除；CustomerEventValidation对原生IdAllocator派生的terminal-failure错误项要求普通customer native-item前缀，精确导致seq2..6 CUSTOMER_EVENT_SCOPE，seq7/8单独合法但批次在前项停止，故中央不save/apply/ack并反复断线。正式makeProviderRetryTurnItem/makeProviderFailureTurnItem正例红测同步复现。最小修改仅CustomerEventValidation及其安全回归：error类型、已登记knownTurn、同run/attempt、中央root node、原providerThread、无parent/nativeRef及原IdAllocator精确ID同时成立才准入；原普通ID和跨范围检查不变。原红2/29与修后安全31、关联47及服务类型通过，根安全31独立通过，实际原七事件修后均准入；辅助离线准入仍不算现场恢复。
+
+上游首次502与其后403单独待定位，不能把中央回传修复当模型成功。正常同密钥只读CPA目录GET200且grok-4.6仍在目录，证据cpa-models-readonly-v1 SHA256 `f0168197caa79bd27363c1df835792111a4d868bd2b1ad2b9fdb18f664d55f72`，未发推理。47B原proof源SHA9862b35a保持，不证明模型读取。relay原未arm、无dropped/original/protocolFault，原故障测试未开始。固定CI、正式候选、明确单原任务终态事件收束维护及原正常ack后再验；不把中央running伪称idle或放宽旧strict发行检查。四状态：代码实现/相关自动通过/发布待完成/真实恢复及模型业务待完成。
