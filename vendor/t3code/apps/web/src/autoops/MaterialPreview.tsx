@@ -6,9 +6,13 @@ import * as Cause from 'effect/Cause'
 import { appAtomRegistry } from '~/rpc/atomRegistry'
 import { projectEnvironment } from '~/state/projects'
 import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
-import { readAutoOpsThreadScope } from './hostConfig'
+import { readAutoOpsHost, readAutoOpsThreadScope } from './hostConfig'
 import FilePreviewPanel, { type FilePreviewPanelProps } from '~/components/files/FilePreviewPanel'
-import { FileSurfaceFailure, FileSurfaceLoading } from '~/components/files/fileSurfaceChrome'
+import {
+  FileSurfaceFailure,
+  FileSurfaceLoading,
+  FileSurfaceNotice,
+} from '~/components/files/fileSurfaceChrome'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
 import { filesystemEnvironment } from '~/state/filesystem'
 import { useAtomQueryRunner } from '~/state/use-atom-query-runner'
@@ -19,10 +23,13 @@ import {
   autoOpsResourceCwd,
   autoOpsResourceUrl,
   isAutoOpsResourceCwd,
+  loadAutoOpsResourceMetadata,
+  loadWorkspaceFileReference,
 } from './resources'
 import { useAutoOpsThreadScope } from './useThreadScope'
 import {
   legacyPreviewPathAllowed,
+  currentWorkspaceFileReference,
   workspaceInputRoot,
   workspacePreviewPathAllowed,
 } from './materialPreviewScope'
@@ -153,11 +160,26 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
     ? autoOpsResourceCwd(props.threadRef.threadId, scope.projectId, scope, versionId ?? undefined)
     : null
   const referencedInput = !versionId && projectId ? workspaceInputRoot(canonical, projectId) : null
-  const inputReadKey = `${scopeCwd ?? ''}:${referencedInput ?? 'current'}`
+  const alias = !versionId && projectId ? currentWorkspaceFileReference(canonical, projectId) : null
+  const referenceInputId = alias?.inputId ?? referencedInput?.split('/')[3]
+  const referencedFile =
+    alias?.path ??
+    (referencedInput && canonical && canonical !== referencedInput
+      ? canonical.slice(referencedInput.length + 1)
+      : null)
+  const invalidAlias = canonical?.split('/')[2] === 'current-input-files' && !alias
+  const inputReadKey = `${readAutoOpsHost()?.principal.id ?? ''}:${props.environmentId}:${scopeCwd ?? ''}:${referencedFile ? canonical : (referencedInput ?? 'current')}`
   const [resolved, setResolved] = useState<{
     key: string
     prefix: string | null
     error?: string
+    readPath?: string
+    currentFile?: {
+      resourcePath: string
+      path: string
+      changed: boolean
+      metadata: Awaited<ReturnType<typeof loadAutoOpsResourceMetadata>>
+    }
   } | null>(null)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
@@ -167,40 +189,80 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
       !scopeCwd ||
       !projectId ||
       !scope?.workspaceType ||
-      versionId
+      versionId ||
+      invalidAlias
     )
       return
     let cancelled = false
-    void executeAtomQuery(
-      appAtomRegistry,
-      projectEnvironment.listEntries({
-        environmentId: props.environmentId,
-        input: {
-          cwd: referencedInput ? `${scopeCwd}&inputId=${referencedInput.split('/')[3]}` : scopeCwd,
-          directoryPath: referencedInput ?? '',
-        },
-      }),
-      { refresh: true, reportFailure: false, reportDefect: false },
-    )
-      .then((result) => {
-        if (cancelled) return
-        if (result._tag !== 'Success') throw Cause.squash(result.cause)
-        const first = result.value.entries[0]
-        const returned = first ? workspaceInputRoot(first.path, projectId) : null
-        if (first && (!returned || (referencedInput && returned !== referencedInput)))
-          throw new Error('工作区返回的输入身份无效，请重试。')
-        setResolved({ key: inputReadKey, prefix: referencedInput ?? returned })
+    const controller = new AbortController()
+    void (async () => {
+      let selectedInput = referencedInput
+      let currentFile: NonNullable<typeof resolved>['currentFile']
+      let readPath: string | undefined
+      if (referenceInputId && referencedFile) {
+        const reference = await loadWorkspaceFileReference(
+          projectId,
+          {
+            threadId: alias?.threadId ?? props.threadRef.threadId,
+            viewerThreadId: props.threadRef.threadId,
+            inputId: referenceInputId,
+            path: referencedFile,
+            workspaceType: scope.workspaceType!,
+          },
+          controller.signal,
+        )
+        if (reference.mode === 'current') {
+          const metadata = await loadAutoOpsResourceMetadata(
+            reference.resourcePath,
+            controller.signal,
+          )
+          currentFile = {
+            resourcePath: reference.resourcePath,
+            path: reference.currentPath,
+            changed: reference.changed,
+            metadata,
+          }
+          selectedInput = null
+        } else {
+          selectedInput = workspaceInputRoot(reference.resourcePath, projectId)
+          readPath = reference.resourcePath
+        }
+      }
+      const result = await executeAtomQuery(
+        appAtomRegistry,
+        projectEnvironment.listEntries({
+          environmentId: props.environmentId,
+          input: {
+            cwd: selectedInput ? `${scopeCwd}&inputId=${selectedInput.split('/')[3]}` : scopeCwd,
+            directoryPath: selectedInput ?? '',
+          },
+        }),
+        { refresh: true, reportFailure: false, reportDefect: false },
+      )
+      if (cancelled) return
+      if (result._tag !== 'Success') throw Cause.squash(result.cause)
+      const first = result.value.entries[0]
+      const returned = first ? workspaceInputRoot(first.path, projectId) : null
+      if (first && (!returned || (selectedInput && returned !== selectedInput)))
+        throw new Error('工作区返回的输入身份无效，请重试。')
+      if (currentFile && !returned) throw new Error('当前文件目录已经改变，请重新打开。')
+      setResolved({
+        key: inputReadKey,
+        prefix: selectedInput ?? returned,
+        ...(currentFile ? { currentFile } : {}),
+        ...(readPath ? { readPath } : {}),
       })
-      .catch((cause: unknown) => {
-        if (!cancelled)
-          setResolved({
-            key: inputReadKey,
-            prefix: null,
-            error: cause instanceof Error ? cause.message : '当前工作区不可用。',
-          })
-      })
+    })().catch((cause: unknown) => {
+      if (!cancelled)
+        setResolved({
+          key: inputReadKey,
+          prefix: null,
+          error: cause instanceof Error ? cause.message : '当前工作区不可用。',
+        })
+    })
     return () => {
       cancelled = true
+      controller.abort()
     }
   }, [
     scopeCwd,
@@ -208,11 +270,17 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
     scope?.workspaceType,
     versionId,
     referencedInput,
+    referencedFile,
+    referenceInputId,
+    alias?.threadId,
+    invalidAlias,
     inputReadKey,
     props.attachment,
     props.environmentId,
+    props.threadRef.threadId,
     attempt,
   ])
+  const currentFile = resolved?.key === inputReadKey ? resolved.currentFile : undefined
   const prefix =
     versionId && projectId
       ? `autoops/${projectId}/workspaces/${versionId}`
@@ -230,9 +298,10 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
         ? { ...entry, path: entry.path.slice(prefix.length + 1) }
         : null
     return {
-      id: cwd,
+      id: currentFile ? `${cwd}:${currentFile.resourcePath}` : cwd,
       allowReferences: true,
-      mentionPath: resourcePath,
+      mentionPath: (path) =>
+        currentFile?.path === path ? currentFile.resourcePath : resourcePath(path),
       async list(directoryPath) {
         const result = await executeAtomQuery(
           appAtomRegistry,
@@ -270,6 +339,17 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
         }
       },
       async metadata(path) {
+        if (currentFile?.path === path) {
+          const url = autoOpsResourceUrl(currentFile.resourcePath)
+          if (!url) throw new Error('当前文件定位无效，请重新打开。')
+          return {
+            kind: 'file' as const,
+            name: currentFile.metadata.name,
+            mimeType: currentFile.metadata.mime,
+            sizeBytes: currentFile.metadata.size,
+            url,
+          }
+        }
         const canonicalPath = resourcePath(path)
         const result = await executeAtomQuery(
           appAtomRegistry,
@@ -294,10 +374,12 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
         }
       },
     }
-  }, [cwd, prefix, props.environmentId])
+  }, [cwd, prefix, props.environmentId, currentFile])
   if (!isAutoOpsHosted() || props.attachment) return <LegacyMaterialPreview {...props} />
   if (!scope || !cwd)
     return <FileSurfaceFailure message="对话工作区范围不可用，请等待范围加载完成后重试。" />
+  if (invalidAlias)
+    return <FileSurfaceFailure message="此文件引用不属于当前项目，或其来源身份无效。" />
   if (!versionId && !scope.workspaceType) {
     const legacyBound =
       knownScope?.scopeLocked ||
@@ -332,13 +414,15 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
       </Empty>
     )
   }
-  if (canonical && !workspacePreviewPathAllowed(canonical, prefix))
+  const readPath = resolved?.key === inputReadKey ? (resolved.readPath ?? canonical) : canonical
+  if (!currentFile && readPath && !workspacePreviewPathAllowed(readPath, prefix))
     return <FileSurfaceFailure message="此资料不属于当前预览的输入，请从原文件引用重新打开。" />
-  const relative =
-    canonical === prefix
+  const relative = currentFile
+    ? currentFile.path
+    : readPath === prefix
       ? null
-      : canonical
-        ? canonical.slice(prefix.length + 1)
+      : readPath
+        ? readPath.slice(prefix.length + 1)
         : props.relativePath
   const toCanonical = (path: string) => (path ? `${prefix}/${path}` : prefix)
   const trail =
@@ -347,7 +431,7 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
       : props.folderTrail?.startsWith(prefix + '/')
         ? props.folderTrail.slice(prefix.length + 1)
         : undefined
-  return (
+  const preview = (
     <FilePreviewPanel
       {...props}
       cwd={cwd}
@@ -360,5 +444,13 @@ function WorkspaceMaterialPreview(props: FilePreviewPanelProps) {
         props.onNavigateFolder(toCanonical(path), toCanonical(nextTrail), keepSource)
       }
     />
+  )
+  return currentFile ? (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FileSurfaceNotice>{currentFile.changed ? '当前文件已更新' : '当前文件'}</FileSurfaceNotice>
+      {preview}
+    </div>
+  ) : (
+    preview
   )
 }

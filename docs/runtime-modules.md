@@ -119,6 +119,27 @@ SQL v4 在保存最终输入前持久准备收据与原件引用：先保护选�
 
 本机 D1/current/实际资源相关 87 项、基础 SQLite/升级/事务/authoring/仓库相关 36 项通过（两集合不累加）；适配器、原生与纯后端类型、运行边界和 diff 检查通过。证据 `.deployment/workspace-current-*-before.log`、`workspace-current-catalog-related-after.log`、`database-open-lock-{before,after}.log`。仅暂存 D1 候选独立导出后 73 项定向、9 项真实原生资料 HTTP、全部运行类型、266 文件边界、实际 Web/Worker 构建及 10446 文件/81 动态依赖的 ZIP 冒烟通过，原输入及重复请求保持；完整 CI 继续核对（日志 `.deployment/current-index-*`）。真实发送、定期更新、服务器发行及全生命周期尚待相应批次，不把本批无 Git 单测当整体完成。
 
+
+### 历史普通文件继续预览与引用（2026-10-28）
+
+历史会话 `1bea28c4` 的 `admin.html` 真实GET返回410/`WORKSPACE_INPUT_RELEASED`，input `8812906d` 已回收而claim仍在；根原件 `ROOT/d1-historical-8812906d-resource-red-root-v1.json` SHA256 `70939ea71ef5ee91384ebb400993e48cae576303f1381d524195721dd17045be`。可能原因一为当前资料已删除：同来源文件仍存在，排除本例；原因二为普通标签一直读已释放input：原入口410及owner失败用例支持。影响仅普通文件定位合同、access/resources、current/authoring及原生HTTP和预览；活动轮次、显式版本、部署包、电脑文件和私有成果保持原合同。
+
+原 `MaterialPreview → workspace/file-reference → access/resources → workspace-current/authoring` 复核实际登录、来源/查看线程、项目/环境/区域和文件身份。上传按原ID识别，改名保持ID、删除重建不继承；Git按来源ID、规范化origin与相对路径识别，同名异源、换URL拒绝。外部新输入只保存必要来源元数据，不保留旧正文或永久保护；存量缺证据明确不可定位，仅两份仍在固定manifest证明同一发布来源时可再引用。HTTP禁缓存，正文固定当前revision、迟到变化409；新发送捕获本轮固定input，工具之后只读该input，不在执行中再取最新或访问Git。
+
+界面沿用锁定T3的ReadOnlyFileSource/ReadOnlyWorkspaceFiles、原“添加到对话”及文件标签，内容变化时显示“当前文件已更新”，未变也明确当前内容。同一初态为原会话已有标签、input已回收、当前同来源文件存在：
+
+| 核心任务 | 修改前完整操作 | 修改后完整操作 | 验证与边界 |
+| --- | --- | --- | --- |
+| 打开旧文件 | 点旧标签1次→410，无法完成 | 点旧标签1次→自动定位及正文等待→原生预览，无额外确认 | 浏览器覆盖变化/未变/改名和迟到隔离；站点待部署 |
+| 再引用并重新打开 | 第1次点击即失败，无法完成后续 | ①点旧标签；②点原“添加到对话”；③点草稿新标签，3次；两次读取等待不计操作 | 原ReadOnlyWorkspaceFiles、Composer草稿、ChatMarkdown与重新定位实际执行；真实模型发送待验 |
+| 临时失败恢复 | 点重试1次仍读已释放input | 503保留真实原因，点原重试1次重新GET | 删除/换源/撤权拒绝，无静默fallback；alert和恢复入口保持 |
+
+用户可连续使用旧会话并辨明当前内容；开发者复用纯合同和原生面板，不把latest混入固定reader；Agent获得语义标签、明确当前canonical与新轮固定输入，可判断拒绝及成功，界面不暴露内部目录。初版遗漏“添加到对话”由浏览器红例证明并补回。后续5失败为测试对包含重试按钮的alert作全文匹配，正文均正确；只改为核alert中精确可见正文，保留错误/重试，拒绝fixture仅匹配本端点且每次新建Response，失败原件保留。
+
+自动证据：后端冻结 `.deployment/d1-file-reference-backend-freeze-v1.json` SHA256 `91d6ee8cf6b3c0d647a686bc6c2dafd02b0a9542cc0d6feca0255f792a641d3b`。Node105/105、原生HTTP17/17在最后只读历史/草稿隔离/存量外部三个局部分支前执行；最终安全固定10/10及root独立同10/10补验，不混称105在最终字节重跑。fresh server/adapters/Web类型、运行边界退出0，三个Web单测文件32/32。UI冻结 `.deployment/d1-current-file-reference-ui-v1/freeze-v1.json` SHA256 `2b4489c54fde00d9dcfab94f82692bc9bfc6b3c900084338e6257b14f1cf34ef`；root整组 `.deployment/d1-current-reference-browser-all-v2.log` 18/18通过（4.88秒），执行期间字节未改，专用IAB页已关闭。八文件format通过，ResourceLink保持上游风格；lint仍有HEAD既有7errors/3warnings，无新增，不称全过。
+
+四状态：代码完成、受影响自动回归通过/完整新CI待验、新定位未部署、真实连续业务未验。已有D1零Git问答证据有效，不代替历史标签、新问答和权限异常的新验收。
+
 ## 项目仓库连接与工作区引用拆分（2026-10-26）
 
 影响范围为已有资料模块的公共合同、存储升级/查询/写入、Git 查询编排和新增原生项目仓库 HTTP；凭证、Git 执行、资料捕获和部署源码包仍使用现有能力，无新增依赖、第二份连接目录或独立后端。核对所有 authoring_sources SQL，当前读写只归资料模块；已有不可变捕获不读取当前连接的可变字段。

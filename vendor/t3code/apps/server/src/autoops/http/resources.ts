@@ -12,10 +12,32 @@ import { saveAuthorizedPlan } from '../../../../../../../agent-demo/t3-adapters/
 import { resolveAttachmentPathById } from '../../attachmentStore.ts'
 import * as ServerConfig from '../../config.ts'
 import { resourceHeaders, resourceMetadata } from './responses.ts'
+import { decodeContract } from '../../../../../../../autoops/contracts/index.ts'
+import { WorkspaceFileReferenceRequest } from '../../../../../../../autoops/contracts/workspace-file-reference.ts'
 
 export function resourcesRoutes({ access, principal }: BusinessHttpContext) {
 
 return Layer.mergeAll(
+HttpRouter.add('GET', '/api/v1/projects/:projectId/workspace/file-reference', Effect.gen(function* () {
+      const current = yield* principal;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const url = new URL(request.url, 'http://localhost');
+      let input;
+      try {
+        if (url.searchParams.size !== new Set(url.searchParams.keys()).size) throw new Error('duplicate');
+        input = decodeContract(WorkspaceFileReferenceRequest, Object.fromEntries(url.searchParams));
+      } catch { return HttpServerResponse.jsonUnsafe({code:'WORKSPACE_REFERENCE_REQUEST_INVALID',error:'普通文件定位参数无效'},{status:400}); }
+      const projectId = decodeURIComponent(url.pathname.split('/')[4] ?? '');
+      const catalog = configuredBusinessResourceCatalog();
+      if (!catalog) return HttpServerResponse.jsonUnsafe({code:'WORKSPACE_UNAVAILABLE',error:'工作区暂时不可用'},{status:503});
+      const value = yield* Effect.try(() => catalog.resolveWorkspaceFileReference(current, {...input,projectId}));
+      // 回复前再次核实际登录、会话范围和原引用，不继承输入所有者权限。
+      const final = yield* principal;
+      if (final.id !== current.id) return HttpServerResponse.jsonUnsafe({code:'WORKSPACE_REFERENCE_ACTOR_CHANGED',error:'登录身份已改变，请重新打开'},{status:403});
+      const checked = yield* Effect.try(() => catalog.resolveWorkspaceFileReference(final, {...input,projectId}));
+      if (checked.resourcePath !== value.resourcePath || checked.sha256 !== value.sha256) return HttpServerResponse.jsonUnsafe({code:'WORKSPACE_REFERENCE_CHANGED',error:'当前文件已更新，请重新打开'},{status:409});
+      return HttpServerResponse.jsonUnsafe(checked,{headers:{'cache-control':'private, no-store'}});
+    }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
 HttpRouter.add("POST", "/autoops/plan-materials", Effect.gen(function* () {
       const current = yield* principal;
       const request = yield* HttpServerRequest.HttpServerRequest;

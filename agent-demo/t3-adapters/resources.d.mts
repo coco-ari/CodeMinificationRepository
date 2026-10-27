@@ -2,10 +2,12 @@ import type { AutoOpsPrincipal, AutoOpsAccess, InputReferenceClaim } from './acc
 import type { createBusinessArtifactStore } from './business-tools.mjs';
 import type { WorkspaceManagement } from './workspace-management.ts';
 import type { configuredWorkspaceStore } from './workspaces.mjs';
+import type { WorkspaceFileReference, WorkspaceFileReferenceRequest } from '../../autoops/contracts/workspace-file-reference.ts';
 export interface ResourceInput {cwd:string;query:string;limit:number;kind?:'file'|'directory';imageOnly?:boolean}
 export interface ResourceContext {records:ReadonlyArray<{kind:string;path?:string}>}
 export interface ResourceEntries {entries:{path:string;kind:'file'|'directory'}[];truncated:boolean}
 export interface BusinessResourceCatalog {
+  resolveWorkspaceFileReference(principal:AutoOpsPrincipal,input:WorkspaceFileReferenceRequest & {projectId:string}):WorkspaceFileReference;
   projectAtCwd(principal:AutoOpsPrincipal,cwd:string):unknown;
   search(principal:AutoOpsPrincipal,input:ResourceInput):ResourceEntries | Promise<ResourceEntries>;
   list(principal:AutoOpsPrincipal,input:{cwd:string;directoryPath?:string}):ResourceEntries | Promise<ResourceEntries>;
@@ -15,5 +17,5 @@ export interface BusinessResourceCatalog {
   requireContext(threadId:string,context:ResourceContext|undefined,actorId?:string,claim?:InputReferenceClaim):void;
   readForThread(threadId:string,path:string,inputId?:string,referenceInputIds?:ReadonlyArray<string>,history?:{referencePaths:ReadonlyArray<string>;attachmentIds:ReadonlyArray<string>;acceptedAt:string;runId?:string;actorId?:string}):Promise<Record<string,unknown>>;
 }
-export function createBusinessResourceCatalog(options:{access:AutoOpsAccess;artifactStore?:ReturnType<typeof createBusinessArtifactStore>;readAttachment?:(id:string)=>Promise<Uint8Array>;workspaceStore?:ReturnType<typeof configuredWorkspaceStore>;workspaceInputs?:Pick<WorkspaceManagement,'captureAvailableInput'|'readInput'|'inputFiles'|'readInputFile'|'readInputContent'>}):BusinessResourceCatalog;
+export function createBusinessResourceCatalog(options:{access:AutoOpsAccess;artifactStore?:ReturnType<typeof createBusinessArtifactStore>;readAttachment?:(id:string)=>Promise<Uint8Array>;workspaceStore?:ReturnType<typeof configuredWorkspaceStore>;workspaceInputs?:Pick<WorkspaceManagement,'captureAvailableInput'|'readInput'|'inputFiles'|'readInputFile'|'readInputContent'> & Partial<Pick<WorkspaceManagement,'resolveInputFileReference'|'readInputReference'|'fixedInputFileReference'>>}):BusinessResourceCatalog;
 export function configuredBusinessResourceCatalog(options?:{readAttachment?:(id:string)=>Promise<Uint8Array>}):BusinessResourceCatalog|undefined;

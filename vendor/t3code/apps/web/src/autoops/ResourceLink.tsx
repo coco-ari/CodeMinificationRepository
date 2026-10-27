@@ -8,6 +8,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useRenderedAppearance } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
 import { readAutoOpsHost } from "./hostConfig";
+import { workspaceRelativePath } from "./pathCompletion";
 import {
   autoOpsResourceAttachmentId,
   autoOpsResourceUrl,
@@ -75,6 +76,13 @@ export function AutoOpsResourceLink({
   // 固定路径和原始链接名称已足够呈现标签，不在时间线重挂载时请求元数据。
   const path = new URL(url, readAutoOpsHost()?.httpBaseUrl).searchParams.get("path");
   const name = path?.split("/").at(-1) || label || "文件";
+  const displayPath =
+    path?.split("/")[2] === "current-input-files"
+      ? workspaceRelativePath(path, {
+          projectId: path.split("/")[1]!,
+          workspaceType: "internal",
+        }) ?? name
+      : path;
   const normalizedLabel = label.trim().replace(/^\.\//, "");
   const labelIsPath =
     !!path &&
@@ -114,7 +122,7 @@ export function AutoOpsResourceLink({
         }
       />
       <TooltipPopup side="top" variant="code">
-        {(path ?? label) || "文件"}
+        {(displayPath ?? label) || "文件"}
       </TooltipPopup>
     </Tooltip>
   );

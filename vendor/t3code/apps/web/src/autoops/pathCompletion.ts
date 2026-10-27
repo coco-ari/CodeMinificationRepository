@@ -25,9 +25,9 @@ export function workspaceRelativePath(
     !/^[a-zA-Z0-9_-]+$/.test(scope.projectId)
   )
     return null
-  const currentPrefix = new RegExp(`^autoops/${scope.projectId}/inputs/[a-zA-Z0-9_-]+/`).exec(
-    path,
-  )?.[0]
+  const currentPrefix = new RegExp(
+    `^autoops/${scope.projectId}/(?:inputs/[a-zA-Z0-9_-]+|current-input-files/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)/`,
+  ).exec(path)?.[0]
   const prefix =
     currentPrefix ??
     (scope.workspaceVersionId && /^[a-zA-Z0-9_-]+$/.test(scope.workspaceVersionId)

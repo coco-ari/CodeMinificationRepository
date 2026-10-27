@@ -21,6 +21,7 @@ import type {
   ProjectRepositoryConnection,
   WorkspaceRepositoryUsage,
   WorkspaceInputCapture,
+  WorkspaceFileIdentity,
   WorkspaceInputRepository,
   WorkspaceInputSelection,
   WorkspaceInputMaintenanceRecord,
@@ -1736,6 +1737,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
             files: [],
             directories: [],
             externalVersionId: id(selection.versionId),
+            ...(selection.fileReferences ? { externalFileReferences: structuredClone(selection.fileReferences) } : {}),
           }
         } else {
           let captured = api.capture(projectId, selection.revision, actorId, requestId, {
@@ -1824,6 +1826,18 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         return structuredClone(value)
       })
     },
+    readInputReference(projectId: string, inputId: string, ownerId: string, actorId: string, workspaceType: 'internal' | 'external'): WorkspaceInputCapture {
+      authorize(projectId, actorId, workspaceType === 'internal' ? 'read' : 'external-read')
+      const row = db
+        .prepare('SELECT * FROM authoring_inputs WHERE project_id=? AND id=?')
+        .get(id(projectId), id(inputId))
+      if (!row || row.actor_id !== ownerId)
+        fail(404, 'WORKSPACE_INPUT_NOT_FOUND', '本轮资料输入不存在或无权访问')
+      const value = JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+      if (value.workspaceType !== workspaceType)
+        fail(404, 'WORKSPACE_INPUT_NOT_FOUND', '本轮资料输入不存在或无权访问')
+      return value
+    },
     readInput(projectId: string, inputId: string, actorId: string): WorkspaceInputCapture {
       const row = db
         .prepare('SELECT * FROM authoring_inputs WHERE project_id=? AND id=?')
@@ -1833,6 +1847,23 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       const value = JSON.parse(text(row, 'value')) as WorkspaceInputCapture
       authorize(projectId, actorId, value.workspaceType === 'internal' ? 'read' : 'external-read')
       return value
+    },
+    publishedInputFileReferences(projectId: string, inputId: string, filePaths: string[]): Array<{path: string; identity: WorkspaceFileIdentity}> {
+      if (closed) fail(503, 'WORKSPACE_AUTHORING_STOPPING', '工作区资料服务已关闭')
+      const row = db.prepare('SELECT value FROM authoring_inputs WHERE project_id=? AND id=?').get(id(projectId), id(inputId))
+      if (!row) fail(409, 'WORKSPACE_REFERENCE_IDENTITY_UNKNOWN', '外部来源的原输入身份无法核验')
+      const value = JSON.parse(text(row, 'value')) as WorkspaceInputCapture
+      if (value.workspaceType !== 'internal') fail(409, 'WORKSPACE_REFERENCE_IDENTITY_UNKNOWN', '外部来源的原输入范围无法核验')
+      // 调用方先证明已发布外部版本与此输入的来源链，再按真实发布 manifest 过滤。
+      return filePaths.flatMap<{path: string; identity: WorkspaceFileIdentity}>(filePath => {
+        path(filePath)
+        const upload = value.files.find(file => file.path === filePath)
+        if (upload) return [{path: filePath, identity: {kind: 'upload', id: upload.id} satisfies WorkspaceFileIdentity}]
+        const repository = value.repositories.find(repository => repository.sourceId === repository.source.id && filePath.startsWith(repository.source.mountPath + '/'))
+        return repository ? [{path: filePath, identity: {kind: 'repository', sourceId: repository.sourceId,
+          originHash: hash(JSON.stringify([new URL(repository.source.url).toString(), repository.source.sourcePath ?? ''])),
+          relativePath: filePath.slice(repository.source.mountPath.length + 1)} satisfies WorkspaceFileIdentity}] : []
+      })
     },
     releaseInput(projectId: string, inputId: string, actorId: string): WorkspaceInputCapture {
       const value = api.readInput(projectId, inputId, actorId)

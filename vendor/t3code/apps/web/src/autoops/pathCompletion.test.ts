@@ -14,6 +14,15 @@ const root = 'autoops/p-autoops/workspaces/version-1/'
 const file = (path: string) => ({ path: root + path, kind: 'file' as const })
 const directory = (path: string) => ({ path: root + path, kind: 'directory' as const })
 
+it('当前文件引用显示相对路径，不把线程和临时版本作为资料目录', () => {
+  const alias =
+    'autoops/p-autoops/current-input-files/source-thread/old-input/revision-2/docs/说明.md'
+  expect(workspaceRelativePath(alias, scope)).toBe('docs/说明.md')
+  expect(workspaceRelativePath(alias, { ...scope, workspaceType: 'external' })).toBe('docs/说明.md')
+  expect(workspaceRelativePath(alias.replace('p-autoops', 'p-other'), scope)).toBeNull()
+  expect(workspaceRelativePath(alias.replace('docs/说明.md', '../secret'), scope)).toBeNull()
+})
+
 describe('workspace path query completion', () => {
   it('resolves only complete paths inside the current immutable scope', () => {
     expect(workspaceRelativePath(root + 'frontend/package.json', scope)).toBe(

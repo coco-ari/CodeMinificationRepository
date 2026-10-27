@@ -1,4 +1,9 @@
-import { autoOpsRequest } from './apiClient'
+import { decodeContract } from '../../../../../../autoops/contracts/index.ts'
+import {
+  WorkspaceFileReference,
+  type WorkspaceFileReferenceRequest,
+} from '../../../../../../autoops/contracts/workspace-file-reference.ts'
+import { AutoOpsRequestError, autoOpsRequest } from './apiClient'
 import { readAutoOpsHost, readAutoOpsThreadScope, type AutoOpsThreadScope } from './hostConfig'
 import { formatWorkspacePathQuery, workspaceRelativePath } from './pathCompletion'
 
@@ -41,10 +46,66 @@ export function autoOpsBusinessPath(value: string | undefined): string | null {
     return null
   if (
     parts.length > 2 &&
-    !['documents', 'environments', 'threads', 'workspaces', 'inputs'].includes(parts[2] ?? '')
+    ![
+      'documents',
+      'environments',
+      'threads',
+      'workspaces',
+      'inputs',
+      'current-input-files',
+    ].includes(parts[2] ?? '')
   )
     return null
   return path
+}
+
+export async function loadWorkspaceFileReference(
+  projectId: string,
+  input: WorkspaceFileReferenceRequest,
+  signal?: AbortSignal,
+): Promise<WorkspaceFileReference> {
+  const query = new URLSearchParams({
+    threadId: input.threadId,
+    inputId: input.inputId,
+    path: input.path,
+    workspaceType: input.workspaceType,
+  })
+  if (input.viewerThreadId) query.set('viewerThreadId', input.viewerThreadId)
+  const raw = await autoOpsRequest<unknown>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/workspace/file-reference?${query}`,
+    { label: '当前文件', ...(signal ? { signal } : {}) },
+  )
+  let reference: WorkspaceFileReference
+  try {
+    reference = decodeContract(WorkspaceFileReference, raw)
+  } catch {
+    throw new AutoOpsRequestError(
+      '文件定位结果无效，请重试。',
+      'WORKSPACE_FILE_REFERENCE_INVALID',
+      undefined,
+    )
+  }
+  const resource = autoOpsBusinessPath(reference.resourcePath)?.split('/')
+  if (
+    reference.projectId !== projectId ||
+    reference.threadId !== input.threadId ||
+    reference.viewerThreadId !== (input.viewerThreadId ?? input.threadId) ||
+    reference.workspaceType !== input.workspaceType ||
+    reference.originalInputId !== input.inputId ||
+    reference.originalPath !== input.path ||
+    resource?.[1] !== projectId ||
+    (reference.mode === 'original'
+      ? reference.changed ||
+        reference.resourcePath !== `autoops/${projectId}/inputs/${input.inputId}/${input.path}`
+      : reference.resourcePath !==
+        `autoops/${projectId}/current-input-files/${input.threadId}/${input.inputId}/${reference.revision}/${input.path}`)
+  )
+    throw new AutoOpsRequestError(
+      '文件定位范围已改变，请重试。',
+      'WORKSPACE_FILE_REFERENCE_INVALID',
+      undefined,
+    )
+  return reference
 }
 export function autoOpsResourceCwd(
   threadId: string | null,

@@ -6,6 +6,8 @@ import { extractBusinessAttachment } from './business-documents.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
 import { configuredWorkspaceManagement } from './workspace-management.ts'
 import { readScopedSkillResourceForThread } from './scoped-skills.mjs'
+import { decodeContract } from '../../autoops/contracts/index.ts'
+import { WorkspaceFileReferenceRequest, WorkspaceFileReference } from '../../autoops/contracts/workspace-file-reference.ts'
 
 const fail = (message) => { throw new AutoOpsAccessError(404, 'RESOURCE_NOT_FOUND', message || '资料不存在或无权访问') }
 const nameFor = (name) => name.replace(/[\/\\\u0000-\u001f]/g, '_').slice(0, 160) || 'file'
@@ -95,6 +97,61 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
   }
   const inputs = () => workspaceInputs ??= configuredWorkspaceManagement(access)
   const inputRoot = (projectId, inputId) => `autoops/${projectId}/inputs/${inputId}`
+  function referenceOwner(binding, input, actor) {
+    if (!inputs().readInputReference) throw new AutoOpsAccessError(503, 'WORKSPACE_UNAVAILABLE', '工作区文件定位暂时不可用')
+    try {
+      inputs().readInputReference(binding.projectId, input.inputId, actor, actor, binding.workspaceType)
+      return actor
+    } catch (error) { if (error.code !== 'WORKSPACE_INPUT_NOT_FOUND') throw error }
+    const own = access.listThreadInputs(binding.threadId).find(value => value.inputId === input.inputId)
+    const reference = access.inputReferences(binding.threadId).find(value => value.inputId === input.inputId)
+    const inputOwnerId = own?.inputOwnerId ?? reference?.actorId
+    if (!inputOwnerId) fail('此文件输入不属于当前可见会话或已确认引用')
+    return inputOwnerId
+  }
+  function referenceScope(principal, input) {
+    const binding = access.requireCurrentFileReference(principal, input.threadId, input.viewerThreadId ?? input.threadId)
+    if (binding.projectId !== input.projectId || binding.workspaceType !== input.workspaceType || binding.executionBinding?.kind === 'customer') fail()
+    access.requireWorkspace(principal, binding.projectId, input.workspaceType, undefined, binding.environmentId)
+    return referenceOwner(binding, input, principal.id)
+  }
+  function resolvedReference(principal, input, expectedRevision) {
+    const request = decodeContract(WorkspaceFileReferenceRequest, { threadId: input.threadId, inputId: input.inputId, path: input.path, workspaceType: input.workspaceType,
+      ...(input.viewerThreadId === undefined ? {} : { viewerThreadId: input.viewerThreadId }) })
+    assertPath(request.path)
+    const scoped = { ...request, projectId: input.projectId }
+    const actor = referenceScope(principal, scoped)
+    if (!inputs().resolveInputFileReference) throw new AutoOpsAccessError(503, 'WORKSPACE_UNAVAILABLE', '工作区文件定位暂时不可用')
+    const current = inputs().resolveInputFileReference(scoped.projectId, request.inputId, request.path, actor, principal.id, request.workspaceType)
+    if (current.workspaceType !== request.workspaceType || referenceScope(principal, scoped) !== actor) fail()
+    if (expectedRevision !== undefined && (current.mode !== 'current' || current.revision !== expectedRevision))
+      throw new AutoOpsAccessError(409, 'WORKSPACE_REFERENCE_CHANGED', '当前文件已更新，请重新打开预览')
+    const resourcePath = current.mode === 'original' ? `${inputRoot(scoped.projectId, request.inputId)}/${request.path}` :
+      `autoops/${scoped.projectId}/current-input-files/${request.threadId}/${request.inputId}/${current.revision}/${request.path}`
+    const value = decodeContract(WorkspaceFileReference, { projectId: scoped.projectId, threadId: request.threadId, viewerThreadId: request.viewerThreadId ?? request.threadId, workspaceType: request.workspaceType,
+      originalInputId: request.inputId, originalPath: request.path, currentPath: current.currentPath, mode: current.mode,
+      resourcePath, revision: current.revision, sha256: current.sha256, changed: current.changed })
+    return { value, file: current.file }
+  }
+  function currentIdentity(path) {
+    assertPath(path)
+    const match = /^autoops\/([^/]+)\/current-input-files\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(path)
+    return match ? { projectId: match[1], threadId: match[2], inputId: match[3], revision: match[4], path: match[5] } : undefined
+  }
+  function currentReference(principal, path) {
+    const identity = currentIdentity(path)
+    if (!identity) fail('当前文件定位无效')
+    const binding = access.requireThread(principal, identity.threadId)
+    const result = resolvedReference(principal, { ...identity, workspaceType: binding.workspaceType }, identity.revision)
+    return { type: 'current-reference', path, projectId: identity.projectId, name: result.file.name, mime: result.file.mime,
+      size: result.file.bytes.byteLength, bytes: result.file.bytes }
+  }
+  function toolReferenceScope(threadId, identity, actor) {
+    const target = access.requireToolThread(threadId, actor)
+    const source = access.requireCurrentFileReferenceForActor(target.actorId, identity.threadId, threadId)
+    if (source.projectId !== identity.projectId) fail()
+    return { binding: target.binding, actor: target.actorId, owner: referenceOwner(source, identity, target.actorId) }
+  }
   function inputIdentity(path) {
     assertPath(path)
     const match = path.match(/^autoops\/([^/]+)\/inputs\/([^/]+)(?:\/(.*))?$/)
@@ -162,6 +219,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
   }
   function findVisible(principal, path) {
     assertPath(path)
+    if (path.split('/')[2] === 'current-input-files') return currentReference(principal, path)
     const identity = inputIdentity(path)
     if (identity) { const found = userInput(principal, identity).files.find(file => file.path === path && file.type !== 'directory'); if (!found) fail(); return found }
     const project = access.requireProject(principal, path.split('/')[1])
@@ -175,6 +233,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     return found
   }
   async function bytes(resource) {
+    if (resource.type === 'current-reference') return resource.bytes
     if (resource.type === 'input') return inputs().readInputFile(resource.projectId, resource.inputId, resource.relativePath, resource.actorId).bytes
     if (resource.type === 'workspace') return workspaceStore.readBytes(resource.projectId, resource.workspaceVersionId, resource.relativePath)
     if (resource.type === 'document') return Buffer.from(resource.content)
@@ -223,6 +282,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
   }
 
   return {
+    resolveWorkspaceFileReference(principal, input) { return resolvedReference(principal, input).value },
     projectAtCwd,
     search(principal, input) {
       const scope = scopeAtCwd(principal, input.cwd), { project } = scope
@@ -298,6 +358,11 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       const entries = []
       for (const path of paths) {
         assertPath(path)
+        if (path.split('/')[2] === 'current-input-files') {
+          const file = findVisible(principal, path)
+          entries.push({ kind: 'file', byteLength: file.size, mimeType: file.mime })
+          continue
+        }
         const identity = inputIdentity(path)
         if (identity) {
           const selected = userInput(principal, identity), file = selected.files.find(file => file.path === path)
@@ -323,6 +388,14 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       let allowed
       for (const record of context?.records || []) if (record.kind === 'mention') {
         assertPath(record.path)
+        const current = currentIdentity(record.path)
+        if (current) {
+          const scope = toolReferenceScope(threadId, current, actorId)
+          const file = inputs().resolveInputFileReference(current.projectId, current.inputId, current.path, scope.owner, scope.actor, scope.binding.workspaceType)
+          if (file.mode !== 'current' || file.revision !== current.revision) throw new AutoOpsAccessError(409, 'WORKSPACE_REFERENCE_CHANGED', '当前文件已更新，请重新打开预览')
+          toolReferenceScope(threadId, current, actorId)
+          continue
+        }
         const identity = inputIdentity(record.path)
         if (identity) {
           const { binding } = access.requireToolThread(threadId, actorId)
@@ -349,6 +422,17 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
       assertPath(path)
       const run = inputId ? access.requireRunInput(threadId, inputId, history?.runId) : undefined
       const actorId = run?.actorId
+      const current = currentIdentity(path)
+      if (current) {
+        if (!inputId || !history?.referencePaths?.includes(path)) fail('当前文件未在本轮上下文中获准')
+        const scope = toolReferenceScope(threadId, current, actorId)
+        const fixed = threadInput(threadId, inputId, false, actorId)
+        const resolved = inputs().fixedInputFileReference(current.projectId, current.inputId, current.path, scope.owner, inputId, fixed.actorId, scope.actor, scope.binding.workspaceType)
+        const content = await inputs().readInputContent(current.projectId, inputId, resolved.path, fixed.actorId)
+        toolReferenceScope(threadId, current, actorId); threadInput(threadId, inputId, false, actorId)
+        return { path, name: resolved.file.path.split('/').at(-1), mime: resolved.file.mime, content: requireExtractedText({ content: content.contents, extraction: content.extraction }, '正文暂不可用，请查看原件'), source: 'workspace_input', inputId, capturedAt: resolved.capturedAt,
+          sourceUrl: `/api/agent-demo/t3/autoops/resources?path=${encodeURIComponent(`${inputRoot(current.projectId, inputId)}/${resolved.path}`)}` }
+      }
       const identity = inputIdentity(path)
       if (identity) {
         if (!inputId) fail('读取本轮资料必须提供任务输入身份')

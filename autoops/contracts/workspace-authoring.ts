@@ -184,6 +184,14 @@ export interface WorkspaceInputSourceIssue {
   code: string
   message: string
 }
+export type WorkspaceFileIdentity =
+  | { kind: 'upload'; id: string }
+  | { kind: 'repository'; sourceId: string; originHash: string; relativePath: string }
+export interface WorkspaceInputFileReference {
+  path: string
+  sha256: string
+  identity: WorkspaceFileIdentity
+}
 export interface WorkspaceInputCapture {
   id: string
   projectId: string
@@ -197,6 +205,7 @@ export interface WorkspaceInputCapture {
   directories: string[]
   captureId?: string
   externalVersionId?: string
+  externalFileReferences?: WorkspaceInputFileReference[]
   sourceErrors?: WorkspaceInputSourceIssue[]
   sourceWarnings?: WorkspaceInputSourceIssue[]
 }
@@ -208,7 +217,7 @@ export type WorkspaceInputSelection =
       sourceErrors?: WorkspaceInputSourceIssue[]
       sourceWarnings?: WorkspaceInputSourceIssue[]
     }
-  | { workspaceType: 'external'; versionId: string }
+  | { workspaceType: 'external'; versionId: string; fileReferences?: WorkspaceInputFileReference[] }
 export interface WorkspaceInputMaintenanceRecord {
   actorId: string
   preparing: boolean

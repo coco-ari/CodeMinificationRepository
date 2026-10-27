@@ -230,6 +230,15 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       try { bindingAudienceForUser(userId, binding); return true } catch { return false }
     })
   }
+  function currentFileReference(source, target) {
+    if (!sameExecutionBinding(source, target) || source.executionBinding?.kind === 'customer' ||
+        ['projectId', 'workspaceType', 'environmentId'].some(key => source[key] !== target[key]))
+      fail(403, 'REFERENCE_WORKSPACE_MISMATCH', '当前文件引用不属于目标会话的项目、环境或资料范围')
+    const sourceAudience = threadAudience(source)
+    if (threadAudience(target).some(member => !sourceAudience.includes(member)))
+      fail(403, 'REFERENCE_AUDIENCE_MISMATCH', '引用内容的授权范围不包含目标会话的所有成员')
+    return source
+  }
   const bindingInput = (current, input) => {
     projectFor(current, identifier(input.projectId, '项目ID'))
     const binding = {
@@ -734,6 +743,16 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
       if (targetAudience.some((member) => !sourceAudience.includes(member)))
         fail(403, 'REFERENCE_AUDIENCE_MISMATCH', '引用内容的授权范围不包含目标会话的所有成员')
       return source
+    },
+    requireCurrentFileReference(principal, sourceThreadId, targetThreadId) {
+      return currentFileReference(requireThread(principal, sourceThreadId), requireThread(principal, targetThreadId))
+    },
+    requireCurrentFileReferenceForActor(actorId, sourceThreadId, targetThreadId) {
+      const source = requireActorThread(sourceThreadId, actorId).binding
+      const target = requireActorThread(targetThreadId, actorId).binding
+      if ([source, target].some(binding => binding.scopeState !== 'locked' && binding.ownerId !== actorId))
+        fail(404, 'THREAD_NOT_FOUND', '会话不存在或无权访问')
+      return currentFileReference(source, target)
     },
     requireCsrf: identity.requireCsrf,
     recordNativeSession: identity.recordNativeSession,

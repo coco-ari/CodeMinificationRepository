@@ -1,6 +1,86 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 afterEach(() => vi.resetModules())
 
+async function referenceClient() {
+  const { installAutoOpsHost } = await import('./hostConfig')
+  installAutoOpsHost(
+    {
+      principal: { id: 'reference-reader', displayName: '文件读者' },
+      gatewayBasePath: '/gateway',
+      csrfToken: 'fixture',
+      projects: [],
+      capabilities: {},
+      fixedModel: { instanceId: 'codex', model: 'fixed' },
+      runtimeMode: 'approval-required',
+    },
+    'https://work.test',
+  )
+  return import('./resources')
+}
+const referenceInput = {
+  threadId: 'thread-1',
+  viewerThreadId: 'thread-1',
+  inputId: 'input-1',
+  path: 'docs/说明.md',
+  workspaceType: 'internal' as const,
+}
+const locatedFile = {
+  projectId: 'p-one',
+  threadId: 'thread-1',
+  viewerThreadId: 'thread-1',
+  workspaceType: 'internal',
+  originalInputId: 'input-1',
+  originalPath: 'docs/说明.md',
+  currentPath: 'docs/说明.md',
+  mode: 'current',
+  resourcePath: 'autoops/p-one/current-input-files/thread-1/input-1/revision-2/docs/说明.md',
+  revision: 'revision-2',
+  sha256: 'b'.repeat(64),
+  changed: true,
+}
+
+it('普通文件定位只GET原线程与文件身份，并接受严格当前资源结果', async () => {
+  const { loadWorkspaceFileReference, autoOpsResourceUrl } = await referenceClient()
+  using fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(locatedFile))
+  await expect(loadWorkspaceFileReference('p-one', referenceInput)).resolves.toEqual(locatedFile)
+  const [path, options] = fetcher.mock.calls[0]!
+  const url = new URL(String(path), 'https://work.test')
+  expect(url.pathname).toBe('/gateway/api/v1/projects/p-one/workspace/file-reference')
+  expect(Object.fromEntries(url.searchParams)).toEqual(referenceInput)
+  expect(options?.method).toBe('GET')
+  expect(options?.body).toBeUndefined()
+  expect(autoOpsResourceUrl(locatedFile.resourcePath)).toContain('current-input-files')
+  const { autoOpsResourcePathDescription } = await import('./resources')
+  expect(autoOpsResourcePathDescription(locatedFile.resourcePath, { projectId: 'p-one' })).toBe(
+    'docs',
+  )
+})
+
+it.each([
+  { projectId: 'other-project' },
+  { threadId: 'other-thread' },
+  { viewerThreadId: 'other-viewer' },
+  { workspaceType: 'external' },
+  { originalInputId: 'other-input' },
+  { originalPath: 'other.md' },
+  {
+    resourcePath: 'autoops/p-one/current-input-files/other-thread/input-1/revision-2/docs/说明.md',
+  },
+  { revision: 'revision-3' },
+  { resourcePath: 'autoops/p-one/current-input-files/thread-1/input-1/revision-2/docs/other.md' },
+  { resourcePath: 'https://outside.test/private' },
+  { secret: 'unexpected-field' },
+])('定位响应范围或合同不符时拒绝原结果：%j', async (changed) => {
+  const { loadWorkspaceFileReference } = await referenceClient()
+  using fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(Response.json({ ...locatedFile, ...changed }))
+  await expect(loadWorkspaceFileReference('p-one', referenceInput)).rejects.toMatchObject({
+    code: 'WORKSPACE_FILE_REFERENCE_INVALID',
+  })
+  expect(fetcher).toHaveBeenCalledTimes(1)
+})
+
 it('completes only directories inside the selected fixed workspace version', async () => {
   const { autoOpsWorkspaceDirectoryCompletion } = await import('./resources')
   const scope = {

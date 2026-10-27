@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { legacyPreviewPathAllowed, workspacePreviewPathAllowed } from './materialPreviewScope'
+import {
+  currentWorkspaceFileReference,
+  legacyPreviewPathAllowed,
+  workspacePreviewPathAllowed,
+} from './materialPreviewScope'
+
+it('当前别名只解析原线程和文件身份，拒绝跨项目或畸形路径', () => {
+  const root = 'autoops/p-one/current-input-files/source-thread/old-input/revision-2/'
+  expect(currentWorkspaceFileReference(root + 'docs/说明.md', 'p-one')).toEqual({
+    threadId: 'source-thread',
+    inputId: 'old-input',
+    path: 'docs/说明.md',
+  })
+  for (const path of [
+    root,
+    root + '../secret',
+    root + 'docs//file.md',
+    root + 'docs/./file.md',
+    root + 'docs\\file.md',
+    root + 'docs/说明\n.md',
+    root.replace('source-thread', 'source.thread') + 'docs/说明.md',
+    root.replace('p-one', 'p-other') + 'docs/说明.md',
+    'autoops/p-one/inputs/old-input/docs/说明.md',
+  ])
+    expect(currentWorkspaceFileReference(path, 'p-one')).toBeNull()
+})
 
 describe('conversation material preview boundary', () => {
   it('keeps previews in the exact fixed project and version, including the root directory', () => {

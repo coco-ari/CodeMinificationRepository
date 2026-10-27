@@ -142,6 +142,8 @@ export interface AutoOpsAccess {
   recordLegacyNativeFork(sourceThreadId: string, targetThreadId: string, sourceNativeId: string, targetNativeId: string): void;
   requireToolThread(threadId: string, actorId?: string): ToolScope;
   requireReference(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;
+  requireCurrentFileReference(principal: AutoOpsPrincipal, sourceThreadId: string, targetThreadId: string): ThreadBinding;
+  requireCurrentFileReferenceForActor(actorId:string, sourceThreadId:string, targetThreadId:string):ThreadBinding;
   requireCsrf(principal: AutoOpsPrincipal, presented: unknown): void;
   recordNativeSession(principal: AutoOpsPrincipal, nativeSessionId: string): void;
   principalForNativeSession(nativeSessionId: string): AutoOpsPrincipal;

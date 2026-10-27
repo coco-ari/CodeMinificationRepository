@@ -15,6 +15,7 @@ export interface WorkspaceSource {
   branch?: string
   authoringRevision?: number
   captureId?: string
+  inputId?: string
   documents?: Array<{ path: string; sha256: string; revision: string }>
 }
 export interface WorkspaceVersion {

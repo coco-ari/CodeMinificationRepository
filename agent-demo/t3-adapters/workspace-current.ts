@@ -20,6 +20,7 @@ import type {
   WorkspaceCapturedFile,
   WorkspaceRepositorySource,
   WorkspaceSourceSyncRecord,
+  WorkspaceInputFileReference,
 } from '../../autoops/contracts/workspace-authoring.ts'
 import type { WorkspaceTask } from '../../autoops/contracts/workspaces.ts'
 import { decodeContract } from '../../autoops/contracts/index.ts'
@@ -354,6 +355,122 @@ export function createCurrentWorkspace({
       fail(410, 'WORKSPACE_INPUT_RELEASED', '原资料已更新或清理，不能改读最新内容')
     return value
   }
+  function readInputReference(project: string, inputId: string, owner: string, actor: string, workspaceType: 'internal' | 'external') {
+    readPermission(project, actor, workspaceType)
+    return authoring.readInputReference(project, inputId, owner, actor, workspaceType)
+  }
+  function externalFileReferences(project: string, versionId: string): WorkspaceInputFileReference[] | undefined {
+    const version = store.getVersion(project, versionId)
+    if (version.type !== 'external' || version.status !== 'published' || !version.sourceVersionId) return undefined
+    const parent = store.getVersion(project, version.sourceVersionId)
+    if (parent.type !== 'internal' || !parent.source.inputId) return undefined
+    const files = store.files(project, version.id)
+    return authoring.publishedInputFileReferences(project, parent.source.inputId, files.map(file => file.path))
+      .map(reference => ({ ...reference, sha256: files.find(file => file.path === reference.path)!.sha256 }))
+  }
+  function mappedReferencePath(project: string, original: WorkspaceInputCapture, path: string, target: WorkspaceInputCapture) {
+    if (original.workspaceType !== target.workspaceType) fail(404, 'WORKSPACE_REFERENCE_FILE_NOT_FOUND', '文件不属于此资料范围')
+    if (original.workspaceType === 'external') {
+      const reference = original.externalFileReferences?.find(file => file.path === path)
+      if (!reference || !target.externalFileReferences) {
+        // 旧输入只在两个已知固定版本的 manifest 仍能证明同一来源时读取，不查询最新指针。
+        if (original.externalVersionId && target.externalVersionId) {
+          let previous, fixed
+          try {
+            previous = store.getVersion(project, original.externalVersionId)
+            fixed = store.getVersion(project, target.externalVersionId)
+          } catch (error) { if (sourceFailureCode(error) !== 'WORKSPACE_NOT_FOUND') throw error }
+          if (previous?.type === 'external' && fixed?.type === 'external' && previous.status === 'published' && fixed.status === 'published' &&
+              (previous.id === fixed.id || (previous.sourceVersionId && previous.sourceVersionId === fixed.sourceVersionId)) &&
+              store.files(project, previous.id).some(file => file.path === path) && store.files(project, fixed.id).some(file => file.path === path)) return path
+        }
+        fail(409, 'WORKSPACE_REFERENCE_IDENTITY_UNKNOWN', '原外部文件来源已无法核验，请从当前外部资料重新打开')
+      }
+      const selected = target.externalFileReferences.find(file => digest(file.identity) === digest(reference.identity))
+      if (!selected) fail(410, target.externalFileReferences.some(file => file.path === path) ? 'WORKSPACE_REFERENCE_FILE_REPLACED' : 'WORKSPACE_REFERENCE_FILE_REMOVED', '原外部文件已删除、改名或替换，请从当前资料重新打开')
+      return selected.path
+    }
+    const uploaded = original.files.find(file => file.path === path)
+    if (uploaded) {
+      const selected = target.files.find(file => file.id === uploaded.id)
+      if (!selected) fail(410, target.files.some(file => file.path === path) ? 'WORKSPACE_REFERENCE_FILE_REPLACED' : 'WORKSPACE_REFERENCE_FILE_REMOVED', '原文件已删除或替换，请从当前资料重新打开')
+      return selected.path
+    }
+    const repository = original.repositories.find(value => value.sourceId === value.source.id && path.startsWith(value.source.mountPath + '/'))
+    if (!repository) fail(409, 'WORKSPACE_REFERENCE_IDENTITY_UNKNOWN', '原文件来源无法核验，请从当前资料重新打开')
+    const selected = target.repositories.find(value => value.sourceId === repository.sourceId)
+    if (!selected) fail(410, 'WORKSPACE_REFERENCE_SOURCE_REMOVED', '原仓库已不在资料输入中')
+    if (new URL(selected.source.url).toString() !== new URL(repository.source.url).toString() || (selected.source.sourcePath ?? '') !== (repository.source.sourcePath ?? ''))
+      fail(409, 'WORKSPACE_REFERENCE_SOURCE_CHANGED', '仓库来源已替换，不能按同名文件打开')
+    return selected.source.mountPath + '/' + path.slice(repository.source.mountPath.length + 1)
+  }
+  function fixedInputFileReference(project: string, originalInputId: string, originalPath: string, originalOwner: string, inputId: string, inputOwner: string, actor: string, workspaceType: 'internal' | 'external') {
+    const original = readInputReference(project, originalInputId, originalOwner, actor, workspaceType)
+    const fixed = readInput(project, inputId, inputOwner)
+    const path = mappedReferencePath(project, original, originalPath, fixed)
+    const file = inputFiles(project, inputId, inputOwner).find(file => file.path === path)
+    if (!file) fail(410, 'WORKSPACE_REFERENCE_FILE_REMOVED', '本轮固定输入中没有此文件，可能已删除或改名')
+    readPermission(project, actor, workspaceType)
+    return { path, file, capturedAt: fixed.createdAt }
+  }
+  function resolveInputFileReference(project: string, inputId: string, path: string, owner: string, actor = owner, workspaceType?: 'internal' | 'external') {
+    ensureAccepting()
+    if (!safePath(path) || path === '.') fail(400, 'WORKSPACE_PATH_INVALID', '资料文件路径无效')
+    // 仅普通预览使用已释放输入的身份元数据；固定输入读取继续由 readInput 拒绝。
+    const input = workspaceType ? readInputReference(project, inputId, owner, actor, workspaceType) : authoring.readInput(project, inputId, owner)
+    readPermission(project, actor, input.workspaceType)
+    const result = (file: { bytes: Uint8Array; name: string; mime: string; revision: string; sha256: string }, currentPath: string, changed: boolean) => ({
+      workspaceType: input.workspaceType, mode: input.status === 'active' ? 'original' as const : 'current' as const,
+      currentPath, revision: file.revision, sha256: file.sha256, changed, file,
+    })
+    if (input.status === 'active') return result(readInputFile(project, inputId, path, owner), path, false)
+    if (input.workspaceType === 'external') {
+      const current = store.overview(project).externalVersions.filter(value => value.status === 'published')
+        .sort((a, b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt))[0]
+      if (input.externalFileReferences && current) {
+        const references = externalFileReferences(project, current.id)
+        if (!references) fail(409, 'WORKSPACE_REFERENCE_IDENTITY_UNKNOWN', '当前外部文件来源已无法核验，请从当前外部资料重新打开')
+        const currentPath = mappedReferencePath(project, input, path, { ...input, externalVersionId: current.id, externalFileReferences: references })
+        const file = store.versionFile(project, current.id, currentPath)
+        const hash = createHash('sha256').update(file.bytes).digest('hex')
+        return result({ ...file, revision: current.id, sha256: hash }, currentPath,
+          input.externalVersionId !== current.id || input.externalFileReferences.find(reference => reference.path === path)?.sha256 !== hash || currentPath !== path)
+      }
+      let original
+      try { original = input.externalVersionId ? store.getVersion(project, input.externalVersionId) : undefined }
+      catch (error) { if (sourceFailureCode(error) !== 'WORKSPACE_NOT_FOUND') throw error }
+      if (!original || !current || original.type !== 'external' ||
+          (current.id !== original.id && (!original.sourceVersionId || current.sourceVersionId !== original.sourceVersionId)))
+        fail(409, 'WORKSPACE_REFERENCE_IDENTITY_UNKNOWN', '原外部文件来源已无法核验，请从当前外部资料重新打开')
+      const previous = store.files(project, original.id).find(file => file.path === path)
+      if (!previous) fail(404, 'WORKSPACE_REFERENCE_FILE_NOT_FOUND', '原输入中没有此普通文件')
+      let file
+      try { file = store.versionFile(project, current.id, path) }
+      catch (error) { if (error && typeof error === 'object' && 'status' in error && error.status === 404) fail(410, 'WORKSPACE_REFERENCE_FILE_REMOVED', '当前资料已无此文件，可能已删除或改名'); throw error }
+      const hash = createHash('sha256').update(file.bytes).digest('hex')
+      return result({ ...file, revision: current.id, sha256: hash }, path, current.id !== original.id || previous.sha256 !== hash)
+    }
+    const uploaded = input.files.find(file => file.path === path)
+    if (uploaded) {
+      const entries = authoring.overview(project, actor).entries
+      const current = entries.find(file => file.id === uploaded.id && file.kind === 'file')
+      if (!current) fail(410, entries.some(file => file.path === path) ? 'WORKSPACE_REFERENCE_FILE_REPLACED' : 'WORKSPACE_REFERENCE_FILE_REMOVED', '原文件已删除或替换，请从当前资料重新打开')
+      const file = authoring.readFile(project, current.path, actor)
+      return result({ ...file, sha256: file.sha256! }, current.path, file.revision !== uploaded.revision || file.sha256 !== uploaded.sha256 || current.path !== path)
+    }
+    const original = input.repositories.find(repository => path.startsWith(repository.source.mountPath + '/'))
+    if (!original || original.sourceId !== original.source.id) fail(409, 'WORKSPACE_REFERENCE_IDENTITY_UNKNOWN', '原文件来源无法核验，请从当前资料重新打开')
+    const current = availableRepositories(project, authoring.overview(project, actor).sources, actor).find(repository => repository.sourceId === original.sourceId)
+    if (!current) fail(410, 'WORKSPACE_REFERENCE_SOURCE_REMOVED', '原仓库已不在当前资料中，请从工作区重新选择')
+    if (new URL(current.source.url).toString() !== new URL(original.source.url).toString() || (current.source.sourcePath ?? '') !== (original.source.sourcePath ?? ''))
+      fail(409, 'WORKSPACE_REFERENCE_SOURCE_CHANGED', '仓库来源已替换，不能按同名文件打开')
+    const currentPath = current.source.mountPath + '/' + path.slice(original.source.mountPath.length + 1)
+    let file
+    try { file = store.versionFile(project, current.versionId, currentPath) }
+    catch (error) { if (error && typeof error === 'object' && 'status' in error && error.status === 404) fail(410, 'WORKSPACE_REFERENCE_FILE_REMOVED', '当前仓库已无此文件，可能已删除或改名'); throw error }
+    return result({ ...file, revision: current.versionId, sha256: createHash('sha256').update(file.bytes).digest('hex') }, currentPath,
+      current.versionId !== original.versionId || current.commit !== original.commit || currentPath !== path)
+  }
   function repositoryForRecord(
     project: string,
     sourceId: string,
@@ -572,9 +689,11 @@ export function createCurrentWorkspace({
             )
             for (const reference of candidateReferences)
               store.retainVersion(project, reference.versionId, reference.reference)
+            const fileReferences = externalFileReferences(project, version.id)
             value = authoring.prepareInput(project, input.requestId, actor, {
               workspaceType: 'external',
               versionId: version.id,
+              ...(fileReferences ? { fileReferences } : {}),
             })
           } else {
             const current = authoring.overview(project, actor)
@@ -1054,6 +1173,7 @@ export function createCurrentWorkspace({
             commit: value.commit,
           })),
           captureId: captured.id,
+          inputId: captured.id,
           authoringRevision: captured.revision,
         },
       },
@@ -1267,6 +1387,9 @@ export function createCurrentWorkspace({
     generateCurrentExternal,
     sync,
     readInput,
+    resolveInputFileReference,
+    readInputReference,
+    fixedInputFileReference,
     inputFiles,
     readInputFile,
     inputTree(project: string, inputId: string, directory: string, actor: string) {
