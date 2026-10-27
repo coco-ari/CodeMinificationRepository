@@ -290,8 +290,8 @@ test('同session两条准入在途命令分别结束，不提前清除活动标�
     first=executor.execute({...command(f.workspace,'openSession','admission-one'),executionScope:scope})
     second=executor.execute({...command(f.workspace,'openSession','admission-two'),executionScope:scope})
     await entered.promise;assert.equal(executor.hasSessionActivity('session-a'),true);assert.equal(executor.hasSessionActivity('other-session'),false)
-    gates[0]!.resolve();await first;assert.equal(executor.hasSessionActivity('session-a'),true)
-    gates[1]!.resolve();await second;assert.equal(executor.hasSessionActivity('session-a'),false);assert.equal(launched,0)
+    gates[0]!.resolve();await Promise.race([first,second]);assert.equal(executor.hasSessionActivity('session-a'),true)
+    gates[1]!.resolve();await Promise.all([first,second]);assert.equal(executor.hasSessionActivity('session-a'),false);assert.equal(launched,0)
   }finally{for(const gate of gates)gate.resolve();await Promise.allSettled([first,second]);await executor.close();f.close()}
 })
 test('撤回本机隔离profile保留既有自用目录、身份及登记修订',()=>{

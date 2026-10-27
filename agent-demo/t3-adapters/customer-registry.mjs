@@ -190,7 +190,8 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       return publicWorkspace(workspaceRow(device.id, workspaceId))
     },
     updateCapabilities(principal, input) {
-      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments', 'workspaceFiles', 'assistantConfiguration', 'sharedProfile'])
+      object(input, ['registeredWorkspaceId', 'workspaceBindingRevision', 'runtimeId', 'revision', 'protocolVersion', 'runtimeVersion', 'configRevision', 'models', 'skills', 'permissions', 'attachments', 'workspaceFiles', 'assistantConfiguration', 'sharedProfile', 'platformToolsVersion'])
+      if (input.platformToolsVersion !== undefined && input.platformToolsVersion !== 1) fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '平台只读工具桥版本无效')
       if (input.assistantConfiguration !== undefined && typeof input.assistantConfiguration !== 'boolean') fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '助手配置能力无效')
       if (input.workspaceFiles !== undefined && typeof input.workspaceFiles !== 'boolean') fail(400, 'CUSTOMER_CAPABILITIES_INVALID', '文件浏览能力无效')
       const device = activeDevice(principal), workspace = workspaceRow(device.id, input.registeredWorkspaceId)
@@ -230,6 +231,7 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       }
       if (input.assistantConfiguration === true) snapshot.assistantConfiguration = true
       if (input.workspaceFiles === true) snapshot.workspaceFiles = true
+      if (input.platformToolsVersion === 1) snapshot.platformToolsVersion = 1
       const encoded = JSON.stringify(snapshot)
       if (Buffer.byteLength(encoded) > 1024 * 1024) fail(413, 'CUSTOMER_CAPABILITIES_LIMIT', '能力目录超过大小限制')
       db.prepare('INSERT INTO customer_capabilities VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id,workspace_id,runtime_id) DO UPDATE SET binding_revision=excluded.binding_revision,revision=excluded.revision,snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at').run(device.id,workspace.id,workspace.runtime_id,workspace.binding_revision,snapshot.revision,encoded,now())

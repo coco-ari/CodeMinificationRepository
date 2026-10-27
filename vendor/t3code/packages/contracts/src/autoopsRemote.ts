@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { CustomerAttachmentManifest } from "./customerAttachments.ts";
 import { CustomerFileInput, CustomerFileResult } from "./customerFiles.ts";
 import { isSharedExecutionScope, type SharedExecutionScope } from "../../../../../autoops/contracts/shared-execution.ts";
+import { isCustomerPlatformToolReference, type CustomerPlatformToolReference } from "../../../../../autoops/contracts/customer-platform-tools.ts";
 
 /** Device transport only. Browser chat and Provider events retain their T3 contracts. */
 export const CUSTOMER_AGENT_PROTOCOL_VERSION = 1;
@@ -11,6 +12,7 @@ const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 // 业务合同由其所属依赖实例验证，避免跨实例解释内部 schema 状态。
 const CustomerSharedExecutionScope = Schema.declare<SharedExecutionScope>(isSharedExecutionScope);
+const CustomerPlatformTools = Schema.declare<CustomerPlatformToolReference>(isCustomerPlatformToolReference);
 export const CustomerAgentTarget = Schema.Struct({
   registeredWorkspaceId: Id,
   workspaceBindingRevision: Revision,
@@ -27,6 +29,7 @@ export const CustomerAgentCommand = Schema.Struct({
   target: CustomerAgentTarget, method: CustomerAgentMethod,
   runtimeEpoch: Schema.optional(Id), input: Schema.Unknown,
   executionScope: Schema.optional(CustomerSharedExecutionScope),
+  platformTools: Schema.optional(CustomerPlatformTools),
   attachments: Schema.optional(Schema.Array(CustomerAttachmentManifest)),
   skillBindings: Schema.optional(Schema.Array(Schema.Struct({ id: Id, name: Id }))),
 });
@@ -56,6 +59,7 @@ export const CustomerAgentClientFrame = Schema.Union([
     attachmentTransfers: Schema.optional(Schema.Boolean),
     workspaceFiles: Schema.optional(Schema.Boolean),
     assistantConfiguration: Schema.optional(Schema.Boolean),
+    platformToolsVersion: Schema.optional(Schema.Literal(1)),
     sharedExecutionVersion: Schema.optional(Schema.Literal(1)),
     receiptQueries: Schema.optional(Schema.Boolean),
     workspaces: Schema.Array(Schema.Struct({

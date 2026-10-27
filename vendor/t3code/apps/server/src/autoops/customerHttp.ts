@@ -15,7 +15,7 @@ import { CustomerAssistantRuntimeRequest } from '../../../../../../autoops/contr
 import { decodeContractJson } from '../../../../../../autoops/contracts/index.ts';
 import * as Stream from 'effect/Stream';
 
-const responseError = (error: unknown) => {
+export const responseError = (error: unknown) => {
   const wrapped = error as { _tag?: string; cause?: unknown };
   const inner =
     wrapped?._tag === "UnknownError" || wrapped?._tag === "UnknownException"

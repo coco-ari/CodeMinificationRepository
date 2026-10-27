@@ -21,6 +21,7 @@ export function validateRoleDefault(role: ProjectRole, value: QuestionConfigurat
 export function validateSharedAllocationConfiguration(
   value: QuestionConfiguration,
   profile: SharedProfileCapability | undefined,
+  platformToolsVersion?: 1,
 ) {
   const target = value.executionBinding
   if (!profile || target.kind !== 'customer')
@@ -30,8 +31,7 @@ export function validateSharedAllocationConfiguration(
     return fail('CUSTOMER_SHARED_PROFILE_REQUIRED','提供者尚未为此预设明确选择当前已验证的隔离profile')
   if (
     value.agentId !== 'a-project' ||
-    value.environmentId !== null ||
-    value.workspaceType !== null ||
+    ((value.environmentId !== null || value.workspaceType !== null) && platformToolsVersion !== 1) ||
     value.visibility !== 'private'
   )
     return fail('CUSTOMER_CONTEXT_UNSUPPORTED', '此运行来源尚未支持平台资料、环境及共享会话')

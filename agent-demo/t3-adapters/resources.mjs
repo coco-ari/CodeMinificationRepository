@@ -10,7 +10,8 @@ import { readScopedSkillResourceForThread } from './scoped-skills.mjs'
 const fail = (message) => { throw new AutoOpsAccessError(404, 'RESOURCE_NOT_FOUND', message || '资料不存在或无权访问') }
 const nameFor = (name) => name.replace(/[\/\\\u0000-\u001f]/g, '_').slice(0, 160) || 'file'
 const version = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16)
-export function createBusinessResourceCatalog({ access, artifactStore, readAttachment, workspaceStore = configuredWorkspaceStore(), workspaceInputs }) {
+export function createBusinessResourceCatalog({ access, artifactStore, readAttachment, workspaceStore = configuredWorkspaceStore(), workspaceInputs, authorizeToolThread }) {
+  const toolThread=authorizeToolThread??((threadId,actorId)=>access.requireToolThread(threadId,actorId))
   const sameWorkspace = (source, target) => (source.workspaceType || null) === (target?.workspaceType || null) && (source.workspaceVersionId || null) === (target?.workspaceVersionId || null)
   function workspace(binding) {
     if (!binding?.workspaceVersionId) return null
@@ -129,7 +130,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
   }
   function threadInput(threadId, inputId, reference = false, actorId) {
     const own = access.listThreadInputs(threadId).find(value => value.inputId === inputId)
-    const { binding, actorId: caller } = access.requireToolThread(threadId, actorId ?? own?.actorId)
+    const { binding, actorId: caller } = toolThread(threadId, actorId ?? own?.actorId)
     const retained = reference ? access.inputReferences(threadId).find(value => value.inputId === inputId) : undefined
     if (!own && !retained) fail('资料输入不属于此会话任务或已验证引用')
     access.requireWorkspaceInputReader(caller, binding.projectId, binding.workspaceType || 'internal')
@@ -218,7 +219,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
     return { contents: content, byteLength: Buffer.byteLength(content), truncated: false }
   }
   function forThread(threadId, currentInput = false, actorId) {
-    const target = access.requireToolThread(threadId, actorId)
+    const target = toolThread(threadId, actorId)
     return catalog(target.project, access.listToolResourceThreads(threadId, actorId), target.binding, currentInput).filter((entry) => entry.environmentId === undefined || entry.environmentId === target.binding.environmentId)
   }
 
@@ -325,7 +326,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
         assertPath(record.path)
         const identity = inputIdentity(record.path)
         if (identity) {
-          const { binding } = access.requireToolThread(threadId, actorId)
+          const { binding } = toolThread(threadId, actorId)
           if (identity.projectId !== binding.projectId) fail()
           const actors = [actorId ?? binding.ownerId]
           for (const source of access.listToolResourceThreads(threadId, actorId)) {
@@ -372,7 +373,7 @@ export function createBusinessResourceCatalog({ access, artifactStore, readAttac
         return { path, kind: 'directory', sourceErrors: selected.capture.sourceErrors ?? [], sourceWarnings: selected.capture.sourceWarnings ?? [], entries: selected.files.filter(file => file.type !== 'directory' && file.path.startsWith(path + '/')).map(({ path, name, mime }) => ({ path, name, mime })) }
       }
       if(path.startsWith('autoops/skills/'))return readScopedSkillResourceForThread(process.env.AUTOOPS_T3_DATA_DIR,threadId,path,access)
-      const historical = path.startsWith(`autoops/${access.requireToolThread(threadId, actorId).binding.projectId}/workspaces/`)
+      const historical = path.startsWith(`autoops/${toolThread(threadId, actorId).binding.projectId}/workspaces/`)
       const resources = forThread(threadId, Boolean(inputId) && !historical, actorId).filter(resource => {
         if (!inputId || !['attachment', 'report'].includes(resource.type)) return true
         const mentioned = history?.referencePaths?.some(path => resource.path === path || resource.path.startsWith(path + '/'))

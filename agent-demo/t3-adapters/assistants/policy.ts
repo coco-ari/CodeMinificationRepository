@@ -145,10 +145,15 @@ export function questionConfigurationPolicy(ports: Ports) {
       return fail('ASSISTANT_ENVIRONMENT_FORBIDDEN', '助手所选环境不在成员范围内')
     if (new Set(value.skillIds).size !== value.skillIds.length)
       return fail('ASSISTANT_SKILLS_DUPLICATE', '技能不能重复选择')
+    if (
+      (value.workspaceType === null && value.executionBinding.kind !== 'customer') ||
+      (member.workspaceAccess === 'external' &&
+        value.workspaceType !== null &&
+        value.workspaceType !== 'external')
+    )
+      return fail('ASSISTANT_WORKSPACE_FORBIDDEN', '助手资料范围不在成员授权内')
     if (value.executionBinding.kind === 'customer') {
       if (
-        value.environmentId !== null ||
-        value.workspaceType !== null ||
         value.visibility !== 'private' ||
         value.agentId !== 'a-project'
       )
@@ -156,6 +161,8 @@ export function questionConfigurationPolicy(ports: Ports) {
       const registry = ports.customers(),
         target = value.executionBinding
       const source = registry.sourceOwner(target)
+      if((value.environmentId!==null||value.workspaceType!==null)&&registry.getCapabilities(source.ownerId,target)?.platformToolsVersion!==1)
+        return fail('CUSTOMER_CONTEXT_UNSUPPORTED','所选运行器尚未接入平台只读工具桥')
       const shared = source.ownerId !== actor || source.projectId !== projectId || value.customerProfile!==undefined
       if (shared) {
         if (member.workspaceAccess !== 'internal')
@@ -166,7 +173,7 @@ export function questionConfigurationPolicy(ports: Ports) {
         ports.verifySharedProfile({providerId:source.ownerId,sourceProjectId:source.projectId,target,profile:capabilities?.sharedProfile})
         registry.validateTarget(source.ownerId,source.projectId,target,{requireOnline:true})
         const profile = capabilities?.sharedProfile
-        validateSharedAllocationConfiguration(value,profile)
+        validateSharedAllocationConfiguration(value,profile,capabilities?.platformToolsVersion)
         return
       }
       if (value.model.instanceId !== `customer-${target.deviceId}-${target.runtimeId}`)
@@ -190,11 +197,6 @@ export function questionConfigurationPolicy(ports: Ports) {
       return
     }
     if(value.customerProfile!==undefined)return fail('ASSISTANT_PROFILE_FORBIDDEN','平台运行来源不能选择客户隔离profile')
-    if (
-      value.workspaceType === null ||
-      (member.workspaceAccess === 'external' && value.workspaceType !== 'external')
-    )
-      return fail('ASSISTANT_WORKSPACE_FORBIDDEN', '助手资料范围不在成员授权内')
     const models = ports.models()
     if (!models.discovered)
       return fail('ASSISTANT_MODELS_UNAVAILABLE', '实际运行器的模型能力目录尚未就绪')

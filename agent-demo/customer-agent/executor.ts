@@ -9,6 +9,8 @@ import type { HeadlessCodexRunner, HeadlessCodexRunnerOptions } from "../../vend
 import { SKILL_MENTION_PATTERN } from "../../vendor/t3code/packages/shared/src/composerInlineTokens.ts";
 import { resolveCustomerFileReferences } from "./files.ts";
 import { createSharedDockerRuntime, loadSharedDockerProfile, sharedRuntimeDirectory, type SharedDockerRuntime } from './shared-docker-profile.ts';
+import { createCustomerPlatformToolsBridge, type CustomerPlatformToolsBridge, type PlatformToolRun } from './platform-tools-bridge.ts';
+import { isCustomerPlatformToolReference, type CustomerPlatformToolRequest } from '../../autoops/contracts/customer-platform-tools.ts';
 import { sharedSessionIdentity, type SharedExecutionScope } from '../../autoops/contracts/shared-execution.ts';
 
 export type RunnerFactory = (options: HeadlessCodexRunnerOptions) => Promise<HeadlessCodexRunner>;
@@ -42,6 +44,9 @@ export class CustomerAgentExecutor {
   private readonly attachments: CustomerAttachmentCache | undefined;
   private readonly discoveryRunners = new Set<HeadlessCodexRunner>();
   private readonly sharedRuntimes = new Map<string,SharedDockerRuntime>();
+  private readonly platformTools = new Map<string,CustomerPlatformToolsBridge>();
+  private readonly platformRuns = new Map<string,PlatformToolRun & {runId:string;attemptId:string;target:CustomerAgentCommand['target']}>();
+  private readonly callPlatformTool:((request:CustomerPlatformToolRequest,signal:AbortSignal)=>Promise<unknown>)|undefined;
   private readonly sharedAttachments = new Map<string,CustomerAttachmentCache>();
   private readonly authorizeShared:((scope:SharedExecutionScope,signal?:AbortSignal)=>Promise<void>)|undefined;
   private readonly downloadAttachment:AttachmentDownload|undefined;
@@ -52,7 +57,9 @@ export class CustomerAgentExecutor {
     store: CustomerAgentStore; deviceId: string; runnerFactory: RunnerFactory; downloadAttachment?: AttachmentDownload;
     notify: (frame: CustomerAgentClientFrame) => void; onState?: (message: string) => void;
     authorizeShared?:(scope:SharedExecutionScope,signal?:AbortSignal)=>Promise<void>;
+    callPlatformTool?:(request:CustomerPlatformToolRequest,signal:AbortSignal)=>Promise<unknown>;
   }) {
+    this.callPlatformTool=options.callPlatformTool;
     this.store = options.store; this.deviceId = options.deviceId; this.runnerFactory = options.runnerFactory;
     this.attachments = options.downloadAttachment ? new CustomerAttachmentCache(join(options.store.directory, "attachments"), options.downloadAttachment) : undefined;
     this.notify = options.notify; this.onState = options.onState ?? (() => {});
@@ -70,6 +77,7 @@ export class CustomerAgentExecutor {
       if(await checkLocal()!==before)throw new ConnectorError('shared_profile_changed','准入期间提供者已更换本机隔离profile');
     }:undefined;this.downloadAttachment=options.downloadAttachment;
   }
+  get platformToolsVersion():1|undefined {return this.callPlatformTool && process.platform!=='win32' && typeof process.getuid==='function' ? 1 : undefined;}
   private async isolatedRunner(options:HeadlessCodexRunnerOptions,isolation:SharedDockerRuntime):Promise<HeadlessCodexRunner> {
     const probe=await this.runnerFactory({...options,onEvent:()=>{}});
     try {await isolation.configureSkillCatalog((await probe.catalog()).skills)} finally {await probe.close()}
@@ -94,6 +102,7 @@ export class CustomerAgentExecutor {
       const options:HeadlessCodexRunnerOptions={
         instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath, localPolicy: workspace.policy,
         ...(isolation?.options??{}),
+        ...(this.platformToolsVersion?{readPlatformToolsSession:(threadId:string)=>this.platformTools.get(sessionId)?.current(threadId)}:{}),
         resolveAttachmentPath: (attachment) => {const path=(isolation?this.sharedAttachments.get(sessionId):this.attachments)?.resolve(sessionId,attachment);return path ? isolation?.attachmentPath(path)??path : null},
         onEvent: (event) => this.handleEvent(sessionId, epoch, event),
         onError: () => this.markUnknown(sessionId, "客户运行器连接异常，结果待核实", "runtime_lost"),
@@ -113,7 +122,37 @@ export class CustomerAgentExecutor {
       throw error;
     } finally { this.opening.delete(sessionId); }
   }
+  private clearPlatformTools(sessionId:string):void {
+    this.platformTools.get(sessionId)?.clear();this.platformRuns.delete(sessionId);
+  }
+  private async preparePlatformTools(command:CustomerAgentCommand,input:Record<string,any>):Promise<void> {
+    if(command.method!=='startTurn')return;
+    this.clearPlatformTools(command.sessionId);
+    if(!command.platformTools)return;
+    const session=this.store.session(command.sessionId);
+    if(!this.platformToolsVersion || !session || !isCustomerPlatformToolReference(command.platformTools) || typeof input.threadId!=='string' || !input.threadId || (command.runtimeEpoch!==undefined && command.runtimeEpoch!==session.runtimeEpoch))throw new ConnectorError('platform_tools_unavailable','平台工具原轮次引用不可用');
+    let bridge=this.platformTools.get(command.sessionId);
+    if(!bridge) {
+      const isolation=this.sharedRuntimes.get(command.sessionId);
+      bridge=await createCustomerPlatformToolsBridge({...(isolation?{socketPath:isolation.platformToolsSocketPath,container:true}:{}),callTool:async(request,signal)=>{
+        const captured=this.platformRuns.get(command.sessionId);
+        const check=async()=>{
+          signal.throwIfAborted();this.shutdown.signal.throwIfAborted();
+          const current=this.store.session(command.sessionId);
+          if(!captured || this.platformRuns.get(command.sessionId)!==captured || current?.state!=='active' || current.runtimeEpoch!==request.runtimeEpoch || current.runId!==captured.runId || current.attemptId!==captured.attemptId || request.commandId!==captured.commandId || request.reference.contextId!==captured.reference.contextId)throw new ConnectorError('platform_tools_stale','原平台工具轮次已结束或待核对');
+          this.store.resolveWorkspace(captured.target);
+          await this.sharedRuntimes.get(command.sessionId)?.assertCurrent();
+          signal.throwIfAborted();
+        };
+        await check();const result=await this.callPlatformTool!(request,signal);await check();return result;
+      }});
+      this.platformTools.set(command.sessionId,bridge);
+    }
+    const run={reference:command.platformTools,commandId:command.commandId,sessionId:command.sessionId,runtimeEpoch:session.runtimeEpoch,threadId:String(input.threadId),runId:String(input.runId),attemptId:String(input.attemptId),target:structuredClone(command.target)};
+    this.platformRuns.set(command.sessionId,run);bridge.activate(run);
+  }
   private markUnknown(sessionId: string, message: string, reason: "runtime_lost" | "journal_unavailable" | "outcome_unknown" = "outcome_unknown"): void {
+    this.clearPlatformTools(sessionId);
     const session = this.store.session(sessionId);
     // A recovery poll may report the same lost runtime repeatedly. The persisted state
     // already appears in every reconnect hello; do not flood controls or terminal logs.
@@ -152,6 +191,7 @@ export class CustomerAgentExecutor {
         this.requests.set(sessionId, requests);
       }
       if (event.type === "turn.terminal" && this.providerTurns.get(sessionId) === event.providerTurnId) {
+        this.clearPlatformTools(sessionId);
         const session = this.store.session(sessionId)!;
         if (session.runId) this.store.releaseWorkspace(session.workspaceId, sessionId, session.runId);
         this.store.saveSession({ ...session, state: "idle", runId: null, attemptId: null });
@@ -182,6 +222,7 @@ export class CustomerAgentExecutor {
     let nativeAttempted = false;
     try {
       this.shutdown.signal.throwIfAborted();
+      if(command.platformTools && command.method!=='startTurn')throw new ConnectorError('platform_tools_context_invalid','平台工具引用只能附于原新轮命令');
       const previous = this.store.receipt(command);
       if (previous) { this.notify(previous); return previous; }
       const workspace = this.store.resolveWorkspace(command.target, command.method === "interruptTurn" || command.method === "readThreadSnapshot");
@@ -251,6 +292,7 @@ export class CustomerAgentExecutor {
         this.shutdown.signal.throwIfAborted();
         this.store.resolveWorkspace(command.target, command.method === "interruptTurn" || command.method === "readThreadSnapshot");
         if(command.executionScope && command.method!=='interruptTurn')await this.sharedRuntimes.get(command.sessionId)?.assertCurrent();
+        await this.preparePlatformTools(command,input);
         if (command.method === "startTurn") {
           if (input.providerThread?.nativeThreadRef?.nativeId) {
             this.providerThreads.set(command.sessionId, input.providerThread);
@@ -280,6 +322,7 @@ export class CustomerAgentExecutor {
         const notStarted = typeof error === "object" && error !== null && "outcome" in error && error.outcome === "not_started";
         if (notStarted) nativeAttempted = false;
         const uncertain = dispatched && !notStarted && !["catalog", "readThreadSnapshot"].includes(command.method);
+        if(command.method==='startTurn' && !uncertain)this.clearPlatformTools(command.sessionId);
         if (command.method === "startTurn" && notStarted) {
           const active = this.store.session(command.sessionId);
           if (active && active.runId === input.runId) {
@@ -339,8 +382,9 @@ export class CustomerAgentExecutor {
       registeredWorkspaceId: workspace.registeredWorkspaceId, workspaceBindingRevision: workspace.workspaceBindingRevision,
       runtimeId: "codex", protocolVersion: 1,
       workspaceFiles: true, assistantConfiguration: true,
+      ...(this.platformToolsVersion ? {platformToolsVersion:this.platformToolsVersion} : {}),
       ...(this.attachments ? {attachments: CUSTOMER_ATTACHMENT_LIMITS} : {}),
-      revision: createHash("sha256").update(JSON.stringify(catalog)).digest("hex"),
+      revision: createHash("sha256").update(JSON.stringify(this.platformToolsVersion ? {catalog,platformToolsVersion:this.platformToolsVersion} : catalog)).digest("hex"),
       models: catalog.models.map((model) => {
         const effort = model.capabilities?.optionDescriptors?.find((option) => option.id === "reasoningEffort");
         const defaultEffort = effort?.type === "select" ? effort.options.find((option) => option.isDefault)?.id : undefined;
@@ -366,7 +410,10 @@ export class CustomerAgentExecutor {
   enforceLocalRevocations(): void {
     const revoked = new Set(this.store.workspaces().filter((workspace) => workspace.revoked).map((workspace) => workspace.registeredWorkspaceId));
     for (const session of this.store.sessions()) {
-      if (revoked.has(session.workspaceId) && session.state === "active") void this.requestLocalStop(session.sessionId, "本机目录授权已撤销，正在请求停止活动执行");
+      if (revoked.has(session.workspaceId)) {
+        this.clearPlatformTools(session.sessionId);
+        if(session.state === "active")void this.requestLocalStop(session.sessionId, "本机目录授权已撤销，正在请求停止活动执行");
+      }
     }
   }
   hasActivity(): boolean {
@@ -378,8 +425,11 @@ export class CustomerAgentExecutor {
   }
   async close(): Promise<void> {
     this.shutdown.abort();
+    for(const sessionId of this.platformTools.keys())this.clearPlatformTools(sessionId);
     await Promise.allSettled([...this.runners.values(), ...this.discoveryRunners].map((runner) => runner.close()));
     await Promise.allSettled([...this.commands]);
+    await Promise.allSettled([...this.platformTools.values()].map(bridge=>bridge.close()));
+    this.platformTools.clear();
     for(const [sessionId,runtime] of this.sharedRuntimes) {
       try {await runtime.close()} catch {this.markUnknown(sessionId,'隔离容器停止结果待核实')}
     }

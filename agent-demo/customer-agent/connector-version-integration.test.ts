@@ -29,6 +29,7 @@ async function fixture() {
   const journal = createCustomerTransportJournal(transportDb)
   const hub = new RemoteDeviceHub({assertAccepting() {}, customerRegistry:registry} as never, journal)
   const errors: string[] = []
+  const hellos:Array<{platformToolsVersion?:1|undefined}> = []
   let count = 0, delayFirst = false, releaseFirst: (() => void) | undefined, firstQueued = false
   const server = createServer(), wss = new NodeWS.WebSocketServer({server})
   wss.on('connection', (socket: InstanceType<typeof NodeWS.WebSocket>, request: IncomingMessage) => {
@@ -38,6 +39,7 @@ async function fixture() {
     socket.on('message', (raw: unknown) => {
       void (async () => {
         const frame = decodeCustomerAgentClientFrame(String(raw))
+        if(frame.type==='hello')hellos.push(frame)
         if (ordinal === 1 && delayFirst) {
           firstQueued = true
           await new Promise<void>(resolve => {releaseFirst = resolve})
@@ -56,7 +58,7 @@ async function fixture() {
     socket.send(JSON.stringify(hello))
     return {socket,hello}
   }
-  return {registry, paired, errors, journal, directory, port, raw,
+  return {registry, paired, errors, journal, directory, port, raw, hellos,
     delay:()=>{delayFirst=true}, queued:()=>firstQueued, release:()=>releaseFirst?.(),
     async close() {
       releaseFirst?.()
@@ -77,7 +79,8 @@ test('真实连接程序 HELLO 把旧配对版本更新到当前版本，所有�
   try {
     connection.start();await until(()=>ready)
     const device = f.registry.listDevices('owner')[0]!
-    assert.equal(CONNECTOR_VERSION,'0.4.3')
+    assert.equal(CONNECTOR_VERSION,'0.4.4')
+    assert.equal(f.hellos[0]?.platformToolsVersion,1)
     assert.equal(device.connectorVersion,CONNECTOR_VERSION)
     assert.equal(device.connectionEpoch,1)
     assert.equal(device.online,true)

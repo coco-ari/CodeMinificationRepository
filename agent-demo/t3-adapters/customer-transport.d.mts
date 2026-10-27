@@ -20,7 +20,7 @@ export interface TransportSession {
  resolution?:{runId:string;attemptId:string;resolvedAt:string;reason:'operator_confirmed_process_stopped'};
  appliedResolution?:TransportSession['resolution'];
 }
-export interface TransportCommand {type:'command';commandId:string;sessionId:string;target:TransportSession['target'];method:string;runtimeEpoch?:string;input:unknown;executionScope?:SharedExecutionScope;attachments?:ReadonlyArray<import('../../vendor/t3code/packages/contracts/src/customerAttachments.ts').CustomerAttachmentManifest>}
+export interface TransportCommand {type:'command';commandId:string;sessionId:string;target:TransportSession['target'];method:string;runtimeEpoch?:string;input:unknown;executionScope?:SharedExecutionScope;platformTools?:import('../../autoops/contracts/customer-platform-tools.ts').CustomerPlatformToolReference;attachments?:ReadonlyArray<import('../../vendor/t3code/packages/contracts/src/customerAttachments.ts').CustomerAttachmentManifest>}
 export interface TransportReceipt {type:'receipt';commandId:string;sessionId:string;state:'accepted'|'completed'|'failed'|'unknown';runtimeEpoch?:string|undefined;grantId?:string|undefined;result?:unknown;error?:{code:string;message:string}|undefined}
 export interface CustomerTransportJournal {
  acquireWorkspace(workspaceKey:string,threadId:string,runId:string):boolean;

@@ -8,7 +8,7 @@ import * as Adapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import { AgentScope, type AgentScopeShape } from '@t3tools/shared/AgentScope';
+import { AgentScope, type AgentScopeShape } from "@t3tools/shared/AgentScope";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexSchema from "effect-codex-app-server/schema";
@@ -47,6 +47,12 @@ export interface HeadlessCodexCatalogProcess {
   readonly close: () => Promise<void>;
 }
 
+export interface CustomerPlatformToolsSession {
+  readonly endpoint: string;
+  readonly authorizationHeader: string;
+  readonly contextId: string;
+}
+
 export interface HeadlessCodexRunnerOptions {
   readonly instanceId: string;
   /** Already canonicalized and registered by the local connector. */
@@ -60,6 +66,10 @@ export interface HeadlessCodexRunnerOptions {
   readonly externalSandbox?: boolean;
   /** 本机隔离所有者签发目录进程 lease，不由远端问答参数提供。 */
   readonly openCatalogProcess?: () => Promise<HeadlessCodexCatalogProcess>;
+  /** 仅连接程序提供本轮私有通道；远端输入不能配置 MCP 地址或凭据。 */
+  readonly readPlatformToolsSession?: (
+    threadId: string,
+  ) => CustomerPlatformToolsSession | undefined;
   readonly resolveAttachmentPath?: (attachment: C.ChatAttachment) => string | null;
   readonly onEvent: (event: unknown) => void | Promise<void>;
   readonly onError?: (error: unknown) => void | Promise<void>;
@@ -228,8 +238,9 @@ export function customerRuntimePolicy(
     interactionMode: "default",
     runtimeMode: policy.sandboxMode === "read-only" ? "approval-required" : "auto-accept-edits",
     approvalPolicy: policy.approvalPolicy,
-    sandboxPolicy:
-      externalSandbox ? {type:'externalSandbox',networkAccess:'restricted'} : policy.sandboxMode === "read-only"
+    sandboxPolicy: externalSandbox
+      ? { type: "externalSandbox", networkAccess: "restricted" }
+      : policy.sandboxMode === "read-only"
         ? { type: "readOnly", networkAccess: policy.networkAccess }
         : { type: "workspaceWrite", writableRoots: [cwd], networkAccess: policy.networkAccess },
   };
@@ -237,14 +248,46 @@ export function customerRuntimePolicy(
 
 export function makeCustomerCodexHost(
   resolveAttachmentPath: (attachment: C.ChatAttachment) => string | null = () => null,
+  readPlatformToolsSession?: (threadId: string) => CustomerPlatformToolsSession | undefined,
+  instanceId = "customer-platform-tools",
 ): CodexExecutionHost {
+  let lastPlatformToolsEndpoint: string | undefined;
   return {
     additionalContext: () => ({}),
-    mcpSessions: { read: () => Effect.succeed(undefined) },
+    mcpSessions: {
+      read: (threadId) =>
+        Effect.sync(() => {
+          const current = readPlatformToolsSession?.(threadId);
+          if (current) lastPlatformToolsEndpoint = current.endpoint;
+          return current
+            ? {
+                // 这里只标识本机通道，业务环境与调用者仍由中心原引用裁决。
+                environmentId: C.EnvironmentId.make("customer-platform-tools"),
+                threadId,
+                providerSessionId: current.contextId,
+                providerInstanceId: C.ProviderInstanceId.make(instanceId),
+                endpoint: current.endpoint,
+                authorizationHeader: current.authorizationHeader,
+                browserToolsAvailable: false,
+                capabilities: new Set(["autoops"]),
+              }
+            : undefined;
+        }),
+    },
     verifyInitialized: () => Effect.void,
     interactionMode: () => "default",
-    threadParameters: () => ({ config: CUSTOMER_THREAD_CONFIG }),
-    mcpApprovals: {},
+    threadParameters: (threadId) => ({
+      config: {
+        ...CUSTOMER_THREAD_CONFIG,
+        // 曾接入的平台工具在下一普通轮关闭；其他提供者自配的 MCP 不受影响。
+        ...(lastPlatformToolsEndpoint !== undefined &&
+        readPlatformToolsSession &&
+        (!threadId || !readPlatformToolsSession(threadId))
+          ? { "mcp_servers.t3-code": { enabled: false, url: lastPlatformToolsEndpoint } }
+          : {}),
+      },
+    }),
+    mcpApprovals: readPlatformToolsSession ? { enabled: true } : {},
     resolveSkillMentions: (client, cwd, text) => resolveCustomerSkillMentions(client, cwd, text),
     resolveAttachmentPath,
     resolveAttachmentPathById: () => null,
@@ -276,9 +319,11 @@ export async function createHeadlessCodexRunner(
       approvalPolicy: "on-request",
       sandboxMode: "workspace-write",
       networkAccess: false,
-    }, options.externalSandbox === true,
+    },
+    options.externalSandbox === true,
   );
-  if(options.externalSandbox && !options.agentScope)throw new Error('外层隔离必须提供实际进程边界');
+  if (options.externalSandbox && !options.agentScope)
+    throw new Error("外层隔离必须提供实际进程边界");
   const settings = Schema.decodeUnknownSync(C.CodexSettings)({
     binaryPath: options.binaryPath ?? "codex",
     homePath: options.homePath ?? "",
@@ -293,7 +338,7 @@ export async function createHeadlessCodexRunner(
       ProviderEventLoggers.ProviderEventLoggers,
       ProviderEventLoggers.NoOpProviderEventLoggers,
     ),
-    options.agentScope ? Layer.succeed(AgentScope,options.agentScope) : Layer.empty,
+    options.agentScope ? Layer.succeed(AgentScope, options.agentScope) : Layer.empty,
   );
   const manager = ManagedRuntime.make(services);
   const scope = await manager.runPromise(Scope.make());
@@ -304,7 +349,16 @@ export async function createHeadlessCodexRunner(
   let client: CodexClient.CodexAppServerClient["Service"] | undefined;
   let clientInitialized = false;
   let selectedSkillNames: readonly string[] | undefined;
-  const host = makeCustomerCodexHost(options.resolveAttachmentPath);
+  const host = makeCustomerCodexHost(
+    options.resolveAttachmentPath,
+    options.readPlatformToolsSession,
+    options.instanceId,
+  );
+  let appliedPlatformTools: string | undefined;
+  const platformConfiguration = () => {
+    const current = threadId ? options.readPlatformToolsSession?.(threadId) : undefined;
+    return current ? `${current.endpoint}\0${current.authorizationHeader}` : undefined;
+  };
   const resolveSelectedSkills: typeof host.resolveSkillMentions = (active, cwd, text) => {
     const mentioned = [...text.matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!);
     if (selectedSkillNames && mentioned.some((name) => !selectedSkillNames!.includes(name)))
@@ -313,7 +367,19 @@ export async function createHeadlessCodexRunner(
   };
   const adapter = await manager.runPromise(
     Effect.gen(function* () {
-      const context = yield* Layer.build(Core.makeLayerAppServerClientFactory());
+      const context = yield* Layer.build(
+        Core.makeLayerAppServerClientFactory(
+          options.readPlatformToolsSession
+            ? (method, payload) => {
+                if (method !== "thread/start") return payload;
+                if (payload === null || typeof payload !== "object" || Array.isArray(payload))
+                  throw new Error("客户原生线程参数不可用");
+                // 仅新建受控桥线程使用可在首轮前正常持久化的历史格式；已有线程恢复不改格式。
+                return { ...payload, historyMode: "legacy" };
+              }
+            : undefined,
+        ),
+      );
       // Layer.build owns the process factory in the caller's single runner scope.
       const baseFactory = yield* Effect.service(Core.CodexAppServerClientFactory).pipe(
         Effect.provide(context),
@@ -382,26 +448,33 @@ export async function createHeadlessCodexRunner(
     assertOpen();
     if (client !== undefined && clientInitialized) return run(catalogEffect(client));
     const processScope = await options.openCatalogProcess?.();
-    let result: Awaited<ReturnType<HeadlessCodexRunner['catalog']>>;
+    let result: Awaited<ReturnType<HeadlessCodexRunner["catalog"]>>;
     try {
       result = await manager.runPromise(
-          Effect.scoped(
-            Effect.gen(function* () {
-              const opened = yield* withCodexAppServerClient({
-                binaryPath: settings.binaryPath,
-                homePath: settings.homePath,
-                launchArgs: settings.launchArgs,
-                cwd: options.cwd,
-                environment,
-                ...(processScope ? {agentScope:processScope.agentScope} : options.agentScope ? {agentScope:options.agentScope} : {}),
-              });
-              return yield* catalogEffect(opened.client);
-            }),
-          ),
-        );
+        Effect.scoped(
+          Effect.gen(function* () {
+            const opened = yield* withCodexAppServerClient({
+              binaryPath: settings.binaryPath,
+              homePath: settings.homePath,
+              launchArgs: settings.launchArgs,
+              cwd: options.cwd,
+              environment,
+              ...(processScope
+                ? { agentScope: processScope.agentScope }
+                : options.agentScope
+                  ? { agentScope: options.agentScope }
+                  : {}),
+            });
+            return yield* catalogEffect(opened.client);
+          }),
+        ),
+      );
     } catch (error) {
-      try {await processScope?.close();}
-      catch (cleanup) {throw new AggregateError([error, cleanup], '临时目录进程失败且外层停止结果待核实');}
+      try {
+        await processScope?.close();
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], "临时目录进程失败且外层停止结果待核实");
+      }
       throw error;
     }
     await processScope?.close();
@@ -474,6 +547,7 @@ export async function createHeadlessCodexRunner(
             assertThread(decoded.existingProviderThread);
           const result = await run(session.ensureThread({ ...decoded, runtimePolicy }));
           nativeThreadId = result.nativeThreadRef?.nativeId ?? undefined;
+          appliedPlatformTools = platformConfiguration();
           return encodeThread(result);
         }
         case "resumeThread": {
@@ -481,6 +555,7 @@ export async function createHeadlessCodexRunner(
           assertThread(decoded.providerThread);
           const result = await run(session.resumeThread({ ...decoded, runtimePolicy }));
           nativeThreadId = result.nativeThreadRef?.nativeId ?? undefined;
+          appliedPlatformTools = platformConfiguration();
           return encodeThread(result);
         }
         case "startTurn": {
@@ -498,6 +573,30 @@ export async function createHeadlessCodexRunner(
               await run(
                 resolveSelectedSkills(client, options.cwd, value.message.text, value.threadId),
               );
+            // startTurn 才带有中心固定引用；原生热会话需用已有 resume 接口刷新配置。
+            const desiredPlatformTools = platformConfiguration();
+            if (options.readPlatformToolsSession && desiredPlatformTools !== appliedPlatformTools) {
+              if (!client || !nativeThreadId || !session?.unloadThread)
+                throw new Error("客户平台工具配置尚未就绪");
+              // 首轮前保存真实标题使 legacy 线程持久化；解除独占订阅后才能应用本轮配置。
+              await run(
+                client.request("thread/name/set", {
+                  threadId: nativeThreadId,
+                  name: value.appThread.title,
+                }),
+              );
+              await run(session.unloadThread({ providerThread: value.providerThread }));
+              const resumed = await run(
+                session!.resumeThread({
+                  threadId: value.threadId,
+                  providerThread: value.providerThread,
+                  modelSelection: value.modelSelection,
+                  runtimePolicy,
+                }),
+              );
+              assertThread(resumed);
+              appliedPlatformTools = desiredPlatformTools;
+            }
             return value;
           });
           const instructions = decoded.assistantConfiguration?.instructions;

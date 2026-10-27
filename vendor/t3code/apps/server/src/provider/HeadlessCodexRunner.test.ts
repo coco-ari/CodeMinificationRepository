@@ -10,6 +10,7 @@ import * as C from "@t3tools/contracts";
 import {
   customerScopedIds,
   createHeadlessCodexRunner,
+  makeCustomerCodexHost,
   customerRuntimePolicy,
 } from "./HeadlessCodexRunner.ts";
 
@@ -20,6 +21,34 @@ import {
 import type { TransportSession } from "../../../../../../agent-demo/t3-adapters/customer-transport.mjs";
 
 describe("customer Codex execution", () => {
+  it("keeps old plain MCP configuration and disables only its previously attached platform channel", async () => {
+    let active = false;
+    const host = makeCustomerCodexHost(undefined, (id) =>
+      active && id === "thread-a"
+        ? {
+            endpoint: "http://127.0.0.1:18767/mcp",
+            authorizationHeader: "Bearer fixture-only",
+            contextId: "fixed-context",
+          }
+        : undefined,
+    );
+    const threadId = C.ThreadId.make("thread-a");
+    expect(host.threadParameters(threadId).config?.["mcp_servers.t3-code"]).toBeUndefined();
+    active = true;
+    expect((await Effect.runPromise(host.mcpSessions.read(threadId)))?.providerSessionId).toBe(
+      "fixed-context",
+    );
+    expect(
+      await Effect.runPromise(host.mcpSessions.read(C.ThreadId.make("foreign-thread"))),
+    ).toBeUndefined();
+    active = false;
+    expect(await Effect.runPromise(host.mcpSessions.read(threadId))).toBeUndefined();
+    expect(host.threadParameters(threadId).config?.["mcp_servers.t3-code"]).toEqual({
+      enabled: false,
+      url: "http://127.0.0.1:18767/mcp",
+    });
+  });
+
   it("isolates identical native IDs across customer conversations", async () => {
     const base = await Effect.runPromise(
       IdAllocator.IdAllocatorV2.pipe(Effect.provide(IdAllocator.layer)),
@@ -63,9 +92,21 @@ describe("customer Codex execution", () => {
     ).toThrow();
   });
 
-  it.each(["foreground", "background", "approval-stop", "stop-unconfirmed"] as const)(
+  it.each([
+    "foreground",
+    "background",
+    "approval-stop",
+    "stop-unconfirmed",
+    "platform-tools",
+    "platform-tools-loaded",
+    "platform-tools-name-failure",
+    "platform-tools-unsubscribe-failure",
+    "platform-tools-resume-failure",
+  ] as const)(
     "reuses native events and %s terminal completion without platform services",
     async (mode) => {
+      const platformMode = mode.startsWith("platform-tools");
+      const platformFailure = mode.endsWith("-failure");
       const directory = await mkdtemp(join(tmpdir(), "autoops-headless-codex-"));
       const fixture = (
         await readFile(
@@ -87,6 +128,7 @@ describe("customer Codex execution", () => {
           )
           .map((entry) => [entry.label, entry.frame.result]),
       );
+      responses["thread/resume"] = responses["thread/start"];
       const notifications = fixture
         .filter(
           (entry) =>
@@ -181,7 +223,22 @@ describe("customer Codex execution", () => {
       const background = ${JSON.stringify(backgroundItem)};
       const stopAtApproval = ${JSON.stringify(mode === "approval-stop")};
       const stopUnconfirmed = ${JSON.stringify(mode === "stop-unconfirmed")};
-      const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
+      const platformMode = ${JSON.stringify(platformMode)};
+      const failAt = ${JSON.stringify(platformFailure ? `thread/${mode.split("-")[2] === "name" ? "name/set" : mode.split("-")[2]}` : null)};
+      let materialized = ${JSON.stringify(mode === "platform-tools-loaded")};
+      let historyMode = 'paginated';
+      let subscribed = false;
+      let appliedMcp;
+      let turnOrdinal = 0;
+      const send = value => {
+        if (platformMode && turnOrdinal > 1 && value.params) {
+          value = structuredClone(value);
+          if (value.params.turn) value.params.turn.id = responses['turn/start'].turn.id + '-' + turnOrdinal;
+          if (value.params.turnId) value.params.turnId = responses['turn/start'].turn.id + '-' + turnOrdinal;
+          if (value.params.item?.id) value.params.item.id += '-' + turnOrdinal;
+        }
+        process.stdout.write(JSON.stringify(value) + '\\n');
+      };
       createInterface({ input: process.stdin }).on('line', line => {
         const message = JSON.parse(line); appendFileSync(${JSON.stringify(logPath)}, line + '\\n');
         if (message.id === 'approval-fixture' && message.result) {
@@ -189,6 +246,45 @@ describe("customer Codex execution", () => {
           return;
         }
         if (message.id === undefined) return;
+        // 对齐锁定0.159.2：空线程不能resume；仍有订阅者时成功响应也不会应用覆盖值。
+        if (platformMode && message.method === failAt) {
+          send({id:message.id,error:{code:-32600,message:'Fixture rejected ' + failAt}});return;
+        }
+        if (platformMode && message.method === 'thread/name/set') {
+          if (message.params.threadId !== responses['thread/start'].thread.id || message.params.name !== 'Customer') {
+            send({id:message.id,error:{code:-32600,message:'Fixture title or original thread identity changed'}});return;
+          }
+          if (historyMode === 'legacy') materialized = true;
+          send({id:message.id,result:{}});return;
+        }
+        if (platformMode && message.method === 'thread/unsubscribe') {
+          subscribed = false;send({id:message.id,result:{status:'unsubscribed'}});return;
+        }
+        if (platformMode && message.method === 'thread/start') {
+          historyMode = message.params.historyMode ?? 'paginated';
+          subscribed = true;appliedMcp = message.params.config?.['mcp_servers.t3-code'];
+        }
+        if (platformMode && message.method === 'thread/resume') {
+          const mcp = message.params.config?.['mcp_servers.t3-code'];
+          if (mcp?.enabled === false && (!mcp.url && !mcp.command)) {
+            send({id:message.id,error:{code:-32600,message:'failed to load configuration: invalid transport in mcp_servers.t3-code'}});return;
+          }
+          if (mcp?.enabled === false && mcp.http_headers?.Authorization !== undefined) {
+            send({id:message.id,error:{code:-32600,message:'Disabled platform channel retained Authorization'}});return;
+          }
+          if (!materialized) {
+            send({id:message.id,error:{code:-32600,message:'no rollout found for thread id fixture'}});return;
+          }
+          if (!subscribed) appliedMcp = message.params.config?.['mcp_servers.t3-code'];
+          subscribed = true;
+        }
+        if (platformMode && message.method === 'turn/start') {
+          turnOrdinal++;
+          const expected = turnOrdinal === 1 ? 'Bearer fixture-local-channel' : 'Bearer fixture-local-channel-2';
+          if (turnOrdinal < 3 ? appliedMcp?.http_headers?.Authorization !== expected : appliedMcp?.enabled !== false) {
+            send({id:message.id,error:{code:-32600,message:'Current platform channel was not applied'}});return;
+          }
+        }
         if (message.method === 'turn/interrupt' && stopUnconfirmed) {
           send({id:message.id,error:{code:-32603,message:'Interrupt outcome could not be confirmed'}});return;
         }
@@ -207,13 +303,21 @@ describe("customer Codex execution", () => {
         else if (message.method === 'skills/list') result = {data:[{cwd:${JSON.stringify(directory)},errors:[],skills:[{name:'local-build',path:${JSON.stringify(join(directory, "skills/local-build/SKILL.md"))},enabled:true,description:'Build locally',scope:'repo'}]}]};
         else result = responses[message.method];
         if (result === undefined) return send({id:message.id,error:{code:-32601,message:'Unsupported fixture method'}});
+        if (platformMode && message.method === 'turn/start' && turnOrdinal > 1) {
+          result = structuredClone(result);result.turn.id += '-' + turnOrdinal;
+        }
         send({id:message.id,result});
-        if (message.method === 'turn/start') setImmediate(() => { send(notifications[0]); approvalStart.forEach(send); });
+        if (message.method === 'turn/start') setImmediate(() => {
+          send(notifications[0]);
+          if (turnOrdinal > 1) notifications.slice(1).forEach(send);
+          else approvalStart.forEach(send);
+        });
       });
     `,
       });
       const events: Array<Record<string, any>> = [];
       const completed = Promise.withResolvers<void>();
+      let terminal = completed;
       const instanceId = "customer-fixture-codex";
       const transportSession: TransportSession = {
         sessionId: "session-customer",
@@ -249,22 +353,40 @@ describe("customer Codex execution", () => {
         sandboxPolicy: { type: "dangerFullAccess" },
       };
       let closedCatalogs = 0;
+      let platformToolsActive = false;
+      let platformToolsNonce = "fixture-local-channel";
       const runner = await createHeadlessCodexRunner({
         instanceId,
         cwd: directory,
         binaryPath,
+        ...(platformMode
+          ? {
+              readPlatformToolsSession: (id: string) =>
+                platformToolsActive && id === "thread-customer"
+                  ? {
+                      endpoint: "http://127.0.0.1:18767/mcp",
+                      authorizationHeader: `Bearer ${platformToolsNonce}`,
+                      contextId: "context-fixed",
+                    }
+                  : undefined,
+            }
+          : {}),
         onEvent: (event) => {
           const value = event as Record<string, any>;
           events.push(value);
           if (value.type === "runtime_request.updated" && value.runtimeRequest.status === "pending")
             approval.resolve(value.runtimeRequest.id);
-          if (value.type === "turn.terminal") completed.resolve();
+          if (value.type === "turn.terminal") terminal.resolve();
         },
-        onError: completed.reject,
+        onError: (error) => terminal.reject(error),
         openCatalogProcess: async () => ({
-          agentScope: {wrap: input => Effect.succeed(input), oomKilled: () => Effect.succeed(false), clear: () => Effect.void},
+          agentScope: {
+            wrap: (input) => Effect.succeed(input),
+            oomKilled: () => Effect.succeed(false),
+            clear: () => Effect.void,
+          },
           close: async () => {
-            const pids = (await readFile(pidPath, 'utf8')).trim().split('\n').map(Number);
+            const pids = (await readFile(pidPath, "utf8")).trim().split("\n").map(Number);
             expect(() => process.kill(pids.at(-1)!, 0)).toThrow();
             closedCatalogs++;
           },
@@ -371,6 +493,32 @@ describe("customer Codex execution", () => {
             assistantConfiguration: { instructions: "", skillNames: [] },
           }),
         ).rejects.toThrow();
+        platformToolsActive = platformMode;
+        if (platformFailure) {
+          await expect(
+            runner.dispatch("startTurn", {
+              ...turn,
+              assistantConfiguration: {
+                instructions: "只描述实际结果",
+                skillNames: ["local-build"],
+              },
+            }),
+          ).rejects.toThrow();
+          const requests = (await readFile(logPath, "utf8"))
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+          const boundary = `thread/${mode.split("-")[2] === "name" ? "name/set" : mode.split("-")[2]}`;
+          const configurationMethods = ["thread/name/set", "thread/unsubscribe", "thread/resume"];
+          expect(
+            requests
+              .filter((request) => configurationMethods.includes(request.method))
+              .map((request) => request.method),
+          ).toEqual(configurationMethods.slice(0, configurationMethods.indexOf(boundary) + 1));
+          expect(requests.filter((request) => request.method === "turn/start")).toHaveLength(0);
+          expect(requests.filter((request) => request.method === "thread/start")).toHaveLength(1);
+          return;
+        }
         await runner.dispatch("startTurn", {
           ...turn,
           assistantConfiguration: { instructions: "只描述实际结果", skillNames: ["local-build"] },
@@ -437,7 +585,7 @@ describe("customer Codex execution", () => {
             (event) =>
               event.type === "message.updated" && event.message.text.includes("fixture simple ok"),
           ),
-        ).toBe(mode === "foreground" || mode === "background");
+        ).toBe(mode === "foreground" || mode === "background" || platformMode);
         expect(
           events.some(
             (event) =>
@@ -471,7 +619,66 @@ describe("customer Codex execution", () => {
         ).toBe(true);
         const thread = requests.find((request) => request.method === "thread/start").params;
         expect(thread.config["features.multi_agent"]).toBe(false);
-        expect(thread.config["mcp_servers.t3-code"]).toBeUndefined();
+        if (platformMode) {
+          expect(thread.config["mcp_servers.t3-code"]).toBeUndefined();
+          expect(thread.historyMode).toBe("legacy");
+          const resumed = requests.find((request) => request.method === "thread/resume");
+          expect(resumed?.params.config["mcp_servers.t3-code"]).toMatchObject({
+            enabled: true,
+            url: "http://127.0.0.1:18767/mcp",
+            http_headers: { Authorization: "Bearer fixture-local-channel" },
+          });
+          expect(requests.findIndex((request) => request.method === "thread/resume")).toBeLessThan(
+            requests.findIndex((request) => request.method === "turn/start"),
+          );
+          // 下一轮必须换本轮nonce，再下一普通轮必须关闭旧桥，不能借稳定nonce逃避热配置。
+          for (const ordinal of [2, 3]) {
+            terminal = Promise.withResolvers<void>();
+            platformToolsNonce = "fixture-local-channel-2";
+            platformToolsActive = ordinal === 2;
+            await runner.dispatch("startTurn", {
+              ...turn,
+              runId: `run-customer-${ordinal}`,
+              attemptId: `attempt-customer-${ordinal}`,
+              rootNodeId: `node-customer-${ordinal}`,
+              runOrdinal: ordinal,
+              providerTurnOrdinal: ordinal,
+              message: { ...turn.message, messageId: `message-customer-${ordinal}` },
+            });
+            await terminal.promise;
+          }
+          const finalRequests = (await readFile(logPath, "utf8"))
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+          expect(finalRequests.filter((request) => request.method === "thread/start")).toHaveLength(
+            1,
+          );
+          expect(finalRequests.filter((request) => request.method === "turn/start")).toHaveLength(
+            3,
+          );
+          expect(
+            finalRequests.filter((request) => request.method === "thread/name/set"),
+          ).toHaveLength(3);
+          expect(
+            finalRequests.filter((request) => request.method === "thread/unsubscribe"),
+          ).toHaveLength(3);
+          const plain = finalRequests
+            .filter((request) => request.method === "thread/resume")
+            .at(-1);
+          expect(plain.params.config["mcp_servers.t3-code"]).toEqual({
+            enabled: false,
+            url: "http://127.0.0.1:18767/mcp",
+          });
+          expect(
+            finalRequests
+              .filter((request) => request.method === "thread/resume")
+              .every((request) => request.params.historyMode === undefined),
+          ).toBe(true);
+        } else {
+          expect(thread.config["mcp_servers.t3-code"]).toBeUndefined();
+          expect(thread.historyMode).toBeUndefined();
+        }
       } finally {
         await runner.close();
         await rm(directory, { recursive: true, force: true });
