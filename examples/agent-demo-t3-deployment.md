@@ -26,6 +26,8 @@
 
 同日B3沿正式0dd及原专属项目/仓库完成真实凭据版本链：原 `40319600-2b8e-4ccc-ac4d-e4352e6c5895` 替换至v2/r2后私有Git同步成功，撤回至v2/r3后新同步明确HTTP409/CREDENTIAL_REVOKED，旧current提交475保持；原助手grok4.6/medium唯一原轮 `run:thread:d09e5b5a-1502-49cf-8ae6-d4b597b81ba2:ordinal:1` 的真实read_project_document返回原131B资料。正常新建 `d469fdfa-e846-4b5c-b146-38c755285e5a`（v1/r1）并在同仓库改引用后同步恢复，authoring r10/current8494e302、提交475保持；旧凭据仍撤回。根正常GET七个原写收据，并经正常只读RPC取得原工具完整输出和唯一原run/message，SQLite只读核replace/recover两capture的精确凭据版本；原D123父state不变。独立原件 `ROOT/b3-credentials-0dd-20261027-v1/independent-root-v1.json` SHA256 `f279df165d1e866faa422958a8aee3895cc34f2c6ad86fc21c0a7f513468f090`。当前不得直接重跑旧D123父runner，以免绑定回已撤回的旧引用；新恢复引用及原请求只在B3原state记录。该管理主链通过，低权限、跨项目及凭证页面仍不因此完成。
 
+同日正式dbbe的reader选定授权链通过：获配409d环境的目录、原任务/版本及原源码ZIP下载200，原1642B/SHA4a68a58a…a3dd保持；同项目其他环境403 ENVIRONMENT_FORBIDDEN，跨项目404 PROJECT_NOT_FOUND。四个原UUID分别为bbf617ef/74492011/3d3fa7df/e460602a，合法Static发布、Java重启、Static回退、独立打包均精确授权403。根独立正常GET与所属存储只读复核22原任务/15版本完整摘要、原版本链/资料/凭据引用/健康相等，未生成任务或包，原件 `ROOT/reader-b3d4d5-real-independent-root-v1.json` SHA256 `b1153e3c278b7d9e4f832518c0e34bf1269ec35b93995d0158bf94fdeef9603e`。当前资料实际路径含acceptance/acceptance-20261026两级目录；下载正式安全MIME为octet-stream，仍核ZIP原始字节。辅助两次零POST失败原state9e2de59d…3682/6d4b571d…5832及旧admin-before保留，经实际GET校准后沿同输出/同四UUID各发一次。reader的凭据列表按既定credential.use返回八字段元数据，与admin相等且无秘密；不将读取成功当管理权，创建/替换/撤销拒绝另验，整项权限与部署矩阵未完成。
+
 ### 历史批次：总体规划首次升级（2026-10-26）
 
 2026-10-26，当前应用为 `be768c1972e0449272e089c3a2c6c6938b915fc4`，完整发行目录 `/home/tao/autoops-agent-demo/releases/t3-confirmed-be768c19`，数据继续使用 `/home/tao/autoops-deployment-validation/data`。网关 PID 354732、Worker 启动器 PID 353131、实际原生进程 PID 353143 已核对；Node 为 24.22.0。当前总体规划仍在真实业务验收，发行上线不等于完整交付。
