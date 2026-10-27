@@ -41,6 +41,8 @@ export interface CodexExecutionHost {
     CodexErrors.CodexAppServerError
   >;
   readonly resolveAttachmentPath: (attachment: ChatAttachment) => string | null;
+  /** 图片转换的宿主路径与模型所在容器的呈现路径可不同；显式拒绝不得回退。 */
+  readonly resolveAttachmentReadPath?: (attachment: ChatAttachment) => string | null;
   readonly resolveAttachmentPathById: (attachmentId: string) => string | null;
   readonly snapshotMcpApp: (input: {
     readonly threadId: ThreadId;

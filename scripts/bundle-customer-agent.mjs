@@ -63,7 +63,7 @@ const requireNodeShared = createRequire(await realpath(path.join(t3Root, 'apps/s
 await copyFile(path.join(path.dirname(requireNodeShared.resolve('ws/package.json')), 'LICENSE'), path.join(output, 'LICENSE-ws'));
 
 const files = {};
-const manifest = { schemaVersion: 1, connectorVersion: '0.4.3', protocolVersion: 1, node: '>=24.10', files: {} };
+const manifest = { schemaVersion: 1, connectorVersion: '0.4.5', protocolVersion: 1, node: '>=24.10', files: {} };
 for (const filename of (await readdir(output)).sort()) {
   if (filename.endsWith('.map')) continue;
   let bytes = await readFile(path.join(output, filename));

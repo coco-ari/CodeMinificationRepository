@@ -61,6 +61,8 @@ export interface HeadlessCodexRunnerOptions {
   /** 本机隔离所有者签发目录进程 lease，不由远端问答参数提供。 */
   readonly openCatalogProcess?: () => Promise<HeadlessCodexCatalogProcess>;
   readonly resolveAttachmentPath?: (attachment: C.ChatAttachment) => string | null;
+  /** 宿主读取图片原字节的路径；隔离运行器向模型呈现的路径可位于另一个挂载空间。 */
+  readonly resolveAttachmentReadPath?: (attachment: C.ChatAttachment) => string | null;
   readonly onEvent: (event: unknown) => void | Promise<void>;
   readonly onError?: (error: unknown) => void | Promise<void>;
 }
@@ -237,6 +239,7 @@ export function customerRuntimePolicy(
 
 export function makeCustomerCodexHost(
   resolveAttachmentPath: (attachment: C.ChatAttachment) => string | null = () => null,
+  resolveAttachmentReadPath?: (attachment: C.ChatAttachment) => string | null,
 ): CodexExecutionHost {
   return {
     additionalContext: () => ({}),
@@ -247,6 +250,7 @@ export function makeCustomerCodexHost(
     mcpApprovals: {},
     resolveSkillMentions: (client, cwd, text) => resolveCustomerSkillMentions(client, cwd, text),
     resolveAttachmentPath,
+    ...(resolveAttachmentReadPath ? { resolveAttachmentReadPath } : {}),
     resolveAttachmentPathById: () => null,
     snapshotMcpApp: () => Effect.succeed(undefined),
     requireLegacyTool: () => {
@@ -304,7 +308,7 @@ export async function createHeadlessCodexRunner(
   let client: CodexClient.CodexAppServerClient["Service"] | undefined;
   let clientInitialized = false;
   let selectedSkillNames: readonly string[] | undefined;
-  const host = makeCustomerCodexHost(options.resolveAttachmentPath);
+  const host = makeCustomerCodexHost(options.resolveAttachmentPath, options.resolveAttachmentReadPath);
   const resolveSelectedSkills: typeof host.resolveSkillMentions = (active, cwd, text) => {
     const mentioned = [...text.matchAll(SKILL_MENTION_PATTERN)].map((match) => match[2]!);
     if (selectedSkillNames && mentioned.some((name) => !selectedSkillNames!.includes(name)))

@@ -95,6 +95,8 @@ export class CustomerAgentExecutor {
         instanceId: `customer-${this.deviceId}-codex`, cwd: workspace.realPath, localPolicy: workspace.policy,
         ...(isolation?.options??{}),
         resolveAttachmentPath: (attachment) => {const path=(isolation?this.sharedAttachments.get(sessionId):this.attachments)?.resolve(sessionId,attachment);return path ? isolation?.attachmentPath(path)??path : null},
+        // 图片字节由宿主转换为原生输入；仅从同会话、同metadata的已验证缓存读取。
+        resolveAttachmentReadPath: (attachment) => (isolation?this.sharedAttachments.get(sessionId):this.attachments)?.resolve(sessionId,attachment)??null,
         onEvent: (event) => this.handleEvent(sessionId, epoch, event),
         onError: () => this.markUnknown(sessionId, "客户运行器连接异常，结果待核实", "runtime_lost"),
       };

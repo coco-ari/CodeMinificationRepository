@@ -3150,7 +3150,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         const resolveCodexAttachment = Effect.fn("CodexAdapterV2.resolveCodexAttachment")(
           function* (attachment: ChatAttachment) {
-            const attachmentPath = host.resolveAttachmentPath(attachment);
+            const attachmentPath = host.resolveAttachmentReadPath
+              ? host.resolveAttachmentReadPath(attachment)
+              : host.resolveAttachmentPath(attachment);
             if (attachmentPath === null) {
               return yield* toProtocolError(`Invalid attachment id '${attachment.id}'`);
             }
