@@ -20,7 +20,15 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用固定为 `d1c0ecd6c71ca0aa6f7d41148fa0db5506776a93`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-visibility-d1c0ecd6`，STATIC_DIR 为同目录 `dist/web`；客户CLI继续复用未变化的0.4.5。两个unit active、NRestarts=0，Web4183205、worker launcher4182710实际目录一致。健康workerReachable=true，HTML SHA256 `c52867d29549fbc7525cc3563c4f7ab1646e39d14b41f941e1dee7a18bdc3d0e` 及两个Web Worker实际字节通过；发行清单 `9b7f46bf5baaa05746c00c98e8f3af4be1abe72633ed8048108cf257269d8460`、原生清单 `33dfa3cb3060f315a4a944608b5fc88db6e69a9ee9da6c047b76b568ec741c22`。
+当前应用固定为 `65c6043e13070c2d4d460bc85baa7982708331c0`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-visibility-65c6043e`，STATIC_DIR 为同目录 `dist/web`；客户 CLI 继续复用未变化的 0.4.5。两个 unit active、NRestarts=0，Web 229199、worker launcher 228701 的实际目录一致；健康 200、workerReachable=true。公网 HTML SHA256 `5771afa2bcf57aec803d89bc12f98c6299917537a644d3170570d3a50a510b50` 与发行回执一致，两个 Web Worker 资源通过。发行清单 `0c766a9ee9b3ac1d4125c8fd7ffc71e464382d32c0f1bbc93a283b5288e28e28`、原生清单 `984fc761ac8fe797766a453693789e6a27ff6600a307217ad7a8fb01f731c3ed`。
+
+本批从固定归档一次构建网页、Worker、网关及发行包，原件 `ROOT/visibility-65c6043e/preflight.json`、`switch.json`，结果 `switched`，无数据恢复或备份，其他服务 PID 保持。新增原电脑会话实际运行者记录；相关自动测试、类型/边界和构建通过。已实测助手发送后只读、三个等宽摘要、单一行内 skill 入口、桌面/390px 窄短窗及已保存会话可见性菜单。跨账号原电脑模型实机验收因具体访问变更待授权，尚未执行；不将自动回归或菜单可点视为此项闭环。详见[会话协作与输入区验收](../docs/validation/conversation-collaboration.md)。代码已推送，不等待 GitHub CI。
+
+上一完整前后端为 `t3-visibility-d1c0ecd6`。若需撤回，先核对本批 switch 记录、当前覆盖和在途操作，仅恢复本批两个 unit 的程序配置；不覆盖业务数据。本批未重新执行程序降级或未受影响的回退矩阵。
+
+#### 上一d1可见范围发行历史（保留）
+
+当时应用固定为 `d1c0ecd6c71ca0aa6f7d41148fa0db5506776a93`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-visibility-d1c0ecd6`，STATIC_DIR 为同目录 `dist/web`；客户CLI继续复用未变化的0.4.5。两个unit active、NRestarts=0，Web4183205、worker launcher4182710实际目录一致。健康workerReachable=true，HTML SHA256 `c52867d29549fbc7525cc3563c4f7ab1646e39d14b41f941e1dee7a18bdc3d0e` 及两个Web Worker实际字节通过；发行清单 `9b7f46bf5baaa05746c00c98e8f3af4be1abe72633ed8048108cf257269d8460`、原生清单 `33dfa3cb3060f315a4a944608b5fc88db6e69a9ee9da6c047b76b568ec741c22`。
 
 本次使用固定归档一次完成网页、Worker、网关及发行包构建，原件为 `ROOT/visibility-d1c0ecd6/preflight.json`、`switch.json`；切换结果switched，未覆盖旧数据库，其他服务PID不变。新增可见性审计表与现有数据并存。底栏、草稿及已发送会话可见范围实站验证见[本批验收](../docs/validation/composer-controls.md)，连接提示同候选修复见[连接验收](../docs/validation/reconnect-and-composer.md)。代码已正常推送，不以GitHub CI作为测试站发行前置。
 
