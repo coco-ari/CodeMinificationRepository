@@ -1,6 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Navigate, useLocation, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { isElectron } from "../env";
@@ -20,12 +20,24 @@ import {
 } from "../state/entities";
 import { useEnvironments } from "../state/environments";
 import { isAutoOpsHosted } from "../autoops/capabilities";
+import { useAutoOpsHost } from "../autoops/hostConfig";
 import { useAutoOpsProjectId } from "../autoops/projectNavigation";
 
 function ChatIndexRouteView() {
+  const host = useAutoOpsHost();
+  const search = useLocation({ select: (location) => location.search });
   const selectedProjectId = useAutoOpsProjectId();
   const { authGateState } = Route.useRouteContext();
   const { environments, isReady } = useEnvironments();
+
+  // 已认证的空项目目录进入配置引导；显式项目深链仍由原范围校验处理。
+  if (
+    authGateState.status === "authenticated" &&
+    host?.projects.length === 0 &&
+    !Object.hasOwn(search, "projectId")
+  ) {
+    return <Navigate to="/projects" replace />;
+  }
 
   if (authGateState.status === "hosted-static") {
     if (!isReady) return null;

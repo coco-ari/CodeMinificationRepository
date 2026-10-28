@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
 import { Label } from '~/components/ui/label'
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from '~/components/ui/empty'
 import { SidebarInset } from '~/components/ui/sidebar'
 import {
   Dialog,
@@ -52,6 +53,7 @@ import { DeploymentServers } from './deployment'
 import { ProjectRemovalAction, ProjectRemovalDialog, type ProjectRemovalTarget } from './ProjectRemovalDialog'
 import { EnvironmentMcpDialog } from './EnvironmentMcpDialog'
 import { ProjectSetupOverview, type RepositorySetupSummary, type AssistantSetupSummary } from './ProjectSetupOverview'
+import { ProjectQuestionEntry } from './ProjectQuestionEntry'
 import {
   isConfigurationEditor,
   configurationMutation,
@@ -97,11 +99,14 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   const navigate = useNavigate()
   const search = location.search as { projectId?: string; section?: string; from?: string }
   const explicit = search.projectId
+  const hasExplicitProject = Object.hasOwn(search, 'projectId')
   const selected = host?.projects.find((project) => project.id === explicit)
   const manageable = selected?.capabilities?.['project.manage'] === true
   const [projects, setProjects] = useState<DirectoryProject[]>([])
   const [settings, setSettings] = useState<ProjectSettings | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const refreshRequest = useRef<AbortController | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [busy, setBusy] = useState(false)
@@ -115,6 +120,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
     alive.current = true
     return () => {
       alive.current = false
+      refreshRequest.current?.abort()
     }
   }, [])
   const request = useRef<AbortController | null>(null)
@@ -263,12 +269,33 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
     setRemovalTarget(target)
   }
   const current = projects.find((project) => project.id === explicit)
+  const firstProject = !hasExplicitProject && !loading && !error && projects.length === 0
+  const refresh = async () => {
+    if (refreshRequest.current || loading || busy) return
+    const controller = new AbortController()
+    refreshRequest.current = controller
+    setRefreshing(true)
+    try {
+      await refreshProjectHost(controller.signal)
+      if (!alive.current || controller.signal.aborted) return
+      await load(true)
+      if (alive.current) setConfigurationRevision((value) => value + 1)
+    } catch (cause) {
+      if (alive.current && !controller.signal.aborted)
+        setError(cause instanceof Error ? cause.message : '项目范围刷新失败，请重试。')
+    } finally {
+      if (refreshRequest.current === controller) {
+        refreshRequest.current = null
+        if (alive.current) setRefreshing(false)
+      }
+    }
+  }
   return (
     <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-project-directory>
       <ModuleSidebar label="项目管理">
         <ModuleSidebarItem
           label="全部项目"
-          selected={!explicit}
+          selected={!hasExplicitProject}
           icon={FolderGit2Icon}
           onClick={() => go()}
         />
@@ -281,14 +308,14 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
               onClick={() => go(project.id)}
             />
           ))}
-          {!loading && !projects.length ? (
+          {!loading && !error && !projects.length ? (
             <ModuleSidebarEmpty>没有可见项目</ModuleSidebarEmpty>
           ) : null}
         </div>
       </ModuleSidebar>
       <ModuleHeader
         title="项目管理"
-        detail={explicit ? (wideHeader ? '项目配置' : (selected?.name ?? '项目不可用')) : '全部项目'}
+        detail={hasExplicitProject ? (wideHeader ? '项目配置' : (selected?.name ?? '项目不可用')) : '全部项目'}
         actions={
           <>
             {host?.canManageDeploymentNodes ? (
@@ -308,17 +335,13 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
               size="icon-sm"
               ref={refreshButton}
               aria-label="刷新项目"
-              disabled={loading || busy}
-              onClick={() => {
-                void refreshProjectHost()
-                  .then(() => load())
-                  .then(() => setConfigurationRevision((value) => value + 1))
-                  .catch((cause) => setError(String(cause.message)))
-              }}
+              disabled={loading || busy || refreshing}
+              aria-busy={refreshing}
+              onClick={() => void refresh()}
             >
               <RefreshCwIcon />
             </Button>
-            {host?.canCreateProject && !explicit ? (
+            {host?.canCreateProject && !hasExplicitProject && !firstProject ? (
               <Button
                 size="sm"
                 onClick={(event) =>
@@ -413,10 +436,40 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
           ) : null}
           {loading ? (
             <p role="status">正在读取项目…</p>
-          ) : explicit && !current ? (
+          ) : hasExplicitProject && !current ? (
             <p role="alert">项目不存在或无权访问</p>
-          ) : !explicit ? (
-            <SettingsSection title="项目">
+          ) : !hasExplicitProject ? (
+            firstProject ? (
+              <Empty size="compact" role="region" aria-label="开始使用项目">
+                <EmptyHeader>
+                  <EmptyTitle role="heading" aria-level={2}>
+                    {host?.canCreateProject ? '创建第一个项目' : '尚未分配项目'}
+                  </EmptyTitle>
+                  <EmptyDescription>
+                    {host?.canCreateProject
+                      ? '创建项目后配置助手即可开始问答。加入已有项目，请联系项目管理员。'
+                      : '请联系项目管理员将你的账号加入项目并分配助手，完成后刷新即可使用。'}
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  {host?.canCreateProject ? (
+                    <Button
+                      disabled={busy || !!pending || refreshing || credentialLocked || removalLocked}
+                      onClick={(event) => open(
+                        { kind: 'create', revision: 0, name: '', description: '' },
+                        event.currentTarget,
+                      )}
+                    >
+                      <PlusIcon />创建项目
+                    </Button>
+                  ) : (
+                    <Button disabled={busy || refreshing} aria-busy={refreshing} onClick={() => void refresh()}>
+                      <RefreshCwIcon />刷新项目
+                    </Button>
+                  )}
+                </EmptyContent>
+              </Empty>
+            ) : projects.length ? <SettingsSection title="项目">
               {projects.map((project) => (
                 <SettingsRow
                   key={project.id}
@@ -433,7 +486,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                   </span>
                 </SettingsRow>
               ))}
-            </SettingsSection>
+            </SettingsSection> : null
           ) : (
             <>
               <ProjectSettingsTarget area="general">
@@ -447,6 +500,12 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                     </SettingsRow>
                   ) : null}
                 </SettingsSection>
+                {selected ? (
+                  <ProjectQuestionEntry
+                    project={selected}
+                    disabled={busy || !!pending || refreshing || credentialLocked || removalLocked}
+                  />
+                ) : null}
                 {manageable && settings ? (
                   <ProjectSetupOverview
                     project={settings}
