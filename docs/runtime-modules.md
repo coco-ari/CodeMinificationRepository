@@ -1483,6 +1483,10 @@ Web 两个原 UI 文件的 lint 基线已在 `git archive 10a466d7 vendor/t3code
 
 stable2随后在取基线前被原180秒认证窗口守卫拒绝，未产生基线、public、switch或owner阶段目录；原件ROOT/69-prebaseline-block-root-v1.json（e7c48a74…bad2）核实旧站三PID、静态三Worker及24任务／16版本整行保持，不声称部署验收。空闲CLI1411912正常停止的十文件及全部账本相等（51c74905…4355），随后沿原HOME/官方CLI36正常恢复为当时1421423/ticks41370395。独立欢迎ROOT/c6-old-dbbe-after69-prebaseline-block-v1/root-welcome-retention-v1.json（785b1d13…2726）确认在线、完整12模型能力正文除updatedAt、profile5/单技能、9会话／28本机命令／64中心命令／8流和全部原收据、十文件保持，未新发业务。下一窗口在停CLI前同时满足原Agent新鲜报告和认证有效期，连续执行现有命令；不放宽原门禁。
 
+2026-10-28现行1e实际技能交互补验：仅自有技能49e528d7/版本1ecee56c分配D123内部，不动原三技能。管理员在普通草稿选择该技能、改Grok4.7/high后重开菜单，真实名称保持；正文及TXT预览原件保留（`.deployment/e3-skill-live-20261028-v1/cua-actual-observations-v1.json` SHAd4925647…575）。IAB后台切标签没有触发原窗口focus/QSC新目录读取，不能拿后台catalog GET代替自动整理证据，本case2未通过；后续独立Linux真实焦点续验，不改产品制造通过。
+
+同一真实project-admin manager沿管理页正常修复自己的disabled预设2c16580b：编辑→取消“49e · 已不可用”→保存，3操作；一次POST原UUID883fabae-bbf5-4c94-8fd0-45f90771ff88，r5/skills[49e]→r6/[]，未启用预设、未改公共64cb及其他配置。原完整receipt/publicIntent/actor/scope/result与200回复逐值相等，焦点回原编辑按钮，pending为空、browser0；根正常GET及整35任务/20版本前后核验通过。`.deployment/e3-owned-invalid-skill-repair-1e014e71-v2-actual/result.json` SHA90d49b23…1bf07，原receipt0645186c…ccb，根独立22e228cd…d07e。用户可修复自有合法预设；开发者复用既有配置及原收据合同；Agent可用同UUID确认结果。此流程修改前后均3操作，不声称减少步骤；受控组件无manage但可调组合只记自动正控，固定实站角色不制造此组合。代码/自动/1e部署均通过，本管理修复真实子项通过；E3整项仍等待普通草稿失效整理及既定整页发行。
+
 ## 共享来源启动误拒与整页接续（2026-10-27，未部署）
 
 C6 调用关系为原生 ThreadLaunchService/ThreadManagementService → ProviderInstanceAvailability → RemoteProviderRegistry → 原绑定与助手/来源 owner。候选原因一为目标原生项目未登记；同实际接收者正常 subscribeShell 读取到正确目标项目、根目录及模型，排除。原因二为可用性使用目标项目筛选来源登记；实际10发行 source map 与固定提交源码摘要一致，确实只有旧 listWorkspaces(device.ownerId, projectId)；真实 SQLite owner 的合法跨项目共享和分配可进入目录，却在粗可用性红测返回 false，确认该原因。另有原生旧合同与新合同对照测试，旧合同在创建前误拒，新合同仅创建原生元数据，不发送消息或推理。
@@ -1820,3 +1824,24 @@ A5平台共享场景在现行1e正常HTTPS界面实际执行：管理员进入D1
 根正常GET四配置收据及admin/reader同原任务，并只读核原23任务/16版本整行、所有目标完整配置与当前指针、仓库/authoring/凭据/计划/公共预设保持；当前24任务/16版本，原当前95ab及HTTP正文不变。原档案只追加该任务精确sourceIdentity对应的一个workspace-package origin，所有旧origin及其他档案字段保持，源码ZIP仍1642B/4文件/SHA4a68a58a…a3dd。独立原件ROOT/queued-withdraw-selected-independent-root-v1.json SHA256 `01451c1bc030ae27b05430df636a7cd6b8c1603483b0da5dc98c7aac15fa52e6`，origin根8963cfd9…5f3a；controller8f860084…72cd始终不自行声称业务通过。
 
 前置失败保留：root遗漏上传README/测试文件在账户读取前拒绝；v3误把含心跳目标的identity整文件SHA视为稳定身份，零业务拒绝；真实RAM双读仅三个目标lastObservedAt/observation.observedAt变化，完整身份核心（含token）相同，证明b02073ea…e649，不回溯编造旧f56报告的具体差异。v4沿既有目标三个观测字段归一化，其余完整JSON/未知字段/顺序及权限保留，rawSHA每次留原件且是否字节相等真实记录；旧报告与源码不覆盖。既有整点清理移除Node固定镜像也在零意图前被原preflight拒绝，只按原registry锁恢复同digest（90089cdd…b718），保留1400MiB门禁。历史lastFailure不删，只拒相对固定grant新增失败；离线工具11/9项不代替业务。本次四状态关闭排队后撤权子项，D5其余矩阵、D6自然保留与全局交付继续。
+
+
+### 原包保留与事件读取超时核对（2026-10-28，R4/R6未闭环）
+
+R6第二版B沿原请求 `21bd8471-d187-4d8a-bff2-ac4c2e410424` 仅POST一次，task `6a4f9124-7ddf-4253-88d6-5cc661a2b625` 固定e353/package7bad真实Maven发布、健康成功，中心67条日志与本机事件按正式默认status和发生/接收时间映射全值相等，seq=ACK67。current=6a4、previous=d8b，本机链3；3588B原ZIP SHA35e74ab9…4100c不变，builder和私有工作目录已清理。最初只读collector v1错误要求原事件与中心字段对称；67原件确认66条省略status，中心正式补running，第二候选未知event字段已排除。v2仅修正式映射，67正控和8篡改反例通过后实际只读核验成功，原v1失败保留；不修改产品。
+
+R4 v5未能装故障：三次before-arm原任务GET在2.068/2.047/2.056秒超时，任务先结束，结果TASK_FINISHED_BEFORE_ARM_NO_FAULT。零网络变化、零ss-K、零Agent信号、零运行中外部SQLite连接，observer已join；发布成功不等于事件补报成功。单次真实诊断1登录/4GET：exact2秒读口在主/工作线程均超时于响应头前，原common客户端则3.21/0.15秒返回相同整response及67日志。排除工作线程独因，正常终态也可超过2秒；尚不能区分连接冷热、DNS/TLS或上游耗时，不把header差异当唯一原因。诊断原件`.deployment/d5-r4-api-transport-diagnostic-v1/evidence/result.json` SHA256 `215993fe65e34df2f368ac8989bb9c5015bfc674a9d4a04d3f208ed014a5b4da`。下一既定C部署复用正常客户端header、构建期只读预热及有界5秒before-arm，故障期2秒/总12秒、两次fresh核实、迟到拒绝与最终清理保持；准备不算通过。
+
+根独立`.deployment/d5-r6-r4-20261028-v1-root/independent-local-after-b-v1.json` SHA256 `eee034c14cc82df12d9d12e3d250aec2bff8128819a6acf8ca353c54e7d62375` 核原35任务/20版本逐完整行、11库135表13226旧行、1061原文件、九附件和七原进程身份保持；仅新增6a4任务/版本及相应current/rollback指针，节点遥测另核。当前36任务/21版本完整行规范化SHA `7d1c7323ef9ad16da91ad836ee94f10f09b090b865f2685af18134fa859c7748`，应用仍1e/官方CLI0.4.5。owner-after-b SHA1d6c4a99…f9f8e、agent-after-b-v2 SHA4c42fcbf…adda4，后续基线input SHA f1253bc7…4121。R6尚无DELETE，R4/R6及D6自然门继续待验。docs-only e40de387质量40632694829/完整运行40632694708均green，没有应用切换。
+
+### 版本链档案保护与清理闭环（2026-10-28）
+
+既定C只POST一次原UUID63ebf4a0-2f49-48f3-9f65-219a1ac7212e，task3f1f39a1-45af-40e6-a2bf-0f696f6f33aa固定原e353/package7bad真实发布、健康及83事件/ACK83通过，current=C、baseline=6a4、链4。R4 v6预热和before-arm均正常返回，但未捕获两次当前verifying后任务即结束；TASK_FINISHED_BEFORE_ARM_NO_FAULT、零网络变化/ss-K/Agent信号且线程收束。它纠正读取预算后仍暴露短窗口，不再重复同类尝试。原业务合同是阶段无关的已领取动作离线补报；后续改在已完成源码校验/解压的真实building窗口取证，固定来源/actor/config、两次fresh、原运行版本保护及ACK精确判定不变。v7只作准备，R4仍未通过，不把C成功计作补报验收。
+
+R6复用现行SourceArchives与原HTTP，代码和既有自动/1e完整CI继续有效；新增9合同与窄后验正控/5篡改反例单列为辅助，不替代业务。当前C原UUID514a7069-37c1-4839-bcec-bc1129b753fe和恢复基线B原UUIDfd66b907-2899-423f-91b1-562bf925a2e8各DELETE一次，均精确409“当前版本、恢复基线或执行中任务引用的版本不能清理”；两次拒绝后完整release/list/任务投影及三个原ZIP均保持。旧自有A=d8b9de7b的唯一DELETE UUID9dacf5f1-fda3-472b-b4bd-a6001bd41afb实际200/ok:true，原release仅增加sourceClearedAt/available=false，正常源码GET410，C/B仍200且原3588B/SHA35e74ab9…4100c不变。
+
+根只读核对sourceClearRequests仅新增成功A的一条原UUID及fingerprint `6df0ac676ea4a962a26075b390d065ee717d8200c664135f36dcee1de8392675`，按JSON.stringify([A,applicationId,u-admin])重算相同；受保护拒绝不产生清理收据，不伪造三条记录。唯一A档案3a891c6e仅增加deletedAt/purgedAt，其中心ZIP在精确目录deployment-center/deployments/archives/3084a806/ccae….zip实际不存在；其余有效档案逐一stat存在，原本机current/previous及链4保持。未清工作区原8c包、共享e9be档案或其他版本，未重DELETE或重打包。原Java28891、Static28892与三个隔离Java28901/28903/28904清理后真实健康均200。
+
+根独立`.deployment/d5-r6-source-clear-prepared-v1/independent-root-acceptance-v1.json` SHA256 `7714661d1149ad9099cc04236c99427b154ea8e683b3a4663b5cc29e94da6cf8`，物理后验64c8e763…fedc4、owner后e908fc6e…8d4b。37任务/22版本历史均保留，只有A档案清理字段改变；规范化任务/版本完整行SHA `27e97902282bcc849d5492c0b476504e4b148af3688066ca6e99b9b7d6cdf071`。原文件/密钥/库身份、43原生表结构和九附件保持；认证会话行存在变化：C前后auth_sessions缺失/变化1、t3_native_auth_sessions6、demo.sessions4，清理前后另两认证表各1，具体旧行原因未归因，不能写所有旧行相等或伪成零异常。其余业务旧行与部署精确允许差分已核，认证历史边界保留，不追改旧snapshot。
+
+R6既定源码保护、唯一清理与恢复内容保留的四状态通过；辅助result的businessAcceptancePassed=false不追写，根综合原HTTP、原意图、正式fingerprint、物理文件与健康裁定本项。当前应用仍1e/原官方CLI0.4.5，未切换发行。D5仅余R4；D6自然七天门、E3普通草稿连续性和后续整页发行继续，整体未完成。
