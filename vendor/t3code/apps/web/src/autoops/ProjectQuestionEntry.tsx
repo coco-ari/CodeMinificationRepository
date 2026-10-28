@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from '@tanstack/react-router'
+import { Link, useLocation } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
 import { SettingsRow, SettingsSection } from '~/components/settings/settingsLayout'
 import { Button } from '~/components/ui/button'
@@ -16,6 +16,10 @@ export function ProjectQuestionEntry(props: ProjectQuestionEntryProps) {
 }
 
 function ProjectQuestionEntryContent({ project, disabled = false }: ProjectQuestionEntryProps) {
+  const search = useLocation({ select: (location) => location.search }) as {
+    section?: string
+    from?: string
+  }
   const directory = project.assistants
   const ready = directory?.ready === true
   const canManage = project.capabilities?.['project.manage'] === true
@@ -77,7 +81,12 @@ function ProjectQuestionEntryContent({ project, disabled = false }: ProjectQuest
             render={
               <Link
                 to="/assistants"
-                search={{ projectId: ProjectId.make(project.id), from: 'projects' }}
+                search={{
+                  projectId: ProjectId.make(project.id),
+                  from: 'projects',
+                  ...(search.section === 'git' ? { returnSection: 'git' } : {}),
+                  ...(search.from === 'deployments' ? { returnFrom: 'deployments' } : {}),
+                }}
               />
             }
           >

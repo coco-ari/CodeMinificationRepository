@@ -68,7 +68,13 @@ export function AssistantManagementPage() {
       ? `?projectId=${encodeURIComponent(selectedQuery)}&`
       : "?";
   const fromProject = (location.search as { from?: string }).from === "projects";
-  const scopeQuery = `${projectQuery}${fromProject ? "from=projects&" : ""}`;
+  const returnContext = location.search as { returnSection?: string; returnFrom?: string };
+  const scopeQuery = [
+    projectQuery,
+    fromProject ? "from=projects&" : "",
+    fromProject && returnContext.returnSection === "git" ? "returnSection=git&" : "",
+    fromProject && returnContext.returnFrom === "deployments" ? "returnFrom=deployments&" : "",
+  ].join("");
   return (
     <ModuleErrorBoundary label="助手" resetKey={`${host?.principal.id}:${projectId}:${provided}`}>
       <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-assistant-management>
@@ -131,7 +137,12 @@ export function AssistantManagementPage() {
 }
 function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
-  const fromProject = useLocation({ select: (location) => (location.search as { from?: string }).from === "projects" });
+  const search = useLocation({ select: (location) => location.search }) as {
+    from?: string;
+    returnSection?: string;
+    returnFrom?: string;
+  };
+  const fromProject = search.from === "projects";
   const host = useAutoOpsHost()!,
     project = host.projects.find((project) => project.id === projectId),
     manage = project?.capabilities?.["project.manage"] === true;
@@ -349,7 +360,20 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
         busy || pending || otherPending || editor ? (
           <Button variant="ghost" size="sm" disabled><ArrowLeftIcon />返回项目配置</Button>
         ) : (
-          <Button variant="ghost" size="sm" render={<Link to="/projects" search={{ projectId: ProjectId.make(projectId) }} />}>
+          <Button
+            variant="ghost"
+            size="sm"
+            render={
+              <Link
+                to="/projects"
+                search={{
+                  projectId: ProjectId.make(projectId),
+                  ...(search.returnSection === "git" ? { section: "git" } : {}),
+                  ...(search.returnFrom === "deployments" ? { from: "deployments" } : {}),
+                }}
+              />
+            }
+          >
             <ArrowLeftIcon />返回项目配置
           </Button>
         )

@@ -1,5 +1,13 @@
 import { useLayoutEffect } from 'react'
-import { useLocation } from '@tanstack/react-router'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+  useLocation,
+} from '@tanstack/react-router'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { render, stubGlobal } from '../../test/render'
@@ -10,6 +18,10 @@ import { readAppearanceModePreference, readThemePreference, useTheme } from '~/h
 import { AutoOpsProjectsPage } from './ProjectsPage'
 import { AssistantManagementPage } from './AssistantManagementPage'
 import { installAutoOpsHost, type AutoOpsT3Bootstrap } from './hostConfig'
+import { RepositorySetupNotice } from './deployment/RepositorySetupNotice'
+import { Route as ProjectsRoute } from '../routes/_chat.projects'
+import { Route as AssistantsRoute } from '../routes/_chat.assistants'
+import { Route as DeploymentsRoute } from '../routes/_chat.deployments'
 import '../index.css'
 import './theme.css'
 
@@ -257,4 +269,97 @@ it('项目配置到助手再返回，刷新真实就绪状态后直接进入问�
   await screen.getByRole('link', { name: '开始问答', exact: true }).click()
   await expect.poll(() => screen.router?.state.location.href).toBe('/?projectId=new-project')
   expect(f.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+})
+
+it('部署仓库入口往返助手后保留原项目分组和返回部署', async () => {
+  const f = setup()
+  f.assign()
+  installAutoOpsHost(f.bootstrap(), location.origin)
+  using _fetch = stubGlobal('fetch', f.fetch)
+  const root = createRootRoute({
+    component: () => (
+      <SidebarProvider>
+        <ModuleSidebarProvider>
+          <ModuleSidebarOutlet />
+          <Outlet />
+        </ModuleSidebarProvider>
+      </SidebarProvider>
+    ),
+  })
+  const router = createRouter({
+    routeTree: root.addChildren([
+      createRoute({
+        getParentRoute: () => root,
+        path: '/deployments',
+        validateSearch: DeploymentsRoute.options.validateSearch,
+        component: () => <RepositorySetupNotice projectId="new-project" />,
+      }),
+      createRoute({
+        getParentRoute: () => root,
+        path: '/projects',
+        validateSearch: ProjectsRoute.options.validateSearch,
+        component: AutoOpsProjectsPage,
+      }),
+      createRoute({
+        getParentRoute: () => root,
+        path: '/assistants',
+        validateSearch: AssistantsRoute.options.validateSearch,
+        component: AssistantManagementPage,
+      }),
+    ]),
+    history: createMemoryHistory({ initialEntries: ['/deployments?projectId=new-project'] }),
+    disableGlobalCatchBoundary: true,
+  })
+  // 使用正式路由的查询解析，避免测试路由保留实际页面会丢弃的字段。
+  await using screen = await render(<RouterProvider router={router} />, { router: false })
+  await screen.getByRole('link', { name: '配置项目仓库', exact: true }).click()
+  await expect.poll(() => router.state.location.href).toBe(
+    '/projects?projectId=new-project&section=git&from=deployments',
+  )
+  await screen.getByRole('link', { name: '配置助手', exact: true }).click()
+  await expect.poll(() => router.state.location.pathname).toBe('/assistants')
+  await screen.getByRole('button', { name: '我提供的', exact: true }).click()
+  await screen.getByRole('button', { name: '当前项目', exact: true }).click()
+  await screen.getByRole('link', { name: '返回项目配置', exact: true }).click()
+  await expect.poll(() => router.state.location.href).toBe(
+    '/projects?projectId=new-project&section=git&from=deployments',
+  )
+  await expect.element(screen.getByRole('link', { name: '返回部署', exact: true })).toBeVisible()
+  await screen.getByRole('link', { name: '返回部署', exact: true }).click()
+  await expect.poll(() => router.state.location.href).toBe('/deployments?projectId=new-project')
+  expect(f.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+})
+
+it('助手路由仅保留项目返回白名单，不接收任意返回地址或分组', () => {
+  const validate = AssistantsRoute.options.validateSearch
+  if (typeof validate !== 'function') throw new Error('助手路由未提供查询解析函数')
+  expect(
+    validate({
+      projectId: 'new-project',
+      from: 'projects',
+      returnSection: 'git',
+      returnFrom: 'deployments',
+    }),
+  ).toEqual({
+    projectId: 'new-project',
+    from: 'projects',
+    returnSection: 'git',
+    returnFrom: 'deployments',
+  })
+  expect(
+    validate({
+      projectId: 'new-project',
+      from: 'projects',
+      returnSection: 'other-project',
+      returnFrom: 'https://foreign.invalid/projects',
+      returnUrl: 'https://foreign.invalid/projects',
+    }),
+  ).toEqual({ projectId: 'new-project', from: 'projects' })
+  expect(
+    validate({
+      projectId: 'new-project',
+      returnSection: 'git',
+      returnFrom: 'deployments',
+    }),
+  ).toEqual({ projectId: 'new-project' })
 })
