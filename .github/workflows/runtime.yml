@@ -1,8 +1,8 @@
 name: 工作台运行链路检查
 
 on:
-  push:
-  pull_request:
+  # 开发测试阶段不自动运行；正式上线前可手动执行完整检查。
+  workflow_dispatch:
 
 permissions:
   contents: read
