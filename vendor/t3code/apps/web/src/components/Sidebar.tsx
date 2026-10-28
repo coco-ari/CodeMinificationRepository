@@ -1323,7 +1323,7 @@ function SidebarSectionHeader(props: {
 
 const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   draftId: DraftId;
-  composer: ComposerThreadDraftState;
+  composer: ComposerThreadDraftState | undefined;
   project: ProjectFaviconProject | null;
   projectDisplayName: string | null;
   isActive: boolean;
@@ -1334,21 +1334,21 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   const { composer, draftId, onContextMenu, onDiscard, onNavigate } = props;
   const compactDraft = isAutoOpsLite();
   const promptPreview =
-    replaceComposerContextReferences(composer.prompt, (occurrence) => occurrence.label)
+    replaceComposerContextReferences(composer?.prompt ?? "", (occurrence) => occurrence.label)
       .trim()
       .split("\n", 1)[0] ?? "";
   // images mirrors persistedAttachments once rehydration finishes; before
   // that only the persisted list is populated, hence max not sum.
-  const attachmentCount =
+  const attachmentCount = composer ?
     Math.max(composer.images.length, composer.persistedAttachments.length) +
     composer.files.length +
     composer.terminalContexts.length +
     composer.previewAnnotations.length +
-    composer.reviewComments.length;
+    composer.reviewComments.length : 0;
   const preview =
     promptPreview.length > 0
       ? promptPreview
-      : `${attachmentCount} 个附件`;
+      : attachmentCount > 0 ? `${attachmentCount} 个附件` : "新对话";
   const accessibility = resolveSidebarRowAccessibility({
     title: preview,
     statusLabel: "未发送的草稿",
@@ -1417,18 +1417,24 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
                 <span
                   role="status"
                   data-slot="sidebar-row-tail-status"
-                  className="col-start-1 row-start-1 text-xs text-warning-foreground transition-opacity motion-reduce:transition-none not-pointer-coarse:group-hover/sidebar-row:opacity-0 not-pointer-coarse:group-focus-within/sidebar-row:opacity-0"
+                  className="pointer-events-none col-start-1 row-start-1 text-xs text-warning-foreground transition-opacity motion-reduce:transition-none not-pointer-coarse:group-hover/sidebar-row:opacity-0 not-pointer-coarse:group-focus-within/sidebar-row:opacity-0"
                 >草稿</span>
                 <span
                   data-slot="sidebar-row-tail-actions"
                   className="pointer-events-none col-start-1 row-start-1 inline-flex items-center opacity-0 transition-opacity motion-reduce:transition-none group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:overflow-hidden pointer-coarse:opacity-100"
                 >
                   <SidebarHeaderIconButton
-                    label="丢弃草稿"
-                    onClick={handleDiscard}
+                    label="对话更多操作"
+                    tooltip="更多操作"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      onContextMenu(draftId, { x: rect.left, y: rect.bottom });
+                    }}
                     onPointerDown={(event) => event.stopPropagation()}
                     className="pointer-coarse:size-11"
-                  ><XIcon className="size-3" /></SidebarHeaderIconButton>
+                  ><EllipsisIcon className="size-3.5" /></SidebarHeaderIconButton>
                 </span>
               </> : <Tooltip>
                 <TooltipTrigger
@@ -1459,10 +1465,10 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
 interface SidebarDraftRowData {
   draftId: DraftId;
   session: DraftSessionState;
-  composer: ComposerThreadDraftState;
+  composer: ComposerThreadDraftState | undefined;
 }
 
-const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
+export const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectByKey: ReadonlyMap<string, EnvironmentProject>;
   projectDisplayNameByKey: ReadonlyMap<string, string>;
   scopedProjectKeys: ReadonlySet<string> | null;
@@ -1476,14 +1482,18 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     routeDraftId: string | null;
     row: SidebarDraftRowData | null;
   }>({ routeDraftId: null, row: null });
-  if (frozenActive.routeDraftId !== props.routeDraftId) {
+  const activeSession = props.routeDraftId ? draftThreadsByThreadKey[props.routeDraftId] : undefined;
+  // 当前空草稿也要提供范围菜单；标题仍在进入时固定，避免输入引发侧栏位移。
+  if (frozenActive.routeDraftId !== props.routeDraftId ||
+    (isAutoOpsHosted() && frozenActive.row === null && activeSession && activeSession.promotedTo == null)) {
     let row: SidebarDraftRowData | null = null;
     if (props.routeDraftId !== null) {
       const draftId = DraftId.make(props.routeDraftId);
       const session = draftThreadsByThreadKey[draftId];
       const composer = draftsByThreadKey[draftId];
       row =
-        session && session.promotedTo == null && composer && composerDraftHasUserContent(composer)
+        session && session.promotedTo == null &&
+        (isAutoOpsHosted() || (composer && composerDraftHasUserContent(composer)))
           ? { draftId, session, composer }
           : null;
     }

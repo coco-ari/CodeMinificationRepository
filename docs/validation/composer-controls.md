@@ -12,6 +12,8 @@
 
 影响集中于 ThreadScopeControl/scopeSelection、共享 menu 与 contextMenuFallback、Sidebar/useThreadActionMenu 及其原有选择调用方。可见范围抽为同一适配入口，使用现有 scope 读写和草稿存储，没有新增后端接口或跨请求缓存。
 
+13d8ed34 首轮实站确认主要改动生效，但发现新空草稿被 SidebarDraftBlock 的进入时冻结规则排除，输入后也需离开才出现；草稿尾部又只有丢弃按钮。为使移入列表的可见范围直接可达，本批补齐当前空草稿行（标题“新对话”，输入期间保持冻结）、紧凑草稿更多按钮和状态标签不拦截点击。丢弃仍在同一菜单。原两项菜单回归改为挂载真实 SidebarDraftBlock，不再用临时按钮代替入口；22 项输入器回归重新通过，类型通过。
+
 ## 同条件操作变化
 
 以同一账号、同一未发送草稿为条件：刷新助手从常驻按钮 1 次点击改为展开助手菜单 + 刷新 2 次；调整可见范围从底栏展开 + 选择 2 次，改为会话更多/右键 + 可见范围子菜单 + 选择 3 次。低频操作增加一次菜单动作，换取常驻底栏去掉可见范围及整行提示/刷新；不宣称操作次数减少。原草稿、模型及助手选择保持。
@@ -24,7 +26,7 @@
 - Web 类型、306 文件运行边界检查及 `git diff --check` 通过。浏览器经具体命令的沙盒外授权启动；不等待 GitHub CI。
 - 一次包含未修改的待回答表单测试的扩展运行未产出结果，已终止，未计为通过；随后只运行上述受影响测试并通过。本批不宣称未触及表单或全站矩阵均已重测。
 
-证据日志：`/tmp/autoops-composer-controls-browser-final.log`、`/tmp/autoops-composer-font-browser.log`、`/tmp/autoops-composer-controls-unit.log`、`/tmp/autoops-composer-controls-types-final2.log`。
+证据日志保存在本地忽略目录 `.deployment/composer-controls-ui/automated/`；首批 `/tmp/autoops-composer-controls-browser-final.log`、`/tmp/autoops-composer-font-browser.log`、`/tmp/autoops-composer-controls-unit.log`，入口补齐 `/tmp/autoops-composer-sidebar-browser.log`、`/tmp/autoops-composer-sidebar-types.log`。
 
 ## 交付状态
 

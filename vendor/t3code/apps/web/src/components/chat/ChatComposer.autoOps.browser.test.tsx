@@ -1,5 +1,7 @@
 import { showThreadMenuWithVisibility } from "~/autoops/threadVisibilityMenu";
 import { showContextMenuFallback } from "~/contextMenuFallback";
+import { SidebarDraftBlock } from "../Sidebar";
+import { SidebarProvider } from "../ui/sidebar";
 import { createRef, useRef } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
@@ -43,7 +45,8 @@ import { ComposerSurface } from "./ComposerSurface";
 import "../../index.css";
 
 const mocks = vi.hoisted(() => ({ createThread: vi.fn() }));
-vi.mock(import("~/hooks/useHandleNewThread"), () => ({
+vi.mock(import("~/hooks/useHandleNewThread"), async (original) => ({
+  ...(await original()),
   useNewThreadHandler: () => mocks.createThread,
 }));
 // 原生会话已认证的测试边界；业务授权仍通过真实宿主预约合同。
@@ -944,15 +947,26 @@ it("刷新助手失败保留草稿，菜单可再次刷新恢复", async () => {
 
 it.each(["more", "right-click"])("会话 %s 菜单更改草稿可见范围，保留文本和模型且无勾选图标", async (entry) => {
   const f = setup(`visibility-${entry}`, true);
+  installAutoOpsHost({ ...readAutoOpsHost()!, productProfile: { id: "project-assistant-lite-v1" } }, window.location.origin);
   useComposerDraftStore.getState().setProjectDraftThreadId(
     scopeProjectRef(f.environmentId, ProjectId.make("composer-project")), f.draftId, { threadId: f.threadId },
   );
   using _fetch = stubGlobal("fetch", f.fetcher);
   const open = () => void showThreadMenuWithVisibility(showContextMenuFallback, [{ id: "discard", label: "丢弃草稿" }],
     { x: 20, y: 20 }, { threadId: f.id, projectId: "composer-project", draftId: f.draftId, canOperate: () => true });
-  await using screen = await render(<><button onClick={open} onContextMenu={event => { event.preventDefault(); open(); }}>对话更多操作</button><Harness fixture={f} /></>);
+  await using screen = await render(<><SidebarProvider><SidebarDraftBlock
+    projectByKey={new Map()} projectDisplayNameByKey={new Map()}
+    scopedProjectKeys={new Set([`${f.environmentId}:composer-project`])}
+    routeDraftId={f.draftId} onNavigateToDraft={noop} onDraftContextMenu={open}
+  /></SidebarProvider><Harness fixture={f} /></>);
+  await expect.element(screen.getByRole("button", { name: "新对话, 未发送的草稿", exact: true })).toBeVisible();
   await editor().fill("切换可见范围仍然保留");
-  await screen.getByRole("button", { name: "对话更多操作" }).click(entry === "right-click" ? { button: "right" } : {});
+  const row = screen.getByRole("button", { name: "新对话, 未发送的草稿", exact: true });
+  if (entry === "right-click") await row.click({ button: "right" });
+  else {
+    await row.click();
+    await row.getByRole("button", { name: "对话更多操作" }).click();
+  }
   await page.getByRole("menuitem", { name: "会话可见范围", exact: true }).click();
   const selected = page.getByRole("menuitemradio", { name: "仅自己", exact: true });
   await expect.element(selected).toHaveAttribute("aria-checked", "true");
