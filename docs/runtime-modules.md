@@ -1733,7 +1733,7 @@ R1沿现行1e、同原Agent1.6.0，在全局空闲及MemAvailable2462MiB/磁盘�
 
 完整所有者前cef8f898…6948、后98aa7afa…7d46覆盖11库/43原生表，12957条原行Counter无缺失、原inode/列/迁移/密钥保持；785旧文件中784字节不变，唯一工作区state仅新增本次version、package、原packages任务及capture保护引用，Node按生产JSON.stringify反去这四项后精确命中原SHA8a23c3b5…c9db。九个已交付附件沿原1e严格基线逐SHA核对，不虚称本次前置采过。原24任务/16版本及旧目标配置/指针保持，只新增上述service/target/唯一task/archive和两条setup收据；现在25任务/16版本。独立本地21组核验 `.deployment/d5-r1-javac-20261028-v1-root/independent-local-v1.json` SHA256 `516767e883dceda65e3ac63db4d877af51357bdeae63dddcd7ebc24b5cbc48c8`，Agent清理原件 `ea7ec18613f5c143542d34e9d0fe6cd1a68d5d5271c52c8e4f4faf30bda776ab`。原09126节点后台维护由applying变failed，实际Docker Hub拉取BuildKit连接重置，完整失败保留，不宣称全站维护正常或整份部署状态零变化；本次专属节点策略仍applied。前置辅助将全站24误作本环境12任务的拒绝发生在setup写前，旧账号配置PID拒绝发生在任务POST前，两次原件均保留，按实际范围/现行PID校正后才执行原任务，未重POST。
 
-本项复用已有代码、相关自动与1e完整CI，辅助8项不代替业务；现行1e生效，R1真实失败与清理业务通过。后续R2已由下节原件补齐，当前仅继续R3切换后恢复、R4事件补报去重、R5节点并发、R6档案清理；D6自然七天到期独立待验，不因单项通过结束原任务。
+本项复用已有代码、相关自动与1e完整CI，辅助8项不代替业务；现行1e生效，R1真实失败与清理业务通过。后续R2、R3已由下节原件补齐，当前仅继续R4事件补报去重、R5节点并发、R6档案清理；D6自然七天到期独立待验，不因单项通过结束原任务。
 
 ### 构建中崩溃与原任务恢复（2026-10-28）
 
@@ -1743,7 +1743,17 @@ R2复用原隔离target5c01a9f2和正常e353固定源码，只POST一次原UUID8
 
 原所有者before `cd3d9bdc…d463`、after `88c92f78…78b2`覆盖11库/43原生表，12992旧行Counter、原inode/列/迁移/密钥均保持。before含866文件及九附件，after基础snapshot的916文件漏合并九个附件，但独立attachments映射按原九键及全部SHA精确相等；原v1的11条compareProblems保留，不能追改成无异常。独立比较只将这九项合并为925文件后，唯一原文件变化为工作区state；反去本次version127d6bf0、package4f8a9bc6、原packages任务81923785和capture保护f5585cc5，Node按JSON.stringify精确重构原SHA24455416…e87d，新增仅57个固定来源文件和两个包文件。原25任务/16版本及所有目标配置/指针保持，只新增本任务，原档案e9be3876仅追加本次精确sourceIdentity的一个origin，没有新service/target/archive ID。原09126节点的独立BuildKit拉取维护仍failed，专属7937存储报告整体保持applied，不宣称全站维护正常或整份部署零变化。
 
-独立本地25组核验 `.deployment/d5-r2-building-20261028-v1-root/independent-local-v1.json` SHA256 `26246db5bb2487305059a73f9f2e0dfed9256d18b1165127871c89218af3062a` 联合原owner、Agent恢复/清理、公开任务及ZIP后确认R2业务子项通过；控制器自身businessAcceptancePassed=false只表明它不单独裁决整体业务，原件不改。代码复用、相关自动与现行1e部署保持，真实构建中崩溃恢复通过；R3–R6及D6自然到期继续。62216b3f8f98b26adf90fbc206fce207930f9032为上一批docs-only提交，[质量40613539184](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40613539184)与[完整运行40613539197](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40613539197)均green，原件 `.deployment/ci-62216b3f-progress3-root-v1.json` SHA256 `0a924fe199d75ccb6ba5aa3a1a82969b30718b8fb67b856d1bd05a7c4c37921c`；它不是新应用发行。
+独立本地25组核验 `.deployment/d5-r2-building-20261028-v1-root/independent-local-v1.json` SHA256 `26246db5bb2487305059a73f9f2e0dfed9256d18b1165127871c89218af3062a` 联合原owner、Agent恢复/清理、公开任务及ZIP后确认R2业务子项通过；控制器自身businessAcceptancePassed=false只表明它不单独裁决整体业务，原件不改。代码复用、相关自动与现行1e部署保持，真实构建中崩溃恢复通过；该时点后续R3由下节补齐，当前仅R4–R6及D6自然到期继续。62216b3f8f98b26adf90fbc206fce207930f9032为上一批docs-only提交，[质量40613539184](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40613539184)与[完整运行40613539197](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40613539197)均green，原件 `.deployment/ci-62216b3f-progress3-root-v1.json` SHA256 `0a924fe199d75ccb6ba5aa3a1a82969b30718b8fb67b856d1bd05a7c4c37921c`；它不是新应用发行。
+
+### 切换后崩溃与同原任务健康恢复（2026-10-28）
+
+R3复用原隔离target5c01a9f2与正常e353源码，只POST一次request `10f04db5-1540-4f2e-854e-e9a6f74f9cd7`，task `386cae69-347b-4920-a3c4-60df35b0e64f`。真实Maven BUILD SUCCESS在seq72，原任务已切换至新CID018810c1并在verifying/seq87尚未终态时，先精确pause该runtime，再对原Agent1721110/t43421857以pidfd唯一SIGKILL。确认退出及锁释放后，先原CID unpause，再按RAM中原unit/启动/身份正常恢复Agent1753929/t43634955。原journal恢复分支只health/finish：seq88“Agent 重启，正在核对已执行的部署状态”、seq89succeeded，seq=ACK89；不重POST、不二次build/activate。新CID、image/imageId、StartedAt、restartCount0、labels与compose摘要全值保持，local current/release和唯一chain一致；原Java/Static健康身份、59368及正式客户CLI1608061保持。
+
+控制器原件258dcf46…1769、只读agent-after b3fd1540…2ffd和完整所有者前8db39cfd…0ca/后8a095f28…1044已交叉核对。11库135表含43张原生表，13111条旧行hash Counter完整保留，列/device/inode/迁移、DATA64512:304953及密钥摘要相等；本次九附件从before到after均按完整原键/SHA核齐，没有R2基础snapshot漏合并问题。925旧文件仅工作区state合法变化，新增仅7bad479f的backend.zip和manifest；原26任务/16版本逐完整行不变，新增唯一R3任务/版本，其他目标配置/current保持，原四档案仅e9be的origin追加本次精确身份。工作区复用原sourceVersion127d6bf0，不新增版本，仅其packageUsedAt、新package7bad、一个packages任务及精确保护引用变化；before字节SHA确等R2 after feaf82e1…ba3b4。中心archive与backend.zip逐字相同3588B/35e74ab9…4100c，manifest正文按生产JSON编码重构命中原SHA。原owner两条compare提示保留，独立逐项归因为本次工作区及部署的允许增量，不改写成原owner无提示或全数据字节相等。
+
+独立审计 `.deployment/d5-r3-switch-20261028-v1-root/independent-local-v1.json` SHA256 `e865c68c4dee838727d05be5fccf7ce33cfc704747051d9344eb78924e6f1e26`：以冻结1e生产events方法和时间/阶段函数，在内存IO中用原89事件及真实receivedAt逆构，中心全部logs、完整raw task、新release及currentRelease均全值相等；未再次执行现场owner/健康HTTP/信号，其他PID及17源/启动的现场事实由已钉采集器交叉核对。public v1将current和release-list整值等而误拒的原事实保留，v2仅按正式列表派生的current/archiveStatus/archiveProtected三字段比较，不改其他字段或重发写入。原controller和agent-after的businessAcceptancePassed=false不追改；代码复用、原相关自动、现行1e部署及本次真实R3场景四状态通过，只裁定该单项。现在27任务/17版本规范化完整行SHA `8c5ffbe72882ed0b53d1a99b629f61bfe761d1b4303e3ac48605817890867428`；原R1 25/16、R2 26/16和切换24/16锚保持。
+
+D5当前仅余R4事件补报去重、R5节点并发与R6档案清理。D6的自然七天无引用临时包门独立：当前证据最早为2026-11-03T07:51:35.703Z（北京时间15:51:35.703），尚未到期，到期仍按实际版本链/活动引用裁决；不能改日期或把脚本/保留检查通过当作实际回收。docs-only d7f02fa649da8645bc37cc8132e0a7d97aad4f12的[质量40617322403](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40617322403)及[完整运行40617322418](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40617322418)均green，证明 `.deployment/ci-d7f02fa6-progress3-root-v1.json` SHA256 `4720cf8972a3503c108932eeb1e7eb90d4bdc1b3807173b50d7a462285091604`；应用仍为1e，没有新应用发行。
 
 ### 同原日志地址撤权与恢复（2026-10-28）
 
@@ -1755,7 +1765,13 @@ A3复用a2b8d768以来的原返回前授权合同。当前1e，原reader89dde30b
 
 A5现行1e只读发现原件 `.deployment/a5-question-discovery-20261027-v3-evidence/0019-result.json` SHA256 `3f3565f634e9db3bda57e84b2f877b11022353798053aeb3049e39717c3c8e1e`：林晓/陈一各自正常登录，原授权指纹前后相同，两人可见shell及合法locked/private/platform候选均为0，来源目录精确403 AUTHORIZATION_PENDING，未发问题/模型、未创建绑定或业务授权。所属元数据原件 `raw-owned-binding-metadata-root-v1.json` SHA256 `7e95cc38be5660a50233b71e4f3f4fbcf797b8d0eeec606320f65030b8d5a4e9` 仅有一条Lin本人private/locked绑定，但已于2026-10-23撤回、has_question=0且native_thread_id=null；全部legacyConversationCount=0。因此当前没有可合法复用的旧问答目标，不能解撤回、补question、创建旧数据或启用两人新授权来制造验收。
 
-这只关闭本次发现和待分配保留的事实，不算旧问答或实际MCP工具准备已通过。既有管理读取/绑定拒绝及无绑定RPC合同继续复用；project-shared受众及撤权后的历史阅读仍为A5明确待验项，不用私有会话拒绝、C5共享使用或本次同地址日志恢复替代。其余条目保持原归口。
+上述发现只证明待分配保留和当前无适用合法旧目标，不算林陈旧问答或实际MCP工具执行通过。既有管理读取/绑定拒绝及无绑定RPC合同继续复用；平台project-shared历史阅读与受限续聊已由下述独立实际场景补齐，不用私有会话、客户电脑共享或同地址日志代替。A5按已确认范围闭环；其余条目保持原归口。
+
+A5平台共享场景在现行1e正常HTTPS界面实际执行：管理员进入D123、新建问题、选择原64cb r1助手，显式选grok4.6/high及project-shared，核环境/内部资料范围后填写并发送一次，共15次核心操作（菜单展开、选择及Esc分别计），前后步骤均15，本轮未改UI；等待4.225秒另计。原thread `bf66e70c-92ed-4dce-813d-241a97db6cb8`、userMessage7226f275只产生唯一run，completed/A5-SHARED-OK。公共预设仍medium/private、技能为空，完整预设/分配及项目settings前后相等，没有因管理员本次选择而改公共配置。
+
+原reader89dde30b仍canUse=true/canAdjust=false，正常GET原binding及完整projection成功，再以原command `6a1a39a4-6d5b-4c27-a15c-dc027ab208e3` / message `15299247-271b-433e-a980-c3e39b63780f` 一次RPC尝试续聊。原生公开Failure精确为EnvironmentAuthorizationError，requiredScope/requiredPermission均orchestration:read，message为“AutoOps access denied or session expired.”；未成功请求模型。完整messages/runs/attempts/providerTurns四数组及原绑定/目录全值不变。实际wire不暴露ASSISTANT_PARAMETERS_FIXED，仅现有owner同负载自动回归覆盖该业务码；high与project-shared同时不同于预设，不能隔离high为唯一原因；未捕获raw commandReceipt，不据拒绝制造收据。结论是共享历史可阅读、不能继承管理员配置续聊，未扩大reader权限。
+
+根实际索引 `.deployment/a5-shared-platform-1e014e71-v2-root/independent-root-v1.json` SHA256 `aacb85c3e78f05342afaafe914bd693bf33c6a35d64eb9b009b7a584f3b5e86d` 固定原UI意图、完整before/after和公共配置原件。v1辅助把ThreadShell的activeRunId/latestRunId套在完整projection而在before/state/dispatch前误拒；原失败和只读诊断保留，依据正式AppThread合同新v2离线真实DTO红→绿、原5+新增1回归通过后，沿同原UUID唯一发出上述RPC。正常读取与公开拒绝、本地辅助与实际业务分别记账；没有重发管理员原问题、补绑定或启用林陈授权。A5本项四状态通过，Lin陈仍pending且旧合法续聊目标当前不适用，C7继续用户取消。
 
 ### 排队任务撤权与专属Agent恢复（2026-10-27）
 
