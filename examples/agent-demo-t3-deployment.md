@@ -8,7 +8,15 @@
 
 ### 当前验证发行
 
-本节 `ROOT=/home/tao/autoops-shared-validation-20261026`，应用数据目录为 `/home/tao/autoops-deployment-validation/data`；两者均属于当前开发验收实例。浏览器登录统一使用 [AutoOps HTTPS入口](https://auto.996788.xyz/agent-demo.html)；`192.168.31.157:28887` 是内网HTTP后端地址，不作为浏览器登录入口。当前会话Cookie启用Secure，HTTP页面即使密码正确、登录接口200也无法保存该会话，不应为内网登录关闭此保护。
+本节 `ROOT=/home/tao/autoops-shared-validation-20261026`，应用数据目录为 `/home/tao/autoops-deployment-validation/data`；两者均属于当前开发验收实例。公网浏览器入口为 [AutoOps HTTPS入口](https://auto.996788.xyz/agent-demo.html)；`192.168.31.157:28887` 是内网HTTP后端地址，不作为浏览器登录入口。当前会话Cookie启用Secure，直接打开内网IP的HTTP页面即使密码正确、登录接口200也无法保存该会话，不应为内网登录关闭此保护。
+
+用户确认先支持当前Mac后，已建立只监听 `127.0.0.1:28887` 的SSH加密隧道，直连 `tao@192.168.31.157` 并转发测试机回环28887。本机浏览器改用 [Mac内网直连入口](http://localhost:28887/agent-demo.html)；此localhost入口已实际完成admin正常登录、刷新保持和原对话加载，Secure会话配置不变，没有改密码、代理、DNS或系统信任。该地址仅适用于建立隧道的Mac，不能复制给其他电脑当内网地址；模型上游仍按原配置连接，不宣称改善模型耗时。当前应用仍为下方e92，无需重新构建或发版。
+
+Mac重启或SSH隧道断开后，在终端执行以下命令，按提示输入测试服务器tao账号密码，并保持该终端打开，再访问上述localhost入口；已有隧道时无需重复启动：
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:28887:127.0.0.1:28887 tao@192.168.31.157
+```
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
