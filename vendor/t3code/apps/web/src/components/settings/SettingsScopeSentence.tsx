@@ -1,7 +1,7 @@
 import { isAutoOpsHosted } from "~/autoops/capabilities";
 import { resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import { useLocation } from "@tanstack/react-router";
-import { CheckIcon, ChevronDownIcon, LayersIcon } from "lucide-react";
+import { ChevronDownIcon, LayersIcon } from "lucide-react";
 import { Fragment, useState, type ReactNode } from "react";
 
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
@@ -177,9 +177,6 @@ function ScopeMenu({
             {(option: ScopeOption) => (
               <ComboboxItem key={option.value} value={option}>
                 <ScopeOptionLabel option={option} />
-                {option.value === value ? (
-                  <CheckIcon aria-hidden className="size-3.5 shrink-0" />
-                ) : null}
               </ComboboxItem>
             )}
           </ComboboxList>
