@@ -126,7 +126,7 @@ export function questionConfigurationPolicy(ports: Ports) {
     projectId: string,
     value: QuestionConfiguration,
     member: ProjectMembership,
-    accepted = false,
+    _accepted = false,
   ) => {
     const project = ports.projects().find((project) => project.id === projectId)
     if (!project || member.status !== 'active')
@@ -206,8 +206,6 @@ export function questionConfigurationPolicy(ports: Ports) {
         : !model.reasoningLevels.includes(value.model.reasoningEffort)
     )
       return fail('ASSISTANT_REASONING_FORBIDDEN', '请明确选择此模型支持的思考强度')
-    const skills = ports.skills(projectId, value.agentId, value.workspaceType)
-    if (!accepted && value.skillIds.some((id) => !skills.some((skill) => skill.id === id)))
-      return fail('ASSISTANT_SKILL_FORBIDDEN', '所选技能已停用或不属于当前项目和资料范围')
+    // 平台 skill 由 skills 模块统一裁决，每轮读取最新三级范围，不以预设旧清单过滤。
   }
 }

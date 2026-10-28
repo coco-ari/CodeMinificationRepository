@@ -76,11 +76,11 @@ it('短窗口创建助手明确选择实际模型，使用其真实默认强度�
   await expect.element(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
   await choose('模型', '实际模型')
   await expect.element(page.getByRole('combobox', { name: '思考强度', exact: true })).toHaveTextContent('high')
-  await page.getByRole('checkbox', { name: '诊断skill', exact: true }).click()
+  await expect.element(page.getByRole('checkbox', { name: '诊断skill', exact: true })).not.toBeInTheDocument()
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   await expect.element(add).toHaveFocus()
-  expect(f.writes[0]?.body.value.configuration).toMatchObject({ model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: 'high' }, skillIds: ['skill'], environmentId: null })
+  expect(f.writes[0]?.body.value.configuration).toMatchObject({ model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: 'high' }, skillIds: [], environmentId: null })
   expect(f.presets.find(preset => preset.name === '测试排障助手')).toBeDefined()
 })
 

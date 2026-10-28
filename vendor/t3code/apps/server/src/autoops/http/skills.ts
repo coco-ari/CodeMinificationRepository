@@ -49,6 +49,7 @@ HttpRouter.add('GET', '/autoops/skill-library/context', Effect.gen(function* () 
       const skillIds = query.skillIds === undefined ? undefined : yield* Effect.try(() => decodeContract(QuestionSkillIdsJson,query.skillIds)).pipe(Effect.mapError(() => ({status:400,code:'SKILL_INPUT_INVALID',message:'技能选择格式无效'})));
       const input = query.threadId ? {threadId:query.threadId} : {
         ...(query.projectId ? {projectId:query.projectId} : {}), ...(query.agentId ? {agentId:query.agentId} : {}),
+        ...(query.assistantId ? {assistantId:query.assistantId} : {}),
         ...(query.environmentId ? {environmentId:query.environmentId} : {}),
         ...(query.workspaceType ? {workspaceType:query.workspaceType as 'internal' | 'external'} : {}),
         ...(query.workspaceVersionId ? {workspaceVersionId:query.workspaceVersionId} : {}),

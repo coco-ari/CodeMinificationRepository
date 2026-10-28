@@ -177,28 +177,28 @@ test('区域链接使用独立路径和完整项目查询，路径前缀不会�
   assert.equal(autoOpsAreaFromPath('/skills-other'), 'chat')
 })
 
-test('技能切项目仅保留已知视图与授权助手，清除旧项目资源和动作参数', () => {
+test('技能切项目只保留已知视图，不携带上一个项目的助手，清除旧项目资源和动作参数', () => {
   const f = fixture()
   f.setHost({ principal: { id: 'alice' }, projects: [
     { id: 'project-a', agents: [{ id: 'agent-a' }] },
     { id: 'project-b', agents: [{ id: 'agent-b' }] },
   ] })
-  const oldHref = '/skills?projectId=project-a&skillView=agent&agentId=agent-a&skillId=old&versionId=v1&action=assign'
-  assert.equal(f.store.projectHref('skills', 'project-b', oldHref), '/skills?projectId=project-b&skillView=agent&agentId=agent-a')
+  const oldHref = '/skills?projectId=project-a&skillView=assistant&assistantId=agent-a&skillId=old&versionId=v1&action=assign'
+  assert.equal(f.store.projectHref('skills', 'project-b', oldHref), '/skills?projectId=project-b&skillView=assistant')
   assert.equal(f.store.readProjectId(), 'project-a', '生成链接不能改变当前项目或既有任务绑定')
-  for (const view of ['library', 'project']) {
-    assert.equal(f.store.projectHref('skills', 'project-b', { skillView: view, agentId: 'agent-a', skillId: 'old' }), `/skills?projectId=project-b&skillView=${view}`)
+  for (const view of ['library', 'global', 'project']) {
+    assert.equal(f.store.projectHref('skills', 'project-b', { skillView: view, assistantId: 'agent-a', skillId: 'old' }), `/skills?projectId=project-b&skillView=${view}`)
   }
   for (const search of [
-    '?skillView=agent&agentId=unknown', '?skillView=agent&agentId=agent-a&agentId=agent-a',
-    { skillView: 'agent', agentId: ['agent-a'] },
-  ]) assert.equal(f.store.projectHref('skills', 'project-b', search), '/skills?projectId=project-b&skillView=agent')
+    '?skillView=assistant&assistantId=unknown', '?skillView=assistant&assistantId=agent-a&assistantId=agent-a',
+    { skillView: 'assistant', assistantId: ['agent-a'] },
+  ]) assert.equal(f.store.projectHref('skills', 'project-b', search), '/skills?projectId=project-b&skillView=assistant')
   for (const search of [
-    '?skillView=unknown&agentId=agent-a', '?skillView=agent&skillView=project&agentId=agent-a',
-    { skillView: ['agent'], agentId: 'agent-a' }, { agentId: 'agent-a' },
+    '?skillView=unknown&assistantId=agent-a', '?skillView=assistant&skillView=project&assistantId=agent-a',
+    { skillView: ['assistant'], assistantId: 'agent-a' }, { assistantId: 'agent-a' },
   ]) assert.equal(f.store.projectHref('skills', 'project-b', search), '/skills?projectId=project-b')
   f.setHost({ principal: { id: 'alice' }, projects: [{ id: 'project-b', agents: [{ id: 'agent-b' }] }] })
-  assert.equal(f.store.projectHref('skills', 'project-b', oldHref), '/skills?projectId=project-b&skillView=agent')
+  assert.equal(f.store.projectHref('skills', 'project-b', oldHref), '/skills?projectId=project-b&skillView=assistant')
   assert.throws(() => f.store.projectHref('skills', 'project-a', oldHref), /无权/)
   f.setSearch({ projectId: 'project-a', skillView: 'project' })
   assert.equal(f.store.readProjectId(), '', '失效技能深链不能回退到另一个项目')

@@ -3,7 +3,6 @@ import { UploadIcon } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
-import { Checkbox } from '~/components/ui/checkbox'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
 import {
@@ -21,7 +20,10 @@ import {
   type SkillLibrary,
   type SkillLibraryAction,
   type SkillTargetType,
-  type SkillWorkspaceType,
+  GLOBAL_SKILL_TARGET,
+  skillScopeNames,
+  inheritedSkillAssignment,
+  canManageSkillScope,
   skillVersionName,
   skillSourceName,
 } from './skillLibrary'
@@ -273,6 +275,7 @@ async function fileBase64(file: File): Promise<string> {
 
 export function SkillAssignmentDialog({
   catalog,
+  projectId,
   initialSkillId,
   initialTargetType,
   initialTargetId,
@@ -284,6 +287,7 @@ export function SkillAssignmentDialog({
   mutate,
 }: SkillDialogProps & {
   catalog: SkillLibrary
+  projectId: string
   initialSkillId?: string
   initialTargetType?: SkillTargetType
   initialTargetId?: string
@@ -292,28 +296,30 @@ export function SkillAssignmentDialog({
 }) {
   const [skillId, setSkillId] = useState(assignment?.skillId ?? initialSkillId ?? '')
   const [targetType, setTargetType] = useState<SkillTargetType>(
-    assignment?.targetType ?? initialTargetType ?? 'agent',
+    assignment?.targetType ?? initialTargetType ?? 'project',
   )
-  const [targetId, setTargetId] = useState(assignment?.targetId ?? initialTargetId ?? '')
+  const [assistantId, setAssistantId] = useState(assignment?.targetId ?? initialTargetId ?? '')
   const [selectedVersionId, setVersionId] = useState(assignment?.versionId ?? '')
-  const [projectEnabled, setProjectEnabled] = useState(assignment?.enabled ?? true)
-  const [workspaceTypes, setWorkspaceTypes] = useState<SkillWorkspaceType[]>(
-    assignment?.workspaceTypes ?? ['internal'],
-  )
+  const [enabled, setEnabled] = useState(assignment?.enabled ?? true)
   const skill = catalog.skills.find((entry) => entry.id === skillId)
   const versions = skill?.versions.filter((version) => version.readiness === 'ready') ?? []
   const version =
     versions.find((entry) => entry.id === selectedVersionId) ??
     versions.find((entry) => entry.id === skill?.latestVersionId) ??
     versions[0]
-  const targets = targetType === 'agent' ? catalog.agents : catalog.projects
-  const target = targets.find((entry) => entry.id === targetId)
-  const changeWorkspace = (type: SkillWorkspaceType, checked: boolean) =>
-    setWorkspaceTypes((current) =>
-      checked
-        ? [...current.filter((entry) => entry !== type), type]
-        : current.filter((entry) => entry !== type),
-    )
+  const assistants = catalog.assistants.filter((entry) => entry.projectId === projectId)
+  const targetId =
+    targetType === 'global'
+      ? GLOBAL_SKILL_TARGET
+      : targetType === 'project'
+        ? projectId
+        : assistantId
+  const validTarget =
+    targetType !== 'assistant' || assistants.some((entry) => entry.id === assistantId)
+  const inherited = skill
+    ? inheritedSkillAssignment(catalog, skill.id, targetType, projectId)
+    : undefined
+  const canManage = canManageSkillScope(catalog, targetType, projectId)
   return (
     <Dialog
       open
@@ -323,8 +329,10 @@ export function SkillAssignmentDialog({
     >
       <DialogPopup finalFocus={finalFocus} showCloseButton={!busy}>
         <DialogHeader>
-          <DialogTitle>{assignment ? '调整skill分配' : '分配skill'}</DialogTitle>
-          <DialogDescription>设置使用对象、版本和工作区。</DialogDescription>
+          <DialogTitle>{assignment ? '调整启用范围' : '启用 skill'}</DialogTitle>
+          <DialogDescription>
+            上层启用后，下层自动继承；关闭上层后按下层配置生效。
+          </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
           <Field label="skill">
@@ -339,43 +347,91 @@ export function SkillAssignmentDialog({
               }}
             >
               <SelectTrigger aria-label="分配的skill">
-                <SelectValue placeholder="选择skill" />
+                <SelectValue placeholder="选择 skill" />
               </SelectTrigger>
               <SelectPopup>
                 {catalog.skills.map((entry) => (
                   <SelectItem
-                    value={entry.id}
                     key={entry.id}
+                    value={entry.id}
                     disabled={
                       !entry.enabled ||
                       !entry.versions.some((version) => version.readiness === 'ready')
                     }
                   >
                     {entry.displayName}
-                    {!entry.enabled
-                      ? ' · 已停用'
-                      : !entry.versions.some((version) => version.readiness === 'ready')
-                        ? ' · 运行条件未满足'
-                        : ''}
+                    {!entry.enabled ? ' · 已停用' : ''}
                   </SelectItem>
                 ))}
               </SelectPopup>
             </Select>
           </Field>
+          <Field label="启用范围">
+            <ToggleGroup
+              value={[targetType]}
+              variant="segmented"
+              disabled={busy || !!assignment}
+              aria-label="skill启用范围"
+              onValueChange={(values) => {
+                const next = values[0]
+                if (next === 'global' || next === 'project' || next === 'assistant')
+                  setTargetType(next)
+              }}
+            >
+              <Toggle value="global" disabled={!catalog.canManage}>
+                所有项目
+              </Toggle>
+              <Toggle value="project">当前项目</Toggle>
+              <Toggle value="assistant">指定助手</Toggle>
+            </ToggleGroup>
+          </Field>
+          {targetType === 'assistant' ? (
+            <Field label="当前项目的助手">
+              <Select
+                value={assistantId}
+                disabled={busy || !!assignment || !assistants.length}
+                onValueChange={(value) => {
+                  if (typeof value === 'string') setAssistantId(value)
+                }}
+              >
+                <SelectTrigger aria-label="分配目标助手">
+                  <SelectValue placeholder="选择助手" />
+                </SelectTrigger>
+                <SelectPopup>
+                  {assistants.map((entry) => (
+                    <SelectItem key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </Field>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {targetType === 'global'
+                ? '所有当前及后续项目均可使用。'
+                : `${catalog.projects.find((entry) => entry.id === projectId)?.name ?? '当前项目'}的所有对话均可使用。`}
+            </p>
+          )}
+          {inherited ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              已继承“{skillScopeNames[inherited.targetType]}”。关闭上层后可在此单独设置。
+            </p>
+          ) : null}
           <Field label="固定版本">
             <Select
               value={version?.id ?? ''}
-              disabled={busy || !versions.length}
+              disabled={busy || !!inherited || !versions.length}
               onValueChange={(value) => {
                 if (typeof value === 'string') setVersionId(value)
               }}
             >
               <SelectTrigger aria-label="分配skill版本">
-                <SelectValue placeholder="没有可分配版本" />
+                <SelectValue placeholder="没有可用版本" />
               </SelectTrigger>
               <SelectPopup>
                 {versions.map((entry) => (
-                  <SelectItem value={entry.id} key={entry.id}>
+                  <SelectItem key={entry.id} value={entry.id}>
                     {skillVersionName(entry)}
                     {entry.id === skill?.latestVersionId ? ' · 最新' : ''}
                   </SelectItem>
@@ -383,88 +439,21 @@ export function SkillAssignmentDialog({
               </SelectPopup>
             </Select>
           </Field>
-          <Field label="分配范围">
-            <ToggleGroup
-              value={[targetType]}
-              variant="segmented"
-              disabled={busy || !!assignment}
-              aria-label="skill分配范围"
-              onValueChange={(values) => {
-                const next = values[0]
-                if (next === 'agent' || next === 'project') {
-                  setTargetType(next)
-                  setTargetId('')
-                }
-              }}
-            >
-              <Toggle value="agent">助手</Toggle>
-              <Toggle value="project">项目</Toggle>
-            </ToggleGroup>
-          </Field>
-          <Field label={targetType === 'agent' ? '助手' : '项目'}>
-            <Select
-              value={targetId}
-              disabled={busy || !!assignment || !targets.length}
-              onValueChange={(value) => {
-                if (typeof value === 'string') setTargetId(value)
-              }}
-            >
-              <SelectTrigger aria-label={targetType === 'agent' ? '分配目标助手' : '分配目标项目'}>
-                <SelectValue placeholder={targets.length ? '选择目标' : '没有可用目标'} />
-              </SelectTrigger>
-              <SelectPopup>
-                {targets.map((entry) => (
-                  <SelectItem value={entry.id} key={entry.id}>
-                    {entry.name}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          </Field>
-          {targetType === 'project' ? (
-            <Field label="项目使用方式">
-              <Select
-                value={projectEnabled ? 'enabled' : 'disabled'}
-                disabled={busy}
-                onValueChange={(value) => setProjectEnabled(value !== 'disabled')}
+          {assignment ? (
+            <Field label="此范围状态">
+              <ToggleGroup
+                variant="segmented"
+                value={[enabled ? 'enabled' : 'disabled']}
+                disabled={busy || !!inherited}
+                aria-label="skill范围状态"
+                onValueChange={(values) => {
+                  if (values[0]) setEnabled(values[0] === 'enabled')
+                }}
               >
-                <SelectTrigger aria-label="项目skill使用方式">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value="enabled">在此项目启用</SelectItem>
-                  <SelectItem value="disabled">在此项目停用，阻止助手继承</SelectItem>
-                </SelectPopup>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                停用会阻止助手继承；取消分配则恢复继承。
-              </p>
+                <Toggle value="enabled">启用</Toggle>
+                <Toggle value="disabled">关闭</Toggle>
+              </ToggleGroup>
             </Field>
-          ) : null}
-          <Field label="可用工作区">
-            <div className="flex flex-wrap gap-4">
-              <label className="flex min-h-9 items-center gap-2 text-sm">
-                <Checkbox
-                  checked={workspaceTypes.includes('internal')}
-                  disabled={busy}
-                  onCheckedChange={(checked) => changeWorkspace('internal', checked)}
-                />
-                内部工作区
-              </label>
-              <label className="flex min-h-9 items-center gap-2 text-sm">
-                <Checkbox
-                  checked={workspaceTypes.includes('external')}
-                  disabled={busy}
-                  onCheckedChange={(checked) => changeWorkspace('external', checked)}
-                />
-                外部工作区
-              </label>
-            </div>
-          </Field>
-          {workspaceTypes.includes('external') ? (
-            <p className="text-xs text-muted-foreground">
-              外部成员可读取skill及附带文件，请确认不含内部资料。
-            </p>
           ) : null}
           <ErrorMessage error={error} />
         </DialogPanel>
@@ -473,31 +462,33 @@ export function SkillAssignmentDialog({
             取消
           </Button>
           <Button
-            disabled={busy || !skill?.enabled || !version || !target || !workspaceTypes.length}
+            disabled={
+              busy || !canManage || !!inherited || !skill?.enabled || !version || !validTarget
+            }
             onClick={async () => {
               if (
                 skill &&
                 version &&
-                target &&
+                validTarget &&
+                !inherited &&
+                canManage &&
                 (await mutate(
                   {
                     action: 'assign',
                     skillId: skill.id,
                     versionId: version.id,
                     targetType,
-                    targetId: target.id,
-                    workspaceTypes,
-                    enabled: targetType === 'project' ? projectEnabled : true,
+                    targetId,
+                    ...(targetType === 'assistant' ? { projectId } : {}),
+                    enabled,
                   },
-                  targetType === 'project' && !projectEnabled
-                    ? '已在此项目停用，不再继承助手分配。'
-                    : '分配已保存。',
+                  '启用范围已保存。',
                 ))
               )
                 onClose()
             }}
           >
-            {busy ? '正在保存…' : '保存分配'}
+            {busy ? '正在保存…' : '保存范围'}
           </Button>
         </DialogFooter>
       </DialogPopup>
@@ -540,7 +531,11 @@ export function SkillDetailsDialog({
               <div className="divide-y divide-border/60">
                 {assignments.map((entry) => {
                   const target = (
-                    entry.targetType === 'agent' ? catalog.agents : catalog.projects
+                    entry.targetType === 'global'
+                      ? [{ id: GLOBAL_SKILL_TARGET, name: '所有项目' }]
+                      : entry.targetType === 'assistant'
+                        ? catalog.assistants
+                        : catalog.projects
                   ).find((target) => target.id === entry.targetId)
                   const version = skill.versions.find((version) => version.id === entry.versionId)
                   return (
@@ -551,18 +546,18 @@ export function SkillDetailsDialog({
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm" title={target?.name}>
-                          {entry.targetType === 'agent' ? '助手' : '项目'} ·{' '}
-                          {target?.name ?? '不可见目标'}
+                          {skillScopeNames[entry.targetType]} · {target?.name ?? '不可见目标'}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground wrap-anywhere">
-                          {entry.workspaceTypes
-                            .map((type) => (type === 'internal' ? '内部' : '外部'))
-                            .join('、')}{' '}
                           · {version ? skillVersionName(version) : '版本不可用'}
                           {!entry.enabled ? ' · 已停用' : ''}
                         </p>
                       </div>
-                      {catalog.canManage ? (
+                      {canManageSkillScope(
+                        catalog,
+                        entry.targetType,
+                        entry.projectId ?? entry.targetId,
+                      ) ? (
                         <div className="flex shrink-0 gap-1">
                           <Button
                             variant="ghost"
@@ -579,9 +574,7 @@ export function SkillDetailsDialog({
                             onClick={() =>
                               void mutate(
                                 { action: 'unassign', assignmentId: entry.id },
-                                entry.targetType === 'project'
-                                  ? '已取消项目的单独分配，该项目将沿用助手设置。'
-                                  : '已取消助手的单独分配，现有项目单独分配不变。',
+                                '已撤销此范围，按其余启用范围生效。',
                               )
                             }
                           >
@@ -594,7 +587,7 @@ export function SkillDetailsDialog({
                 })}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">尚未分配给助手或项目。</p>
+              <p className="text-sm text-muted-foreground">尚未设置启用范围。</p>
             )}
           </section>
           <section aria-label="skill版本记录">
@@ -667,7 +660,7 @@ export function SkillDeleteDialog({
         <DialogHeader>
           <DialogTitle>删除skill</DialogTitle>
           <DialogDescription>
-            将“{skill.displayName}”从skill库移除。
+            将“{skill.displayName}”从skills移除。
             {assignedCount
               ? `该skill有 ${assignedCount} 项分配，请先撤销分配后删除。`
               : '历史轮次保留其固定执行版本，后续不能再分配或调用此skill。'}

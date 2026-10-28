@@ -513,29 +513,35 @@ export function ProjectConfigurationFields({
           />
         </>
       ) : null}
-      <fieldset className="space-y-3">
-        <legend className="mb-2 text-sm font-medium">skill</legend>
-        {[
-          ...skillChoices,
-          ...config.skillIds
-            .filter((id) => !skillChoices.some((skill) => skill.id === id))
-            .map((id) => ({ id, name: `${id} · ${isolated ? '原预设skill' : '已不可用'}` })),
-        ].map((skill) => (
-          <Check
-            key={skill.id}
-            label={skill.name}
-            checked={config.skillIds.includes(skill.id)}
-            disabled={disabled || isolated}
-            onChange={(checked) =>
-              update({
-                skillIds: checked
-                  ? [...config.skillIds, skill.id]
-                  : config.skillIds.filter((id) => id !== skill.id),
-              })
-            }
-          />
-        ))}
-      </fieldset>
+      {customer ? (
+        <fieldset className="space-y-3">
+          <legend className="mb-2 text-sm font-medium">本机 skills</legend>
+          {[
+            ...skillChoices,
+            ...config.skillIds
+              .filter((id) => !skillChoices.some((skill) => skill.id === id))
+              .map((id) => ({ id, name: `${id} · ${isolated ? '原预设skill' : '已不可用'}` })),
+          ].map((skill) => (
+            <Check
+              key={skill.id}
+              label={skill.name}
+              checked={config.skillIds.includes(skill.id)}
+              disabled={disabled || isolated}
+              onChange={(checked) =>
+                update({
+                  skillIds: checked
+                    ? [...config.skillIds, skill.id]
+                    : config.skillIds.filter((id) => id !== skill.id),
+                })
+              }
+            />
+          ))}
+        </fieldset>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          skill 的启用范围在项目的 skills 页面统一设置。
+        </p>
+      )}
       <div className="space-y-2">
         <Label htmlFor="assistant-instructions">角色指令（可选）</Label>
         <Textarea

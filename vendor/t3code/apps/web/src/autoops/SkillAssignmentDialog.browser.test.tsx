@@ -8,10 +8,12 @@ const catalog: SkillLibrary = {
   revision: 'one',
   canManage: true,
   projects: [
-    { id: 'p-one', name: '项目一' },
-    { id: 'p-two', name: '项目二' },
+    { id: 'p-one', name: '项目一', canManage: true },
+    { id: 'p-two', name: '项目二', canManage: true },
   ],
-  agents: [],
+  assistants: [
+    { id: 'assistant-one', name: '真实助手', projectId: 'p-one', executionKind: 'platform' },
+  ],
   assignments: [],
   skills: [
     {
@@ -37,11 +39,12 @@ const catalog: SkillLibrary = {
     },
   ],
 }
-it('可以仅在所选项目停用skill并保留固定版本和范围', async () => {
+it('当前项目启用固定版本不再要求选择工作区', async () => {
   const mutate = vi.fn().mockResolvedValue(true)
   await using _screen = await render(
     <SkillAssignmentDialog
       catalog={catalog}
+      projectId="p-one"
       initialSkillId="skill"
       initialTargetType="project"
       initialTargetId="p-one"
@@ -52,9 +55,7 @@ it('可以仅在所选项目停用skill并保留固定版本和范围', async ()
       mutate={mutate}
     />,
   )
-  await page.getByRole('combobox', { name: '项目skill使用方式' }).click()
-  await page.getByRole('option', { name: '在此项目停用，阻止助手继承' }).click()
-  await page.getByRole('button', { name: '保存分配' }).click()
+  await page.getByRole('button', { name: '保存范围' }).click()
   expect(mutate).toHaveBeenCalledWith(
     {
       action: 'assign',
@@ -62,8 +63,7 @@ it('可以仅在所选项目停用skill并保留固定版本和范围', async ()
       versionId: 'version',
       targetType: 'project',
       targetId: 'p-one',
-      workspaceTypes: ['internal'],
-      enabled: false,
+      enabled: true,
     },
     expect.any(String),
   )
@@ -73,13 +73,13 @@ it('再次调整停用分配时，不会无意重新启用', async () => {
   await using _screen = await render(
     <SkillAssignmentDialog
       catalog={catalog}
+      projectId="p-one"
       assignment={{
         id: 'assignment',
         skillId: 'skill',
         versionId: 'version',
         targetType: 'project',
         targetId: 'p-one',
-        workspaceTypes: ['internal'],
         enabled: false,
       }}
       busy={false}
@@ -89,6 +89,38 @@ it('再次调整停用分配时，不会无意重新启用', async () => {
       mutate={mutate}
     />,
   )
-  await page.getByRole('button', { name: '保存分配' }).click()
+  await page.getByRole('button', { name: '保存范围' }).click()
   expect(mutate.mock.calls[0]?.[0]).toMatchObject({ targetId: 'p-one', enabled: false })
+})
+
+it('所有项目开启后项目显示继承，不能用下层关闭覆盖上层', async () => {
+  const mutate = vi.fn()
+  await using _screen = await render(
+    <SkillAssignmentDialog
+      catalog={{
+        ...catalog,
+        assignments: [
+          {
+            id: 'global',
+            skillId: 'skill',
+            versionId: 'version',
+            targetType: 'global',
+            targetId: 'all-projects',
+            enabled: true,
+          },
+        ],
+      }}
+      projectId="p-one"
+      initialSkillId="skill"
+      initialTargetType="project"
+      busy={false}
+      error={null}
+      onClose={() => {}}
+      finalFocus={() => null}
+      mutate={mutate}
+    />,
+  )
+  expect(page.getByRole('status').element().textContent).toContain('已继承“所有项目”')
+  await expect.element(page.getByRole('button', { name: '保存范围' })).toBeDisabled()
+  expect(mutate).not.toHaveBeenCalled()
 })

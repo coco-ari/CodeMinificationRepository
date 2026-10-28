@@ -117,12 +117,11 @@ test('成员缩减环境或变为外部前校验默认助手，不通过旧分�
   assert.doesNotThrow(() => f.assistants.validateMember('project', 'reader', { ...f.reader, status: 'disabled' }))
 })
 
-test('真实能力缺失、非法模型/强度/技能不能就绪，不使用平台默认替换实际选择', t => {
+test('真实能力缺失、非法模型/强度不能就绪，不使用平台默认替换实际选择', t => {
   const f = fixture(t)
   const cases = [
     [{ model: { instanceId: 'codex', model: 'guessed', reasoningEffort: 'low' } }, 'ASSISTANT_MODEL_FORBIDDEN'],
     [{ model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: null } }, 'ASSISTANT_REASONING_FORBIDDEN'],
-    [{ skillIds: ['missing'] }, 'ASSISTANT_SKILL_FORBIDDEN'],
   ]
   for (const [index, [patch, code]] of cases.entries())
     assert.throws(() => f.assistants.save('admin', 'project', null, save('invalid-' + index, details({ configuration: config(patch) }))), { code })
@@ -250,7 +249,7 @@ test('RPC 启动和继续使用最终预设合同，篡改强度与撤回后执�
 })
 
 
-test('最终选择的技能限定实际原生目录和调用，空列表不回退到所有项目技能', t => {
+test('平台对话的原生目录和调用统一继承三级范围，不再受预设旧清单限制', t => {
   const f = fixture(t), skills = resolveSkillLibrary(f.dataDir, { projectId: 'project', agentId: 'a-project', workspaceType: 'internal' })
   assert.ok(skills.length >= 2)
   const selected = skills[0], other = skills[1], configuration = config({ skillIds: [selected.id] })
@@ -258,10 +257,10 @@ test('最终选择的技能限定实际原生目录和调用，空列表不回�
   const principal = f.access.authenticateCookie('demo_session=admin')
   const binding = f.access.reserveThread(principal, { threadId: 'skill-thread', projectId: 'project', environmentId: 'test', agentId: 'a-project', workspaceType: 'internal', visibility: 'private', question: select(preset) })
   const context = prepareScopedBusinessSkills(f.dataDir, binding)
-  assert.deepEqual(context.skills.map(skill => skill.id), [selected.id])
+  assert.deepEqual(context.skills.map(skill => skill.id).sort(), skills.map(skill => skill.id).sort())
   const env = { AUTOOPS_T3_DATA_DIR: f.dataDir }
   assert.equal(resolveBusinessSkillMentions('$' + selected.name, env, binding)[0].name, selected.name)
-  assert.throws(() => resolveBusinessSkillMentions('$' + other.name, env, binding), { code: 'SKILL_NOT_AVAILABLE' })
+  assert.equal(resolveBusinessSkillMentions('$' + other.name, env, binding)[0].name, other.name)
   const empty = { ...binding, threadId: 'no-skills', question: { ...binding.question, configuration: { ...configuration, skillIds: [] } } }
-  assert.deepEqual(prepareScopedBusinessSkills(f.dataDir, empty).skills, [])
+  assert.deepEqual(prepareScopedBusinessSkills(f.dataDir, empty).skills.map(skill => skill.id).sort(), skills.map(skill => skill.id).sort())
 })

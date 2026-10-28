@@ -46,6 +46,11 @@ import {
 } from './SkillLibraryDialogs'
 import {
   skillFileSource,
+  skillScopeNames,
+  GLOBAL_SKILL_TARGET,
+  effectiveSkillAssignment,
+  inheritedSkillAssignment,
+  canManageSkillScope,
   skillVersion,
   skillVersionName,
   type LibrarySkill,
@@ -55,21 +60,31 @@ import {
   type SkillVersion,
 } from './skillLibrary'
 
-type Scope = 'library' | 'agent' | 'project'
+type Scope = 'library' | 'global' | 'assistant' | 'project'
 type OpenDialog =
   | { type: 'import'; skill?: LibrarySkill }
   | { type: 'assign'; skillId?: string; assignment?: SkillAssignment }
   | { type: 'details' | 'delete'; skill: LibrarySkill }
   | null
-const scopeNames = { library: '全部skill', agent: '助手分配', project: '项目分配' } as const
-const scopeIcons = { library: LibraryIcon, agent: BotIcon, project: FolderGit2Icon } as const
+const scopeNames = {
+  library: '全部 skills',
+  global: '所有项目',
+  project: '当前项目',
+  assistant: '指定助手',
+} as const
+const scopeIcons = {
+  library: LibraryIcon,
+  global: LibraryIcon,
+  project: FolderGit2Icon,
+  assistant: BotIcon,
+} as const
 
 const viewStorageKey = (principalId: string, projectId: string) =>
   `autoops:skill-library-view:${encodeURIComponent(principalId)}:${encodeURIComponent(projectId)}`
 function readView(
   principalId: string,
   projectId: string,
-): { scope?: Scope; agentId?: string; query?: string } {
+): { scope?: Scope; assistantId?: string; query?: string } {
   try {
     const value = JSON.parse(sessionStorage.getItem(viewStorageKey(principalId, projectId)) ?? '{}')
     return value && typeof value === 'object' ? value : {}
@@ -78,7 +93,7 @@ function readView(
   }
 }
 
-/** 公共项目框架负责导航，skill库保留全局分配语义。 */
+/** 公共项目框架负责导航，skills保留全局分配语义。 */
 export function AutoOpsSkillLibraryPage() {
   const host = readAutoOpsHost()
   const projectId = useAutoOpsProjectId()
@@ -88,10 +103,12 @@ export function AutoOpsSkillLibraryPage() {
   const saved = readView(host?.principal.id ?? '', projectId)
   const requestedScope = search.skillView ?? saved.scope
   const scope: Scope =
-    requestedScope === 'agent' || requestedScope === 'project' ? requestedScope : 'library'
-  const agentId =
-    typeof (search.agentId ?? saved.agentId) === 'string'
-      ? (search.agentId ?? saved.agentId ?? '')
+    requestedScope === 'assistant' || requestedScope === 'project' || requestedScope === 'global'
+      ? requestedScope
+      : 'library'
+  const assistantId =
+    typeof (search.assistantId ?? saved.assistantId) === 'string'
+      ? (search.assistantId ?? saved.assistantId ?? '')
       : ''
   useEffect(() => {
     if (!host || !project || search.skillView !== undefined) return
@@ -102,17 +119,17 @@ export function AutoOpsSkillLibraryPage() {
       search: {
         projectId: ProjectId.make(projectId),
         skillView: scope,
-        ...(scope === 'agent' && agentId ? { agentId } : {}),
+        ...(scope === 'assistant' && assistantId ? { assistantId } : {}),
       },
     })
-  }, [host, project, search.skillView, projectId, scope, agentId, navigate])
+  }, [host, project, search.skillView, projectId, scope, assistantId, navigate])
   if (!host || !project)
     return (
       <SidebarInset
         className="h-dvh min-h-0 min-w-0 overflow-hidden"
         data-testid="skill-project-unavailable"
       >
-        <ModuleHeader title="skill库" />
+        <ModuleHeader title="skills" />
         <ModuleSidebar label="skill管理">
           <ModuleSidebarEmpty>请先选择有权访问的项目。</ModuleSidebarEmpty>
         </ModuleSidebar>
@@ -125,17 +142,17 @@ export function AutoOpsSkillLibraryPage() {
       search: {
         projectId: ProjectId.make(projectId),
         skillView: view,
-        ...(view === 'agent' && selectedAgentId ? { agentId: selectedAgentId } : {}),
+        ...(view === 'assistant' && selectedAgentId ? { assistantId: selectedAgentId } : {}),
       },
     })
   }
   return (
     <SkillLibraryContent
-      key={`${host.principal.id}:${projectId}:${scope}:${agentId}`}
+      key={`${host.principal.id}:${projectId}:${scope}:${assistantId}`}
       projectId={projectId}
       projectName={project.name}
       scope={scope}
-      agentId={agentId}
+      assistantId={assistantId}
       selectView={selectView}
     />
   )
@@ -145,14 +162,14 @@ function SkillLibraryContent({
   projectId,
   projectName,
   scope,
-  agentId,
+  assistantId,
   selectView,
 }: {
   projectId: string
   projectName: string
   scope: Scope
-  agentId: string
-  selectView: (scope: Scope, agentId?: string) => void
+  assistantId: string
+  selectView: (scope: Scope, assistantId?: string) => void
 }) {
   const host = readAutoOpsHost()!
   const {
@@ -165,7 +182,7 @@ function SkillLibraryContent({
     isUpdating,
     mutate: mutateCatalog,
     clearError,
-  } = useSkillLibraryCatalog()
+  } = useSkillLibraryCatalog(projectId)
   const [query, setQuery] = useState(() => {
     const saved = readView(host.principal.id, projectId)
     return saved.scope === scope && typeof saved.query === 'string' ? saved.query : ''
@@ -174,12 +191,12 @@ function SkillLibraryContent({
     try {
       sessionStorage.setItem(
         viewStorageKey(host.principal.id, projectId),
-        JSON.stringify({ scope, agentId, query }),
+        JSON.stringify({ scope, assistantId, query }),
       )
     } catch {
       /* 存储不可用时，当前页面仍可使用。 */
     }
-  }, [host.principal.id, projectId, scope, agentId, query])
+  }, [host.principal.id, projectId, scope, assistantId, query])
   const [selectedId, setSelectedId] = useState('')
   const [selectedVersionId, setSelectedVersionId] = useState('')
   const [detailOpen, setDetailOpen] = useState(false)
@@ -210,22 +227,30 @@ function SkillLibraryContent({
   }, [accessDenied])
 
   const targets =
-    scope === 'agent'
-      ? (catalog?.agents ?? [])
+    scope === 'assistant'
+      ? (catalog?.assistants.filter((entry) => entry.projectId === projectId) ?? [])
       : scope === 'project'
         ? (catalog?.projects ?? [])
-        : []
+        : scope === 'global'
+          ? [{ id: GLOBAL_SKILL_TARGET, name: '所有项目' }]
+          : []
   const target =
     scope === 'project'
       ? targets.find((entry) => entry.id === projectId)
-      : (targets.find((entry) => entry.id === agentId) ?? (!agentId ? targets[0] : undefined))
+      : (targets.find((entry) => entry.id === assistantId) ??
+        (!assistantId ? targets[0] : undefined))
   const assignments =
     catalog?.assignments.filter(
-      (entry) => entry.targetType === scope && entry.targetId === target?.id,
+      (entry) =>
+        entry.targetType === scope &&
+        entry.targetId === target?.id &&
+        (scope !== 'assistant' || entry.projectId === projectId),
     ) ?? []
   const visibleSkills = (catalog?.skills ?? []).filter(
     (skill) =>
-      (scope === 'library' || assignments.some((entry) => entry.skillId === skill.id)) &&
+      (scope === 'library' ||
+        assignments.some((entry) => entry.skillId === skill.id) ||
+        (scope !== 'global' && !!inheritedSkillAssignment(catalog!, skill.id, scope, projectId))) &&
       `${skill.displayName} ${skill.name} ${skill.description}`
         .toLocaleLowerCase()
         .includes(query.toLocaleLowerCase().trim()),
@@ -245,7 +270,12 @@ function SkillLibraryContent({
   }, [assignmentPopoverSkillId, assignmentPopoverCardVisible])
   const selected = visibleSkills.find((entry) => entry.id === selectedId) ?? visibleSkills[0]
   const assignment = selected
-    ? assignments.find((entry) => entry.skillId === selected.id)
+    ? scope === 'assistant' || scope === 'project'
+      ? effectiveSkillAssignment(catalog?.assignments ?? [], selected.id, {
+          projectId,
+          ...(scope === 'assistant' && target ? { assistantId: target.id } : {}),
+        })
+      : assignments.find((entry) => entry.skillId === selected.id)
     : undefined
   const version = selected
     ? skillVersion(selected, selectedVersionId || assignment?.versionId)
@@ -292,16 +322,29 @@ function SkillLibraryContent({
     return true
   }
   const toggleTarget = (skill: LibrarySkill, type: SkillTargetType, id: string) => {
-    if (!catalog || !catalog.canManage || isUpdating()) return
+    if (
+      !catalog ||
+      !canManageSkillScope(catalog, type, projectId) ||
+      inheritedSkillAssignment(catalog, skill.id, type, projectId) ||
+      isUpdating()
+    )
+      return
     const existing = catalog.assignments.find(
-      (entry) => entry.skillId === skill.id && entry.targetType === type && entry.targetId === id,
+      (entry) =>
+        entry.skillId === skill.id &&
+        entry.targetType === type &&
+        entry.targetId === id &&
+        (type !== 'assistant' || entry.projectId === projectId),
     )
     if (!skillQuickAssignmentAllowed(skill, existing)) return
     const nextVersion = skillVersion(skill, existing?.versionId)
     if (!nextVersion) return
     const name =
-      (type === 'agent' ? catalog.agents : catalog.projects).find((entry) => entry.id === id)
-        ?.name ?? id
+      type === 'global'
+        ? '所有项目'
+        : ((type === 'assistant' ? catalog.assistants : catalog.projects).find(
+            (entry) => entry.id === id,
+          )?.name ?? id)
     const action: SkillLibraryAction = existing?.enabled
       ? { action: 'unassign', assignmentId: existing.id }
       : {
@@ -310,17 +353,13 @@ function SkillLibraryContent({
           targetType: type,
           targetId: id,
           versionId: existing?.versionId ?? nextVersion.id,
-          workspaceTypes: existing?.workspaceTypes ?? ['internal'],
+          ...(type === 'assistant' ? { projectId } : {}),
           enabled: true,
         }
     setPendingTarget(skillTargetKey(skill.id, type, id))
     void mutate(
       action,
-      existing?.enabled
-        ? `已取消“${name}”的分配${type === 'project' ? '，沿用助手设置' : ''}。`
-        : existing
-          ? `已恢复“${name}”的分配，沿用原版本与工作区范围。`
-          : `已分配给“${name}”，仅用于内部工作区。`,
+      existing?.enabled ? `已关闭“${name}”的单独启用，按其余范围生效。` : `已在“${name}”启用。`,
     ).finally(() => setPendingTarget(null))
   }
   const openFiles = (skill: LibrarySkill) => {
@@ -352,6 +391,9 @@ function SkillLibraryContent({
       assignment={currentAssignment}
       busy={busy || loading}
       canManage={canManage}
+      canAssign={
+        !!catalog && (catalog.canManage || catalog.projects.some((entry) => entry.canManage))
+      }
       onAction={(action, trigger) => {
         if (action === 'details' || action === 'delete' || action === 'import')
           openDialog({ type: action, skill }, trigger)
@@ -379,7 +421,7 @@ function SkillLibraryContent({
   )
   const dialogProps = { busy: busy || loading, error, onClose: closeDialog, finalFocus, mutate }
 
-  if (!host) return <SkillEmpty title="skill库不可用" description="请从 AutoOps 工作台进入。" />
+  if (!host) return <SkillEmpty title="skills不可用" description="请从 AutoOps 工作台进入。" />
   return (
     <SidebarInset
       className="h-dvh min-h-0 min-w-0 overflow-hidden overscroll-y-none"
@@ -387,12 +429,15 @@ function SkillLibraryContent({
       data-skill-library-revision={catalog?.revision}
     >
       <ModuleHeader
-        title="skill库"
+        title="skills"
         detail={showDetail && selected ? selected.displayName : scopeNames[scope]}
         actions={
           <>
             {showDetail && selected ? actions(selected, version, assignment) : null}
-            {!showDetail && canManage ? (
+            {!showDetail &&
+            (scope === 'library'
+              ? canManage
+              : catalog && canManageSkillScope(catalog, scope, projectId)) ? (
               <Button
                 ref={libraryActionRef}
                 size="sm"
@@ -407,7 +452,7 @@ function SkillLibraryContent({
               </Button>
             ) : null}
             <FileSurfaceAction
-              label="刷新skill库"
+              label="刷新skills"
               disabled={busy || loading}
               onPress={refreshLibrary}
             >
@@ -442,7 +487,7 @@ function SkillLibraryContent({
       {error && !dialog ? (
         <div className="shrink-0 border-b border-border/60 p-3">
           <Alert variant="error">
-            <AlertTitle>skill库操作未完成</AlertTitle>
+            <AlertTitle>skills操作未完成</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
           <Button
@@ -458,14 +503,14 @@ function SkillLibraryContent({
       ) : null}
       {!catalog ? (
         !loading ? (
-          <SkillEmpty title="无法读取skill库" description="请重新加载后再试。" />
+          <SkillEmpty title="无法读取skills" description="请重新加载后再试。" />
         ) : (
           <div
             role="status"
             className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
           >
             <Spinner size="sm" />
-            正在读取skill库…
+            正在读取skills…
           </div>
         )
       ) : (
@@ -478,16 +523,16 @@ function SkillLibraryContent({
               <WorkspacePageContainer width="wide" className="gap-3">
                 <div
                   className="flex min-w-0 flex-wrap items-center gap-2"
-                  aria-label="skill库工具栏"
+                  aria-label="skills工具栏"
                 >
-                  {scope === 'agent' ? (
+                  {scope === 'assistant' ? (
                     <div className="w-40 min-w-0 max-w-full">
                       <Select
                         value={target?.id ?? ''}
                         disabled={!targets.length}
                         onValueChange={(value) => {
                           if (typeof value === 'string') {
-                            selectView('agent', value)
+                            selectView('assistant', value)
                           }
                         }}
                       >
@@ -508,7 +553,11 @@ function SkillLibraryContent({
                     className="min-w-0 max-w-48 truncate text-xs text-muted-foreground"
                     title={scope === 'project' ? projectName : undefined}
                   >
-                    {scope === 'project' ? projectName : '全局共享'}
+                    {scope === 'library'
+                      ? '可用 skill 目录'
+                      : scope === 'global'
+                        ? '对所有项目生效'
+                        : projectName}
                   </span>
                   <div className="ml-auto flex shrink-0 items-center gap-1">
                     <span
@@ -527,12 +576,11 @@ function SkillLibraryContent({
                       <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
                         <PopoverTitle>skill分配</PopoverTitle>
                         <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
-                          <p>skill库与助手分配全局共享，项目分配跟随顶部当前项目。</p>
+                          <p>所有项目 → 当前项目 → 指定助手，按上层启用优先。</p>
+                          <p>上层开启后下层显示“已继承”。关闭上层后，按保留的下层配置生效。</p>
                           <p>
-                            点击助手或项目即可分配，再点取消。新分配使用最新版本，仅限内部工作区；未就绪版本不能分配。
+                            启用范围不增加文件、环境或电脑操作权限。更新包不会自动更换已启用的固定版本。
                           </p>
-                          <p>项目未单独分配时沿用助手设置。</p>
-                          <p>版本、来源和外部范围在skill菜单中查看或调整。</p>
                         </div>
                       </PopoverPopup>
                     </Popover>
@@ -573,8 +621,8 @@ function SkillLibraryContent({
                       query
                         ? '没有匹配的skill'
                         : scope === 'library'
-                          ? 'skill库为空'
-                          : '尚未单独分配skill'
+                          ? 'skills为空'
+                          : '此范围暂无启用的 skill'
                     }
                     description={
                       query
@@ -582,7 +630,7 @@ function SkillLibraryContent({
                         : canManage
                           ? scope === 'library'
                             ? '导入 SKILL.md、ZIP 或公开 Git skill包。'
-                            : '可从全部skill的卡片直接分配给助手或项目。'
+                            : '可在全部 skills 中设置启用范围。'
                           : '请联系管理员分配可用skill。'
                     }
                   />
@@ -599,7 +647,7 @@ function SkillLibraryContent({
                 <>
                   <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-3 py-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <FileSurfaceAction label="返回skill库" onPress={returnToLibrary}>
+                      <FileSurfaceAction label="返回skills" onPress={returnToLibrary}>
                         <ArrowLeftIcon />
                       </FileSurfaceAction>
                       <div className="min-w-0 flex-1 sm:max-w-80">
@@ -638,9 +686,7 @@ function SkillLibraryContent({
                     {assignment ? (
                       <p className="text-xs text-muted-foreground">
                         当前分配：
-                        {assignment.workspaceTypes
-                          .map((type) => (type === 'internal' ? '内部工作区' : '外部工作区'))
-                          .join('、')}
+                        {skillScopeNames[assignment.targetType]}
                         {version.id !== assignment.versionId
                           ? ' · 正在预览其他版本，当前分配未改变'
                           : ''}
@@ -673,6 +719,7 @@ function SkillLibraryContent({
         <SkillAssignmentDialog
           {...dialogProps}
           catalog={catalog}
+          projectId={projectId}
           {...(dialog.skillId ? { initialSkillId: dialog.skillId } : {})}
           {...(dialog.assignment ? { assignment: dialog.assignment } : {})}
           {...(scope !== 'library'
@@ -708,6 +755,7 @@ function SkillActions({
   assignment,
   busy,
   canManage,
+  canAssign,
   onAction,
 }: {
   skill: LibrarySkill
@@ -715,6 +763,7 @@ function SkillActions({
   assignment: SkillAssignment | undefined
   busy: boolean
   canManage: boolean
+  canAssign: boolean
   onAction: (action: SkillAction, trigger: HTMLElement | null) => void
 }) {
   const trigger = useRef<HTMLButtonElement | null>(null)
@@ -732,7 +781,7 @@ function SkillActions({
           <InfoIcon />
           分配与版本详情
         </MenuItem>
-        {canManage ? (
+        {canAssign ? (
           <>
             <MenuItem
               disabled={
@@ -743,8 +792,12 @@ function SkillActions({
               onClick={() => onAction('assign', trigger.current)}
             >
               <PlusIcon />
-              {assignment ? '调整当前分配' : '分配skill'}
+              {assignment ? '调整启用范围' : '启用范围'}
             </MenuItem>
+          </>
+        ) : null}
+        {canManage ? (
+          <>
             <MenuItem disabled={busy} onClick={() => onAction('import', trigger.current)}>
               <UploadIcon />
               导入新版本

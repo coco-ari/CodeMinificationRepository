@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import { page } from 'vite-plus/test/browser'
+import { page, userEvent } from 'vite-plus/test/browser'
 import { act, render } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { AutoOpsSkillLibraryPage } from './SkillLibraryPage'
@@ -28,8 +28,8 @@ vi.mock(import('./skillLibrary'), async (original) => ({
 const catalog = (): SkillLibrary => ({
   revision: 'revision-one',
   canManage: true,
-  projects: [{ id: 'p-one', name: '隔离项目' }],
-  agents: [],
+  projects: [{ id: 'p-one', name: '隔离项目', canManage: true }],
+  assistants: [],
   assignments: [],
   skills: [
     {
@@ -118,10 +118,12 @@ describe('skill库写入后的撤权处理', () => {
 })
 
 describe('skill卡片就地分配', () => {
-  for (const targetType of ['agent', 'project'] as const) {
+  for (const targetType of ['assistant', 'project', 'global'] as const) {
     it(`${targetType} 分组可直接分配与取消，状态以服务端返回为准`, async () => {
       const initial = catalog()
-      initial.agents = [{ id: 'agent-one', name: '隔离助手', projectIds: ['p-one'] }]
+      initial.assistants = [
+        { id: 'assistant-one', name: '隔离助手', projectId: 'p-one', executionKind: 'platform' },
+      ]
       const assigned: SkillLibrary = {
         ...initial,
         revision: 'revision-two',
@@ -130,9 +132,14 @@ describe('skill卡片就地分配', () => {
             id: 'assignment-one',
             skillId: 'skill-one',
             targetType,
-            targetId: targetType === 'agent' ? 'agent-one' : 'p-one',
+            targetId:
+              targetType === 'assistant'
+                ? 'assistant-one'
+                : targetType === 'global'
+                  ? 'all-projects'
+                  : 'p-one',
             versionId: 'version-one',
-            workspaceTypes: ['internal'],
+            ...(targetType === 'assistant' ? { projectId: 'p-one' } : {}),
             enabled: true,
           },
         ],
@@ -141,13 +148,16 @@ describe('skill卡片就地分配', () => {
       mocks.load.mockResolvedValue(initial)
       mocks.change.mockReturnValueOnce(accepted.promise).mockResolvedValueOnce(initial)
       await using screen = await render(library(), testLocation)
-      const group = page.getByRole('group', {
-        name: targetType === 'agent' ? '助手分配' : '项目分配摘要',
-        exact: true,
-      })
-      const name = targetType === 'agent' ? '隔离助手' : '隔离项目'
+      if (targetType === 'assistant')
+        await page.getByRole('button', { name: '指定助手：可撤权skill' }).click()
+      const group =
+        targetType === 'assistant'
+          ? page.getByRole('dialog')
+          : page.getByRole('group', { name: 'skill 启用范围', exact: true })
+      const name =
+        targetType === 'assistant' ? '隔离助手' : targetType === 'global' ? '所有项目' : '当前项目'
       const unassigned = group.getByRole('button', {
-        name: `${name}：${targetType === 'agent' ? '尚未分配' : '沿用助手设置'}`,
+        name: `${name}：未启用`,
         exact: true,
       })
       await expect.element(unassigned).toHaveAttribute('aria-pressed', 'false')
@@ -155,24 +165,39 @@ describe('skill卡片就地分配', () => {
       await expect.element(unassigned).toHaveAttribute('aria-busy', 'true')
       await expect.element(unassigned).toHaveAttribute('aria-pressed', 'false')
       await expect.element(unassigned).toBeDisabled()
-      expect(mocks.change).toHaveBeenNthCalledWith(1, 'revision-one', {
-        action: 'assign',
-        skillId: 'skill-one',
-        targetType,
-        targetId: targetType === 'agent' ? 'agent-one' : 'p-one',
-        versionId: 'version-one',
-        workspaceTypes: ['internal'],
-        enabled: true,
-      })
+      expect(mocks.change).toHaveBeenNthCalledWith(
+        1,
+        'revision-one',
+        {
+          action: 'assign',
+          skillId: 'skill-one',
+          targetType,
+          targetId:
+            targetType === 'assistant'
+              ? 'assistant-one'
+              : targetType === 'global'
+                ? 'all-projects'
+                : 'p-one',
+          versionId: 'version-one',
+          ...(targetType === 'assistant' ? { projectId: 'p-one' } : {}),
+          enabled: true,
+        },
+        'p-one',
+      )
       await act(() => accepted.resolve(assigned))
-      const selected = group.getByRole('button', { name: `${name}：内部 · version-`, exact: true })
+      const selected = group.getByRole('button', { name: `${name}：已启用`, exact: true })
       await expect.element(selected).toHaveAttribute('aria-pressed', 'true')
       await selected.click()
       await expect.element(unassigned).toHaveAttribute('aria-pressed', 'false')
-      expect(mocks.change).toHaveBeenNthCalledWith(2, 'revision-two', {
-        action: 'unassign',
-        assignmentId: 'assignment-one',
-      })
+      expect(mocks.change).toHaveBeenNthCalledWith(
+        2,
+        'revision-two',
+        {
+          action: 'unassign',
+          assignmentId: 'assignment-one',
+        },
+        'p-one',
+      )
       expect(screen.container.querySelector('[data-skill-card]')).not.toBeNull()
     })
   }
@@ -185,8 +210,8 @@ describe('skill卡片就地分配', () => {
     )
     await using screen = await render(library(), testLocation)
     const target = page
-      .getByRole('group', { name: '项目分配摘要', exact: true })
-      .getByRole('button', { name: '隔离项目：沿用助手设置', exact: true })
+      .getByRole('group', { name: 'skill 启用范围', exact: true })
+      .getByRole('button', { name: '当前项目：未启用', exact: true })
     await target.click()
     await vi.waitFor(() => expect(screen.container.textContent).toContain('网络中断，请重试。'))
     await expect.element(target).toHaveAttribute('aria-pressed', 'false')
@@ -202,14 +227,13 @@ describe('skill卡片就地分配', () => {
           targetType: 'project',
           targetId: 'p-one',
           versionId: 'version-one',
-          workspaceTypes: ['internal'],
           enabled: true,
         },
       ],
     } satisfies SkillLibrary)
     await target.click()
     await expect
-      .element(page.getByRole('button', { name: '隔离项目：内部 · version-', exact: true }))
+      .element(page.getByRole('button', { name: '当前项目：已启用', exact: true }))
       .toHaveAttribute('aria-pressed', 'true')
     expect(mocks.change).toHaveBeenCalledTimes(2)
     expect(screen.container.textContent).not.toContain('网络中断，请重试。')
@@ -300,3 +324,65 @@ describe('skill目录控制器的跨页面隔离', () => {
     expect(mocks.change).toHaveBeenCalledTimes(1)
   })
 })
+
+for (const [width, theme] of [
+  [1440, 'light'],
+  [390, 'dark'],
+] as const) {
+  it(`${width}px ${theme}：继承状态、当前项目助手筛选与键盘返回`, async () => {
+    await page.viewport(width, 560)
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    const value = catalog()
+    value.assignments = [
+      {
+        id: 'global',
+        skillId: 'skill-one',
+        versionId: 'version-one',
+        targetType: 'global',
+        targetId: 'all-projects',
+        enabled: true,
+      },
+    ]
+    value.assistants = [
+      {
+        id: 'one',
+        name: '本项目名称非常长的真实助手',
+        projectId: 'p-one',
+        executionKind: 'platform',
+      },
+      { id: 'other', name: '其他项目助手', projectId: 'p-two', executionKind: 'platform' },
+    ]
+    mocks.load.mockResolvedValue(value)
+    try {
+      await using screen = await render(library(), testLocation)
+      const inherited = page.getByRole('button', {
+        name: '当前项目：已继承 · 所有项目',
+        exact: true,
+      })
+      await expect.element(inherited).toBeDisabled()
+      await expect.element(inherited).toHaveAttribute('aria-pressed', 'true')
+      const trigger = page.getByRole('button', { name: '指定助手：可撤权skill', exact: true })
+      await trigger.click()
+      await expect
+        .element(
+          page.getByRole('button', {
+            name: '本项目名称非常长的真实助手：已继承 · 所有项目',
+            exact: true,
+          }),
+        )
+        .toBeDisabled()
+      expect(document.body.textContent).not.toContain('其他项目助手')
+      await page.getByRole('searchbox', { name: '搜索指定助手' }).fill('不存在')
+      await expect.element(page.getByText('没有匹配的助手')).toBeVisible()
+      await userEvent.keyboard('{Escape}')
+      await expect.element(trigger).toHaveFocus()
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
+      expect(
+        screen.container.querySelectorAll('[data-skill-target-type] svg.lucide-check').length,
+      ).toBe(0)
+    } finally {
+      document.documentElement.classList.remove('dark')
+      await page.viewport(1280, 720)
+    }
+  })
+}

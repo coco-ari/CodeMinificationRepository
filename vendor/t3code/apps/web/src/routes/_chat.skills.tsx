@@ -5,18 +5,23 @@ import { AutoOpsSkillLibraryPage } from '../autoops/SkillLibraryPage'
 export const Route = createFileRoute('/_chat/skills')({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { projectId?: ProjectId; skillView?: 'library' | 'agent' | 'project'; agentId?: string } => ({
+  ): {
+    projectId?: ProjectId
+    skillView?: 'library' | 'global' | 'assistant' | 'project'
+    assistantId?: string
+  } => ({
     // Preserve explicit invalid project selection; never fall back to another project.
     ...(Object.hasOwn(search, 'projectId')
       ? { projectId: ProjectId.make(typeof search.projectId === 'string' ? search.projectId : '') }
       : {}),
     ...(search.skillView === 'library' ||
-    search.skillView === 'agent' ||
+    search.skillView === 'global' ||
+    search.skillView === 'assistant' ||
     search.skillView === 'project'
       ? { skillView: search.skillView }
       : {}),
-    ...(Object.hasOwn(search, 'agentId')
-      ? { agentId: typeof search.agentId === 'string' ? search.agentId : '' }
+    ...(Object.hasOwn(search, 'assistantId')
+      ? { assistantId: typeof search.assistantId === 'string' ? search.assistantId : '' }
       : {}),
   }),
   component: AutoOpsSkillLibraryPage,

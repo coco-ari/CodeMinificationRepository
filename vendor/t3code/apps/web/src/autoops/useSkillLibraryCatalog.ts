@@ -11,7 +11,7 @@ const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : '操作失败，请重试。'
 
 /** skill目录的数据生命周期；选中项、对话框、焦点和导航仍由页面负责。 */
-export function useSkillLibraryCatalog() {
+export function useSkillLibraryCatalog(projectId?: string) {
   const [catalog, setCatalog] = useState<SkillLibrary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [accessDenied, setAccessDenied] = useState(false)
@@ -35,7 +35,7 @@ export function useSkillLibraryCatalog() {
     const generation = ++requestGeneration.current
     refreshPending.current = true
     setLoading(true)
-    void loadSkillLibrary(controller.signal)
+    void loadSkillLibrary(controller.signal, projectId)
       .then((next) => {
         if (controller.signal.aborted || generation !== requestGeneration.current) return
         setCatalog(next)
@@ -58,7 +58,7 @@ export function useSkillLibraryCatalog() {
       // 已接受的写入继续执行，但旧页面不能覆盖后来页面的状态或导航。
       ++requestGeneration.current
     }
-  }, [refresh])
+  }, [refresh, projectId])
 
   const isUpdating = () => mutationLock.current || refreshPending.current
   const refreshLibrary = () => {
@@ -90,7 +90,7 @@ export function useSkillLibraryCatalog() {
     setBusy(true)
     setError(null)
     try {
-      const next = await changeSkillLibrary(previous.revision, action)
+      const next = await changeSkillLibrary(previous.revision, action, projectId)
       window.dispatchEvent(new Event('autoops:skill-library-changed'))
       if (generation !== requestGeneration.current) return null
       setCatalog(next)
@@ -105,7 +105,7 @@ export function useSkillLibraryCatalog() {
       }
       // 写入失败只核对目录，不自动重发；离开页面时同时取消这次核对读取。
       try {
-        const next = await loadSkillLibrary(activeRead.current?.signal)
+        const next = await loadSkillLibrary(activeRead.current?.signal, projectId)
         if (generation === requestGeneration.current) setCatalog(next)
       } catch (refreshCause) {
         if (generation === requestGeneration.current && isAutoOpsAccessError(refreshCause))

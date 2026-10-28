@@ -30,6 +30,12 @@ describe("platform skill catalogue binding", () => {
       expect(Object.fromEntries(url.searchParams)).toEqual({ threadId: "thread-one" });
     }
   });
+  it("草稿按实际助手读取，旧预设空清单不会缩小继承范围", () => {
+    const question = { assistantId: 'actual-assistant', presetRevision: 1, configuration: { skillIds: [] } } as unknown as NonNullable<AutoOpsThreadScope['question']>;
+    const draft = new URL(autoOpsSkillContextRequestKey('/gateway', 'draft-one', { ...scope, question })!, 'https://test.invalid');
+    expect(draft.searchParams.get('assistantId')).toBe('actual-assistant');
+    expect(draft.searchParams.has('skillIds')).toBe(false);
+  });
   it("does not request platform skills for any customer target or incomplete scope", () => {
     const remote = {
       ...scope,

@@ -12,8 +12,14 @@ const fail = (message='技能不存在或不属于当前授权范围', code='SKI
 const digest = value => createHash('sha256').update(typeof value==='string'||Buffer.isBuffer(value)?value:JSON.stringify(value)).digest('hex')
 const contextRoot = directory => join(resolve(directory),'t3','skill-contexts')
 const idPattern = /^[a-f0-9]{64}$/
-const scopeOf = value => ({projectId:value.projectId,agentId:value.agentId,workspaceType:value.workspaceType||'internal',...(value.workspaceVersionId?{workspaceVersionId:value.workspaceVersionId}:{}),...(value.environmentId?{environmentId:value.environmentId}:{}),...((value.skillIds ?? value.question?.configuration.skillIds) !== undefined ? {skillIds:[...(value.skillIds ?? value.question.configuration.skillIds)].sort()} : {})})
+const scopeOf = value => ({projectId:value.projectId,agentId:value.agentId,workspaceType:value.workspaceType||'internal',...(value.workspaceVersionId?{workspaceVersionId:value.workspaceVersionId}:{}),...(value.environmentId?{environmentId:value.environmentId}:{}),...((value.assistantId ?? value.question?.assistantId) ? {assistantId:value.assistantId ?? value.question.assistantId} : {})})
 const scopeEqual = (a,b) => JSON.stringify(scopeOf(a))===JSON.stringify(scopeOf(b))
+// 升级前快照没有实际助手字段；仅在已授权会话校验时兼容旧业务范围。
+const snapshotMatchesBinding = (snapshot,binding) => {
+  if (scopeOf(snapshot).assistantId) return scopeEqual(snapshot,binding)
+  const current = scopeOf(binding); delete current.assistantId
+  return scopeEqual(snapshot,current)
+}
 const safeFile = (root,path) => {
   if(typeof path!=='string'||path.includes('\\')||path.startsWith('/')||path.includes('\0')||path.split('/').some(p=>!p||p==='.'||p==='..'))fail()
   const target=join(root,path)
@@ -46,6 +52,7 @@ function authorizeScope(access,principal,input) {
   const bootstrap=access.bootstrap(principal)
   const project=bootstrap.projects.find(project=>project.id===scope.projectId)
   if(!project?.agents.some(agent=>agent.id===scope.agentId))fail()
+  if(scope.assistantId && !project.assistants?.items.some(item=>item.preset.id===scope.assistantId && item.preset.enabled && item.preset.configuration.agentId===scope.agentId))fail('助手不属于当前项目或已停用')
   access.requireWorkspace(principal,scope.projectId,scope.workspaceType,scope.workspaceVersionId,scope.environmentId)
   if(scope.environmentId)access.requireEnvironment(principal,scope.projectId,scope.environmentId)
   return scope
@@ -114,7 +121,7 @@ function assertThreadScope(directory,path,threadId,binding) {
   const saved=readJson(path)
   if(!idPattern.test(saved.snapshotId))fail()
   const identity=readJson(join(contextRoot(directory),saved.snapshotId,'snapshot.json'))
-  if(saved.threadId!==threadId||digest(identity)!==saved.snapshotId||!scopeEqual(identity.scope,binding))fail('会话技能绑定与当前范围不一致')
+  if(saved.threadId!==threadId||digest(identity)!==saved.snapshotId||!snapshotMatchesBinding(identity.scope,binding))fail('会话技能绑定与当前范围不一致')
 }
 export function prepareScopedBusinessSkills(directory,binding,{lock=true}={}) {
   const threadId=binding.nativeParentThreadId||binding.threadId,saved=threadId?lockPath(directory,threadId):null
@@ -144,7 +151,7 @@ function authorizeSnapshotViewer(directory,context,{access,principal}) {
       const saved=readJson(join(threads,entry.name))
       if(saved.snapshotId!==context.snapshotId||typeof saved.threadId!=='string'||![digest(saved.threadId)+'.json',`${digest(saved.threadId)}-${context.snapshotId}.json`].includes(entry.name))continue
       const binding=access.requireThread(principal,saved.threadId)
-      if(binding.scopeState==='locked'&&scopeEqual(binding,context.scope))return
+      if(binding.scopeState==='locked'&&snapshotMatchesBinding(context.scope,binding))return
     }catch{/* Missing, revoked or private conversations confer no access. */}
   }
   fail('此技能快照属于无权查看的历史对话，请使用当前对话的技能范围')
@@ -199,7 +206,7 @@ function authorizedSkillContext(directory,contextId,{access=configuredAutoOpsAcc
       const saved=readJson(path)
       return saved.threadId===ownerThreadId&&saved.snapshotId===contextId
     })
-    if(!scopeEqual(binding,context.scope)||(current.snapshotId!==contextId&&!historical))fail()
+    if(!snapshotMatchesBinding(context.scope,binding)||(current.snapshotId!==contextId&&!historical))fail()
     if(principal&&binding.scopeState!=='locked')authorizeSnapshotViewer(directory,context,{access,principal})
   } else authorizeSnapshotViewer(directory,context,{access,principal})
   return assertCurrent(directory,context)

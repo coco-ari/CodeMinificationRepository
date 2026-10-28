@@ -1,10 +1,20 @@
+import {
+  effectiveSkillAssignment,
+  GLOBAL_SKILL_TARGET,
+} from '../../../../../../autoops/contracts/skill-scope.mjs'
+export { effectiveSkillAssignment, GLOBAL_SKILL_TARGET }
+export const skillScopeNames = {
+  global: '所有项目',
+  project: '当前项目',
+  assistant: '指定助手',
+} as const
 import type { ProjectListEntriesResult, ServerProviderSkill } from '@t3tools/contracts'
 import type { ReadOnlyFileSource } from '~/components/files/readOnlyFileSource'
 import { autoOpsApiUrl, autoOpsRequest } from './apiClient'
 import { autoOpsSkillPackageLink } from './resources'
 
 export type SkillWorkspaceType = 'internal' | 'external'
-export type SkillTargetType = 'agent' | 'project'
+export type SkillTargetType = 'global' | 'project' | 'assistant'
 export interface SkillVersion {
   id: string
   createdAt: string
@@ -37,7 +47,7 @@ export interface SkillAssignment {
   targetId: string
   skillId: string
   versionId: string
-  workspaceTypes: SkillWorkspaceType[]
+  projectId?: string
   enabled: boolean
 }
 export interface SkillLibrary {
@@ -45,8 +55,13 @@ export interface SkillLibrary {
   canManage: boolean
   skills: LibrarySkill[]
   assignments: SkillAssignment[]
-  projects: Array<{ id: string; name: string }>
-  agents: Array<{ id: string; name: string; projectIds: string[] }>
+  projects: Array<{ id: string; name: string; canManage: boolean }>
+  assistants: Array<{
+    id: string
+    name: string
+    projectId: string
+    executionKind: 'platform' | 'customer'
+  }>
 }
 export type SkillLibraryAction =
   | { action: 'import-markdown'; contents: string; skillId?: string }
@@ -59,7 +74,7 @@ export type SkillLibraryAction =
       versionId: string
       targetType: SkillTargetType
       targetId: string
-      workspaceTypes: SkillWorkspaceType[]
+      projectId?: string
       enabled?: boolean
     }
   | { action: 'unassign'; assignmentId: string }
@@ -67,16 +82,27 @@ export type SkillLibraryAction =
   | { action: 'verify'; skillId: string; versionId: string }
 
 const base = () => autoOpsApiUrl('/autoops/skill-library')
-const request = (body?: SkillLibraryAction & { revision: string }, signal?: AbortSignal) =>
-  autoOpsRequest<SkillLibrary>('/autoops/skill-library', {
-    label: 'skill库',
-    ...(body === undefined ? {} : { body }),
-    ...(signal ? { signal } : {}),
-  })
+const request = (
+  body?: SkillLibraryAction & { revision: string },
+  signal?: AbortSignal,
+  projectId?: string,
+) =>
+  autoOpsRequest<SkillLibrary>(
+    `/autoops/skill-library${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    {
+      label: 'skills',
+      ...(body === undefined ? {} : { body }),
+      ...(signal ? { signal } : {}),
+    },
+  )
 
-export const loadSkillLibrary = (signal?: AbortSignal) => request(undefined, signal)
-export const changeSkillLibrary = (revision: string, action: SkillLibraryAction) =>
-  request({ ...action, revision })
+export const loadSkillLibrary = (signal?: AbortSignal, projectId?: string) =>
+  request(undefined, signal, projectId)
+export const changeSkillLibrary = (
+  revision: string,
+  action: SkillLibraryAction,
+  projectId?: string,
+) => request({ ...action, revision }, undefined, projectId)
 export const skillVersionName = (version: SkillVersion) =>
   `${new Date(version.createdAt).toLocaleString('zh-CN')} · ${version.id.slice(0, 8)}`
 export const skillSourceName = (source: SkillVersion['source']) =>
@@ -178,4 +204,27 @@ export async function loadSkillContext(
   if (!requestKey.startsWith(endpoint + '?')) throw new Error('当前skill范围地址无效。')
   const path = '/autoops/skill-library/context' + requestKey.slice(endpoint.length)
   return autoOpsRequest(path, { label: '当前skill范围', ...(signal ? { signal } : {}) })
+}
+
+/** 上层开启时下层只显示继承，关闭上层不会丢失原下层设置。 */
+export function inheritedSkillAssignment(
+  catalog: SkillLibrary,
+  skillId: string,
+  type: SkillTargetType,
+  projectId: string,
+) {
+  const effective = effectiveSkillAssignment(catalog.assignments, skillId, { projectId })
+  return effective &&
+    (type === 'assistant' || (type === 'project' && effective.targetType === 'global'))
+    ? effective
+    : undefined
+}
+export function canManageSkillScope(
+  catalog: SkillLibrary,
+  type: SkillTargetType,
+  projectId: string,
+) {
+  return type === 'global'
+    ? catalog.canManage
+    : catalog.projects.some((project) => project.id === projectId && project.canManage)
 }

@@ -13,21 +13,21 @@ import {resolveBusinessSkillMentions,filterBusinessSkills} from '../agent-demo/t
 import {createAutoOpsAccess,initializeAutoOpsAccessSchema} from '../agent-demo/t3-adapters/access.mjs'
 const markdown=(name,body='读取 references/check.md 后整理报告。')=>`---\nname: ${name}\ndescription: 测试技能\n---\n${body}\n`
 function fixture(t){
- const directory=mkdtempSync(join(tmpdir(),'scoped-skills-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));const library=createSkillLibrary(directory)
- const binding={threadId:'thread-one',projectId:'p-one',agentId:'a-one',environmentId:'env-one',workspaceType:'internal',workspaceVersionId:'version-one',ownerId:'user-one',visibility:'private',scopeState:'locked'}
+ const directory=mkdtempSync(join(tmpdir(),'scoped-skills-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));mkdirSync(join(directory,'t3'),{recursive:true});writeFileSync(join(directory,'t3/skills-library.json'),JSON.stringify({version:1,skills:[]}));const library=createSkillLibrary(directory)
+ const binding={threadId:'thread-one',projectId:'p-one',agentId:'a-one',assistantId:'assistant-one',environmentId:'env-one',workspaceType:'internal',workspaceVersionId:'version-one',ownerId:'user-one',visibility:'private',scopeState:'locked'}
  const principal={id:'user-one'},bindings=new Map([[binding.threadId,binding]])
- const access={bootstrap:()=>({projects:[{id:'p-one',agents:[{id:'a-one'},{id:'a-other'}]}]}),requireWorkspace:(_p,p,type)=>{if(p!=='p-one'||type!=='internal')throw Error('denied')},requireEnvironment:()=>{},requireThread:(viewer,id)=>{const binding=bindings.get(id);if(!binding||binding.ownerId!==viewer.id&&(binding.visibility!=='project'||binding.scopeState!=='locked'))throw Error('denied');return binding},requireToolThread:id=>({binding:access.requireThread(principal,id)})}
+ const access={bootstrap:()=>({projects:[{id:'p-one',agents:[{id:'a-one'},{id:'a-other'}],assistants:{items:[{preset:{id:'assistant-one',enabled:true,configuration:{agentId:'a-one'}}},{preset:{id:'assistant-other',enabled:true,configuration:{agentId:'a-other'}}}]}}]}),requireWorkspace:(_p,p,type)=>{if(p!=='p-one'||type!=='internal')throw Error('denied')},requireEnvironment:()=>{},requireThread:(viewer,id)=>{const binding=bindings.get(id);if(!binding||binding.ownerId!==viewer.id&&(binding.visibility!=='project'||binding.scopeState!=='locked'))throw Error('denied');return binding},requireToolThread:id=>({binding:access.requireThread(principal,id)})}
  const importSkill=(name='sample',body,files={})=>{library.importArchive({revision:library.catalog().revision,archiveBase64:Buffer.from(zipSync(Object.fromEntries(Object.entries({'SKILL.md':markdown(name,body),'references/check.md':'固定参考内容',...files}).map(([k,v])=>[k,Buffer.from(v)])))).toString('base64')});return library.catalog().skills.find(s=>s.name===name)}
- const assign=(skill,targetType='agent',targetId='a-one',versionId=skill.versions.at(-1).id,workspaceTypes=['internal'])=>library.assign({revision:library.catalog().revision,skillId:skill.id,versionId,targetType,targetId,workspaceTypes})
+ const assign=(skill,targetType='assistant',targetId='assistant-one',versionId=skill.versions.at(-1).id)=>library.assign({revision:library.catalog().revision,skillId:skill.id,versionId,targetType,targetId,...(targetType==='assistant'?{projectId:'p-one'}:{})})
  return {directory,library,binding,principal,access,bindings,importSkill,assign,env:{AUTOOPS_T3_DATA_DIR:directory}}
 }
-test('同一中央包按助手/项目与内部外部范围隔离；原生列表与typed $使用同一清单',t=>{
+test('同一中央包按真实助手与项目隔离，不因切换内外工作区丢失启用；原生列表与typed $使用同一清单',t=>{
  const f=fixture(t),skill=f.importSkill();f.assign(skill)
  const c=prepareScopedBusinessSkills(f.directory,f.binding)
  assert.equal(c.skills.length,1);assert.match(readFileSync(c.skills[0].path,'utf8'),/name: autoops-sample/)
  assert.equal(resolveBusinessSkillMentions('$autoops-sample 请检查',f.env,f.binding)[0].path,c.skills[0].path)
  assert.throws(()=>resolveBusinessSkillMentions('$autoops-sample',f.env),e=>e.code==='SKILL_SCOPE_REQUIRED')
- for(const changes of [{agentId:'a-other'},{workspaceType:'external'}])assert.throws(()=>resolveBusinessSkillMentions('$autoops-sample',f.env,{...f.binding,...changes,threadId:'other'}),e=>e.code==='SKILL_NOT_AVAILABLE')
+ for(const changes of [{assistantId:'assistant-other'},{projectId:'p-two'}])assert.throws(()=>resolveBusinessSkillMentions('$autoops-sample',f.env,{...f.binding,...changes,threadId:'other'}),e=>e.code==='SKILL_NOT_AVAILABLE')
  f.assign(skill,'project','p-one');assert.equal(resolveBusinessSkillMentions('$autoops-sample',f.env,{...f.binding,agentId:'a-other',threadId:'different'}).length,1)
  assert.throws(()=>resolveBusinessSkillMentions('$autoops-sample',f.env,{...f.binding,projectId:'p-two',agentId:'a-other',threadId:'another'}))
  const entries=[...c.skills,{...c.skills[0],path:'/other/SKILL.md'}]
@@ -109,9 +109,9 @@ test('真实登录与会话ACL：私有旧版本仅拥有者可见，共享旧�
   for(const id of ['u-admin','u-lin','u-guest'])sessionDb.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(createHash('sha256').update(id).digest('hex'),id,'csrf',Date.now()+60000)
   const access=createAutoOpsAccess({sessionDb,bindingDb}),owner=access.authenticateCookie('demo_session=u-admin'),member=access.authenticateCookie('demo_session=u-lin'),guest=access.authenticateCookie('demo_session=u-guest')
   const binding=access.bindThread(owner,{threadId:'history',projectId:'p-autoops',agentId:'a-project',environmentId:'env-test',workspaceType:'internal',workspaceVersionId:'internal-v1',visibility})
-  const skill=f.importSkill();f.assign(skill,'agent','a-project')
+  const skill=f.importSkill();f.assign(skill,'project','p-autoops')
   const old=prepareScopedBusinessSkills(f.directory,binding)
-  f.library.importMarkdown({revision:f.library.catalog().revision,skillId:skill.id,contents:markdown('sample','当前版本')});f.assign(f.library.catalog().skills.find(s=>s.id===skill.id),'agent','a-project')
+  f.library.importMarkdown({revision:f.library.catalog().revision,skillId:skill.id,contents:markdown('sample','当前版本')});f.assign(f.library.catalog().skills.find(s=>s.id===skill.id),'project','p-autoops')
   const ownerOptions={access,principal:owner},memberOptions={access,principal:member},guestOptions={access,principal:guest}
   const content=options=>readScopedSkillResource(f.directory,old.snapshotId,'autoops-sample','references/check.md',options).bytes.toString()
   const cached={providers:[{skills:old.skills,workspaceSnapshots:[{cwd:old.physicalCwd,skills:old.skills}]}]}
@@ -233,4 +233,17 @@ test('技能运行上下文提供可直接读取的正文路径，正文与参�
  assert.throws(()=>readScopedSkillResourceForThread(f.directory,f.binding.threadId,policy.context.skills[0].path,f.access))
  assert.equal(policy.config['features.shell_tool'],undefined)
  assert.equal(policy.config['permissions.agent_demo.filesystem'][':root'],'deny')
+})
+
+
+test('旧快照升级后原会话仍可继续，新快照固定真实助手且跨助手草稿拒绝',t=>{
+ const f=fixture(t),skill=f.importSkill();f.assign(skill,'project','p-one')
+ const legacy={...f.binding};delete legacy.assistantId
+ const old=prepareScopedBusinessSkills(f.directory,legacy)
+ const fresh=prepareScopedBusinessSkills(f.directory,f.binding)
+ assert.notEqual(fresh.snapshotId,old.snapshotId)
+ assert.equal(fresh.scope.assistantId,'assistant-one')
+ assert.equal(resolveBusinessSkillContext(f.directory,{...f.binding,threadId:undefined},{access:f.access,principal:f.principal}).snapshotId,fresh.snapshotId)
+ assert.throws(()=>resolveBusinessSkillContext(f.directory,{...f.binding,threadId:undefined,assistantId:'another-project-assistant'},{access:f.access,principal:f.principal}),{code:'SKILL_SCOPE_FORBIDDEN'})
+ assert.throws(()=>prepareScopedBusinessSkills(f.directory,{...f.binding,projectId:'p-other'}),{code:'SKILL_SCOPE_FORBIDDEN'})
 })

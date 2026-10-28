@@ -7,7 +7,7 @@ export const AUTOOPS_AREAS = [
   { id: 'projects', label: '项目管理', icon: 'folderSettings', path: '/projects', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'assistants', label: '助手', icon: 'bot', path: '/assistants', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'accounts', label: '账号', icon: 'users', path: '/accounts', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'skills', label: 'skill库', icon: 'sparkles', path: '/skills', scope: 'global', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
+  { id: 'skills', label: 'skills', icon: 'sparkles', path: '/skills', scope: 'global', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
 ] as const
 
 export type AutoOpsArea = typeof AUTOOPS_AREAS[number]['id']
@@ -105,8 +105,8 @@ const CONTROL_ROUTES = new Set([
   'connect', 'connect-agent', 'pair', 'welcome', 'new', 'api', 'autoops',
 ])
 
-/** A project change keeps only global skill browsing, never a resource or pending action. */
-function skillNavigationSearch(search: unknown, host: NavigationHost): URLSearchParams {
+/** 切项目只保留 skills 视图，不携带上一项目的助手或待提交操作。 */
+function skillNavigationSearch(search: unknown): URLSearchParams {
   let params: URLSearchParams
   if (search instanceof URLSearchParams) params = search
   else if (typeof search === 'string' || search instanceof URL) {
@@ -115,7 +115,7 @@ function skillNavigationSearch(search: unknown, host: NavigationHost): URLSearch
   } else {
     params = new URLSearchParams()
     if (search && typeof search === 'object') {
-      for (const key of ['skillView', 'agentId'] as const) {
+      for (const key of ['skillView'] as const) {
         const value = (search as Record<string, unknown>)[key]
         if (typeof value === 'string') params.set(key, value)
       }
@@ -124,12 +124,8 @@ function skillNavigationSearch(search: unknown, host: NavigationHost): URLSearch
   const result = new URLSearchParams()
   const views = params.getAll('skillView')
   const view = views.length === 1 ? views[0] : undefined
-  if (view !== 'library' && view !== 'agent' && view !== 'project') return result
+  if (view !== 'library' && view !== 'global' && view !== 'assistant' && view !== 'project') return result
   result.set('skillView', view)
-  const agents = params.getAll('agentId')
-  const agentId = agents.length === 1 ? agents[0] : undefined
-  if (view === 'agent' && agentId && host.projects.some((project) =>
-    project.agents?.some((agent) => agent.id === agentId))) result.set('agentId', agentId)
   return result
 }
 
@@ -228,7 +224,7 @@ export function createAutoOpsProjectNavigation(options: {
       if (!allowed(host, projectId)) throw new Error('当前项目不可用或无权访问。')
       const params = new URLSearchParams({ projectId })
       if (area === 'skills') {
-        for (const [key, value] of skillNavigationSearch(search, host)) params.set(key, value)
+        for (const [key, value] of skillNavigationSearch(search)) params.set(key, value)
       }
       if (area === 'assistants' && search && typeof search === 'object') {
         const view = search instanceof URLSearchParams

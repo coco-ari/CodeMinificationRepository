@@ -1,3 +1,4 @@
+import { effectiveSkillAssignment, GLOBAL_SKILL_TARGET } from '../../autoops/contracts/skill-scope.mjs'
 /** Skills Manager (MIT, Tianliang Zhang), commit 7a2219219287f4ef4c543fc169ebcc5b0bff085c.
  * Server port of installer::PreparedSource/copy_skill_dir, skill_metadata and
  * content_hash's sorted content scope. See vendor/skills-manager/README.md.
@@ -215,7 +216,7 @@ function loadState(root) {
   const info = lstatSync(path)
   if (!info.isFile() || info.isSymbolicLink() || info.size > 32 * 1024 * 1024) fail(409, 'SKILL_STORAGE_INVALID', '技能索引不可读')
   const state = JSON.parse(readFileSync(path, 'utf8'))
-  if (state.version !== 2 || !Array.isArray(state.skills) || !Array.isArray(state.assignments)) fail(409, 'SKILL_STORAGE_INVALID', '技能索引版本无效')
+  if (![2, 3].includes(state.version) || !Array.isArray(state.skills) || !Array.isArray(state.assignments)) fail(409, 'SKILL_STORAGE_INVALID', '技能索引版本无效')
   return state
 }
 export const skillLibraryRevision = state => sha(JSON.stringify(state))
@@ -225,13 +226,21 @@ function libraryRoot(dataDirectory) {
   normalDirectory(root)
   if (!existsSync(join(root, 'index.json'))) withLock(root, () => {
     if (existsSync(join(root, 'index.json'))) return
-    const state = { version: 2, createdAt: now(), skills: [], assignments: [] }
+    const state = { version: 3, createdAt: now(), skills: [], assignments: [] }
     for (const original of legacySkills(dataDirectory)) {
       const contents = `---\nname: ${original.name}\ndescription: ${JSON.stringify(original.description)}\ndisplay-name: ${JSON.stringify(original.displayName || original.name)}\nallowed-tools: ${JSON.stringify(original.tools)}\n---\n\n# 适用范围\n仅使用当前会话已经授予的业务工具。此技能不会扩大任何权限。\n\n${original.instructions}\n`
       const skill = publishVersion(root, state, prepareFiles(new Map([['SKILL.md', { bytes: Buffer.from(contents), executable: false }]])), { type: original.builtin ? 'builtin' : 'legacy' })
       skill.enabled = original.enabled !== false; skill.builtin = !!original.builtin
-      for (const agentId of ['a-project', 'a-report']) state.assignments.push({ id: randomUUID(), targetType: 'agent', targetId: agentId, skillId: skill.id, versionId: skill.latestVersionId, workspaceTypes: original.builtin ? ['internal', 'external'] : ['internal'], enabled: true, createdAt: now() })
+      state.assignments.push({ id: randomUUID(), targetType: 'global', targetId: GLOBAL_SKILL_TARGET, skillId: skill.id, versionId: skill.latestVersionId, enabled: true, createdAt: now() })
     }
+    atom(join(root, 'index.json'), state)
+  })
+  if (loadState(root).version === 2) withLock(root, () => {
+    const state = loadState(root)
+    if (state.version !== 2) return
+    // 旧业务身份不是实际助手，不将旧身份授权扩展到所有项目。
+    state.assignments = state.assignments.filter(entry => entry.targetType === 'project').map(({ workspaceTypes, ...entry }) => entry)
+    state.version = 3
     atom(join(root, 'index.json'), state)
   })
   return root
@@ -241,7 +250,7 @@ export function projectSkillDeletionReferences(dataDirectory, projectId, environ
   if (environmentId !== undefined) return []
   const root = resolve(dataDirectory,'t3','skill-library-v2')
   if (!existsSync(join(root,'index.json'))) return []
-  const count = loadState(root).assignments.filter(value => value.targetType === 'project' && value.targetId === projectId).length
+  const count = loadState(root).assignments.filter(value => (value.targetType === 'project' && value.targetId === projectId) || (value.targetType === 'assistant' && value.projectId === projectId)).length
   return count ? [{kind:'project-skills',count,message:'项目仍有技能分配'}] : []
 }
 function getVersion(state, skillId, versionId) {
@@ -264,13 +273,10 @@ export function resolveSkillLibrary(dataDirectory, scope) {
   if (!scope || !scope.projectId || !scope.agentId || !['internal', 'external'].includes(scope.workspaceType)) return []
   const root = libraryRoot(dataDirectory), state = loadState(root)
   const result = []
-  const selected = scope.skillIds ?? scope.question?.configuration.skillIds
   for (const skill of state.skills) {
-    if (!skill.enabled || skill.deletedAt || (selected !== undefined && !selected.includes(skill.id))) continue
-    // Project assignment wins even when disabled or excluding this workspace.
-    const assignment = state.assignments.find(entry => entry.skillId === skill.id && entry.targetType === 'project' && entry.targetId === scope.projectId)
-      ?? state.assignments.find(entry => entry.skillId === skill.id && entry.targetType === 'agent' && entry.targetId === scope.agentId)
-    if (!assignment?.enabled || !assignment.workspaceTypes.includes(scope.workspaceType)) continue
+    if (!skill.enabled || skill.deletedAt) continue
+    const assignment = effectiveSkillAssignment(state.assignments, skill.id, { projectId: scope.projectId, assistantId: scope.assistantId ?? scope.question?.assistantId })
+    if (!assignment) continue
     const version = skill.versions.find(entry => entry.id === assignment.versionId)
     if (version?.readiness !== 'ready') continue
     result.push(resolvedVersion(root, skill, version))
@@ -363,9 +369,10 @@ export function createSkillLibrary(dataDirectory) {
       const { skill, version } = getVersion(state, input.skillId, input.versionId)
       if (skill.deletedAt) missing()
       if (version.readiness !== 'ready') fail(409, 'SKILL_NOT_READY', '此版本运行条件尚未就绪，当前不能分配或调用')
-      if (!['agent', 'project'].includes(input.targetType) || typeof input.targetId !== 'string' || !input.targetId || input.targetId.length > 120 || !Array.isArray(input.workspaceTypes) || !input.workspaceTypes.length || input.workspaceTypes.some(type => !['internal', 'external'].includes(type)) || (input.enabled !== undefined && typeof input.enabled !== 'boolean')) fail(400, 'SKILL_ASSIGNMENT_INVALID', '请选择有效的范围、工作区与版本')
-      const previous = state.assignments.find(entry => entry.skillId === input.skillId && entry.targetType === input.targetType && entry.targetId === input.targetId)
-      const value = { id: previous?.id || randomUUID(), skillId: input.skillId, versionId: input.versionId, targetType: input.targetType, targetId: input.targetId, workspaceTypes: [...new Set(input.workspaceTypes)], enabled: input.enabled !== false, createdAt: previous?.createdAt || now(), updatedAt: now() }
+      if (!['global', 'project', 'assistant'].includes(input.targetType) || typeof input.targetId !== 'string' || !input.targetId || input.targetId.length > 120 || (input.targetType === 'global' && input.targetId !== GLOBAL_SKILL_TARGET) || (input.targetType === 'assistant' && (typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 120)) || (input.enabled !== undefined && typeof input.enabled !== 'boolean')) fail(400, 'SKILL_ASSIGNMENT_INVALID', '请选择有效的启用范围与版本')
+      const projectId = input.targetType === 'assistant' ? input.projectId : undefined
+      const previous = state.assignments.find(entry => entry.skillId === input.skillId && entry.targetType === input.targetType && entry.targetId === input.targetId && entry.projectId === projectId)
+      const value = { id: previous?.id || randomUUID(), skillId: input.skillId, versionId: input.versionId, targetType: input.targetType, targetId: input.targetId, ...(projectId ? { projectId } : {}), enabled: input.enabled !== false, createdAt: previous?.createdAt || now(), updatedAt: now() }
       if (previous) Object.assign(previous, value); else state.assignments.push(value)
     }) },
     unassign(input) { return mutate(input, state => { const assignment = state.assignments.find(entry => entry.id === input.assignmentId); if (!assignment) missing(); state.assignments = state.assignments.filter(entry => entry.id !== input.assignmentId) }) },

@@ -13,21 +13,23 @@ function fixture(t, legacy) {
   if (legacy !== undefined) { mkdirSync(join(data, 't3')); writeFileSync(join(data, 't3/skills-library.json'), JSON.stringify({version:1,skills:legacy})) }
   t.after(() => rmSync(data, {recursive:true,force:true}))
   const library = createSkillLibrary(data)
-  const request = (method, input, path='/autoops/skill-library', principal={role:'admin'}) => handleSkillLibraryRequest({ access, principal, dataDirectory:data, method, input, url:new URL(path,'http://localhost') })
+  const request = (method, input, path='/autoops/skill-library', principal={id:'admin',role:'admin'}) => handleSkillLibraryRequest({ access, principal, dataDirectory:data, method, input, url:new URL(path,'http://localhost') })
   const projects = [{id:'p-a',name:'甲项目',membership:{workspaceAccess:'internal'}},{id:'p-b',name:'乙项目',membership:{workspaceAccess:'external'}}]
+  for (const project of projects) project.assistants = { items: [{preset:{id:'assistant-'+project.id.slice(2),name:project.name+'真实助手',enabled:true,configuration:{agentId:'a-project',executionBinding:{kind:'platform'}}}},{preset:{id:'disabled-'+project.id,name:'已停用助手',enabled:false,configuration:{executionBinding:{kind:'platform'}}}}] }
   const agents = [{id:'a-project',name:'项目助手',projectIds:['p-a','p-b']},{id:'a-report',name:'报告助手',projectIds:['p-a']}]
   const access = {
     refresh: principal => principal,
-    bootstrap: principal => ({projects:principal.role==='external'?[projects[1]]:projects,agents}),
+    bootstrap: principal => ({projects:(principal.role==='external'?[projects[1]]:projects).map(p=>({...p,capabilities:{'project.manage':principal.id==='project-admin'&&p.id==='p-a'}})),agents}),
     requireMembership: (principal,id) => { const project=projects.find(p=>p.id===id);if(!project || principal.role==='external'&&id!=='p-b')throw Object.assign(new Error('no'),{status:404});return project.membership },
     requireProject: (principal,id) => access.requireMembership(principal,id),
+    requireProjectActionForActor: (actor,id) => { if(!['admin','project-admin'].includes(actor)||actor==='project-admin'&&id!=='p-a')throw Object.assign(new Error('no'),{status:403}) },
     requireWorkspaceManager: (principal,id) => { if(principal.role!=='admin'||!projects.some(p=>p.id===id))throw Object.assign(new Error('no'),{status:403}) },
   }
-  return {data,library,request,scope:{projectId:'p-a',agentId:'a-project',workspaceType:'internal'}}
+  return {data,library,request,scope:{projectId:'p-a',agentId:'a-project',assistantId:'assistant-a',workspaceType:'internal'}}
 }
 const markdown = (name, body='阅读资料并列出真实来源。') => `---\nname: ${name}\ndescription: >-\n  一个完整的\n  技能说明\n---\n\n${body}\n`
 function add(library, name='review', body) { const c=library.importMarkdown({revision:library.catalog().revision,contents:markdown(name,body)});return c.skills.find(s=>s.name===name) }
-function assign(library, skill, extra={}) { return library.assign({revision:library.catalog().revision,skillId:skill.id,versionId:skill.latestVersionId,targetType:'agent',targetId:'a-project',workspaceTypes:['internal'],...extra}) }
+function assign(library, skill, extra={}) { return library.assign({revision:library.catalog().revision,skillId:skill.id,versionId:skill.latestVersionId,targetType:'assistant',targetId:'assistant-a',projectId:'p-a',...extra}) }
 function archive(library, entries, extra={}) { return library.importArchive({revision:library.catalog().revision,archiveBase64:Buffer.from(zipSync(Object.fromEntries(Object.entries(entries).map(([path,value])=>[path,Buffer.from(value)])))).toString('base64'),fileName:'skill.zip',...extra}) }
 
 test('迁移内置与已有 JSON，保留停用状态、原文及旧文件，显式空库不重置',t=>{
@@ -37,7 +39,7 @@ test('迁移内置与已有 JSON，保留停用状态、原文及旧文件，显
   assert.equal(resolveSkillLibrary(normal.data,{...normal.scope,workspaceType:'external'}).length,3)
   const original=[{name:'custom',displayName:'自定义',description:'原有说明',instructions:'不丢失正文',tools:['read_project_document'],enabled:false}]
   const f=fixture(t,original),state=f.library.catalog(),skill=state.skills[0]
-  assert.equal(skill.enabled,false);assert.equal(state.assignments.length,2)
+  assert.equal(skill.enabled,false);assert.equal(state.assignments.length,1)
   assert.match(readSkillLibraryVersion(f.data,skill.id,skill.latestVersionId).instructions,/不丢失正文/)
   assert.deepEqual(JSON.parse(readFileSync(join(f.data,'t3/skills-library.json'),'utf8')).skills,original)
   assert.equal(fixture(t,[]).library.catalog().skills.length,0)
@@ -64,19 +66,27 @@ test('脚本与依赖完整保存但明确受限，不能伪装可调用，检�
   assert.equal(f.library.catalog().skills[0].versions[0].readiness,'restricted')
 })
 
-test('助手与项目分配取并集，同技能项目优先且显式停用阻断助手回退',t=>{
+test('所有项目、当前项目、指定助手按上层启用优先，停用上层回退下层且不受旧空清单影响',t=>{
   const f=fixture(t,[]),skill=add(f.library)
   assign(f.library,skill)
-  assert.equal(resolveSkillLibrary(f.data,f.scope).length,1)
-  assert.equal(resolveSkillLibrary(f.data,{...f.scope,agentId:'a-report'}).length,0)
-  assert.equal(resolveSkillLibrary(f.data,{...f.scope,workspaceType:'external'}).length,0)
-  assign(f.library,skill,{targetType:'project',targetId:'p-a',enabled:false})
+  assert.equal(resolveSkillLibrary(f.data,{...f.scope,question:{assistantId:'assistant-a',configuration:{skillIds:[]}}}).length,1)
+  assert.equal(resolveSkillLibrary(f.data,{...f.scope,assistantId:'assistant-other'}).length,0)
+  assert.equal(resolveSkillLibrary(f.data,{...f.scope,projectId:'p-b'}).length,0)
+  assert.equal(resolveSkillLibrary(f.data,{...f.scope,workspaceType:'external'}).length,1)
+  const next=f.library.importMarkdown({revision:f.library.catalog().revision,skillId:skill.id,contents:markdown('review','项目版本')}).skills[0]
+  assign(f.library,next,{targetType:'project',targetId:'p-a'})
+  assert.equal(resolveSkillLibrary(f.data,{...f.scope,assistantId:'assistant-other'})[0].versionId,next.latestVersionId)
+  assign(f.library,skill,{targetType:'global',targetId:'all-projects'})
+  assert.equal(resolveSkillLibrary(f.data,f.scope)[0].versionId,skill.latestVersionId)
+  assert.equal(resolveSkillLibrary(f.data,{...f.scope,projectId:'new-project',assistantId:'new-assistant'}).length,1)
+  assign(f.library,skill,{targetType:'assistant',enabled:false})
+  assert.equal(resolveSkillLibrary(f.data,f.scope)[0].versionId,skill.latestVersionId)
+  assign(f.library,skill,{targetType:'global',targetId:'all-projects',enabled:false})
+  assert.equal(resolveSkillLibrary(f.data,f.scope)[0].versionId,next.latestVersionId)
+  assign(f.library,next,{targetType:'project',targetId:'p-a',enabled:false})
   assert.equal(resolveSkillLibrary(f.data,f.scope).length,0)
-  assign(f.library,skill,{targetType:'project',targetId:'p-a',workspaceTypes:['internal','external']})
-  assert.equal(resolveSkillLibrary(f.data,{...f.scope,agentId:'a-report',workspaceType:'external'}).length,1)
-  const override=f.library.catalog().assignments.find(a=>a.targetType==='project')
-  f.library.unassign({revision:f.library.catalog().revision,assignmentId:override.id})
-  assert.equal(resolveSkillLibrary(f.data,f.scope).length,1)
+  assign(f.library,skill)
+  assert.equal(resolveSkillLibrary(f.data,f.scope)[0].versionId,skill.latestVersionId)
 })
 
 test('更新生成不可变版本，分配固定旧版本，更新分配后切换且历史可读',t=>{
@@ -156,7 +166,7 @@ test('HTTP 管理限制、外部目录过滤与正文授权一致，未分配旧
   await assert.rejects(f.request('GET',undefined,`/autoops/skill-library/${skill.id}/versions/${updated.latestVersionId}/content`,member),e=>e.status===404)
   const result=await f.request('GET',undefined,'/autoops/skill-library',member)
   assert.equal(result.body.skills[0].latestVersionId,skill.latestVersionId)
-  await assert.rejects(f.request('POST',{action:'assign',revision:f.library.catalog().revision,skillId:skill.id,versionId:skill.latestVersionId,targetType:'agent',targetId:'unknown',workspaceTypes:['internal']}),e=>e.status===403)
+  await assert.rejects(f.request('POST',{action:'assign',revision:f.library.catalog().revision,skillId:skill.id,versionId:skill.latestVersionId,targetType:'assistant',targetId:'unknown',projectId:'p-a'}),e=>e.status===403)
 })
 
 test('公开 Git 来源只接受白名单 HTTPS 与完整 commit，拒绝本地凭据和路径注入',async t=>{
@@ -210,4 +220,35 @@ test('纯 Markdown 的命令执行依赖也受限，避免把 CLI 技能误报�
     assert.match(skill.versions[0].reason,/当前运行器未开放的命令执行/)
     assert.throws(()=>assign(f.library,skill),e=>e.code==='SKILL_NOT_READY')
   }
+})
+
+
+test('项目目录只列当前项目真实助手，项目管理员可设本项目但不能改全局或其他项目',async t=>{
+ const f=fixture(t,[]),skill=add(f.library),path='/autoops/skill-library?projectId=p-a'
+ const c=(await f.request('GET',undefined,path)).body
+ assert.deepEqual(c.assistants.map(a=>[a.id,a.name]),[['assistant-a','甲项目真实助手']])
+ assert.equal(c.agents,undefined)
+ const member={id:'project-admin',role:'member'}
+ const assignRequest=extra=>f.request('POST',{action:'assign',revision:f.library.catalog().revision,skillId:skill.id,versionId:skill.latestVersionId,targetType:'assistant',targetId:'assistant-a',projectId:'p-a',...extra},path,member)
+ await assignRequest({})
+ assert.equal(resolveSkillLibrary(f.data,f.scope).length,1)
+ await assert.rejects(assignRequest({targetId:'assistant-b'}),e=>e.status===403)
+ await assert.rejects(assignRequest({targetId:'disabled-p-a'}),e=>e.status===403)
+ await assert.rejects(assignRequest({targetType:'project',targetId:'p-b'}),e=>e.status===403)
+ await assert.rejects(assignRequest({targetType:'global',targetId:'all-projects'}),e=>e.status===403)
+ await assignRequest({targetType:'project',targetId:'p-a'})
+ await assert.rejects(f.request('POST',{action:'set-enabled',revision:f.library.catalog().revision,skillId:skill.id,enabled:false},path,member),e=>e.status===403)
+})
+
+test('旧索引升级保留包与项目配置，移除不是实际助手的业务身份范围',t=>{
+ const f=fixture(t,[]),skill=add(f.library)
+ const path=join(f.data,'t3/skill-library-v2/index.json'),old=readSkillLibrary(f.data)
+ old.version=2
+ old.assignments=[{id:'old-agent',skillId:skill.id,versionId:skill.latestVersionId,targetType:'agent',targetId:'a-project',enabled:true,workspaceTypes:['internal']},{id:'old-project',skillId:skill.id,versionId:skill.latestVersionId,targetType:'project',targetId:'p-a',enabled:true,workspaceTypes:['internal']}]
+ writeFileSync(path,JSON.stringify(old))
+ const next=createSkillLibrary(f.data).catalog()
+ assert.deepEqual(next.assignments.map(a=>a.id),['old-project'])
+ assert.equal(next.assignments[0].workspaceTypes,undefined)
+ assert.equal(resolveSkillLibrary(f.data,{...f.scope,workspaceType:'external'}).length,1)
+ assert.equal(readSkillLibrary(f.data).version,3)
 })
