@@ -20,7 +20,15 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用固定为 `13d8ed34c1f103b30b462aa46c1651b0f383b4aa`，前端与后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-perf-13d8ed34`，STATIC_DIR为同目录dist/web；客户CLI复用未变化的0.4.5。北京时间2026-10-28 22:52切换成功，Web4013932、worker launcher4013435实际运行目录一致，两unit active且NRestarts=0。健康workerReachable=true，HTML SHA256 `de1cf25f33170802d08f4404e3c84012f56f01b08172383b9ac4e246dfbf6585`，两个Web Worker实际字节通过。发行清单 `450afa6fbd81cbb03bafc1ca7cea92c523d85fe17063d26009ba0c99bdb76126`，原生清单 `14ee392bb454dc6358e104c17e5cd338780bd3ad6e0261f37fc1f4697907b6ac`；原件为 `ROOT/perf-13d8ed34/preflight.json`、`switch.json`、`live-observation.json`。切换前没有活动问答、待处理客户命令或工作区租约；无迁移变化、无备份或数据恢复，其他服务PID不变。
+当前应用固定为 `d1c0ecd6c71ca0aa6f7d41148fa0db5506776a93`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-visibility-d1c0ecd6`，STATIC_DIR 为同目录 `dist/web`；客户CLI继续复用未变化的0.4.5。两个unit active、NRestarts=0，Web4183205、worker launcher4182710实际目录一致。健康workerReachable=true，HTML SHA256 `c52867d29549fbc7525cc3563c4f7ab1646e39d14b41f941e1dee7a18bdc3d0e` 及两个Web Worker实际字节通过；发行清单 `9b7f46bf5baaa05746c00c98e8f3af4be1abe72633ed8048108cf257269d8460`、原生清单 `33dfa3cb3060f315a4a944608b5fc88db6e69a9ee9da6c047b76b568ec741c22`。
+
+本次使用固定归档一次完成网页、Worker、网关及发行包构建，原件为 `ROOT/visibility-d1c0ecd6/preflight.json`、`switch.json`；切换结果switched，未覆盖旧数据库，其他服务PID不变。新增可见性审计表与现有数据并存。底栏、草稿及已发送会话可见范围实站验证见[本批验收](../docs/validation/composer-controls.md)，连接提示同候选修复见[连接验收](../docs/validation/reconnect-and-composer.md)。代码已正常推送，不以GitHub CI作为测试站发行前置。
+
+此前实际为后端 `t3-perf-13d8ed34` 加前端 `t3-composer-49993a04-static/dist/web`。需要撤回时先核对本批switch记录、当前覆盖及在途操作，再只撤销本批两个unit覆盖恢复该组合；不套用下方历史单一前端路径，不覆盖业务数据。本批未重新执行程序降级或未受影响的业务回退矩阵。
+
+#### 上一13d性能与499底栏发行历史（保留）
+
+当时应用固定为 `13d8ed34c1f103b30b462aa46c1651b0f383b4aa`，前端与后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-perf-13d8ed34`，STATIC_DIR为同目录dist/web；客户CLI复用未变化的0.4.5。北京时间2026-10-28 22:52切换成功，Web4013932、worker launcher4013435实际运行目录一致，两unit active且NRestarts=0。健康workerReachable=true，HTML SHA256 `de1cf25f33170802d08f4404e3c84012f56f01b08172383b9ac4e246dfbf6585`，两个Web Worker实际字节通过。发行清单 `450afa6fbd81cbb03bafc1ca7cea92c523d85fe17063d26009ba0c99bdb76126`，原生清单 `14ee392bb454dc6358e104c17e5cd338780bd3ad6e0261f37fc1f4697907b6ac`；原件为 `ROOT/perf-13d8ed34/preflight.json`、`switch.json`、`live-observation.json`。切换前没有活动问答、待处理客户命令或工作区租约；无迁移变化、无备份或数据恢复，其他服务PID不变。
 
 本批消除项目/内置助手目录内部重复账号投影，保持本次同步读取复用、下次撤权/改名生效。67项后端关联回归、Server类型/边界及同一固定候选完整构建通过。实站同admin正常登录、10项目/19会话、工作区根3项及子目录11项读取均200且响应字节数相同；五次短样本bootstrap中位59.15→26.08ms，会话列表54.76→28.61ms。仅支持本批目录开销减少，不承诺模型速度或长期连接稳定，具体复现和未测边界见[性能审查](../docs/validation/authorization-directory-performance.md)。本候选同时包含d50cb4f0/fa4614c0已协调的底栏与菜单修复，37项浏览器/52项单元及Web类型已通过，实际交互结果见[底栏验收](../docs/validation/composer-controls.md)。
 
