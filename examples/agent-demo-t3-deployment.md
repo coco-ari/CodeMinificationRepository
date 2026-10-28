@@ -10,7 +10,7 @@
 
 本节 `ROOT=/home/tao/autoops-shared-validation-20261026`，应用数据目录为 `/home/tao/autoops-deployment-validation/data`；两者均属于当前开发验收实例。公网浏览器入口为 [AutoOps HTTPS入口](https://auto.996788.xyz/agent-demo.html)；`192.168.31.157:28887` 是内网HTTP后端地址，不作为浏览器登录入口。当前会话Cookie启用Secure，直接打开内网IP的HTTP页面即使密码正确、登录接口200也无法保存该会话，不应为内网登录关闭此保护。
 
-用户确认先支持当前Mac后，已建立只监听 `127.0.0.1:28887` 的SSH加密隧道，直连 `tao@192.168.31.157` 并转发测试机回环28887。本机浏览器改用 [Mac内网直连入口](http://localhost:28887/agent-demo.html)；此localhost入口已实际完成admin正常登录、刷新保持和原对话加载，Secure会话配置不变，没有改密码、代理、DNS或系统信任。该地址仅适用于建立隧道的Mac，不能复制给其他电脑当内网地址；模型上游仍按原配置连接，不宣称改善模型耗时。当前应用仍为下方e92，无需重新构建或发版。
+用户确认先支持当前Mac后，已建立只监听 `127.0.0.1:28887` 的SSH加密隧道，直连 `tao@192.168.31.157` 并转发测试机回环28887。本机浏览器改用 [Mac内网直连入口](http://localhost:28887/agent-demo.html)；此localhost入口已实际完成admin正常登录、刷新保持和原对话加载，Secure会话配置不变，没有改密码、代理、DNS或系统信任。该地址仅适用于建立隧道的Mac，不能复制给其他电脑当内网地址；模型上游仍按原配置连接，不宣称改善模型耗时。当前应用以本节发行记录为准，连接方式本身不触发重新构建或发版。
 
 Mac重启或SSH隧道断开后，在终端执行以下命令，按提示输入测试服务器tao账号密码，并保持该终端打开，再访问上述localhost入口；已有隧道时无需重复启动：
 
@@ -20,7 +20,13 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用为项目引导集成候选 `e92e02b849b32b875b181b6a5eaee1c290c18f2b`，发行 `/home/tao/autoops-agent-demo/releases/t3-confirmed-e92e02b8`，STATIC_DIR为同目录dist/web。实际Web3163921/t46621417、launcher3163456/t46620821、native3163580/t46621021，进程目录均属于该发行。`ROOT/onboarding-switch-v1/switch-v1.json` SHA256 `410a8cf09ad3365ea7af39e11f3da4e799303a1faa8c05a55e38753888d42e9a` 为switched，迁移无变化，无数据恢复；新HTML `15db954f…0feed` 和两个Web Worker实际HTTP字节核验通过。release manifest `d0f161e203477ce27a28b6e51c119aea5efc89fb9d77acfa29cab6d5e0a10942`，native manifest `d2494f8210d50822a30dd17bf2cdd9c1be53c7491ad7aaa4e942935af3c516c8`。
+当前应用为问答菜单修复 `83c3cebf150a96569e265b2a831b4c51113006f9`，发行 `/home/tao/autoops-agent-demo/releases/t3-confirmed-83c3cebf`，STATIC_DIR为同目录dist/web。实际Web3469252/t47207205、launcher3468792/t47206559、native3468980/t47206827与该发行目录一致；`ROOT/scope-menu-switch-v1/switch-v1.json` SHA256 `25157f7e78c1221fd8a696c2b97defe9f2407cd17972241bcd663172bda32a32` 为switched，HTML `f85d4731e0700a5e8c8bfd8236b6075cc2e4a5623753c36dfc92f599e34be9d3` 和两个Web Worker实际字节通过。release manifest `60663f7d5b012a040b56423b558f2e3db8faea253de1d1557a6056277136c8c0`，native manifest `ccb2df1b8bcf239ac59488228075ff12fb5d92cb46fa4eec1e1916bf0b1f64e3`。
+
+固定83的38项浏览器、5项参数单测、Web类型及八阶段归档构建通过，Linux官方2038文件/21包核验通过，CLI继续复用0.4.5。切换前后在途为空，仅更新原两个unit，其他服务PID保持，迁移无变化、未备份或恢复测试数据。`.deployment/scope-menu-switch-v1/runtime-v1.json` SHA256 `b830b23859ac6b2381e02c309fecbe50dddb39f6e359084ccf65fce78895a339` 核实际三进程、应用及五Java/static目标健康200。内网真实管理员选助手后可调整本草稿，范围/环境/技能切换均只保留一个菜单；停用原因、技能勾选、Esc、刷新及390×600长名称通过。用户ok助手保留停用r2、隔离公共预设保留r1；本批未新发模型请求。四状态与边界见[UI1](../docs/runtime-modules.md#问答参数菜单切换与停用原因2026-10-28)，不重跑未受影响业务或等待远端CI。
+
+#### 上一e92发行与ON1验收历史（保留）
+
+当时应用为项目引导集成候选 `e92e02b849b32b875b181b6a5eaee1c290c18f2b`，发行 `/home/tao/autoops-agent-demo/releases/t3-confirmed-e92e02b8`，STATIC_DIR为同目录dist/web。实际Web3163921/t46621417、launcher3163456/t46620821、native3163580/t46621021，进程目录均属于该发行。`ROOT/onboarding-switch-v1/switch-v1.json` SHA256 `410a8cf09ad3365ea7af39e11f3da4e799303a1faa8c05a55e38753888d42e9a` 为switched，迁移无变化，无数据恢复；新HTML `15db954f…0feed` 和两个Web Worker实际HTTP字节核验通过。release manifest `d0f161e203477ce27a28b6e51c119aea5efc89fb9d77acfa29cab6d5e0a10942`，native manifest `d2494f8210d50822a30dd17bf2cdd9c1be53c7491ad7aaa4e942935af3c516c8`。
 
 本批八阶段固定归档构建、Linux官方2038文件/21包、内外健康和实际版本通过；`ROOT/onboarding-switch-v1/runtime-v1.json` SHA256 `5660890be3e5c5eb4131581983a42916370b0caa17f8e526eb82f2d652231c08` 记录现场。切换前后均无在途任务，仅切两个授权unit，其余用户服务PID不变。客户CLI仍为已验证0.4.5，不更换或停机；未启用独立后端、不执行旧数据全量保留门或等待CI。
 
