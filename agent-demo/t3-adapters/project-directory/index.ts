@@ -64,34 +64,36 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
   const rowFor = (project: string) =>
     db.prepare("SELECT * FROM directory_projects WHERE id=? AND state='active'").get(project) ??
     fail(404, 'PROJECT_NOT_FOUND', '项目不存在或无权访问')
-  function members(project: string): C.DirectoryMember[] {
-    return db
+  function members(project: string, users?: ReadonlyMap<string, User>): C.DirectoryMember[] {
+    const rows = db
       .prepare('SELECT * FROM directory_members WHERE project_id=? ORDER BY user_id')
       .all(project)
-      .map((row) => {
-        const user = seed.users.find((user) => user.id === row.user_id)
-        const environments = db
-          .prepare(
-            'SELECT environment_id,role FROM directory_member_environments WHERE project_id=? AND user_id=? ORDER BY environment_id',
-          )
-          .all(project, row.user_id!)
-        return {
-          userId: String(row.user_id),
-          name: user?.name ?? '不可用账号',
-          kind: user?.kind ?? 'internal',
-          role: row.role as C.DirectoryMember['role'],
-          status: row.status as C.DirectoryMember['status'],
-          environmentIds: environments.map((env) => String(env.environment_id)),
-          environmentRoles: Object.fromEntries(
-            environments
-              .filter((env) => env.role !== null)
-              .map((env) => [String(env.environment_id), env.role]),
-          ) as C.DirectoryMember['environmentRoles'],
-          canAdjustChat: Boolean(row.can_adjust_chat),
-          authorizationPending: Boolean(row.pending),
-          revision: Number(row.revision),
-        }
-      })
+    if (!rows.length) return []
+    const usersById = users ?? new Map(seed.users.map((user) => [user.id, user]))
+    return rows.map((row) => {
+      const user = usersById.get(String(row.user_id))
+      const environments = db
+        .prepare(
+          'SELECT environment_id,role FROM directory_member_environments WHERE project_id=? AND user_id=? ORDER BY environment_id',
+        )
+        .all(project, row.user_id!)
+      return {
+        userId: String(row.user_id),
+        name: user?.name ?? '不可用账号',
+        kind: user?.kind ?? 'internal',
+        role: row.role as C.DirectoryMember['role'],
+        status: row.status as C.DirectoryMember['status'],
+        environmentIds: environments.map((env) => String(env.environment_id)),
+        environmentRoles: Object.fromEntries(
+          environments
+            .filter((env) => env.role !== null)
+            .map((env) => [String(env.environment_id), env.role]),
+        ) as C.DirectoryMember['environmentRoles'],
+        canAdjustChat: Boolean(row.can_adjust_chat),
+        authorizationPending: Boolean(row.pending),
+        revision: Number(row.revision),
+      }
+    })
   }
   function projectDetails(project: string): C.DirectoryProject {
     const row = rowFor(project)
@@ -179,35 +181,42 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       return seed.users
     },
     get projects() {
-      return db
+      const rows = db
         .prepare("SELECT id FROM directory_projects WHERE state='active' ORDER BY rowid")
         .all()
-        .map((row) => {
-          const project = projectDetails(String(row.id)),
-            existing = seed.projects.find((entry) => entry.id === project.id)
-          const assignments = members(project.id)
-          return {
-            ...project,
-            memberIds: assignments
-              .filter((member) => member.status === 'active')
-              .map((member) => member.userId),
-            memberships: assignments.map((member) => ({
-              ...member,
-              environmentIds: [...member.environmentIds],
-              environmentRoles: { ...member.environmentRoles },
-              workspaceAccess:
-                member.role === 'external' ? ('external' as const) : ('internal' as const),
-            })),
-            documents: existing?.documents ?? [],
-            resources: existing?.resources ?? [],
-          }
-        })
+      if (!rows.length) return []
+      // 仅本次同步目录投影复用账号读数，下次读取仍取当前账号与成员状态。
+      const users = new Map(seed.users.map((user) => [user.id, user]))
+      return rows.map((row) => {
+        const project = projectDetails(String(row.id)),
+          existing = seed.projects.find((entry) => entry.id === project.id)
+        const assignments = members(project.id, users)
+        return {
+          ...project,
+          memberIds: assignments
+            .filter((member) => member.status === 'active')
+            .map((member) => member.userId),
+          memberships: assignments.map((member) => ({
+            ...member,
+            environmentIds: [...member.environmentIds],
+            environmentRoles: { ...member.environmentRoles },
+            workspaceAccess:
+              member.role === 'external' ? ('external' as const) : ('internal' as const),
+          })),
+          documents: existing?.documents ?? [],
+          resources: existing?.resources ?? [],
+        }
+      })
     },
     get agents() {
+      let projectIds: string[] | undefined
       return seed.agents.map((agent) => ({
         ...agent,
         projectIds: ['a-project', 'a-report'].includes(agent.id)
-          ? catalog.projects.map((project) => project.id)
+          ? [...(projectIds ??= db
+              .prepare("SELECT id FROM directory_projects WHERE state='active' ORDER BY rowid")
+              .all()
+              .map((row) => String(row.id)))]
           : [...agent.projectIds],
       }))
     },

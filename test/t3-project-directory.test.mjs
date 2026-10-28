@@ -30,6 +30,38 @@ function fixture(t) {
 const project = requestId => ({ requestId, expectedRevision: 0, value: { name: '新项目', description: '保留说明' } })
 const assignment = (requestId, value = {}) => ({ requestId, expectedRevision: 1, value: { userId: 'member', role: 'reader', status: 'active', environmentIds: ['test'], environmentRoles: {}, canAdjustChat: true, ...value } })
 
+test('目录快照只读取一次账号目录，下一次读取仍反映改名和成员撤权', t => {
+  const f = fixture(t)
+  const expected = f.directory.catalog.projects
+  let reads = 0
+  Object.defineProperty(f.seed, 'users', { get() { reads++; return f.users } })
+  assert.deepEqual(f.directory.catalog.projects, expected)
+  assert.equal(reads, 1)
+  f.users.find(user => user.id === 'member').name = '更新后的姓名'
+  const next = f.directory.catalog.projects[0]
+  assert.equal(next.memberships.find(member => member.userId === 'member').name, '更新后的姓名')
+  f.access.requireProjectActionForActor('member', 'existing', 'chat.use')
+  f.directory.saveMember('creator', 'existing', assignment('perf-revoke', { status: 'disabled' }))
+  assert.throws(() => f.access.requireProjectActionForActor('member', 'existing', 'chat.use'), { code: 'PROJECT_NOT_FOUND' })
+})
+
+test('内置助手目录只取有效项目标识，不重建成员或读取账号目录', t => {
+  const f = fixture(t)
+  f.seed.agents.push(
+    { id: 'a-project', name: '项目助手', projectIds: [] },
+    { id: 'a-report', name: '报告助手', projectIds: [] },
+    { id: 'custom', name: '指定项目助手', projectIds: ['existing'] },
+  )
+  let reads = 0
+  Object.defineProperty(f.seed, 'users', { get() { reads++; return f.users } })
+  assert.deepEqual(f.directory.catalog.agents.map(agent => agent.projectIds), [['existing'], ['existing'], ['existing']])
+  assert.equal(reads, 0)
+  const created = f.directory.create('creator', project('perf-new-project'))
+  reads = 0
+  assert.deepEqual(f.directory.catalog.agents.map(agent => agent.projectIds), [['existing', created.id], ['existing', created.id], ['existing']])
+  assert.equal(reads, 0)
+})
+
 test('一次导入存量身份和待分配状态，重开不会用夹具覆盖已保存配置', t => {
   const f = fixture(t)
   assert.equal(f.directory.settings('creator', 'existing').members.find(row => row.userId === 'member').authorizationPending, true)
