@@ -1952,3 +1952,11 @@ R4 四类状态为：原代码复用完成；既有相关回归及1e完整CI通�
 真实操作分别记账：本地草稿创建/参数/正文/附件及预览14步，预览后原标签激活、切出、切回3步；另有登录3步及零上传焦点前置4步，合计客户端24步。管理员停用与重新打开菜单确认2步另计；读取和自动整理不计操作。目录请求到响应735ms，原窗口focus至响应804ms，等待与操作分列。本次无UI产品修改，不声称相对旧版减少步骤。用户保留同一未发送内容，开发者复用原整理与原编辑器公开流程，Agent通过完整目录响应、真实终态及逐字段原件判断结果；截图仅辅助。
 
 本新pending ID未额外执行metadata/HTTP字节读回，旧cc375原件仅证明旧ID，不冒充本次；切站前根另直接核本件实际存储75B/SHA1f60ce…f742、DATA64512/inode269245，原件 `.deployment/a05-pending-file-before-root-v1.json` SHAaf625819eef3d039e48f7c436280f4c1187f741eb92b33a9eebc1dad4d4150f1，属于独立文件保留证明。普通草稿场景四状态通过：代码复用、原21/17关联回归与完整CI有效、现行1e生效、上述真实连续性通过；新版整页发行及D6仍待验。R4文档提交642b3eb0两项CI40647478275/40647478135均green，未切应用。
+
+### a05切服务前中止与原电脑助手恢复（2026-10-28）
+
+固定a05候选已通过两项完整CI和原八阶段构建；首次strict-stable2在callback构造、调用switch之前，原`read_original_agent_report`的sudo子进程要求密码。复现条件为UID1000、固定Docker组988及原只读报告调用；预期读到原Agent59368的root报告，实际退出1且stdout为空。候选原因一是最终Python的sudo认证上下文与顶层PTY不同，原子调用明确报`sudo: a password is required`支持；原因二是原root helper或报告本身失败，顶层直接执行同一固定脚本返回真实格式、readOnly=true、原59368、sourceSHAf59db132…cdd7及报告SHA dd38d1a3…baf53，排除该次脚本故障。不得通过sudoers豁免、替换原Agent或删除档案门禁解决。
+
+独立`.deployment/a05-pre-service-abort-root-v1.json` SHA256 `089e9e602e188b4ee4e0dcfdb1db0ccb85cec6dc534447a0583a3ac222718a6b`确认原Web/launcher/native三PID、ticks、命令、cwd、HTML及39任务/24版本完整行未变；switch收据物理不存在、owner阶段目录存在且为空。原CLI1608061正常停止收据261083…760b保护完整16件文件，未发新业务；随后唯一沿原1e桥、原HOME/设备/state/profile恢复2758619/t45846094。`.deployment/c6-old1e-aftera05-pre-service-abort-v1/root-welcome-retention-v1.json` SHA256 `9d44d7fb58fe2a07e4bb0acdaa8d8fff5fa1588029c8de3a15bcc2fe287436b6`独立核online、12模型/profile5、9会话/28本机命令/64中心命令/8流及原收据不变；完整17件仅增加新目录桥，剔除该唯一文件后与原stop.after完整16件相等。首次welcome的AssertionError无精确栈，保留失败，不归因具体断言；原e95源只读复验通过，没有第二次CLI启动。a05尚未部署，原报告校验保留，继续同进程认证与strict-stable3验收。
+
+B3独立综合索引`.deployment/b3-independent-composite-review-v1.json` SHA256 `8967a3b3775732591cf5ff7fe0b72cc4131a736256806f9a35944c8bc5506840`交叉核真实私有Git替换、撤回失败保留当前内容、新凭据恢复、reader三403/跨项目四404，以及八实际引用、五类影响、单次503后真实200恢复及其他配置全值保持。原失败索引保留；B3业务闭环，整页风险布局仍由E1/E3完成，不新增笼统组合门禁。
