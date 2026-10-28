@@ -1940,3 +1940,15 @@ R4 复用公开 `AgentRunner({client})`、真实 `CenterClient`、正式中心�
 独立索引 `.deployment/d5-r4-ack-delivery-20261028-v2-root/independent-local-v1.json` SHA256 `327b6392b44e5fdb2862f0ed5b37774330e0b0d4cfbba62a9f6bcf10c3ee287d` 固定23份原始安全导出、中心原件及根后验。owner-after `ead780557229640b94486569d4dd751abd027a2c6d8d7c86860b8117e384639c`、正常 public-after `d84cfde6c7aeaf6f7d2ec5c7a55e6c39dc0ebf75ada1cd65fd1b8e765ff5189c`、实际只读后验 `89024731a0034ebe550af8c3006f0600b1d229c08f9ec946928f61bb921a2f8e` 已交叉核验。原 v1–v7 失败与本轮零 POST 拒绝不追改；辅助脚本的 businessAcceptancePassed=false 保留，由上述真实链路和独立核验裁定 R4 通过。
 
 R4 四类状态为：原代码复用完成；既有相关回归及1e完整CI通过，新增定向真实合同/恢复边界回归仅算辅助；原1e已生效、未切换应用发行；真实 ACK 失败、原事件补报及数据保留通过。D5 R1–R6 与 E5 既定部署矩阵闭环；E3普通草稿连续性、新版整页发行和D6自然七天门仍未完成。文档提交 d6dfaa76 的质量40643064018/完整运行40643064019均green，不代表新应用部署。
+
+### 普通草稿真实焦点刷新与技能撤回闭环（2026-10-28）
+
+本项复用现行1e及原69技能整理代码，无产品修改。固定 Playwright1.60/官方完整Chromium1223，在同一真实应用与空白标签间完成原生 A→B→A；两目标明确取消测试用 focus emulation，配置命令单列为干预，不计用户操作，不派发合成 focus。零上传前置通过后，manager沿原内部工作区创建本地草稿 `8319809c-6201-4827-acf3-2a7f624d05aa`，选择原64cb公共助手、Grok4.7/高及自有49e技能，输入原文、正常选择75B文件并唯一上传204、打开真实附件预览。原 pending ID 为 `pending-32efd064-8905-4097-baad-75f1d6c303f2-txt`，无问答派发或公共预设修改。
+
+正式切到空白标签并取得可信原生 window blur 后，管理员经正常技能菜单仅停用自有49e；独立正常 GET 核完整catalog/settings仅 enabled true→false及合法目录修订变化。切回原草稿的可信 window focus 后，页面自身发出新技能目录 GET，requestedAt1793171662529/respondedAt1793171663264、HTTP200、修订df0998…、完整body已不含49e；随后自动移除该失效技能。原草稿URL、正文文本、助手、Grok4.7/高、同一附件ID/标签及预览全文逐值保持。
+
+原严格结果仍为 blocked/childExit2：附件外层span新增9字节空 ` style=""`，其余HTML逐字相等，包括两项选区装饰类。新辅助取证已先保存原始after/focus再比较，原失败不改写；独立审计只对本次精确新增的空style属性判定DOM内容等价，不建立任意HTML或未知字段豁免。此前登录后焦点仿真及缺失after的失败全部保留，不能追认为同一原因。独立综合索引 `.deployment/e3-draft-skill-focus-1e014e71-v4-actual-aftercapture-v1/independent-comprehensive-v2.json` SHA256 `f0cd0ba5da9497beb2cd8db6fa4e516e1eb75194d11b1a172b068845457b0816` 核全原件；根以相同manager正常七GET补核其他配置，原件46765f7563fce05f2ccb5aedb892f563099d53369bd7ee3ba577c185902fc96a，除本次失效技能目录投影外全部相等。父进程完整39任务/24版本前后保持，自有浏览器正常退出且无残留。
+
+真实操作分别记账：本地草稿创建/参数/正文/附件及预览14步，预览后原标签激活、切出、切回3步；另有登录3步及零上传焦点前置4步，合计客户端24步。管理员停用与重新打开菜单确认2步另计；读取和自动整理不计操作。目录请求到响应735ms，原窗口focus至响应804ms，等待与操作分列。本次无UI产品修改，不声称相对旧版减少步骤。用户保留同一未发送内容，开发者复用原整理与原编辑器公开流程，Agent通过完整目录响应、真实终态及逐字段原件判断结果；截图仅辅助。
+
+本新pending ID未额外执行metadata/HTTP字节读回，旧cc375原件仅证明旧ID，不冒充本次；切站前根另直接核本件实际存储75B/SHA1f60ce…f742、DATA64512/inode269245，原件 `.deployment/a05-pending-file-before-root-v1.json` SHAaf625819eef3d039e48f7c436280f4c1187f741eb92b33a9eebc1dad4d4150f1，属于独立文件保留证明。普通草稿场景四状态通过：代码复用、原21/17关联回归与完整CI有效、现行1e生效、上述真实连续性通过；新版整页发行及D6仍待验。R4文档提交642b3eb0两项CI40647478275/40647478135均green，未切应用。
