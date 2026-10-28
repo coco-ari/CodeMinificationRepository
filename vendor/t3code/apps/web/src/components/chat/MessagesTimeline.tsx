@@ -4391,7 +4391,7 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
           <UserMessageContextChip
             icon={<SkillChipIcon />}
             label={record.label || record.name}
-            kindLabel="技能"
+            kindLabel="skill"
             tooltip={`$${record.name}`}
             copyMarkdown={context.copyMarkdown}
             kind="skill"

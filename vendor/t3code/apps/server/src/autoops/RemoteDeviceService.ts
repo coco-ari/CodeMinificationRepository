@@ -225,6 +225,13 @@ export class RemoteDeviceHub {
                   try { this.access.requireSharedExecutionScope(command.executionScope,principal); }
                   catch { await send({type:'receiptQuery',commandId:command.commandId,sessionId:command.sessionId,grantId:command.executionScope.grantId});continue; }
                 }
+                if (!command.executionScope && ['startTurn','steerTurn'].includes(command.method)) {
+                  try {
+                    if(command.method==='startTurn') this.access.requireCustomerRunActor(session.threadId,String((command.input as {runId:string}).runId));
+                    else { const actor=this.access.requireMessageActor(session.threadId,(command.input as {message:{messageId:string}}).message.messageId); this.access.customerExecutionSource(session.threadId,actor.actorId); }
+                  }
+                  catch { await send({type:'receiptQuery',commandId:command.commandId,sessionId:command.sessionId}); continue; }
+                }
                 await send(command as CustomerAgentServerFrame);
               }
               const unknown=this.journal.unknownCommands(session.sessionId);
@@ -385,7 +392,12 @@ export class RemoteDeviceHub {
       if(executionScope) {
         if(method!=='interruptTurn')this.access.requireSharedExecutionScope(executionScope);
         if(connection?.sharedExecutionVersion!==1)throw Object.assign(error('CONNECTOR_UPDATE_REQUIRED','此连接程序未支持已验证的共享隔离'),{outcome:'not_started'});
-      } else if(method!=='readThreadSnapshot')this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,target,{requireOnline:!control});
+      } else if(method!=='readThreadSnapshot') {
+        this.access.customerRegistry.validateTarget(session.ownerId,session.projectId,target,{requireOnline:!control});
+        // 重连及等待附件期间再次检查原轮次调用者，不继承会话所有者身份。
+        if(method==='startTurn')this.access.requireCustomerRunActor(session.threadId,String((input as {runId:string}).runId));
+        if(method==='steerTurn') { const actor=this.access.requireMessageActor(session.threadId,(input as {message:{messageId:string}}).message.messageId); this.access.customerExecutionSource(session.threadId,actor.actorId); }
+      }
     };
     authorize();
     if(executionScope && method==='startTurn')this.update(sessionId,{executionScope});

@@ -17,7 +17,7 @@ const catalog: SkillLibrary = {
     {
       id: 'skill',
       name: 'test',
-      displayName: '验收技能',
+      displayName: '验收skill',
       description: '',
       enabled: true,
       latestVersionId: 'version',
@@ -37,7 +37,7 @@ const catalog: SkillLibrary = {
     },
   ],
 }
-it('可以仅在所选项目停用技能并保留固定版本和范围', async () => {
+it('可以仅在所选项目停用skill并保留固定版本和范围', async () => {
   const mutate = vi.fn().mockResolvedValue(true)
   await using _screen = await render(
     <SkillAssignmentDialog
@@ -52,7 +52,7 @@ it('可以仅在所选项目停用技能并保留固定版本和范围', async (
       mutate={mutate}
     />,
   )
-  await page.getByRole('combobox', { name: '项目技能使用方式' }).click()
+  await page.getByRole('combobox', { name: '项目skill使用方式' }).click()
   await page.getByRole('option', { name: '在此项目停用，阻止助手继承' }).click()
   await page.getByRole('button', { name: '保存分配' }).click()
   expect(mutate).toHaveBeenCalledWith(

@@ -445,8 +445,8 @@ export function createAssistantDirectory(options: Options) {
         return fail(403,'ASSISTANT_SOURCE_FIXED','不能改变助手的运行来源或业务身份')
       if(!adjustable(member)&&stable(configuration)!==stable(original))
         return fail(403,'ASSISTANT_PARAMETERS_FIXED','当前成员只能使用已分配预设的参数')
-      if(configuration.executionBinding.kind!=='customer'||configuration.agentId!=='a-project'||configuration.environmentId!==null||configuration.workspaceType!==null||configuration.visibility!=='private')
-        return fail(403,'CUSTOMER_CONTEXT_UNSUPPORTED','此目录只支持当前助手的私有客户来源')
+      if(configuration.executionBinding.kind!=='customer'||configuration.agentId!=='a-project'||configuration.environmentId!==null||configuration.workspaceType!==null)
+        return fail(403,'CUSTOMER_CONTEXT_UNSUPPORTED','此目录只支持当前助手的电脑来源')
       const source=providerRegistry().sourceOwner(configuration.executionBinding)
       if((source.ownerId!==actor||source.projectId!==project)&&member.workspaceAccess!=='internal')
         return fail(403,'CUSTOMER_SHARED_EXTERNAL_UNSUPPORTED','此隔离来源尚未支持外部资料范围')
@@ -1026,7 +1026,9 @@ export function createAssistantDirectory(options: Options) {
         stable(configuration.customerProfile)!==stable(original.configuration.customerProfile)
       )
         fail(403, 'ASSISTANT_SOURCE_FIXED', '不能改变助手的运行来源或业务身份')
-      if (!adjustable(member) && stable(configuration) !== stable(original.configuration))
+      // 已接受会话的可见性独立修改，不改变原助手的执行配置。
+      const expected = accepted ? {...original.configuration, visibility:configuration.visibility} : original.configuration
+      if (!adjustable(member) && stable(configuration) !== stable(expected))
         fail(403, 'ASSISTANT_PARAMETERS_FIXED', '当前成员只能使用已分配预设的参数')
       options.validate(actor, project, configuration, member, accepted)
       return {

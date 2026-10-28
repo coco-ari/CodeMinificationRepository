@@ -69,7 +69,7 @@ export async function loadCustomerCapabilities(target: CustomerTarget, signal?: 
 export async function loadCustomerAssistantRuntime(projectId: string, question: AssistantSelection, signal?: AbortSignal) {
   const actorId = readAutoOpsHost()?.principal.id
   const input = decodeContract(CustomerAssistantRuntimeRequest, { projectId, question })
-  const target = input.question.configuration.executionBinding
+  const target = question.configuration.executionBinding
   if (target.kind !== 'customer') throw new AutoOpsRequestError('当前助手不使用电脑运行器。', 'CUSTOMER_RUNTIME_TARGET_INVALID', 400)
   const result = await autoOpsRequest<CustomerAssistantRuntime>('/autoops/customer/assistant-runtime', {
     label: '助手运行能力', body: input, timeoutMs: 30_000, ...(signal ? { signal } : {}),
@@ -84,7 +84,7 @@ export async function loadCustomerAssistantRuntime(projectId: string, question: 
 export function customerRuntimeRequestKey(scope: AutoOpsThreadScope | undefined) {
   const target = scope?.executionBinding?.kind === "customer" ? scope.executionBinding : null;
   const principalId = readAutoOpsHost()?.principal.id;
-  return target ? JSON.stringify([principalId, scope?.projectId, target, scope?.question]) : null;
+  return target ? JSON.stringify([principalId, scope?.projectId, scope?.threadId, scope?.visibility, target, scope?.question]) : null;
 }
 export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
   const target = scope?.executionBinding?.kind === "customer" ? scope.executionBinding : null;
@@ -104,8 +104,13 @@ export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
       if (reading || controller.signal.aborted) return;
       reading = true;
       try {
-        if (scope?.question) {
-          const runtime = await loadCustomerAssistantRuntime(scope.projectId, scope.question, controller.signal)
+        if (scope?.question || (scope?.threadId && scope.scopeState === 'locked')) {
+          const runtime = scope.threadId && scope.scopeState === 'locked'
+            ? await autoOpsRequest<CustomerAssistantRuntime>('/autoops/customer/assistant-runtime', {
+                label: '会话运行能力', body: decodeContract(CustomerAssistantRuntimeRequest, {threadId: scope.threadId}),
+                signal: controller.signal, timeoutMs: 30_000,
+              })
+            : await loadCustomerAssistantRuntime(scope.projectId, scope.question!, controller.signal)
           if (!controller.signal.aborted)
             setState({ key, catalog: runtime.capabilities, device: runtime.device,
               error: runtime.available ? null : runtime.reason?.message ?? '当前助手配置不可用，请核对实际能力' })
@@ -126,7 +131,7 @@ export function useCustomerRuntime(scope: AutoOpsThreadScope | undefined) {
         if (!controller.signal.aborted)
           setState((current) => ({
             key,
-            // 读取失败后停止提供新的模型和技能候选；历史消息由原生会话保留。
+            // 读取失败后停止提供新的模型和skill候选；历史消息由原生会话保留。
             catalog: null,
             device: !isAutoOpsAccessError(cause) && current?.key === key ? current.device : null,
             error: cause instanceof Error ? cause.message : "无法读取客户运行器",

@@ -28,7 +28,7 @@ const host = () => ({
   ],
   capabilities: {},
 })
-const labels = ['问答', '工作区', '部署', '技能库', '项目管理', '助手', '账号']
+const labels = ['问答', '工作区', '部署', 'skill库', '项目管理', '助手', '账号']
 const view = (width = 1200) => (
   <div style={{ width, maxWidth: '100%' }}>
     <SidebarProvider>
@@ -126,7 +126,7 @@ it('零项目只显示已授权全局模块，功能菜单不存在空占位', a
   mocks.host.mockReturnValue({ ...host(), projects: [] })
   mocks.projectId = ''
   await using screen = await render(view(), { router: '/projects' })
-  for (const name of ['技能库', '项目管理', '助手', '账号'])
+  for (const name of ['skill库', '项目管理', '助手', '账号'])
     await expect.element(screen.getByRole('radio', { name, exact: true })).toBeVisible()
   for (const name of ['问答', '工作区', '部署'])
     await expect.element(screen.getByRole('radio', { name, exact: true })).not.toBeInTheDocument()

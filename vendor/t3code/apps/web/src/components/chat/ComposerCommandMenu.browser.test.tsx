@@ -29,7 +29,7 @@ it('文件读取失败明确展示错误并允许重试', async () => {
   expect(retry).toHaveBeenCalledTimes(2)
 })
 
-it('技能读取失败复用候选菜单并支持键盘重试', async () => {
+it('skill读取失败复用候选菜单并支持键盘重试', async () => {
   const retry = vi.fn()
   await using screen = await render(
     <ComposerCommandMenu
@@ -38,7 +38,7 @@ it('技能读取失败复用候选菜单并支持键盘重试', async () => {
       resolvedTheme="light"
       isLoading={false}
       triggerKind="skill"
-      error="技能加载失败，请重试。"
+      error="skill加载失败，请重试。"
       onRetry={retry}
       activeItemId={null}
       onHighlightedItemChange={() => {}}

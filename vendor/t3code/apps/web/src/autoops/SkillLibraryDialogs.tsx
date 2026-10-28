@@ -96,7 +96,7 @@ export function SkillImportDialog({
     if (
       await mutate(
         { ...action, ...(skill ? { skillId: skill.id } : {}) },
-        skill ? '新版本已导入，已有分配保持不变。' : '技能已导入。',
+        skill ? '新版本已导入，已有分配保持不变。' : 'skill已导入。',
       )
     )
       onClose()
@@ -110,10 +110,10 @@ export function SkillImportDialog({
     >
       <DialogPopup finalFocus={finalFocus} showCloseButton={!disabled} className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{skill ? '导入技能新版本' : '导入技能'}</DialogTitle>
+          <DialogTitle>{skill ? '导入skill新版本' : '导入skill'}</DialogTitle>
           <DialogDescription>
             {skill
-              ? `${skill.displayName} · name 须与原技能一致`
+              ? `${skill.displayName} · name 须与原skill一致`
               : '支持 SKILL.md、ZIP 和公开 Git 仓库。'}
           </DialogDescription>
         </DialogHeader>
@@ -121,7 +121,7 @@ export function SkillImportDialog({
           <ToggleGroup
             value={[mode]}
             variant="segmented"
-            aria-label="技能导入方式"
+            aria-label="skill导入方式"
             disabled={disabled}
             onValueChange={(values) => {
               const next = values[0]
@@ -151,7 +151,7 @@ export function SkillImportDialog({
                 type="file"
                 hidden
                 accept=".md,.zip,text/markdown,application/zip"
-                aria-label="技能包文件"
+                aria-label="skill包文件"
                 onChange={(event) => {
                   const chosen = event.currentTarget.files?.[0]
                   event.currentTarget.value = ''
@@ -164,7 +164,7 @@ export function SkillImportDialog({
                     return
                   }
                   if (!archive && !chosen.name.toLowerCase().endsWith('.md')) {
-                    setFileError('请选择 SKILL.md 或 ZIP 技能包。')
+                    setFileError('请选择 SKILL.md 或 ZIP skill包。')
                     return
                   }
                   setReading(true)
@@ -215,7 +215,7 @@ export function SkillImportDialog({
             <>
               <Field label="公开 HTTPS 仓库">
                 <Input
-                  aria-label="技能 Git 仓库地址"
+                  aria-label="skill Git 仓库地址"
                   value={url}
                   disabled={disabled}
                   placeholder="https://github.com/组织/仓库"
@@ -224,7 +224,7 @@ export function SkillImportDialog({
               </Field>
               <Field label="提交版本">
                 <Input
-                  aria-label="技能 Git 提交 SHA"
+                  aria-label="skill Git 提交 SHA"
                   value={ref}
                   disabled={disabled}
                   font="mono"
@@ -232,9 +232,9 @@ export function SkillImportDialog({
                   onChange={(event) => setRef(event.currentTarget.value)}
                 />
               </Field>
-              <Field label="技能所在子目录（选填）">
+              <Field label="skill所在子目录（选填）">
                 <Input
-                  aria-label="技能 Git 子目录"
+                  aria-label="skill Git 子目录"
                   value={subdirectory}
                   disabled={disabled}
                   placeholder="skills/project-review"
@@ -247,7 +247,7 @@ export function SkillImportDialog({
             </>
           )}
           <p className="text-xs text-muted-foreground">
-            导入后自动检查；依赖脚本或未开放工具的技能仅可查看。
+            导入后自动检查；依赖脚本或未开放工具的skill仅可查看。
           </p>
           <ErrorMessage error={fileError ?? error} />
         </DialogPanel>
@@ -323,11 +323,11 @@ export function SkillAssignmentDialog({
     >
       <DialogPopup finalFocus={finalFocus} showCloseButton={!busy}>
         <DialogHeader>
-          <DialogTitle>{assignment ? '调整技能分配' : '分配技能'}</DialogTitle>
+          <DialogTitle>{assignment ? '调整skill分配' : '分配skill'}</DialogTitle>
           <DialogDescription>设置使用对象、版本和工作区。</DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
-          <Field label="技能">
+          <Field label="skill">
             <Select
               value={skillId}
               disabled={busy || !!assignment}
@@ -338,8 +338,8 @@ export function SkillAssignmentDialog({
                 }
               }}
             >
-              <SelectTrigger aria-label="分配的技能">
-                <SelectValue placeholder="选择技能" />
+              <SelectTrigger aria-label="分配的skill">
+                <SelectValue placeholder="选择skill" />
               </SelectTrigger>
               <SelectPopup>
                 {catalog.skills.map((entry) => (
@@ -370,7 +370,7 @@ export function SkillAssignmentDialog({
                 if (typeof value === 'string') setVersionId(value)
               }}
             >
-              <SelectTrigger aria-label="分配技能版本">
+              <SelectTrigger aria-label="分配skill版本">
                 <SelectValue placeholder="没有可分配版本" />
               </SelectTrigger>
               <SelectPopup>
@@ -388,7 +388,7 @@ export function SkillAssignmentDialog({
               value={[targetType]}
               variant="segmented"
               disabled={busy || !!assignment}
-              aria-label="技能分配范围"
+              aria-label="skill分配范围"
               onValueChange={(values) => {
                 const next = values[0]
                 if (next === 'agent' || next === 'project') {
@@ -428,7 +428,7 @@ export function SkillAssignmentDialog({
                 disabled={busy}
                 onValueChange={(value) => setProjectEnabled(value !== 'disabled')}
               >
-                <SelectTrigger aria-label="项目技能使用方式">
+                <SelectTrigger aria-label="项目skill使用方式">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectPopup>
@@ -463,7 +463,7 @@ export function SkillAssignmentDialog({
           </Field>
           {workspaceTypes.includes('external') ? (
             <p className="text-xs text-muted-foreground">
-              外部成员可读取技能及附带文件，请确认不含内部资料。
+              外部成员可读取skill及附带文件，请确认不含内部资料。
             </p>
           ) : null}
           <ErrorMessage error={error} />
@@ -530,7 +530,7 @@ export function SkillDetailsDialog({
     >
       <DialogPopup finalFocus={finalFocus} showCloseButton={!busy} className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>技能分配与版本</DialogTitle>
+          <DialogTitle>skill分配与版本</DialogTitle>
           <DialogDescription>{skill.displayName}</DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-5">
@@ -597,7 +597,7 @@ export function SkillDetailsDialog({
               <p className="text-sm text-muted-foreground">尚未分配给助手或项目。</p>
             )}
           </section>
-          <section aria-label="技能版本记录">
+          <section aria-label="skill版本记录">
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">版本记录</h3>
             <div className="divide-y divide-border/60">
               {skill.versions.map((version) => (
@@ -629,7 +629,7 @@ export function SkillDetailsDialog({
                   >
                     {version.readiness === 'ready'
                       ? '运行条件已满足'
-                      : `运行条件未满足：${version.reason ?? '请检查技能包'}`}
+                      : `运行条件未满足：${version.reason ?? '请检查skill包'}`}
                   </p>
                 </div>
               ))}
@@ -665,12 +665,12 @@ export function SkillDeleteDialog({
     >
       <DialogPopup finalFocus={finalFocus} showCloseButton={!busy}>
         <DialogHeader>
-          <DialogTitle>删除技能</DialogTitle>
+          <DialogTitle>删除skill</DialogTitle>
           <DialogDescription>
-            将“{skill.displayName}”从技能库移除。
+            将“{skill.displayName}”从skill库移除。
             {assignedCount
-              ? `该技能有 ${assignedCount} 项分配，请先撤销分配后删除。`
-              : '历史轮次保留其固定执行版本，后续不能再分配或调用此技能。'}
+              ? `该skill有 ${assignedCount} 项分配，请先撤销分配后删除。`
+              : '历史轮次保留其固定执行版本，后续不能再分配或调用此skill。'}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -684,11 +684,11 @@ export function SkillDeleteDialog({
             variant="destructive"
             disabled={busy || assignedCount > 0}
             onClick={async () => {
-              if (await mutate({ action: 'delete', skillId: skill.id }, '技能已从中央库移除。'))
+              if (await mutate({ action: 'delete', skillId: skill.id }, 'skill已从中央库移除。'))
                 onClose()
             }}
           >
-            {busy ? '正在删除…' : '删除技能'}
+            {busy ? '正在删除…' : '删除skill'}
           </Button>
         </DialogFooter>
       </DialogPopup>

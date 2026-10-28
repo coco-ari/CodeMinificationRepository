@@ -43,7 +43,7 @@ const snapshot = (label = "发布准备检查") => ({
   skills: [{ name: skillName, displayName: label, versionId: "skill-version-one" }],
 });
 const response = (label?: string) => Response.json(snapshot(label));
-const denied = (status: number) => Response.json({ error: "当前技能访问已失效。" }, { status });
+const denied = (status: number) => Response.json({ error: "当前skill访问已失效。" }, { status });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -101,7 +101,7 @@ function Probe({
         </p>
       ) : null}
       <button type="button" disabled={!result?.authorizedContext}>
-        选择新技能
+        选择新skill
       </button>
       {showEditor ? <SkillDraft skills={displaySkills} /> : null}
       <output data-testid="available">{result?.authorizedContext?.skills.map(skill => skill.name).join(",")}</output>
@@ -141,8 +141,8 @@ async function focus() {
   await act(() => window.dispatchEvent(new Event("focus")));
 }
 
-describe("技能上下文的同范围刷新", () => {
-  it("旧对话按当前分配刷新，移除的技能不阻止其余候选，网络失败不恢复旧项", async () => {
+describe("skill上下文的同范围刷新", () => {
+  it("旧对话按当前分配刷新，移除的skill不阻止其余候选，网络失败不恢复旧项", async () => {
     setup();
     const selection = { ...scope, scopeLocked: true, scopeState: "locked" as const };
     const current = { ...snapshot(), snapshotId: "remaining", skills: [{ name: "autoops-kept", displayName: "项目资料解读", versionId: "kept" }] };
@@ -196,7 +196,7 @@ describe("技能上下文的同范围刷新", () => {
     await vi.waitFor(() => expect(node.textContent).toContain("新版发布检查"));
     expect(editor.state.selection.from).toBe(cursor);
     expect(serializeEditorDoc(editor.state.doc).value).toBe(prompt);
-    expect(node.querySelectorAll('button[aria-label="技能 新版发布检查，查看详情"]')).toHaveLength(
+    expect(node.querySelectorAll('button[aria-label="skill 新版发布检查，查看详情"]')).toHaveLength(
       1,
     );
     expect(skillContextDisplaySkills(next)[0]?.path).toBe(
@@ -205,7 +205,7 @@ describe("技能上下文的同范围刷新", () => {
     expect(skillContextDisplaySkills(null)).toEqual([]);
   });
 
-  it("输入框已有技能标签和原文序列化在复核、网络失败及恢复期间保持稳定", async () => {
+  it("输入框已有skill标签和原文序列化在复核、网络失败及恢复期间保持稳定", async () => {
     setup();
     const pending = deferred<Response>();
     const fetcher = vi
@@ -237,7 +237,7 @@ describe("技能上下文的同范围刷新", () => {
     expect(editorNode.textContent).toContain("发布准备检查");
     expect(serializeEditorDoc(editor.state.doc).value).toBe(prompt);
     await focus();
-    await vi.waitFor(() => expect(panel(screen).textContent).toContain("当前技能访问已失效。"));
+    await vi.waitFor(() => expect(panel(screen).textContent).toContain("当前skill访问已失效。"));
     expect(editorNode.textContent).not.toContain("发布准备检查");
     expect(serializeEditorDoc(editor.state.doc).value).toBe(prompt);
   });
@@ -285,7 +285,7 @@ describe("技能上下文的同范围刷新", () => {
     expectLabel(screen);
   });
 
-  it("技能库变动只发一个请求，普通网络失败保留历史并可恢复", async () => {
+  it("skill库变动只发一个请求，普通网络失败保留历史并可恢复", async () => {
     setup();
     const pending = deferred<Response>();
     const fetcher = vi
@@ -308,7 +308,7 @@ describe("技能上下文的同范围刷新", () => {
     expect(panel(screen).querySelector('[role="alert"]')).toBeNull();
   });
 
-  it("读取在途发生技能变动会重新复核，迟到旧结果不能重新授权", async () => {
+  it("读取在途发生skill变动会重新复核，迟到旧结果不能重新授权", async () => {
     setup();
     const oldRequest = deferred<Response>();
     const nextRequest = deferred<Response>();
@@ -329,7 +329,7 @@ describe("技能上下文的同范围刷新", () => {
     expectLabel(screen);
     expect(newSelection(screen).disabled).toBe(true);
     await act(() => nextRequest.resolve(denied(403)));
-    await vi.waitFor(() => expect(panel(screen).textContent).toContain("当前技能访问已失效。"));
+    await vi.waitFor(() => expect(panel(screen).textContent).toContain("当前skill访问已失效。"));
     expect(history(screen).textContent).toContain(prompt);
     expect(newSelection(screen).disabled).toBe(true);
   });
@@ -348,7 +348,7 @@ describe("技能上下文的同范围刷新", () => {
       await using screen = await render(view({}, true));
       await vi.waitFor(() => expectLabel(screen));
       await focus();
-      await vi.waitFor(() => expect(panel(screen).textContent).toContain("当前技能访问已失效。"));
+      await vi.waitFor(() => expect(panel(screen).textContent).toContain("当前skill访问已失效。"));
       expect(history(screen).textContent).toContain(prompt);
       expect(newSelection(screen).disabled).toBe(true);
       await focus();
@@ -362,7 +362,7 @@ describe("技能上下文的同范围刷新", () => {
   );
 });
 
-describe("技能上下文的身份和范围隔离", () => {
+describe("skill上下文的身份和范围隔离", () => {
   it.each(["线程", "项目", "账号", "登录会话"] as const)(
     "%s变化按原生身份边界隔离目录，并忽略不服从取消的迟到响应",
     async (change) => {
@@ -451,16 +451,16 @@ describe("技能上下文的身份和范围隔离", () => {
 });
 
 for (const recovery of ["manual", "online"] as const) {
-  it(`技能授权目录读取失败后通过 ${recovery} 恢复且不提前放行`, async () => {
+  it(`skill授权目录读取失败后通过 ${recovery} 恢复且不提前放行`, async () => {
     setup();
     const pending = deferred<Response>();
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(Response.json({ error: "技能加载失败" }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ error: "skill加载失败" }, { status: 503 }))
       .mockReturnValueOnce(pending.promise);
     using _fetch = stubGlobal("fetch", fetcher);
     await using screen = await render(view());
-    await vi.waitFor(() => expect(panel(screen).textContent).toContain("技能加载失败"));
+    await vi.waitFor(() => expect(panel(screen).textContent).toContain("skill加载失败"));
     expect(newSelection(screen).disabled).toBe(true);
     await act(() => {
       if (recovery === "online") window.dispatchEvent(new Event("online"));

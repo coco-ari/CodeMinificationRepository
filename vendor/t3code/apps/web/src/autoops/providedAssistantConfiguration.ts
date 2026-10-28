@@ -89,6 +89,6 @@ export function providedConfigurationIssue(
     new Set(draft.skillIds).size !== draft.skillIds.length ||
     draft.skillIds.some((id) => !catalog.skills.some((skill) => skill.id === id))
   )
-    return '所选技能已不属于此运行目录，请重新核对。'
+    return '所选skill已不属于此运行目录，请重新核对。'
   return null
 }

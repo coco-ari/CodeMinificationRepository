@@ -358,7 +358,7 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
                 <EmptyTitle>{deviceRead.error ? "无法读取设备" : "还没有连接电脑"}</EmptyTitle>
                 <EmptyDescription>
                   先在自己的电脑安装并登录
-                  Codex，再通过一次性配对码连接并登记目录。代码和技能留在本机。
+                  Codex，再通过一次性配对码连接并登记目录。代码和skill留在本机。
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

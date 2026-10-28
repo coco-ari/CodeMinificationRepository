@@ -4,11 +4,11 @@ import { CustomerAssistantSource } from './customer-source.ts'
 import { DirectoryId } from './project-directory.ts'
 import type { CustomerCapabilities, CustomerDevice, CustomerWorkspace } from './runtime.ts'
 
-/** 仅按当前账号获分配的助手读取目录；不接收设备所有者或任意运行目标。 */
-export const CustomerAssistantRuntimeRequest = S.Struct({
+/** 草稿按已分配助手读取；已保存会话按服务端绑定及当前会话权限读取，不接收所有者身份。 */
+export const CustomerAssistantRuntimeRequest = S.Union([S.Struct({
   projectId: DirectoryId,
   question: AssistantSelection,
-})
+}), S.Struct({threadId: DirectoryId})])
 export type CustomerAssistantRuntimeRequest = typeof CustomerAssistantRuntimeRequest.Type
 export interface CustomerAssistantRuntime {
   target: typeof CustomerAssistantSource.Type

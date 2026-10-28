@@ -104,7 +104,7 @@ function setup(manage = false) {
               defaultReasoningEffort: "high",
             },
           ],
-          skills: [{ id: "local-skill", name: "本机只读技能", description: "" }],
+          skills: [{ id: "local-skill", name: "本机只读skill", description: "" }],
         },
       },
     ],
@@ -325,7 +325,7 @@ function setup(manage = false) {
                     sharedProfile: {
                       ...isolatedProfile,
                       models: [{ id: "isolated-model", supportedReasoningEfforts: ["high"], defaultReasoningEffort: "high" }],
-                      skills: [{ id: "isolated-skill", name: "隔离只读技能", description: "" }],
+                      skills: [{ id: "isolated-skill", name: "隔离只读skill", description: "" }],
                     },
                   },
                 },
@@ -464,7 +464,7 @@ function projectPresetSave(f: ReturnType<typeof setup>, loseReply: boolean) {
   };
 }
 
-it("管理员修复受限公共预设的失效技能，不取得额外问答参数权限", async () => {
+it("管理员修复受限公共预设的失效skill，不取得额外问答参数权限", async () => {
   const f = setup(true);
   Object.assign(f.platform.configuration, { skillIds: ["removed-skill"] });
   projectPresetSave(f, false);
@@ -741,11 +741,11 @@ function enableIsolatedProfile(f: ReturnType<typeof setup>) {
         defaultReasoningEffort: "medium",
       },
     ],
-    skills: [{ id: "isolated-skill", name: "隔离只读技能", description: "" }],
+    skills: [{ id: "isolated-skill", name: "隔离只读skill", description: "" }],
   };
 }
 
-it("新预设显式选择隔离目录后仅展示其真实模型技能，提交固定profile且不自动选首项", async () => {
+it("新预设显式选择隔离目录后仅展示其真实模型skill，提交固定profile且不自动选首项", async () => {
   const f = setup();
   enableIsolatedProfile(f);
   using _fetch = stubGlobal("fetch", f.fetcher);
@@ -773,9 +773,9 @@ it("新预设显式选择隔离目录后仅展示其真实模型技能，提交�
     .element(page.getByRole("combobox", { name: "思考强度", exact: true }))
     .toHaveTextContent("medium");
   await expect
-    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .element(page.getByRole("checkbox", { name: "本机只读skill", exact: true }))
     .not.toBeInTheDocument();
-  await page.getByRole("checkbox", { name: "隔离只读技能", exact: true }).click();
+  await page.getByRole("checkbox", { name: "隔离只读skill", exact: true }).click();
   await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
   await expect.element(add).toHaveFocus();
@@ -793,7 +793,7 @@ it("新预设显式选择隔离目录后仅展示其真实模型技能，提交�
   );
 });
 
-it("编辑自用预设保留原参数，显式切换运行目录清除旧模型技能且不默选新模型", async () => {
+it("编辑自用预设保留原参数，显式切换运行目录清除旧模型skill且不默选新模型", async () => {
   const f = setup();
   enableIsolatedProfile(f);
   Object.assign(f.own.items[0]!.preset.configuration, { skillIds: ["local-skill"] });
@@ -810,7 +810,7 @@ it("编辑自用预设保留原参数，显式切换运行目录清除旧模型�
     .element(page.getByRole("combobox", { name: "模型", exact: true }))
     .toHaveTextContent("真实本机模型");
   await expect
-    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .element(page.getByRole("checkbox", { name: "本机只读skill", exact: true }))
     .toBeChecked();
   await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
   await page.getByRole("option", { name: "隔离运行器", exact: true }).click();
@@ -818,7 +818,7 @@ it("编辑自用预设保留原参数，显式切换运行目录清除旧模型�
     .element(page.getByRole("combobox", { name: "模型", exact: true }))
     .toHaveTextContent("请选择");
   await expect
-    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .element(page.getByRole("checkbox", { name: "本机只读skill", exact: true }))
     .not.toBeInTheDocument();
   await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
   await expect
@@ -831,7 +831,7 @@ it("编辑自用预设保留原参数，显式切换运行目录清除旧模型�
     .element(page.getByRole("combobox", { name: "模型", exact: true }))
     .toHaveTextContent("请选择");
   await expect
-    .element(page.getByRole("checkbox", { name: "本机只读技能", exact: true }))
+    .element(page.getByRole("checkbox", { name: "本机只读skill", exact: true }))
     .not.toBeChecked();
 });
 

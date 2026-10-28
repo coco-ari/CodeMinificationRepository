@@ -17,6 +17,7 @@ export type AutoOpsExecutionBinding =
       runtimeId: 'codex'
     }
 export interface AutoOpsThreadScope {
+  threadId?: string
   ownerId?: string
   question?: AssistantSelection
   executionBinding?: AutoOpsExecutionBinding
@@ -91,8 +92,7 @@ function scopeAllowed(scope: AutoOpsThreadScope, project: AutoOpsT3Bootstrap['pr
       !project.membership ||
       project.membership.environmentIds.includes(scope.environmentId)) &&
     (scope.executionBinding?.kind === 'customer'
-      ? scope.visibility === 'private' &&
-        scope.agentId === 'a-project' &&
+      ? scope.agentId === 'a-project' &&
         !scope.workspaceType &&
         !scope.workspaceVersionId
       : project.membership?.workspaceAccess !== 'external' || scope.workspaceType === 'external')

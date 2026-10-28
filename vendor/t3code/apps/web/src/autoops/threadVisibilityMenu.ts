@@ -30,9 +30,8 @@ function lockedReason(scope: AutoOpsThreadScope, target: Target): string | null 
   if (scope.nativeParentThreadId) return '跟随来源会话'
   if (!target.draftId && scope.ownerId !== readAutoOpsHost()?.principal.id)
     return '仅会话创建者可调整'
-  // 可见性不随发送状态锁定；仅沿用配置权限，提交中的执行参数仍不允许调整。
-  if (!target.canOperate() || !questionCanAdjust({ ...scope, scopeState: 'locked' })) return '由项目管理员设置'
-  if (scope.executionBinding?.kind === 'customer') return '本机对话仅自己可见'
+  // 已保存会话由创建者调整可见性；草稿参数继续遵循预设配置权限。
+  if (!target.canOperate() || (target.draftId && scope.executionBinding?.kind !== 'customer' && !questionCanAdjust({ ...scope, scopeState: 'locked' }))) return '由项目管理员设置'
   return null
 }
 

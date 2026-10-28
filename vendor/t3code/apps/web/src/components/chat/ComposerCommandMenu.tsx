@@ -166,13 +166,13 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             <p className="text-secondary-label text-xs">
               {props.isLoading
                 ? props.triggerKind === "skill"
-                  ? "正在搜索工作区技能…"
+                  ? "正在搜索工作区skill…"
                   : props.triggerKind === "pull-request"
                     ? "正在查找拉取请求…"
                     : "正在搜索工作区文件…"
                 : (props.emptyStateText ??
                   (props.triggerKind === "skill"
-                    ? "没有找到技能。可输入 / 浏览运行器命令。"
+                    ? "没有找到skill。可输入 / 浏览运行器命令。"
                     : props.triggerKind === "path"
                       ? "没有匹配的文件或文件夹。"
                       : "没有匹配的命令。"))}
@@ -272,7 +272,7 @@ const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {
   path: "文件与文件夹",
   "pull-request": "拉取请求",
   "slash-command": "命令",
-  skill: "技能",
+  skill: "skill",
 };
 
 const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {
@@ -299,7 +299,7 @@ function SkillSourceBadge(props: { kind: ProviderSkillSourceKind; showSkillSuffi
     <Badge className="ms-auto" variant="secondary">
       <Icon aria-hidden="true" className="text-current" />
       {SKILL_SOURCE_LABEL_BY_KIND[props.kind]}
-      {props.showSkillSuffix ? " 技能" : null}
+      {props.showSkillSuffix ? " skill" : null}
     </Badge>
   );
 }

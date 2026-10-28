@@ -619,7 +619,7 @@ it("管理员选择助手后仍可调整资料范围，停用助手不出现在�
   await expect.element(screen.getByRole("button", { name: "会话可见范围", exact: true })).not.toBeInTheDocument();
   await userEvent.click(workspace);
   await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
-  await screen.getByRole("button", { name: "技能", exact: true }).click();
+  await screen.getByRole("button", { name: "业务环境", exact: true }).click();
   await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
   await userEvent.click(workspace);
   await page.getByRole("menuitemradio", { name: "内部当前资料", exact: true }).click();
@@ -985,8 +985,8 @@ it.each(["more", "right-click", "narrow"])("会话 %s 菜单更改草稿可见�
   expect(f.bindings).toHaveLength(0);
 });
 
-it.each(["locked", "permission", "customer", "submitting"])("可见范围遵守 %s 限制，菜单打开后也会重核", async (mode) => {
-  const f = setup(`visibility-block-${mode}`, mode !== "permission", mode === "customer");
+it.each(["locked", "permission", "submitting"])("可见范围遵守 %s 限制，菜单打开后也会重核", async (mode) => {
+  const f = setup(`visibility-block-${mode}`, mode !== "permission", false);
   useComposerDraftStore.getState().setProjectDraftThreadId(
     scopeProjectRef(f.environmentId, ProjectId.make("composer-project")), f.draftId, { threadId: f.threadId },
   );
@@ -1004,8 +1004,9 @@ it.each(["locked", "permission", "customer", "submitting"])("可见范围遵守 
 });
 
 
-it.each(["locked", "submitting"])("已保存会话在 %s 状态可往返调整可见性，保存失败不伪造成功", async (state) => {
-  const f = setup(`mutable-visibility-${state}`, true);
+it.each(["locked", "submitting", "customer", "restricted"])("已保存会话在 %s 状态可往返调整可见性，保存失败不伪造成功", async (kind) => {
+  const state = ["customer", "restricted"].includes(kind) ? "locked" : kind;
+  const f = setup(`mutable-visibility-${kind}`, !["customer", "restricted"].includes(kind), kind === "customer");
   let saved = { ...readAutoOpsThreadScope(f.id, "composer-project")!, ownerId: "actual-composer-user",
     scopeState: state as "locked" | "submitting", scopeLocked: state === "locked" };
   const writes: unknown[] = [];

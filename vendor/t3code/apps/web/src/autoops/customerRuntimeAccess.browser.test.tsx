@@ -33,7 +33,7 @@ const catalog = {
   protocolVersion: 1,
   updatedAt: '2026-10-24T00:00:00Z',
   models: [{ id: '私有模型', supportedReasoningEfforts: [] }],
-  skills: [{ id: 'private', name: '私有技能', description: '测试目录' }],
+  skills: [{ id: 'private', name: '私有skill', description: '测试目录' }],
 }
 function Harness({ value = scope }: { value?: AutoOpsThreadScope }) {
   const state = useCustomerRuntime(value)
@@ -60,12 +60,12 @@ describe('客户候选目录的当前授权', () => {
   it.each([401, 403, 404, 503])('读取失败 %i 后移除旧候选，重试恢复新目录', async (status) => {
     setup()
     await using screen = await render(<Harness />)
-    await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型私有技能'))
+    await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型私有skill'))
     mocks.request.mockRejectedValue(new AutoOpsRequestError('目录不可访问', 'DENIED', status))
     await page.getByRole('button', { name: '刷新能力' }).click()
     await vi.waitFor(() => expect(screen.container.textContent).toContain('目录不可访问'))
     expect(screen.container.textContent).not.toContain('私有模型')
-    expect(screen.container.textContent).not.toContain('私有技能')
+    expect(screen.container.textContent).not.toContain('私有skill')
     mocks.request.mockImplementation(async (path: string) =>
       path.includes('/capabilities?')
         ? { capabilities: { ...catalog, skills: [] } }
@@ -73,7 +73,7 @@ describe('客户候选目录的当前授权', () => {
     )
     await page.getByRole('button', { name: '刷新能力' }).click()
     await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型'))
-    expect(screen.container.textContent).not.toContain('私有技能')
+    expect(screen.container.textContent).not.toContain('私有skill')
   })
   it('切账号并重挂载会话后，旧请求迟到不能恢复旧目录', async () => {
     setup()
@@ -92,7 +92,7 @@ describe('客户候选目录的当前授权', () => {
     await screen.rerender(<Harness key="owner-two" />)
     await act(() => oldFinish({ capabilities: catalog, devices: [] }))
     expect(screen.container.textContent).not.toContain('私有模型')
-    expect(screen.container.textContent).not.toContain('私有技能')
+    expect(screen.container.textContent).not.toContain('私有skill')
   })
 })
 
@@ -116,7 +116,7 @@ describe('项目获分配助手的候选目录', () => {
     setup()
     mocks.request.mockResolvedValue(assignedRuntime)
     await using screen = await render(<Harness value={assignedScope} />)
-    await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型私有技能'))
+    await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型私有skill'))
     expect(mocks.request).toHaveBeenCalledWith('/autoops/customer/assistant-runtime', expect.objectContaining({
       body: { projectId: scope.projectId, question: assignedScope.question },
     }))
@@ -125,11 +125,11 @@ describe('项目获分配助手的候选目录', () => {
     await page.getByRole('button', { name: '刷新能力' }).click()
     await vi.waitFor(() => expect(screen.container.textContent).toContain('提供者已撤回共享'))
     expect(screen.container.textContent).not.toContain('私有模型')
-    expect(screen.container.textContent).not.toContain('私有技能')
+    expect(screen.container.textContent).not.toContain('私有skill')
     mocks.request.mockResolvedValue({ ...assignedRuntime, capabilities: { ...catalog, skills: [] } })
     await page.getByRole('button', { name: '刷新能力' }).click()
     await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型'))
-    expect(screen.container.textContent).not.toContain('私有技能')
+    expect(screen.container.textContent).not.toContain('私有skill')
   })
   it('原模型下线仍显示合法当前目录和错误，不改原选择或冒称可发送', async () => {
     setup()
@@ -142,7 +142,7 @@ describe('项目获分配助手的候选目录', () => {
     expect(screen.container.textContent).toContain('原模型已下线，请调整本次配置')
     expect(assignedScope.question?.configuration.model.model).toBe('私有模型')
   })
-  it('切换项目和助手后旧请求迟到不能恢复旧模型与技能', async () => {
+  it('切换项目和助手后旧请求迟到不能恢复旧模型与skill', async () => {
     setup()
     let complete!: (value: unknown) => void
     mocks.request.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
@@ -157,6 +157,22 @@ describe('项目获分配助手的候选目录', () => {
     await act(() => complete(assignedRuntime))
     expect(screen.container.textContent).toContain('新项目模型')
     expect(screen.container.textContent).not.toContain('私有模型')
-    expect(screen.container.textContent).not.toContain('私有技能')
+    expect(screen.container.textContent).not.toContain('私有skill')
   })
+})
+
+
+it.each([true, false])('已保存共享会话按threadId读取原电脑目录，不要求独立分配，存在预设=%s', async (hasPreset) => {
+  setup()
+  mocks.request.mockResolvedValue({...assignedRuntime, profile: 'self'})
+  const bound: AutoOpsThreadScope = {...(hasPreset ? assignedScope : scope), threadId: 'shared-original',
+    ownerId: 'someone-else', scopeState: 'locked', scopeLocked: true, visibility: 'project'}
+  await using screen = await render(<Harness value={bound} />)
+  await vi.waitFor(() => expect(screen.container.textContent).toContain('私有模型私有skill'))
+  expect(mocks.request).toHaveBeenCalledWith('/autoops/customer/assistant-runtime', expect.objectContaining({body:{threadId:'shared-original'}}))
+  expect(mocks.request.mock.calls.every(([path]) => path === '/autoops/customer/assistant-runtime')).toBe(true)
+  mocks.request.mockRejectedValue(new AutoOpsRequestError('会话不存在或无权访问','THREAD_NOT_FOUND',404))
+  await page.getByRole('button', {name:'刷新能力'}).click()
+  await vi.waitFor(() => expect(screen.container.textContent).not.toContain('私有模型'))
+  expect(screen.container.textContent).toContain('会话不存在或无权访问')
 })

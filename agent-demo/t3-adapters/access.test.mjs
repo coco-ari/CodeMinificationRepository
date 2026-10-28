@@ -64,7 +64,9 @@ test('可见性独立更新拒绝权限和并发覆盖，父会话变更同时�
   catalog.users.find(user => user.id === owner.id).role = 'member'
   const membership = catalog.projects.find(project => project.id === scope.projectId).memberships.find(member => member.userId === owner.id)
   membership.role = 'reader'; membership.canAdjustChat = false; membership.environmentIds = ['env-test']
-  assert.throws(() => access.updateThreadVisibility(owner, 'parent-visible', { expectedVisibility: 'project', visibility: 'private' }), { code: 'PROJECT_ACTION_FORBIDDEN' })
+  assert.equal(access.updateThreadVisibility(owner, 'parent-visible', { expectedVisibility: 'project', visibility: 'private' }).visibility, 'private')
+  membership.status = 'disabled'
+  assert.throws(() => access.updateThreadVisibility(owner, 'parent-visible', { expectedVisibility: 'private', visibility: 'project' }), { status: 404 })
 })
 
 test('可见性镜像随父子会话持久保存，必要审计失败时原子回滚', t => {
@@ -305,6 +307,43 @@ function customerScope(t, ownerId = 'u-guest') {
   return {...setupResult,owner:principal(ownerId),registry,paired,devicePrincipal,executionBinding}
 }
 
+test('所有者共享本机会话后成员可沿原电脑操作，转私有拒绝后续请求及排队执行', t => {
+  const {access, owner, principal, executionBinding, registry, devicePrincipal, bindingDb} = customerScope(t, 'u-admin')
+  const member = principal('u-lin')
+  registry.markConnected(devicePrincipal)
+  access.bindThread(owner, {...scope, environmentId:null, threadId:'computer-collaboration', executionBinding})
+  assert.equal(access.canSeeThread(member, 'computer-collaboration'), false)
+  access.updateThreadVisibility(owner, 'computer-collaboration', {expectedVisibility:'private', visibility:'project'})
+  assert.equal(access.canSeeThread(member, 'computer-collaboration'), true)
+  assert.deepEqual(access.requireThreadExecution(member, 'computer-collaboration').executionBinding, executionBinding)
+  assert.deepEqual(access.customerExecutionSource('computer-collaboration', member.id), {ownerId:owner.id, projectId:scope.projectId})
+  access.recordMessageActor(member, 'computer-collaboration', 'collaborator-command', 'collaborator-message')
+  access.prepareCustomerRun('computer-collaboration', 'collaborator-run', 'collaborator-message')
+  assert.equal(access.requireCustomerRunActor('computer-collaboration', 'collaborator-run'), member.id)
+  assert.equal(bindingDb.prepare('SELECT actor_id FROM t3_message_actors WHERE message_id=?').get('collaborator-message').actor_id, member.id)
+  access.recordThreadAttachment(member, 'collaborator-attachment', 'computer-collaboration')
+  assert.equal(access.requireCustomerAttachment(owner.id, 'computer-collaboration', 'collaborator-attachment').id, 'collaborator-attachment')
+  assert.throws(() => access.updateThreadVisibility(member, 'computer-collaboration', {expectedVisibility:'project', visibility:'private'}), {code:'THREAD_OWNER_REQUIRED'})
+  access.updateThreadVisibility(owner, 'computer-collaboration', {expectedVisibility:'project', visibility:'private'})
+  assert.equal(access.canSeeThread(member, 'computer-collaboration'), false)
+  assert.throws(() => access.requireThreadExecution(member, 'computer-collaboration'), {status:404})
+  assert.throws(() => access.requireCustomerRunActor('computer-collaboration', 'collaborator-run'), {status:404})
+  assert.throws(() => access.prepareCustomerRun('computer-collaboration', 'queued-after-revoke', 'collaborator-message'), {status:404})
+  assert.deepEqual(access.requireThreadExecution(owner, 'computer-collaboration').executionBinding, executionBinding)
+})
+
+test('共享电脑仍要求当前成员及环境范围，不允许改绑或冒充所有者新建会话', t => {
+  const {access, owner, principal, executionBinding, registry, devicePrincipal, catalog} = customerScope(t, 'u-admin')
+  registry.markConnected(devicePrincipal)
+  access.bindThread(owner, {...scope, threadId:'computer-member', visibility:'project', executionBinding})
+  assert.equal(access.canSeeThread(principal('u-lin'), 'computer-member'), true)
+  assert.equal(access.canSeeThread(principal('u-guest'), 'computer-member'), false)
+  assert.throws(() => access.reserveThread(principal('u-lin'), {...scope, threadId:'stolen-source', executionBinding}), {code:'CUSTOMER_SHARED_ISOLATION_UNVERIFIED'})
+  catalog.projects.find(project => project.id === scope.projectId).memberships.find(member => member.userId === 'u-lin').status = 'disabled'
+  assert.equal(access.canSeeThread(principal('u-lin'), 'computer-member'), false)
+  assert.throws(() => access.customerExecutionSource('computer-member','u-lin'), {status:404})
+})
+
 test('external members can bind their own customer directory without platform internal access', t => {
   const {access,owner,principal,executionBinding} = customerScope(t)
   const binding = access.reserveThread(owner,{...scope,environmentId:null,threadId:'customer-draft',executionBinding})
@@ -313,7 +352,7 @@ test('external members can bind their own customer directory without platform in
   assert.equal(access.canSeeThread(owner,'customer-draft'),true)
   assert.equal(access.canSeeThread(principal('u-admin'),'customer-draft'),false)
   assert.deepEqual(access.threadAudience(binding),[owner.id])
-  assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'shared-customer',visibility:'project',executionBinding}),{code:'CUSTOMER_OWNER_REQUIRED'})
+  assert.equal(access.reserveThread(owner,{...scope,environmentId:null,threadId:'shared-customer',visibility:'project',executionBinding}).visibility,'project')
   assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'report-customer',agentId:'a-report',executionBinding}),{code:'INVALID_CUSTOMER_SCOPE'})
   assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'prod-customer',environmentId:'env-prod',executionBinding}),{code:'ENVIRONMENT_FORBIDDEN'})
   assert.throws(()=>access.requireToolThread('customer-draft'),{code:'CUSTOMER_BUSINESS_TOOLS_DISABLED'})
@@ -328,7 +367,7 @@ test('customer conversation locks exact execution target after acceptance and hi
   registry.registerWorkspace(devicePrincipal,{registeredWorkspaceId:'local-other',projectId:'p-autoops',label:'其他目录',workspaceBindingRevision:1,runtimeId:'codex'})
   assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'customer-history',executionBinding:{...executionBinding,registeredWorkspaceId:'local-other'}}),{code:'THREAD_SCOPE_LOCKED'})
   access.finishThreadSubmission('customer-history','cmd-1',true)
-  assert.throws(() => access.updateThreadVisibility(owner, 'customer-history', { expectedVisibility: 'private', visibility: 'project' }), { status: 403 })
+  assert.equal(access.updateThreadVisibility(owner, 'customer-history', { expectedVisibility: 'private', visibility: 'project' }).visibility, 'project')
   registry.revokeWorkspace(devicePrincipal,'local-project')
   registry.revokeCredential(owner.id,paired.device.id)
   assert.equal(access.requireThread(owner,'customer-history').scopeState,'locked')

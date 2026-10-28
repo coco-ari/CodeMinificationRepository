@@ -149,10 +149,9 @@ export function questionConfigurationPolicy(ports: Ports) {
       if (
         value.environmentId !== null ||
         value.workspaceType !== null ||
-        value.visibility !== 'private' ||
         value.agentId !== 'a-project'
       )
-        return fail('CUSTOMER_CONTEXT_UNSUPPORTED', '此运行来源尚未支持平台资料、环境及共享会话')
+        return fail('CUSTOMER_CONTEXT_UNSUPPORTED', '此运行来源不使用平台资料或环境')
       const registry = ports.customers(),
         target = value.executionBinding
       const source = registry.sourceOwner(target)

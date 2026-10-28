@@ -21,14 +21,14 @@ const version: SkillVersion = {
 const skill: LibrarySkill = {
   id: 'test-skill',
   name: 'test-skill',
-  displayName: '测试技能',
+  displayName: '测试skill',
   description: '测试',
   enabled: true,
   versions: [version],
   latestVersionId: version.id,
 }
 
-describe('技能文件浏览的范围内链接', () => {
+describe('skill文件浏览的范围内链接', () => {
   it('根文档与嵌套文档按各自目录解析，保留中文与空格', () => {
     const source = skillFileSource(skill, version)
     expect(

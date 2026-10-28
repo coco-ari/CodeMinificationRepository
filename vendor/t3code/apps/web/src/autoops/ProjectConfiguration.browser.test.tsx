@@ -23,7 +23,7 @@ function setup({ lost = false, conflict = false, manage = true, denied = false, 
   const members = [{ userId: 'member', name: '待分配成员', kind: 'internal', role: 'reader', environmentIds: ['test'], environmentRoles: {}, canAdjustChat: false, status: 'active', revision: 1, authorizationPending: true }]
   const presets: AssistantPreset[] = [{ id: 'helper', projectId: project.id, name: '资料分析', description: '', instructions: '使用本项目资料', enabled: true, revision: 1, createdBy: 'config-user', updatedAt: 'now', configuration: { agentId: 'a-project', executionBinding: { kind: 'platform' }, environmentId: null, workspaceType: 'internal', visibility: 'private', model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: 'high' }, skillIds: [] } }]
   const allocations: Array<Record<string, unknown>> = []
-  const choices: AssistantChoices = { agents: [{ id: 'a-project', name: '项目开发' }], sources: [{ id: 'platform', name: '平台运行器', executionBinding: { kind: 'platform' }, available: true, models: [{ id: 'first-other-model', name: '其他模型', reasoningLevels: ['low'], defaultReasoning: 'low' }, { id: 'actual-model', name: '实际模型', reasoningLevels: ['low', 'high'], defaultReasoning: 'high' }], skills: [] }], platformSkills: [{ id: 'skill', name: '诊断技能', agentId: 'a-project', workspaceType: 'internal' }] }
+  const choices: AssistantChoices = { agents: [{ id: 'a-project', name: '项目开发' }], sources: [{ id: 'platform', name: '平台运行器', executionBinding: { kind: 'platform' }, available: true, models: [{ id: 'first-other-model', name: '其他模型', reasoningLevels: ['low'], defaultReasoning: 'low' }, { id: 'actual-model', name: '实际模型', reasoningLevels: ['low', 'high'], defaultReasoning: 'high' }], skills: [] }], platformSkills: [{ id: 'skill', name: '诊断skill', agentId: 'a-project', workspaceType: 'internal' }] }
   const bootstrap = () => ({ principal: { id: 'config-user', displayName: '配置用户' }, csrfToken: 'csrf', gatewayBasePath: '/api/agent-demo/t3', fixedModel: { instanceId: 'codex', model: 'first-other-model' }, runtimeMode: 'approval-required' as const, capabilities: {}, projects: [{ ...project, agents: [{ id: 'a-project', name: '项目开发' }], capabilities: { 'project.manage': manage, 'workspace.read': true, 'workspace.manage': manage, 'deployment.read': true, 'deployment.execute': manage } }] })
   installAutoOpsHost(bootstrap(), window.location.origin)
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -76,7 +76,7 @@ it('短窗口创建助手明确选择实际模型，使用其真实默认强度�
   await expect.element(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
   await choose('模型', '实际模型')
   await expect.element(page.getByRole('combobox', { name: '思考强度', exact: true })).toHaveTextContent('high')
-  await page.getByRole('checkbox', { name: '诊断技能', exact: true }).click()
+  await page.getByRole('checkbox', { name: '诊断skill', exact: true }).click()
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   await expect.element(add).toHaveFocus()
@@ -174,7 +174,7 @@ it('编辑用户来源保留原目录、实际模型及思考强度，不被平�
 })
 
 
-it('项目表单保留隔离预设目录与原参数，不用自用目录显示或覆盖隔离模型技能', async () => {
+it('项目表单保留隔离预设目录与原参数，不用自用目录显示或覆盖隔离模型skill', async () => {
   const f = setup(),
     source = {
       kind: 'customer' as const,
@@ -198,7 +198,7 @@ it('项目表单保留隔离预设目录与原参数，不用自用目录显示�
     models: [
       { id: 'self-model', name: '自用模型', reasoningLevels: ['low'], defaultReasoning: 'low' },
     ],
-    skills: [{ id: 'self-skill', name: '自用技能' }],
+    skills: [{ id: 'self-skill', name: '自用skill' }],
   })
   Object.assign(f.presets[0]!.configuration, {
     executionBinding: source,
@@ -228,10 +228,10 @@ it('项目表单保留隔离预设目录与原参数，不用自用目录显示�
     .element(page.getByRole('combobox', { name: '思考强度', exact: true }))
     .toHaveTextContent('high')
   await expect
-    .element(page.getByRole('checkbox', { name: '自用技能', exact: true }))
+    .element(page.getByRole('checkbox', { name: '自用skill', exact: true }))
     .not.toBeInTheDocument()
   await expect
-    .element(page.getByRole('checkbox', { name: 'isolated-skill · 原预设技能', exact: true }))
+    .element(page.getByRole('checkbox', { name: 'isolated-skill · 原预设skill', exact: true }))
     .toBeDisabled()
   await page.getByRole('textbox', { name: '名称', exact: true }).fill('保留隔离参数')
   await page.getByRole('button', { name: '保存', exact: true }).click()

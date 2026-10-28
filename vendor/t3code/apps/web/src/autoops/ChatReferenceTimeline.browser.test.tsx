@@ -39,7 +39,7 @@ vi.mock(import("../state/server"), async (original) => {
   };
 });
 
-// 隔离公共运行时的环境发现，网络只允许本用例的技能目录请求。
+// 隔离公共运行时的环境发现，网络只允许本用例的skill目录请求。
 vi.mock(import("../environments/primary/target"), async (original) => ({
   ...(await original()),
   readPrimaryEnvironmentTarget: () => null,
@@ -135,7 +135,7 @@ function ReferenceTimeline({
         data-refreshing={context?.isRefreshing === true}
         data-authorized={context?.authorizedContext != null}
       >
-        技能目录状态
+        skill目录状态
       </output>
       <MessagesTimeline
         key={timelineKey}
@@ -197,7 +197,7 @@ async function copiedText(markdown: HTMLElement) {
   }
 }
 
-it("目录慢刷新期间滚动和重挂长历史仍保留技能与双方文件标签、原始复制及阅读位置", async () => {
+it("目录慢刷新期间滚动和重挂长历史仍保留skill与双方文件标签、原始复制及阅读位置", async () => {
   const threadId = `reference-${Math.random().toString(36).slice(2)}`;
   const props = timelineProps(threadId);
   const context = {
@@ -225,7 +225,7 @@ it("目录慢刷新期间滚动和重挂长历史仍保留技能与双方文件�
     ...Array.from({ length: 64 }, (_, index) =>
       message(
         `history-${index}`,
-        `历史消息 ${index}\n\n${"这一段资料用于检验向上阅读时的真实文件与技能标签。".repeat(35)}`,
+        `历史消息 ${index}\n\n${"这一段资料用于检验向上阅读时的真实文件与skill标签。".repeat(35)}`,
         "assistant",
       ),
     ),

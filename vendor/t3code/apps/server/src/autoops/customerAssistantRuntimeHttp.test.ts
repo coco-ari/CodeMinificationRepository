@@ -138,6 +138,60 @@ function transportFixture(f:ReturnType<typeof fixture>) {
   return {journal,hub,session,scope,command,sent,connect,hello}
 }
 
+function ownConversation(f:ReturnType<typeof fixture>) {
+  const owner=f.access.authenticateCookie('demo_session=provider')
+  const own=f.directory.saveProvided('provider',null,{requestId:'provided-own',expectedRevision:0,value:{name:'我的电脑助手',description:'',instructions:'沿原电脑工作',enabled:true,configuration:{agentId:'a-project',executionBinding:f.target,environmentId:null,workspaceType:null,visibility:'private',model:{instanceId:`customer-${f.target.deviceId}-codex`,model:'provider-private-model',reasoningEffort:'high'},skillIds:[]}}})
+  const binding=f.access.bindThread(owner,{threadId:'owner-collaboration',projectId:'source',environmentId:null,agentId:'a-project',visibility:'private',executionBinding:f.target,question:{assistantId:own.id,presetRevision:own.revision,configuration:own.configuration}})
+  f.access.updateThreadVisibility(owner,binding.threadId,{expectedVisibility:'private',visibility:'project'})
+  return {owner,binding,own}
+}
+
+it('自用电脑共享原会话后成员无需另分配助手，HTTP沿原能力读取且撤回立即失效',async()=>{
+  const f=fixture(),t=ownConversation(f),input={threadId:t.binding.threadId}
+  const response=await f.request(input),body=await response.json()
+  expect(response.status).toBe(200)
+  expect(body).toMatchObject({available:true,profile:'self',target:f.target,capabilities:{models:[{id:'provider-private-model'}]}})
+  expect(f.directory.catalog('recipient','source').items).toHaveLength(0)
+  expect(f.access.requireQuestionForActor('recipient',t.binding.threadId)?.assistantId).toBe(t.own.id)
+  expect(f.access.visibleCustomerProviderInstances(f.access.authenticateCookie('demo_session=recipient')).shared).toContain(`customer-${f.target.deviceId}-codex`)
+  f.registry.updateCapabilities(f.principal,{...f.capability,revision:'model-offline',models:[{id:'new-model',supportedReasoningEfforts:['high']}]})
+  const recovery=await f.request(input)
+  expect(recovery.status).toBe(200)
+  expect(await recovery.json()).toMatchObject({available:false,reason:{code:'CUSTOMER_MODEL_UNAVAILABLE'},capabilities:{models:[{id:'new-model'}]}})
+  f.registry.updateCapabilities(f.principal,f.capability)
+  f.access.updateThreadVisibility(t.owner,t.binding.threadId,{expectedVisibility:'project',visibility:'private'})
+  expect((await f.request(input)).status).toBe(404)
+  expect((await f.request(input,'provider')).status).toBe(200)
+})
+
+it('原电脑共享成员的待处理轮次保留实际调用者，转私有后重连只查收据',async()=>{
+  const f=fixture(),t=ownConversation(f),recipient=f.access.authenticateCookie('demo_session=recipient')
+  f.access.recordMessageActor(recipient,t.binding.threadId,'collab-command','collab-message')
+  expect(f.access.prepareCustomerRun(t.binding.threadId,'collab-run','collab-message')).toBeUndefined()
+  expect(f.access.requireCustomerRunActor(t.binding.threadId,'collab-run')).toBe('recipient')
+  const db=new DatabaseSync(':memory:'),journal=createCustomerTransportJournal(db),hub=new RemoteDeviceHub(f.access,journal)
+  cleanups.push(()=>{hub.close();db.close()})
+  f.registry.markConnected(f.principal)
+  hub.bind(f.access.getThreadBinding(t.binding.threadId)!,'own-session')
+  hub.update('own-session',{runtimeEpoch:'same-epoch',state:'idle'})
+  const session=hub.session('own-session')!
+  expect(session.executionScope).toBeUndefined()
+  expect(session.ownerId).toBe('provider')
+  const command={type:'command' as const,commandId:'queued-collab-command',sessionId:session.sessionId,target:session.target,method:'startTurn' as const,runtimeEpoch:'same-epoch',input:{runId:'collab-run'}}
+  journal.saveCommand(command)
+  const sent:CustomerAgentServerFrame[]=[]
+  const hello={type:'hello' as const,protocolVersion:1 as const,deviceId:f.target.deviceId,connectorVersion:'test-original-host',connectorEpoch:'connector',workspaces:[],sessions:[{sessionId:session.sessionId,runtimeEpoch:'same-epoch',state:'idle' as const,live:true}]}
+  await hub.connect(f.principal,async frame=>{sent.push(frame)},()=>{}).accept(hello)
+  expect(sent.filter(frame=>frame.type==='command')).toEqual([command])
+  f.access.updateThreadVisibility(t.owner,t.binding.threadId,{expectedVisibility:'project',visibility:'private'})
+  sent.length=0
+  await hub.connect(f.principal,async frame=>{sent.push(frame)},()=>{}).accept(hello)
+  expect(sent.some(frame=>frame.type==='command')).toBe(false)
+  expect(sent).toContainEqual({type:'receiptQuery',commandId:command.commandId,sessionId:session.sessionId})
+  expect(()=>f.access.requireCustomerRunActor(t.binding.threadId,'collab-run')).toThrow()
+  expect(journal.command(command.commandId)?.command).toEqual(command)
+})
+
 it('共享原命令断线恢复保留actual actor及grant，旧客户端不重发，错误grant不能写原收据',async()=>{
   const f=fixture(),t=transportFixture(f),old=t.connect()
   await old.accept(t.hello(false))

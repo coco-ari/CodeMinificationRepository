@@ -45,12 +45,12 @@ describe('统一业务请求边界', () => {
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST_METHOD', uncertain: false })
     expect(fetcher).not.toHaveBeenCalled()
   })
-  it('工作区和技能写入复用同源身份与 CSRF，不自行重试', async () => {
+  it('工作区和skill写入复用同源身份与 CSRF，不自行重试', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ accepted: true })))
     vi.stubGlobal('fetch', fetcher)
     expect(
       await autoOpsRequest('/autoops/skill-library', {
-        label: '技能库',
+        label: 'skill库',
         body: { action: 'set-enabled', enabled: false },
       }),
     ).toEqual({ accepted: true })
@@ -135,7 +135,7 @@ describe('统一业务请求边界', () => {
     const fetcher = vi.fn().mockRejectedValue(new TypeError('network'))
     vi.stubGlobal('fetch', fetcher)
     await expect(
-      autoOpsRequest('/autoops/skill-library', { label: '技能库', body: {} }),
+      autoOpsRequest('/autoops/skill-library', { label: 'skill库', body: {} }),
     ).rejects.toMatchObject({ uncertain: true, code: 'CONNECTION_FAILED' })
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
@@ -164,7 +164,7 @@ describe('统一业务请求边界', () => {
   it('无效响应不能伪装成成功的空列表', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('null')))
     await expect(
-      autoOpsRequest('/autoops/skill-library', { label: '技能库' }),
+      autoOpsRequest('/autoops/skill-library', { label: 'skill库' }),
     ).rejects.toMatchObject({ code: 'INVALID_RESPONSE', uncertain: false })
   })
   it('禁止请求跳出业务命名空间或带出凭据', () => {

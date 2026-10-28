@@ -2760,7 +2760,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         description:
           skill.shortDescription ??
           skill.description ??
-          (skill.scope ? `${skill.scope} skill` : "执行运行器技能"),
+          (skill.scope ? `${skill.scope} skill` : "执行运行器skill"),
       }));
     }
     if (
@@ -2876,17 +2876,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (composerTriggerKind === "skill") {
       if (customerScope)
         return selectedProviderSkills.length === 0
-          ? "本机尚未发现可用技能，请在连接程序中检查并刷新。"
-          : "未找到匹配的本地技能。";
-      if (!isAutoOpsHosted()) return "没有找到技能。可输入 / 浏览运行器命令。";
+          ? "本机尚未发现可用skill，请在连接程序中检查并刷新。"
+          : "未找到匹配的本地skill。";
+      if (!isAutoOpsHosted()) return "没有找到skill。可输入 / 浏览运行器命令。";
       if (autoOpsSkillContext?.error) return autoOpsSkillContext.error;
-      if (!autoOpsSkillContext || autoOpsSkillContext.isRefreshing) return "正在读取技能…";
+      if (!autoOpsSkillContext || autoOpsSkillContext.isRefreshing) return "正在读取skill…";
       if (!autoOpsSkillContext.authorizedContext?.skills.length)
-        return "暂无可用技能";
-      if (workspaceSkillRefresh.isRefreshing) return "正在读取技能…";
+        return "暂无可用skill";
+      if (workspaceSkillRefresh.isRefreshing) return "正在读取skill…";
       if (selectedProviderSkills.length === 0)
-        return workspaceSkillRefresh.error ?? "当前模型服务未能读取技能，请重试。";
-      return "未找到匹配的技能，请更换名称。";
+        return workspaceSkillRefresh.error ?? "当前模型服务未能读取skill，请重试。";
+      return "未找到匹配的skill，请更换名称。";
     }
     if (composerTriggerKind === "pull-request") {
       if (pullRequestProjectId === null || pullRequestRepository === null) {
@@ -7514,13 +7514,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                     : "请在设置中启用运行器后发送消息"
                                 : customerScope
                                   ? supportsCustomerFiles
-                                    ? "输入需求，@ 引用电脑文件，$ 使用本机技能"
-                                    : "输入需求，$ 使用本机技能"
+                                    ? "输入需求，@ 引用电脑文件，$ 使用本机skill"
+                                    : "输入需求，$ 使用本机skill"
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                     : isAutoOpsHosted()
-                                      ? "输入问题，@ 引用项目资料，$ 使用技能，/ 查看命令"
-                                      : "输入问题，@ 引用文件或文件夹，$ 使用技能，/ 查看命令"
+                                      ? "输入问题，@ 引用项目资料，$ 使用skill，/ 查看命令"
+                                      : "输入问题，@ 引用文件或文件夹，$ 使用skill，/ 查看命令"
                     }
                     disabled={
                       isConnecting ||

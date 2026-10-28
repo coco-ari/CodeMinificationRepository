@@ -357,11 +357,11 @@ function ComposerSkillNodeView({ node }: NodeViewProps) {
         kind="skill"
         icon={<SkillChipIcon />}
         label={skillLabel}
-        accessibleLabel={`技能 ${skillLabel}`}
+        accessibleLabel={`skill ${skillLabel}`}
       >
         <div className="space-y-3 p-2 text-sm">
           <p className="font-medium">{skillLabel}</p>
-          <p>{description || "此技能暂无说明。"}</p>
+          <p>{description || "此skill暂无说明。"}</p>
           {skill?.path &&
           !skill.path.startsWith("autoops-customer-skill:") &&
           actions.environmentId ? (

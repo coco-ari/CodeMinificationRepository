@@ -611,7 +611,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ['自动打开面板']
       : []),
     ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
-      ? ['在斜杠菜单中显示技能']
+      ? ['在斜杠菜单中显示skill']
       : []),
     ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
       ? ['滚动时收起输入框']
@@ -2731,11 +2731,11 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting('skills-in-slash-menu')}
-          description="在 / 命令菜单中也显示技能。输入 $ 时始终显示技能。"
+          description="在 / 命令菜单中也显示skill。输入 $ 时始终显示skill。"
           resetAction={
             settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu ? (
               <SettingResetButton
-                label="在斜杠菜单中显示技能"
+                label="在斜杠菜单中显示skill"
                 onClick={() =>
                   updateSettings({
                     showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
@@ -2750,7 +2750,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ showSkillsInSlashMenu: Boolean(checked) })
               }
-              aria-label="在斜杠菜单中显示技能"
+              aria-label="在斜杠菜单中显示skill"
             />
           }
         />

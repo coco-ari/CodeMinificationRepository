@@ -281,7 +281,7 @@ export function AttachmentFilePreview(props: {
         event.preventDefault();
         event.stopPropagation();
         if ("error" in target || !props.threadRef) {
-          toastManager.add({ type: "error", title: "无法打开文件", description: "error" in target ? target.error : "请在当前对话中重新打开技能说明。" });
+          toastManager.add({ type: "error", title: "无法打开文件", description: "error" in target ? target.error : "请在当前对话中重新打开skill说明。" });
         } else {
           void openAutoOpsResource(target.url, props.threadRef);
         }

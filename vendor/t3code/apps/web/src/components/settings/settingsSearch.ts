@@ -133,7 +133,7 @@ const SOURCE_CONTROL_HOST_SEARCH_ITEMS = sourceControlClients.definitions.flatMa
 
 export const SETTINGS_SEARCH_ITEMS = [
   {
-    id: 'autoops-skills', title: '技能', to: '/settings/general',
+    id: 'autoops-skills', title: 'skill', to: '/settings/general',
     searchTerms: ['skill skills SKILL.md 导入 启用 停用 项目资料解读 环境健康检查 发布准备报告'],
   },
   {
@@ -467,7 +467,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "skills-in-slash-menu",
-    title: "在斜杠菜单中显示技能",
+    title: "在斜杠菜单中显示skill",
     searchTitle: "Show skills in slash menu",
     to: "/settings/general",
     searchTerms: ["command menu dollar $ slash /"],

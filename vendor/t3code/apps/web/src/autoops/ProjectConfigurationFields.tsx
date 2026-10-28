@@ -514,12 +514,12 @@ export function ProjectConfigurationFields({
         </>
       ) : null}
       <fieldset className="space-y-3">
-        <legend className="mb-2 text-sm font-medium">技能</legend>
+        <legend className="mb-2 text-sm font-medium">skill</legend>
         {[
           ...skillChoices,
           ...config.skillIds
             .filter((id) => !skillChoices.some((skill) => skill.id === id))
-            .map((id) => ({ id, name: `${id} · ${isolated ? '原预设技能' : '已不可用'}` })),
+            .map((id) => ({ id, name: `${id} · ${isolated ? '原预设skill' : '已不可用'}` })),
         ].map((skill) => (
           <Check
             key={skill.id}

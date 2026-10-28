@@ -65,17 +65,21 @@ export const layer = HttpRouter.add(
           runtimeId: "codex",
         });
         if (target.kind !== "customer") throw { status: 400, message: "请选择客户工作区" };
+        let fileOwnerId = principal.id;
         const authorize = () => {
           access.refresh(principal);
           access.requireMembership(principal, projectId);
           const threadId = query.get("threadId");
-          const binding = threadId ? access.getThreadBinding(threadId) : undefined;
+          const binding = threadId ? access.requireThread(principal, threadId) : undefined;
           if (!binding && environmentId !== null) access.requireEnvironment(principal, projectId, environmentId);
           if (binding) {
-            const owned = access.requireThread(principal, binding.threadId);
+            const owned = access.requireThreadExecution(principal, binding.threadId);
+            const source = access.customerExecutionSource(binding.threadId, principal.id);
+            if (source.ownerId !== binding.ownerId || binding.question?.configuration.customerProfile)
+              throw { status: 403, message: "此提供者来源未开放文件浏览" };
+            fileOwnerId = source.ownerId;
             const current = owned.executionBinding;
             if (
-              owned.ownerId !== principal.id ||
               owned.projectId !== projectId ||
               owned.environmentId !== environmentId ||
               current.kind !== "customer" ||
@@ -87,8 +91,9 @@ export const layer = HttpRouter.add(
               throw { status: 403, message: "文件不属于当前对话的电脑目录" };
           }
         };
+        authorize();
         const result = await hub.readFiles(
-          principal.id,
+          fileOwnerId,
           projectId,
           target,
           input,

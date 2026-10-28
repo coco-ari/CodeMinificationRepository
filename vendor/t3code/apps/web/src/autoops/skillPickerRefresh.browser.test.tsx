@@ -56,7 +56,7 @@ function Probe({
   });
   return (
     <>
-      <output>{state.isRefreshing ? "正在读取技能…" : (state.error ?? "已完成")}</output>
+      <output>{state.isRefreshing ? "正在读取skill…" : (state.error ?? "已完成")}</output>
       <ComposerCommandMenu
         listId="skills"
         items={[]}
@@ -78,14 +78,14 @@ function Probe({
 const options = { router: false } as const;
 const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 
-describe("技能目录读取恢复", () => {
+describe("skill目录读取恢复", () => {
   it("没有快照时也自动重试，而不是等用户再次输入", async () => {
     setup();
     using timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     mocks.refresh.mockResolvedValueOnce(success()).mockResolvedValueOnce(success(cwd));
     await using screen = await render(<Probe />, options);
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
-    expect(screen.container.querySelector("output")?.textContent).toBe("正在读取技能…");
+    expect(screen.container.querySelector("output")?.textContent).toBe("正在读取skill…");
     await advance(10_000);
     expect(mocks.refresh).toHaveBeenCalledTimes(2);
     expect(screen.container.querySelector("output")?.textContent).toBe("已完成");
@@ -98,7 +98,7 @@ describe("技能目录读取恢复", () => {
     using timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     await using screen = await render(<Probe />, options);
     await advance(30_000);
-    expect(screen.container.querySelector("output")?.textContent).toBe("技能加载失败，请重试。");
+    expect(screen.container.querySelector("output")?.textContent).toBe("skill加载失败，请重试。");
     expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain("重试");
     expect(mocks.refresh).toHaveBeenCalledTimes(3);
     await advance(120_000);
@@ -155,7 +155,7 @@ describe("技能目录读取恢复", () => {
     await using screen = await render(<Probe />, options);
     await screen.rerender(<Probe directory="autoops/skill-context/scope-two" />);
     await act(() => deliver(success(cwd)));
-    expect(screen.container.querySelector("output")?.textContent).toBe("正在读取技能…");
+    expect(screen.container.querySelector("output")?.textContent).toBe("正在读取skill…");
     await advance(10_000);
     expect(mocks.refresh.mock.calls.map(([call]) => call.input.cwd)).toEqual([
       cwd,

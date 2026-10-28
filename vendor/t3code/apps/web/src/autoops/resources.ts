@@ -230,12 +230,12 @@ export function autoOpsSkillPackageLink(
     return { error: '文件链接编码无效。' }
   }
   if (!path || path.startsWith('/') || /[\\\u0000-\u001f]/.test(path))
-    return { error: '此链接不属于当前技能包。' }
+    return { error: '此链接不属于当前skill包。' }
   const parts = fromPath.split('/').slice(0, -1)
   for (const part of path.split('/')) {
     if (!part || part === '.') continue
     if (part === '..') {
-      if (!parts.length) return { error: '此链接超出了当前技能包。' }
+      if (!parts.length) return { error: '此链接超出了当前skill包。' }
       parts.pop()
     } else parts.push(part)
   }
@@ -264,7 +264,7 @@ export function autoOpsSkillResourceLink(
   if (!resolved || 'error' in resolved) return resolved
   const target = resolved.path
   const url = autoOpsResourceUrl(`${resource.pathname}?path=${encodeURIComponent(target)}`)
-  return url ? { url, path: target } : { error: '此链接不属于当前技能包。' }
+  return url ? { url, path: target } : { error: '此链接不属于当前skill包。' }
 }
 
 /** 元数据只从既有资源白名单读取；文件字节继续交给原生查看器。 */

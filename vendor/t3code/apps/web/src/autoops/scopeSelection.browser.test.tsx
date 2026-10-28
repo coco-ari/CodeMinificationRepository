@@ -52,6 +52,23 @@ it('已锁定范围保留名称和当前值，提交中保留禁用状态且不�
   expect(onChange).not.toHaveBeenCalled()
 })
 
+it('锁定助手即使提供刷新内容也不能展开菜单，保留同一控件宽度', async () => {
+  await page.viewport(1280, 600)
+  const onChange = vi.fn()
+  const view = (locked: boolean) => <ScopeComposerChoice {...choice} label="助手" size="xs" locked={locked}
+    footer={<span>刷新助手</span>} onChange={onChange} />
+  await using screen = await render(view(false))
+  const width = screen.getByRole('button', {name:'助手',exact:true}).element().getBoundingClientRect().width
+  await screen.rerender(view(true))
+  const current = screen.getByLabelText('助手', {exact:true})
+  expect(current.element().getBoundingClientRect().width).toBe(width)
+  await current.click()
+  await userEvent.keyboard('{Enter}')
+  await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
+  await expect.element(screen.getByText('刷新助手')).not.toBeInTheDocument()
+  expect(onChange).not.toHaveBeenCalled()
+})
+
 it('紧凑布局的只读参数可用键盘查看实际值，不产生调整菜单', async () => {
   const onChange = vi.fn()
   await using screen = await render(

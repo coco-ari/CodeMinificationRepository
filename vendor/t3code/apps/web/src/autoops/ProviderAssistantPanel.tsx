@@ -715,7 +715,7 @@ export function ProviderAssistantPanel() {
                     }
                   />
                   <fieldset className="space-y-2">
-                    <legend className="mb-2 text-sm font-medium">技能</legend>
+                    <legend className="mb-2 text-sm font-medium">skill</legend>
                     {[
                       ...directory.skills,
                       ...editor.draft.skillIds

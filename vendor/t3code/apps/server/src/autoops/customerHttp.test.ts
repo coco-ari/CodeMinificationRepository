@@ -112,6 +112,26 @@ describe("customer registration HTTP boundaries", () => {
     query.set("environmentId", "env-test"); query.set("workspaceBindingRevision", "2");
     expect((await f.request(path(), { ownerId: "u-admin" })).status).toBe(409);
   });
+  it("共享原电脑会话允许成员浏览固定目录，转私有后拒绝，不能浏览其他目录", async () => {
+    const f = fixture(async (ownerId, projectId, target, _input, _signal, authorize) => {
+      authorize?.();
+      expect(ownerId).toBe("u-admin");
+      f.access.customerRegistry.validateTarget(ownerId, projectId, target);
+      return { entries: [{path: "source.txt", kind: "file"}], truncated: false };
+    });
+    const owner = f.access.authenticateCookie("demo_session=u-admin"), registry=f.access.customerRegistry;
+    const paired=registry.consumePairing(registry.createPairing(owner.id).pairingCode,{label:"原电脑"});
+    const target={kind:"customer" as const,deviceId:paired.device.id,registeredWorkspaceId:"original",workspaceBindingRevision:1,runtimeId:"codex" as const};
+    registry.registerWorkspace(registry.authenticateToken(paired.deviceToken),{registeredWorkspaceId:target.registeredWorkspaceId,workspaceBindingRevision:1,runtimeId:"codex",projectId:"p-autoops",label:"原目录"});
+    f.access.bindThread(owner,{threadId:"shared-files",projectId:"p-autoops",environmentId:null,agentId:"a-project",visibility:"project",executionBinding:target});
+    const query=new URLSearchParams({threadId:"shared-files",projectId:"p-autoops",deviceId:target.deviceId,registeredWorkspaceId:target.registeredWorkspaceId,workspaceBindingRevision:"1",input:'{"operation":"list"}'});
+    expect((await f.request(`files?${query}`,{ownerId:"u-guest"})).status).toBe(200);
+    query.set("registeredWorkspaceId","other");
+    expect((await f.request(`files?${query}`,{ownerId:"u-guest"})).status).toBe(403);
+    query.set("registeredWorkspaceId","original");
+    f.access.updateThreadVisibility(owner,"shared-files",{expectedVisibility:"project",visibility:"private"});
+    expect((await f.request(`files?${query}`,{ownerId:"u-guest"})).status).toBe(404);
+  });
   it("downloads only an authenticated fixed build artifact and reports an unpublished bundle", async () => {
     const { request } = fixture();
     expect((await request("download")).status).toBe(401);

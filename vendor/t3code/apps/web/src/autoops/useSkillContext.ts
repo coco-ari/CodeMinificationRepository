@@ -87,11 +87,11 @@ const skillContextQueries = Atom.family((key: string) => {
           const context = await loadSkillContext(request.requestKey, signal);
           return { context, error: null };
         } catch (cause) {
-          // 撤权成为新的读取基线，之后的网络失败也不能复活此前的技能展示。
+          // 撤权成为新的读取基线，之后的网络失败也不能复活此前的skill展示。
           if (isAutoOpsAccessError(cause)) {
             return {
               context: null,
-              error: cause instanceof Error ? cause.message : "当前技能访问已失效。",
+              error: cause instanceof Error ? cause.message : "当前skill访问已失效。",
             };
           }
           throw cause;
@@ -99,14 +99,14 @@ const skillContextQueries = Atom.family((key: string) => {
       },
       catch: (cause) =>
         new SkillContextReadError({
-          message: cause instanceof Error ? cause.message : "无法读取当前技能范围",
+          message: cause instanceof Error ? cause.message : "无法读取当前skill范围",
           cause,
         }),
     });
   }).pipe(Atom.setIdleTTL(0), Atom.withLabel("autoops:skill-context"));
 });
 
-/** 历史展示保留同范围快照；技能发现和新选择仅使用复核完成后的授权目录。 */
+/** 历史展示保留同范围快照；skill发现和新选择仅使用复核完成后的授权目录。 */
 export function useAutoOpsSkillContext(
   threadId: string | null,
   projectId: string | undefined,

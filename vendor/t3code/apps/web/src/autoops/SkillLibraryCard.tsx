@@ -105,7 +105,7 @@ export function SkillLibraryCard({
             </button>
           </h2>
           <p className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground wrap-anywhere">
-            {skill.description || '尚未提供技能描述。'}
+            {skill.description || '尚未提供skill描述。'}
           </p>
         </div>
         {actions}
@@ -127,7 +127,7 @@ export function SkillLibraryCard({
                 <div className="space-y-2">
                   <PopoverTitle>运行条件未满足</PopoverTitle>
                   <p className="text-xs leading-relaxed text-muted-foreground wrap-anywhere">
-                    {version.reason ?? '当前执行环境无法使用此技能。'}
+                    {version.reason ?? '当前执行环境无法使用此skill。'}
                   </p>
                 </div>
               </PopoverPopup>
@@ -238,7 +238,7 @@ function SkillTargetButton({
     ? '当前账号无管理权限'
     : !allowed
       ? !skill.enabled
-        ? '请先启用技能'
+        ? '请先启用skill'
         : '此版本尚未满足运行条件'
       : active
         ? '再次点击取消单独分配'

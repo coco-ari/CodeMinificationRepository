@@ -1,4 +1,3 @@
-import { QuestionSkillsControl } from "./QuestionSkillsControl";
 import { questionCanAdjust, questionModelSelection } from "./questionConfiguration";
 import { refreshProjectHost } from "./projectDirectory";
 import { MenuItem } from "~/components/ui/menu";
@@ -217,36 +216,6 @@ export function AutoOpsThreadScopeControl({
     (!isDraft && error !== null);
   const canAdjust = questionCanAdjust(scope);
   const configLocked = locked || !canAdjust;
-  const reconcileUnavailableSkills = (skillIds: string[]) => {
-    if (!isDraft || locked || disabled || !canAdjust) return;
-    const current = readAutoOpsThreadScope(threadId, projectId);
-    if (
-      readAutoOpsHost()?.principal.id !== host.principal.id ||
-      !current?.question ||
-      !sameAutoOpsThreadScope(current, scope) ||
-      current.scopeState === "submitting" ||
-      current.scopeState === "locked" ||
-      current.scopeLocked ||
-      current.compatibilityReadOnly ||
-      current.nativeParentThreadId ||
-      !questionCanAdjust(current)
-    )
-      return;
-    const selected = current.question.configuration.skillIds;
-    if (
-      skillIds.length >= selected.length ||
-      JSON.stringify(selected.filter((id) => skillIds.includes(id))) !== JSON.stringify(skillIds)
-    )
-      return;
-    // 目录整理只移除本草稿的失效选择，不触发用户主动切换所需的新草稿边界。
-    setAutoOpsThreadScope(threadId, {
-      ...current,
-      question: {
-        ...current.question,
-        configuration: { ...current.question.configuration, skillIds },
-      },
-    });
-  };
   const apply = async (patch: Partial<AutoOpsThreadScope>, loadPresetModel = false) => {
     if (locked || disabled || (!canAdjust && !patch.question)) return;
     const next = { ...scope, ...patch, scopeState: "draft" as const, scopeLocked: false };
@@ -381,7 +350,7 @@ export function AutoOpsThreadScopeControl({
   const agent = project.agents.find((entry) => entry.id === scope.agentId);
   const assistantReason = project.assistants?.reason;
   const refreshAssistants = async () => {
-    if (refreshingAssistants) return;
+    if (refreshingAssistants || locked || disabled) return;
     setRefreshingAssistants(true);
     setRefreshError(null);
     try {
@@ -412,7 +381,7 @@ export function AutoOpsThreadScopeControl({
               summary={
                 project.assistants?.items.find(
                   (item) => item.preset.id === scope.question?.assistantId,
-                )?.preset.name ?? (locked ? "既有助手" : "选择助手")
+                )?.preset.name ?? (locked ? (scope.executionBinding?.kind === "customer" ? "本机助手" : agent?.name ?? "项目助手") : "选择助手")
               }
               icon={BotIcon}
               value={scope.question?.assistantId ?? ""}
@@ -459,7 +428,7 @@ export function AutoOpsThreadScopeControl({
             <ScopeComposerChoice
               label="资料范围"
               size="xs"
-              labelWidth={4.5}
+              labelWidth={5}
               summary={scope.workspaceType === "external" ? "外部当前资料" : "内部当前资料"}
               icon={EyeIcon}
               value={scope.workspaceType ?? "internal"}
@@ -519,7 +488,7 @@ export function AutoOpsThreadScopeControl({
           <ScopeComposerChoice
             label="业务环境"
             size="xs"
-            labelWidth={4}
+            labelWidth={5}
             summary={scope.environmentId === null ? "无环境" : (environment?.name ?? "环境不可用")}
             icon={ServerIcon}
             value={scope.environmentId ?? "__none__"}
@@ -532,25 +501,6 @@ export function AutoOpsThreadScopeControl({
             disabled={disabled}
             onChange={(value) => void apply({ environmentId: value === "__none__" ? null : value })}
           />
-          {host.assistantDirectoryEnabled ? (
-            <QuestionSkillsControl
-              size="xs"
-              scope={scope}
-              customerRuntime={customerRuntime}
-              locked={configLocked}
-              disabled={disabled}
-              onReconcileUnavailable={reconcileUnavailableSkills}
-              onChange={(skillIds) => {
-                if (scope.question)
-                  void apply({
-                    question: {
-                      ...scope.question,
-                      configuration: { ...scope.question.configuration, skillIds },
-                    },
-                  });
-              }}
-            />
-          ) : null}
           {!host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
             <ScopeComposerChoice
               label="项目助手"

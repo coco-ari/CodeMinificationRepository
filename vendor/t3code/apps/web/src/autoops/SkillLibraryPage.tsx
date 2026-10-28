@@ -61,7 +61,7 @@ type OpenDialog =
   | { type: 'assign'; skillId?: string; assignment?: SkillAssignment }
   | { type: 'details' | 'delete'; skill: LibrarySkill }
   | null
-const scopeNames = { library: '全部技能', agent: '助手分配', project: '项目分配' } as const
+const scopeNames = { library: '全部skill', agent: '助手分配', project: '项目分配' } as const
 const scopeIcons = { library: LibraryIcon, agent: BotIcon, project: FolderGit2Icon } as const
 
 const viewStorageKey = (principalId: string, projectId: string) =>
@@ -78,7 +78,7 @@ function readView(
   }
 }
 
-/** 公共项目框架负责导航，技能库保留全局分配语义。 */
+/** 公共项目框架负责导航，skill库保留全局分配语义。 */
 export function AutoOpsSkillLibraryPage() {
   const host = readAutoOpsHost()
   const projectId = useAutoOpsProjectId()
@@ -112,8 +112,8 @@ export function AutoOpsSkillLibraryPage() {
         className="h-dvh min-h-0 min-w-0 overflow-hidden"
         data-testid="skill-project-unavailable"
       >
-        <ModuleHeader title="技能库" />
-        <ModuleSidebar label="技能管理">
+        <ModuleHeader title="skill库" />
+        <ModuleSidebar label="skill管理">
           <ModuleSidebarEmpty>请先选择有权访问的项目。</ModuleSidebarEmpty>
         </ModuleSidebar>
         <SkillEmpty title="项目不可用或无权访问" description="请通过顶部导航选择有权访问的项目。" />
@@ -372,14 +372,14 @@ function SkillLibraryContent({
         else if (action === 'toggle')
           void mutate(
             { action: 'set-enabled', skillId: skill.id, enabled: !skill.enabled },
-            skill.enabled ? '技能已停用。' : '技能已启用。',
+            skill.enabled ? 'skill已停用。' : 'skill已启用。',
           )
       }}
     />
   )
   const dialogProps = { busy: busy || loading, error, onClose: closeDialog, finalFocus, mutate }
 
-  if (!host) return <SkillEmpty title="技能库不可用" description="请从 AutoOps 工作台进入。" />
+  if (!host) return <SkillEmpty title="skill库不可用" description="请从 AutoOps 工作台进入。" />
   return (
     <SidebarInset
       className="h-dvh min-h-0 min-w-0 overflow-hidden overscroll-y-none"
@@ -387,7 +387,7 @@ function SkillLibraryContent({
       data-skill-library-revision={catalog?.revision}
     >
       <ModuleHeader
-        title="技能库"
+        title="skill库"
         detail={showDetail && selected ? selected.displayName : scopeNames[scope]}
         actions={
           <>
@@ -403,11 +403,11 @@ function SkillLibraryContent({
                 }
               >
                 {scope === 'library' ? <UploadIcon /> : <PlusIcon />}
-                {scope === 'library' ? '导入技能' : '添加技能'}
+                {scope === 'library' ? '导入skill' : '添加skill'}
               </Button>
             ) : null}
             <FileSurfaceAction
-              label="刷新技能库"
+              label="刷新skill库"
               disabled={busy || loading}
               onPress={refreshLibrary}
             >
@@ -417,10 +417,10 @@ function SkillLibraryContent({
         }
       />
       <ModuleSidebar
-        label="技能管理"
+        label="skill管理"
         search={{
           value: query,
-          label: '搜索技能',
+          label: '搜索skill',
           onChange: (value) => {
             setQuery(value)
             setDetailOpen(false)
@@ -442,7 +442,7 @@ function SkillLibraryContent({
       {error && !dialog ? (
         <div className="shrink-0 border-b border-border/60 p-3">
           <Alert variant="error">
-            <AlertTitle>技能库操作未完成</AlertTitle>
+            <AlertTitle>skill库操作未完成</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
           <Button
@@ -458,27 +458,27 @@ function SkillLibraryContent({
       ) : null}
       {!catalog ? (
         !loading ? (
-          <SkillEmpty title="无法读取技能库" description="请重新加载后再试。" />
+          <SkillEmpty title="无法读取skill库" description="请重新加载后再试。" />
         ) : (
           <div
             role="status"
             className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
           >
             <Spinner size="sm" />
-            正在读取技能库…
+            正在读取skill库…
           </div>
         )
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
             className={cn('flex min-h-0 min-w-0 flex-1 flex-col', showDetail && 'hidden')}
-            aria-label="技能列表"
+            aria-label="skill列表"
           >
             <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
               <WorkspacePageContainer width="wide" className="gap-3">
                 <div
                   className="flex min-w-0 flex-wrap items-center gap-2"
-                  aria-label="技能库工具栏"
+                  aria-label="skill库工具栏"
                 >
                   {scope === 'agent' ? (
                     <div className="w-40 min-w-0 max-w-full">
@@ -491,7 +491,7 @@ function SkillLibraryContent({
                           }
                         }}
                       >
-                        <SelectTrigger size="sm" className="min-w-0" aria-label="技能范围助手">
+                        <SelectTrigger size="sm" className="min-w-0" aria-label="skill范围助手">
                           <SelectValue>{target?.name ?? '没有可用目标'}</SelectValue>
                         </SelectTrigger>
                         <SelectPopup>
@@ -513,26 +513,26 @@ function SkillLibraryContent({
                   <div className="ml-auto flex shrink-0 items-center gap-1">
                     <span
                       className="text-xs text-muted-foreground"
-                      aria-label={`${visibleSkills.length} 项技能`}
+                      aria-label={`${visibleSkills.length} 项skill`}
                     >
-                      {visibleSkills.length} 项技能
+                      {visibleSkills.length} 项skill
                     </span>
                     <Popover>
                       <PopoverTrigger
-                        aria-label="技能分配说明"
+                        aria-label="skill分配说明"
                         render={<Button size="icon-sm" variant="ghost-muted" />}
                       >
                         <InfoIcon />
                       </PopoverTrigger>
                       <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
-                        <PopoverTitle>技能分配</PopoverTitle>
+                        <PopoverTitle>skill分配</PopoverTitle>
                         <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
-                          <p>技能库与助手分配全局共享，项目分配跟随顶部当前项目。</p>
+                          <p>skill库与助手分配全局共享，项目分配跟随顶部当前项目。</p>
                           <p>
                             点击助手或项目即可分配，再点取消。新分配使用最新版本，仅限内部工作区；未就绪版本不能分配。
                           </p>
                           <p>项目未单独分配时沿用助手设置。</p>
-                          <p>版本、来源和外部范围在技能菜单中查看或调整。</p>
+                          <p>版本、来源和外部范围在skill菜单中查看或调整。</p>
                         </div>
                       </PopoverPopup>
                     </Popover>
@@ -571,19 +571,19 @@ function SkillLibraryContent({
                   <SkillEmpty
                     title={
                       query
-                        ? '没有匹配的技能'
+                        ? '没有匹配的skill'
                         : scope === 'library'
-                          ? '技能库为空'
-                          : '尚未单独分配技能'
+                          ? 'skill库为空'
+                          : '尚未单独分配skill'
                     }
                     description={
                       query
                         ? '换一个名称或关键词试试。'
                         : canManage
                           ? scope === 'library'
-                            ? '导入 SKILL.md、ZIP 或公开 Git 技能包。'
-                            : '可从全部技能的卡片直接分配给助手或项目。'
-                          : '请联系管理员分配可用技能。'
+                            ? '导入 SKILL.md、ZIP 或公开 Git skill包。'
+                            : '可从全部skill的卡片直接分配给助手或项目。'
+                          : '请联系管理员分配可用skill。'
                     }
                   />
                 ) : null}
@@ -593,13 +593,13 @@ function SkillLibraryContent({
           {showDetail ? (
             <section
               className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-              aria-label="技能详情"
+              aria-label="skill详情"
             >
               {selected && version ? (
                 <>
                   <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-3 py-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <FileSurfaceAction label="返回技能库" onPress={returnToLibrary}>
+                      <FileSurfaceAction label="返回skill库" onPress={returnToLibrary}>
                         <ArrowLeftIcon />
                       </FileSurfaceAction>
                       <div className="min-w-0 flex-1 sm:max-w-80">
@@ -609,7 +609,7 @@ function SkillLibraryContent({
                             if (typeof value === 'string') setSelectedVersionId(value)
                           }}
                         >
-                          <SelectTrigger size="sm" aria-label="查看技能版本" className="min-w-0">
+                          <SelectTrigger size="sm" aria-label="查看skill版本" className="min-w-0">
                             <SelectValue>{skillVersionName(version)}</SelectValue>
                           </SelectTrigger>
                           <SelectPopup>
@@ -631,7 +631,7 @@ function SkillLibraryContent({
                     </div>
                     {version.readiness === 'restricted' ? (
                       <p role="status" className="text-xs text-warning-foreground wrap-anywhere">
-                        运行条件未满足：{version.reason ?? '当前执行环境无法使用此技能。'}{' '}
+                        运行条件未满足：{version.reason ?? '当前执行环境无法使用此skill。'}{' '}
                         可以查看文件。
                       </p>
                     ) : null}
@@ -655,8 +655,8 @@ function SkillLibraryContent({
                 </>
               ) : (
                 <SkillEmpty
-                  title="选择技能查看文件"
-                  description="技能的说明、参考资料与资源按原目录显示。"
+                  title="选择skill查看文件"
+                  description="skill的说明、参考资料与资源按原目录显示。"
                 />
               )}
             </section>
@@ -722,7 +722,7 @@ function SkillActions({
     <Menu>
       <MenuTrigger
         ref={trigger}
-        aria-label="技能操作"
+        aria-label="skill操作"
         render={<Button variant="ghost" size="icon-sm" />}
       >
         <MoreHorizontalIcon />
@@ -743,7 +743,7 @@ function SkillActions({
               onClick={() => onAction('assign', trigger.current)}
             >
               <PlusIcon />
-              {assignment ? '调整当前分配' : '分配技能'}
+              {assignment ? '调整当前分配' : '分配skill'}
             </MenuItem>
             <MenuItem disabled={busy} onClick={() => onAction('import', trigger.current)}>
               <UploadIcon />
@@ -758,10 +758,10 @@ function SkillActions({
             </MenuItem>
             <MenuSeparator />
             <MenuItem disabled={busy} onClick={() => onAction('toggle', trigger.current)}>
-              {skill.enabled ? '停用技能' : '启用技能'}
+              {skill.enabled ? '停用skill' : '启用skill'}
             </MenuItem>
             <MenuItem disabled={busy} onClick={() => onAction('delete', trigger.current)}>
-              删除技能
+              删除skill
             </MenuItem>
           </>
         ) : null}
@@ -786,7 +786,7 @@ function SkillFiles({ skill, version }: { skill: LibrarySkill; version: SkillVer
   const [selected, setSelected] = useState<string | null>('SKILL.md')
   const [trail, setTrail] = useState<string | undefined>(undefined)
   if (!environmentId)
-    return <SkillEmpty title="文件连接不可用" description="重新连接工作台后可查看技能文件。" />
+    return <SkillEmpty title="文件连接不可用" description="重新连接工作台后可查看skill文件。" />
   return (
     <div className={cn('flex min-h-0 min-w-0 flex-1 overflow-hidden')}>
       <ReadOnlyWorkspaceFiles

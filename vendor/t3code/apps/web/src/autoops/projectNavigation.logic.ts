@@ -7,7 +7,7 @@ export const AUTOOPS_AREAS = [
   { id: 'projects', label: '项目管理', icon: 'folderSettings', path: '/projects', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'assistants', label: '助手', icon: 'bot', path: '/assistants', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
   { id: 'accounts', label: '账号', icon: 'users', path: '/accounts', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'skills', label: '技能库', icon: 'sparkles', path: '/skills', scope: 'global', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
+  { id: 'skills', label: 'skill库', icon: 'sparkles', path: '/skills', scope: 'global', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
 ] as const
 
 export type AutoOpsArea = typeof AUTOOPS_AREAS[number]['id']

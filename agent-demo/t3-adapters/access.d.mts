@@ -65,6 +65,7 @@ export interface AutoOpsAccess {
   requireThreadExecution(principal: AutoOpsPrincipal, threadId: string, options?: {requireOnline?: boolean}): ThreadBinding;
   customerAssistantRuntime(principal:AutoOpsPrincipal,input:import('../../autoops/contracts/customer-assistant-runtime.ts').CustomerAssistantRuntimeRequest):import('../../autoops/contracts/customer-assistant-runtime.ts').CustomerAssistantRuntime;
   visibleCustomerProviderInstances(principal:AutoOpsPrincipal):{owned:string[];shared:string[]};
+  requireCustomerRunActor(threadId:string,runId:string): string;
   customerExecutionSource(threadId:string, actorId?:string): {ownerId:string;projectId:string};
   issueCustomerSessionScope(threadId:string,sessionId:string,modelSelection?:unknown): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;
   prepareCustomerRun(threadId:string,runId:string,messageId?:string,editCommandId?:string,modelSelection?:unknown,inheritedRunId?:string): import('../../autoops/contracts/shared-execution.ts').SharedExecutionScope | undefined;

@@ -40,7 +40,7 @@ describe('业务 JSON 公开入口', () => {
       }),
     )
   })
-  it('技能范围只读取当前网关对应的范围键，并透传取消信号', async () => {
+  it('skill范围只读取当前网关对应的范围键，并透传取消信号', async () => {
     await installHost()
     const { loadSkillContext } = await import('./skillLibrary')
     const fetch = vi.fn(async () =>

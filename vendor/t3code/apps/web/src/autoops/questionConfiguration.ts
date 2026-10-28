@@ -49,6 +49,9 @@ export function questionSendDisabledReason(scope: AutoOpsThreadScope | undefined
   const host = readAutoOpsHost()
   if (!host?.assistantDirectoryEnabled || (scope?.scopeState === 'locked' && !scope.question))
     return null
+  // 共享原电脑会话的目录与执行授权由会话接口复核，不要求成员另建助手分配。
+  if (scope?.scopeState === 'locked' && scope.executionBinding?.kind === 'customer' &&
+      scope.visibility === 'project' && scope.ownerId !== host.principal.id) return null
   const state = host.projects.find((project) => project.id === scope?.projectId)?.assistants
   if (!state) return '助手目录尚未就绪，请刷新项目配置。'
   if (!state.canAdjust && !state.ready)

@@ -10,7 +10,7 @@ import {
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : '操作失败，请重试。'
 
-/** 技能目录的数据生命周期；选中项、对话框、焦点和导航仍由页面负责。 */
+/** skill目录的数据生命周期；选中项、对话框、焦点和导航仍由页面负责。 */
 export function useSkillLibraryCatalog() {
   const [catalog, setCatalog] = useState<SkillLibrary | null>(null)
   const [error, setError] = useState<string | null>(null)

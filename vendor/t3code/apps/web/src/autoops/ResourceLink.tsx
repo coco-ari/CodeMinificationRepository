@@ -23,7 +23,7 @@ export async function openAutoOpsResource(
   if (!url) return;
   const resource = new URL(url, window.location.origin);
   const resourcePath = resource.searchParams.get("path");
-  // 工作区文件使用业务路径定位；技能包的相对路径交给原生附件查看器。
+  // 工作区文件使用业务路径定位；skill包的相对路径交给原生附件查看器。
   if (
     resource.pathname === `${readAutoOpsHost()?.gatewayBasePath}/autoops/resources` &&
     resourcePath

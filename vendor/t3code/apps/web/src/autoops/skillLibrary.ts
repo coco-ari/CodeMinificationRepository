@@ -69,7 +69,7 @@ export type SkillLibraryAction =
 const base = () => autoOpsApiUrl('/autoops/skill-library')
 const request = (body?: SkillLibraryAction & { revision: string }, signal?: AbortSignal) =>
   autoOpsRequest<SkillLibrary>('/autoops/skill-library', {
-    label: '技能库',
+    label: 'skill库',
     ...(body === undefined ? {} : { body }),
     ...(signal ? { signal } : {}),
   })
@@ -82,10 +82,10 @@ export const skillVersionName = (version: SkillVersion) =>
 export const skillSourceName = (source: SkillVersion['source']) =>
   ({
     markdown: 'SKILL.md',
-    archive: 'ZIP 技能包',
+    archive: 'ZIP skill包',
     git: 'Git 仓库',
-    builtin: '内置技能',
-    legacy: '原有技能',
+    builtin: '内置skill',
+    legacy: '原有skill',
   })[source.type]
 export const skillVersion = (skill: LibrarySkill, id?: string) =>
   skill.versions.find((version) => version.id === (id ?? skill.latestVersionId)) ??
@@ -110,12 +110,12 @@ export function skillFileSource(skill: LibrarySkill, version: SkillVersion): Rea
   return {
     id: `skill-library:${skill.id}:${version.id}`,
     allowReferences: false,
-    origin: '技能文件',
+    origin: 'skill文件',
     resolveLink: (fromPath, href) => {
       const resolved = autoOpsSkillPackageLink(fromPath, href)
       if (!resolved || 'error' in resolved) return resolved
       const target = entries.get(resolved.path)
-      return target ?? { error: '当前技能版本中没有此文件，请从右侧目录查看。' }
+      return target ?? { error: '当前skill版本中没有此文件，请从右侧目录查看。' }
     },
     mentionPath: (path) => path,
     list: async (directory) =>
@@ -175,7 +175,7 @@ export async function loadSkillContext(
   signal?: AbortSignal,
 ): Promise<SkillContext> {
   const endpoint = autoOpsApiUrl('/autoops/skill-library/context')
-  if (!requestKey.startsWith(endpoint + '?')) throw new Error('当前技能范围地址无效。')
+  if (!requestKey.startsWith(endpoint + '?')) throw new Error('当前skill范围地址无效。')
   const path = '/autoops/skill-library/context' + requestKey.slice(endpoint.length)
-  return autoOpsRequest(path, { label: '当前技能范围', ...(signal ? { signal } : {}) })
+  return autoOpsRequest(path, { label: '当前skill范围', ...(signal ? { signal } : {}) })
 }

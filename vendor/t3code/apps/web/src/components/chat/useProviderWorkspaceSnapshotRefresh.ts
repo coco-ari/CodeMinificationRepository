@@ -16,7 +16,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 
 const RETRY_DELAY_MS = 10_000;
 const REFRESH_TIMEOUT_MS = 30_000;
-const REFRESH_ERROR = "技能加载失败，请重试。";
+const REFRESH_ERROR = "skill加载失败，请重试。";
 
 /** 复用原生目录刷新；缺失目录也会重试，并限制本次等待的总时间。 */
 export function useProviderWorkspaceSnapshotRefresh(input: {

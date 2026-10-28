@@ -40,7 +40,7 @@ function source(): ProvidedAssistantSource {
       models: [
         { id: 'self-model', supportedReasoningEfforts: ['low'], defaultReasoningEffort: 'low' },
       ],
-      skills: [{ id: 'self-skill', name: '本机技能', description: '' }],
+      skills: [{ id: 'self-skill', name: '本机skill', description: '' }],
       sharedProfile: {
         ...profile,
         models: [
@@ -50,7 +50,7 @@ function source(): ProvidedAssistantSource {
             defaultReasoningEffort: 'high',
           },
         ],
-        skills: [{ id: 'isolated-skill', name: '隔离技能', description: '' }],
+        skills: [{ id: 'isolated-skill', name: '隔离skill', description: '' }],
       },
     },
   }
@@ -62,7 +62,7 @@ const draft = () => ({
   skillIds: ['isolated-skill'],
 })
 
-it('新预设先显式选运行目录，模型及技能不从首项或平台补齐', () => {
+it('新预设先显式选运行目录，模型及skill不从首项或平台补齐', () => {
   const s = source()
   expect(providedRuntimeCatalog(s, null)).toMatchObject({
     available: false,
@@ -78,7 +78,7 @@ it('新预设先显式选运行目录，模型及技能不从首项或平台补�
     '所选运行目录',
   )
   expect(providedConfigurationIssue(s, { ...draft(), skillIds: ['self-skill'] })).toContain(
-    '所选技能',
+    '所选skill',
   )
 })
 
@@ -105,14 +105,14 @@ it.each(['unverified', 'withdrawn', 'changed', 'missing', 'offline'] as const)(
   },
 )
 
-it('能力变化保留原参数，阻止消失的模型、强度、技能及重复技能', () => {
+it('能力变化保留原参数，阻止消失的模型、强度、skill及重复skill', () => {
   const s = source(),
     original = draft()
   expect(providedConfigurationIssue(s, { ...original, reasoning: 'low' })).toContain('实际支持')
   expect(providedConfigurationIssue(s, { ...original, reasoning: null })).toContain('实际支持')
   expect(
     providedConfigurationIssue(s, { ...original, skillIds: ['isolated-skill', 'isolated-skill'] }),
-  ).toContain('所选技能')
+  ).toContain('所选skill')
   s.capabilities!.sharedProfile = { ...s.capabilities!.sharedProfile!, models: [] }
   expect(providedConfigurationIssue(s, original)).toContain('所选运行目录')
   expect(original).toEqual(draft())
