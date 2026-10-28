@@ -82,6 +82,23 @@ function setup() {
 }
 
 describe('部署历史与源码档案', () => {
+  it('版本链直接显示历史分支和固定提交，回退仍使用所选历史记录', async () => {
+    setup()
+    const historical: DeploymentRelease = {
+      ...release,
+      sourceIdentity: { repositories: [{ path: '.', commit: 'a'.repeat(40) }] },
+      sourceSelection: { sources: [{ sourceId: 'repo-one', refKind: 'branch', ref: 'release/history', mountPath: '.' }], contexts: [] },
+    }
+    request.mockResolvedValue({ releases: [historical], total: 1, nextOffset: null })
+    await using screen = await render(view())
+    await expect.element(screen.getByText('release/history', { exact: true })).toBeVisible()
+    await expect.element(screen.getByText('aaaaaaaaaaaa', { exact: true })).toBeVisible()
+    await expect.element(screen.getByText('源码包可恢复', { exact: true })).toBeVisible()
+    await screen.getByRole('button', { name: '回退', exact: true }).click()
+    expect(rollback).toHaveBeenCalledWith(historical)
+    expect(request.mock.calls.every(([path]) => !path.includes('/refs') && !path.includes('/commits'))).toBe(true)
+  })
+
   it('分页后回退使用选中的历史版本，不替换为当前版本', async () => {
     setup()
     const older = { ...release, id: 'older-release', revision: 'b'.repeat(40) }

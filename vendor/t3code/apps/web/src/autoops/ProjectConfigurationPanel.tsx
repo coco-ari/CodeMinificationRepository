@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Button } from '~/components/ui/button'
-import { SettingsGroup } from '~/components/settings/SettingsGroup'
 import { SettingsSection, SettingsRow } from '~/components/settings/settingsLayout'
 import type { ProjectSettings } from './projectDirectory'
+import type { AssistantSetupSummary } from './ProjectSetupOverview'
 import { isAutoOpsAccessError } from './apiClient'
 import {
   loadAssistantSettings,
@@ -21,17 +21,25 @@ export function ProjectConfigurationPanel({
   disabled,
   revision,
   onOpen,
+  onSummary,
 }: {
   project: ProjectSettings
   disabled: boolean
   revision: number
   onOpen(editor: ProjectConfigurationEditor, button: HTMLButtonElement): void
+  onSummary?: (value: AssistantSetupSummary | null) => void
 }) {
   const [assistants, setAssistants] = useState<AssistantSettings | null>(null)
   const [choices, setChoices] = useState<AssistantChoices | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [accessDenied, setAccessDenied] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    onSummary?.(error ? { error } : assistants ? {
+      enabled: assistants.presets.filter((preset) => preset.enabled).length,
+      allocations: assistants.allocations.filter((allocation) => allocation.assistantIds.length > 0).length,
+    } : null)
+  }, [assistants, error, onSummary])
   useEffect(() => {
     const controller = new AbortController()
     setError(null)
@@ -152,7 +160,7 @@ export function ProjectConfigurationPanel({
         ) : !assistants ? (
           <p role="status">正在读取助手…</p>
         ) : (
-          <SettingsGroup>
+          <>
             {assistants.presets.map((preset) => (
               <SettingsRow
                 key={preset.id}
@@ -192,7 +200,7 @@ export function ProjectConfigurationPanel({
               />
             ))}
             {!assistants.presets.length ? <SettingsRow title="暂无助手" /> : null}
-          </SettingsGroup>
+          </>
         )}
       </SettingsSection>
       <SettingsSection
@@ -227,75 +235,73 @@ export function ProjectConfigurationPanel({
           </Button>
         }
       >
-        <SettingsGroup>
-          {project.members.map((member) => (
-            <SettingsRow
-              key={member.userId}
-              title={member.name}
-              description={
-                member.authorizationPending
-                  ? '待管理员分配'
-                  : member.status === 'disabled'
-                    ? '已停用'
-                    : projectRoleNames[member.role]
-              }
-              control={
-                <div className="flex flex-wrap gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={disabled || !context || !!error}
-                    aria-label={`分配助手给 ${member.name}`}
-                    onClick={(event) =>
-                      allocate({ kind: 'member', id: member.userId }, event.currentTarget)
-                    }
-                  >
-                    助手
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={disabled}
-                    aria-label={`编辑成员 ${member.name}`}
-                    onClick={(event) =>
-                      onOpen(
-                        {
-                          kind: 'member',
-                          name: member.name,
-                          description: '',
-                          revision: member.revision,
-                          value: {
-                            userId: member.userId,
-                            role: member.role,
-                            environmentIds: [...member.environmentIds],
-                            environmentRoles: { ...member.environmentRoles },
-                            canAdjustChat: member.canAdjustChat,
-                            status: member.status,
-                          },
-                          context: { project },
+        {project.members.map((member) => (
+          <SettingsRow
+            key={member.userId}
+            title={member.name}
+            description={
+              member.authorizationPending
+                ? '待管理员分配'
+                : member.status === 'disabled'
+                  ? '已停用'
+                  : projectRoleNames[member.role]
+            }
+            control={
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={disabled || !context || !!error}
+                  aria-label={`分配助手给 ${member.name}`}
+                  onClick={(event) =>
+                    allocate({ kind: 'member', id: member.userId }, event.currentTarget)
+                  }
+                >
+                  助手
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={disabled}
+                  aria-label={`编辑成员 ${member.name}`}
+                  onClick={(event) =>
+                    onOpen(
+                      {
+                        kind: 'member',
+                        name: member.name,
+                        description: '',
+                        revision: member.revision,
+                        value: {
+                          userId: member.userId,
+                          role: member.role,
+                          environmentIds: [...member.environmentIds],
+                          environmentRoles: { ...member.environmentRoles },
+                          canAdjustChat: member.canAdjustChat,
+                          status: member.status,
                         },
-                        event.currentTarget,
-                      )
-                    }
-                  >
-                    编辑
-                  </Button>
-                </div>
-              }
-            >
-              <span className="text-xs text-muted-foreground">
-                {member.role === 'project_admin'
-                  ? '全部环境'
-                  : member.environmentIds
-                      .map(
-                        (id) =>
-                          project.project.environments.find((env) => env.id === id)?.name ?? id,
-                      )
-                      .join('、') || '无环境'}
-              </span>
-            </SettingsRow>
-          ))}
-        </SettingsGroup>
+                        context: { project },
+                      },
+                      event.currentTarget,
+                    )
+                  }
+                >
+                  编辑
+                </Button>
+              </div>
+            }
+          >
+            <span className="text-xs text-muted-foreground">
+              {member.role === 'project_admin'
+                ? '全部环境'
+                : member.environmentIds
+                    .map(
+                      (id) =>
+                        project.project.environments.find((env) => env.id === id)?.name ?? id,
+                    )
+                    .join('、') || '无环境'}
+            </span>
+          </SettingsRow>
+        ))}
       </SettingsSection>
     </>
   )
