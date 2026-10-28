@@ -20,7 +20,13 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用为助手选择反馈修复 `37446ba7000214a88445cd725afc98485568fb83`，发行 `/home/tao/autoops-agent-demo/releases/t3-confirmed-37446ba7`，STATIC_DIR为同目录dist/web。实际Web3569357/t47397164、launcher3568893/t47396517、native3569053/t47396787与该发行目录一致；`ROOT/assistant-feedback-switch-v1/switch-v1.json` SHA256 `e04af5c07eafbdea474a73689f6c7e8a9a62ec624052d2939db966773c4e01cd` 为switched，HTML `08c14e6fe2c4d44ed6b81f79f39749db9787e2bc86c3f0ac7eb3acfbd9e65708` 及两个Web Worker实际字节通过。release manifest `735e7f209de7b284658cef1aac6d497ab39b82771d0f4155df814ae61ee6c2a3`，native manifest `8a964e300e270e393cee2ba143c8c84bfd267c814e86a73072823a772c5534cb`。
+当前前端为自适应导航合并提交 `61549d38e6751e0d4cef83d54a06fb78ba144a61`，静态目录 `/home/tao/autoops-agent-demo/releases/t3-adaptive-61549d38-static/dist/web`；后端、worker 和客户包仍沿用 `37446ba7` 的 `t3-confirmed-37446ba7`。只更新网页网关 STATIC_DIR 并重启网关，网页 PID 3626398，worker PID 3568893 保持。851 个产物及 7 个入口 HTTP 资源通过，健康 200、workerReachable=true；HTML SHA256 `8aaf3a3a77a13516c5d634c6e4ef4b705e3517028e63530dbb44c80c853cf9c8`。未迁移或恢复数据。112 项关联回归、19 项导航、类型/边界和固定托管构建通过；实站桌面/390px、长项目名、搜索/键盘、助手选中及刷新通过。详见[本批验收](../docs/validation/adaptive-top-navigation.md#测试站发行与实际交互)。
+
+切换原件为 `ROOT/adaptive-61549d38-static-result.json`。如需仅回退前端，先确认其中 dropin 仍为生效末项，再移除该条覆盖、daemon-reload 并重启网页网关，恢复 374 静态路径；不恢复业务数据或重启 worker。
+
+#### 上一374整套发行与助手反馈历史（保留）
+
+当时应用为助手选择反馈修复 `37446ba7000214a88445cd725afc98485568fb83`，发行 `/home/tao/autoops-agent-demo/releases/t3-confirmed-37446ba7`，STATIC_DIR为同目录dist/web。实际Web3569357/t47397164、launcher3568893/t47396517、native3569053/t47396787与该发行目录一致；`ROOT/assistant-feedback-switch-v1/switch-v1.json` SHA256 `e04af5c07eafbdea474a73689f6c7e8a9a62ec624052d2939db966773c4e01cd` 为switched，HTML `08c14e6fe2c4d44ed6b81f79f39749db9787e2bc86c3f0ac7eb3acfbd9e65708` 及两个Web Worker实际字节通过。release manifest `735e7f209de7b284658cef1aac6d497ab39b82771d0f4155df814ae61ee6c2a3`，native manifest `8a964e300e270e393cee2ba143c8c84bfd267c814e86a73072823a772c5534cb`。
 
 固定374的33项关联浏览器、Web类型及八阶段归档构建通过，Linux官方2038文件/21包通过，CLI仍为0.4.5。切前在途为空，只切原两unit，其他PID保持，迁移无变化；没有备份或恢复测试数据。运行原件 `.deployment/assistant-feedback-switch-v1/runtime-v2.json` SHA256 `efed1cc971eebbdc48744434c1df290a650033ac40e729bfefa5a6d5c4b2aa01` 核三进程、当前目录及应用健康200。首次独立探测曾503，诊断见同目录health-diagnostic-v1.json：原生/网关随后200、10/9ms，两unit NRestarts=0，未证实波动根因，不能宣称本批修复；空runtime-v1不是通过证据。真实名称/勾选/重选、菜单切换、Esc、刷新及390×600换行通过，未发送问答或启用停用助手；[UI1证据与边界](../docs/runtime-modules.md#当前助手名称与选中反馈2026-10-28)。未受影响业务沿用原证据，不等待远端CI。
 
