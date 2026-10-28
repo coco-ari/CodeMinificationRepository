@@ -41,6 +41,10 @@
 
 ## 统一助手管理与实际输入器（2026-10-26）
 
+2026-10-28按原件收束A4/C2：受限reader的实际Composer已验证grok-4.6/medium、五类只读范围、Ctrl+Shift+M/E不改参数且不打开Dialog、/model不出现调整项及四布局。原索引`.deployment/real-reader-ui-20261027-evidence-index-v1.json` SHA256 `1b2b22188c576fb943832cd355270af6cfc0c08e1b1b540fbabf48876e09be88`；原Composer c3ef92e6…b8991后段项目管理断言失败仍保留，续办85632f05…30e97只关闭该后段。8710两原消息2416983d/84102ad0分别completed，固定预设64cb/revision1，模型/强度篡改403、修订篡改409，公共预设保持；原state SHA256 `93ea3ebcf6d131b9590457587508fe19829d09740b7214a348b53939970e2794`，负例原件5ce295ca…529d1。v11 reader 2ba53d83…789c3仅补助手管理页可见、无编辑入口，不冒称Composer。上述分支四状态通过并复用现行代码与完整CI；不重发旧问题。尚缺设计164/166规定的“有调整权者明确选择不同于预设的合法参数→真实执行仍用该值→公共预设不变”独立正例，A4/C2共用一次。
+
+后来准备的23步未构成新增业务要求：1e v1在进入问答时守卫阻止克隆订阅/favicon，v3已确认真实服务器对这两请求拒绝，却又漏了ChatView直接mount的subscribeDeviceState；两轮均只4步、零自然visit/问答，失败原件6f9726fa…b23/0559336f…4107不追改。一次有界诊断912f7bd8…4f50只确认输入，不算业务通过。实际挂载链审计`.deployment/c2-current-mount-audit-v1/audit-v1.json` SHA256 `e040574cde6de486361ac0aa212393db02882d220f36f2e98a5032e66cf865aa`列明迟发device及条件VCS/PR/assets；分类为验收工具初始化遗漏，不放宽产品权限或所有readScope，不再为已有reader成功证据追加新observer发版。助手管理页经/_chat的null thread target→Outlet→ModuleSidebarOutlet→AssistantManagementPage，不挂ChatView/Composer，保存恢复另行验证。
+
 影响范围为助手唯一管理导航、原接入面板、纯助手合同及其 SQLite v2 升级、本人/项目目录、原生 HTTP 装配与实际 ChatComposer 选择和发送。继续复用 T3 ModuleWorkspace、SettingsSection/Row、Menu/Dialog、原电脑接入、模型选择器及原会话启动合同；不复制执行器，也不变更平台/用户运行位置。已有项目助手与角色/成员分配继续复用，旧 devices 路由重定向到助手的“我提供的”，保留显式项目范围。低权限仅显示获分配预设，项目管理者不能代提供者修改本人助手或共享授权。
 
 本人来源来自登记目录及真实能力，不推测平台默认。提供者主动共享给明确项目，管理者随后分配；分配记录固定预设、共享修订与来源身份。提供者修改需要管理者重新确认，撤回拒绝新执行；原已接受配置沿原修订恢复。跨用户/跨项目执行仍明确拒绝：当前 transport、本机会话、目录、附件及技能尚缺完整的实际调用者隔离，不能删除硬拒绝就称为 C6 完成。旧接入/配对协议仍没有本批新预设的原请求收据，分别保留证据边界。
@@ -135,7 +139,7 @@ B在上述显式恢复后仅发送一次，同原thread新user4080ac51/run2 comp
 
 新问题完整可见且保留文件chip后只点击发送一次；长文本输入工具首次5秒超时留下部分草稿，根核对末尾后定位末尾并仅粘贴剩余后缀，完整复核后才发送。该工具恢复额外操作单列，不将本次整个输入过程声称为正常两步。实际user `d84e3e7f-3a9e-42c1-99c4-cdd1fd1a21a5`、run ordinal3 completed，仍为原codex／grok-4.6／medium、原64cb预设revision1。正常原HTTP `original-C-http-v1.json` SHA256 `a532d4c2636e269d805b95bc484f078b16416754b82bc0f4d18a81012b080aad` 确认本轮context保存原C别名，原A/B消息、run、providerTurn和工具完整行保持；未捕获原命令receipt，不把projection称为回执。只读正常RPC取得同item完整工具原件 `original-C-full-tools-v1.json` SHA256 `8f72e69282558460a44a9b11984e7243a3057bf4a6954653930a2f22cd1e3b5e`：唯一dynamic_tool为read_project_material，实际input `91435189-9407-48b4-a0b2-bd4579c26209` 直接读取本条界面添加的current-input-files原别名，输入输出path相等，完整111B C正文SHA256 `fe16db41316990af3b2be2d9df040312334be74d705e171080453120fe236b04`。没有list或改用/inputs路径恢复，output.sourceUrl仍按原合同指向同fixed input，不是第二次工具读取；没有模型Shell或环境MCP工具。run耗时18.877秒，页面显示19秒；原B三工具失败/恢复历史保留，不追记B通过。
 
-补充正常GET及只读owner原行证明 `C-owner-and-updates-readonly-v2.json` SHA256 `ee5279a5b5e1cbdbb18822372b437d570d0d71a2ad5c73390fbc825ee3103802`：原message actor=u-admin，run登记同actor／ordinal3／input91435189，与该run的userMessageId及实际工具一致；after更新计划及其他资料/source完整正文等before。首辅助断言误要求终态临时claim仍存在而失败；实际claim已释放为0，run/input登记与原消息调用者仍保留，未改数据或放宽业务授权。新原件不替代原命令收据。独立review-v2 SHA256 `708d77bf0726559a50d326f29192e6f7abe92704ca2025aa524d77c1f3da5c9d` 对上述调用链、原A/B56完整行和计划保留复核通过。本次代码、完整自动、实际部署及上述新同面板刷新／当轮别名直读业务均通过，D1其余角色/异常边界仍待验；原已观察两轮Git零增量、四输入释放及原消息恢复证据复用，本次C未启动Git观察，不新增零Git结论。用户沿原预览和Add完成当前资料问答，开发者复用原reveal信号与固定输入合同，Agent可按真实当轮context、实际工具正文和终态判断结果，无新入口、权限或C7桥。
+补充正常GET及只读owner原行证明 `C-owner-and-updates-readonly-v2.json` SHA256 `ee5279a5b5e1cbdbb18822372b437d570d0d71a2ad5c73390fbc825ee3103802`：原message actor=u-admin，run登记同actor／ordinal3／input91435189，与该run的userMessageId及实际工具一致；after更新计划及其他资料/source完整正文等before。首辅助断言误要求终态临时claim仍存在而失败；实际claim已释放为0，run/input登记与原消息调用者仍保留，未改数据或放宽业务授权。新原件不替代原命令收据。独立review-v2 SHA256 `708d77bf0726559a50d326f29192e6f7abe92704ca2025aa524d77c1f3da5c9d` 对上述调用链、原A/B56完整行和计划保留复核通过。本次代码、完整自动、实际部署及上述新同面板刷新／当轮别名直读业务均通过，D1本项四类状态通过；已覆盖的权限/异常证据直接复用，不扩展全角色排列；原已观察两轮Git零增量、四输入释放及原消息恢复证据复用，本次C未启动Git观察，不新增零Git结论。用户沿原预览和Add完成当前资料问答，开发者复用原reveal信号与固定输入合同，Agent可按真实当轮context、实际工具正文和终态判断结果，无新入口、权限或C7桥。
 
 ### 历史普通文件继续预览与引用（2026-10-28）
 
@@ -846,6 +850,26 @@ Windows 上的目录 fsync、POSIX 权限、静态站点符号链接和 shell �
 - 本轮业务生命周期已接入 T3 Effect 组合根，但本节代码验收不能代替真实升级。远端已领取的部署和客户动作继续按持久收据核对，中心进程退出不等于远端动作取消或完成；目标主机切换仍要核对活动任务和数据保留。
 - 现有部署引擎的聚合存储继续由引擎拥有，未进行全面换库；单实例和现有持久格式是明确边界，不能据此声称所有历史存储已迁入独立后端。
 - 共享服务器上安装依赖或验收，必须使用独立 cgroup 的总内存限制并串行执行；只设置 V8 堆上限不能保护线上进程。构建优先在开发或 CI 主机完成，验收只使用隔离数据目录。
+
+### 非空部署页面与窄窗确认（2026-10-28）
+
+当前1e实际正常管理员浏览器沿已有D123项目和Java专属目标，只读核对原健康恢复结果，不重复部署。运行信息显示执行器在线、运行中且健康检查通过；三条发布记录当前版本为原e353提交，当前回退禁用。已确认版本详情真实显示原app构建目录、app/target/demo.jar、两原镜像digest、命名卷与固定网络别名、18081/health、HTTP200／cmr-demo-ready及45秒／2秒健康配置。原历史回退确认页仍使用该版本历史配置和原包重建说明，只检视与取消，未点击最终确认。
+
+同一目标从桌面1280×720切至390×520，版本详情实际PageDown将内层scrollTop从0滚至186（client254／content2020），根scrollTop仍0，根宽390等client390；详情Dialog为x0/y48/390×472，底部关闭入口可用。运行信息和详情Esc分别恢复原触发按钮；历史回退默认焦点取消，实际Tab到确认、Shift+Tab回取消、Esc恢复原第二条回退按钮。窄工具栏更多→源码任务记录显示11条及原失败，独立内层client342／content962，Esc回到原更多触发按钮。没有产品修改；核心任务前后同16操作：切换项目、选项目、部署、运行信息、Esc、发布记录、详情、PageDown、Esc、历史回退、Tab、Shift+Tab、Esc、更多、源码任务记录、Esc；读取等待未整轮计时，不宣称减少操作或等待。额外观察器等待不存在的“部署”heading超时后，按实际服务名heading读取正常DOM，未重发导航或业务命令。
+
+实际CUA操作及DOM记录 `.deployment/deployment-nonempty-ui-cua-1e014e71-selected-v1.json` SHA256 `4fbad1cff0e85ca46b92f09abc7f6bf6f16b1c6e20b3b1316649de685bf1e791`；截图只作工具输出旁证，未保存本地PNG，不替代上述操作和滚动／焦点断言。复用原owner只读核对完整任务与版本，ROOT/deployment-ui-1e014e71-readonly-owner-root-v1.json SHA256 `fdc67583b6fa8af531200d8bfaa8f878a850995ef06030bdd75e2494e42495e6` 确认24任务／16版本整行仍为1e224f95…69e4、活动0、计划关闭、DATA身份和两原Agent及当前CLI保持；本次未进行HTTP/WS拦截，不冒称零网络。四状态为代码复用完成、既有1e完整自动通过、1e生效、上述非空界面选定项真实通过。深色及原模拟触控菜单/Dialog仍待；物理设备只是未测外延，不是新增硬件门槛。日志读工具随后完成，见下；不能据此关闭D5剩余执行恢复场景；临时tabs38/40已关闭，原问答页保留，浏览器尺寸已恢复。用户可沿原详情核健康与历史恢复；开发者和Agent复用公开版本/任务事实及原确认流程，无新业务入口或执行链。
+
+随后沿同原Java task `00e8d726-d61c-421b-b846-c5534aa48ff7`，正常页面实际完成搜索“恢复上一”（2匹配）、阶段“验证服务”联合过滤（1匹配）、复制和下载。复制/导出按原合同保留ISO完整时间戳，页面显示当地短时间；原首个等短时间断言错误已按源码和实际内容排除产品缺陷。复制到实际剪贴板后已恢复原剪贴板。下载事件观察器20秒超时，但下载目录实际已生成原task文件，逐字核对同过滤正文84B／SHA256 `bf129082a32c9ba176afb3fa9937a79fe4b49c39f632261bc50faede4280cedc`，不是模拟下载；副本保存在 `.deployment/deployment-nonempty-log-export-1e014e71-v1.log`。generic定位器不匹配aria-label的工具失败亦保留，正常DOM确认查询结果，不改产品。核心目标初始同原任务日志，前后均“填写关键词→展开阶段→选择阶段→复制→下载”5操作；异步等待/下载事件工具失败另计，不主张步骤改善。实际UI记录f5369ae9…3325；之后owner原件4a0361fa…4f11确认完整24任务/16版本1e224f95…69e4不变、活动0、计划停用、原Agent/CLI/DATA保持，临时tab41已关闭。上述日志读工具单项四状态通过；仅非空部署深色与原触控菜单/Dialog继续E1/E3，不重复真实发布。
+
+非空部署深色随后实际通过：同原Java目标在设置→外观→深色后，原三版本链、完整配置Dialog、运行信息和原任务搜索2行均正常；DOM确认dark=true、body为oklch(0.145 0 none)，1280×720根无横溢/scrollTop0。详情PageDown内滚33.5（client565/content1960），Esc精确回原详情按钮；运行信息显示在线/健康通过和原e353。核心任务前后同12操作，等待未整轮计时、无产品改动；设置/外观/浅色三操作恢复原偏好且验证dark=false，临时tab42关闭、原问答tab保留。原件`.deployment/deployment-dark-ui-cua-1e014e71-v1.json` SHA256 `d475a2688b4ff6c4ee65f97e581321501f6ccbe2af02b0977ca460aae446af7e`，实际截图只作工具输出旁证，不冒称本轮零网络或新业务回退。深色单项四状态通过，E1/E3仅原模拟触控菜单/Dialog和助手保存原请求恢复继续；物理手机不是新增门槛。
+
+### 助手保存原请求恢复（2026-10-28）
+
+正式1e上的manager实际固定角色为project_admin、chat.configure=true；不伪造project.manage=true/chat.configure=false成员组合。新建未分配平台预设2c16580b，仅复制原64cb的grok-4.6/medium、内部资料、原409环境、private和空技能。三次实际POST各一次：创建b00138fa；改名eb28e846真实200回复丢失后，UI自动只GET同UUID一次、关表单并回编辑焦点；再改名446c87d8真实200回复丢失，首次自动核对注入503，保留原完整pending且禁止保存，Esc可关闭，点击“检查保存结果”只GET原UUID，恢复revision3并清pending/回原编辑焦点。503与回复丢失均为观察器注入，实际保存和三条owner收据均来自真实服务，未模拟成功结果。初始化未发克隆/favicon/device；不以零请求当通用只读合同。
+
+实际22步全部完成（登录3、业务19），轮询等待2241ms另计；本轮无产品改动，前后同19业务操作，不主张减少步骤。原件`.deployment/e3-assistant-live-1e014e71-v4-actual/result.json` SHA256 `f1b67209705fad949bb515b97c79d106ca7d9bc5677bc472d20c712c04ca3174`；父进程9b3ca2c2…8db3确认24任务/16版本完整行前后相等、无遗留浏览器。根按正式originalReceipt解码校验三完整收据，再独立正常manager GET同三UUID逐字相等；原项目/成员/公共64cb/分配/仓库/资料/计划均保持。随后仅对本次未分配预设正常POST停用b54a56d9至revision4，保留原件不删除，其他预设/分配完整相同；ROOT/e3-assistant-live-1e014e71-root-final-v1/proof.json SHA256 `eaf4dea0ea7771b458b81c9354ae2049e116a0ef25f25d43ac96f57c10a428b8`，旧三写未重放。
+
+两次辅助失败保留：v2把reader changed相位误用于manager，止于登录、零业务；v3把模型ID当显示名，实际option为Grok 4.6，止于创建选择器、零业务。当前账号只读审计revision5、后四操作仅enable，未改密码；c2e1032a…2dfa支持initial相位。完整路由、选择器及后续恢复链核对后仅改相位与显示名，v4本地13合同通过；未改产品、模型ID、权限或guard。四状态为代码0259已完成、完整1e CI及相关自动通过、正式1e生效、该保存恢复真实通过；不能由此结束整体E3，原模拟触控菜单/Dialog仍待。用户可关闭未知表单并核原结果；开发者及Agent沿同owner收据判定，命令发送、服务保存和界面恢复分别有证据。
 
 ## 本轮逐模块验收范围
 
