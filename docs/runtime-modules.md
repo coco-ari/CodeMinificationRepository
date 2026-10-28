@@ -1755,6 +1755,22 @@ R3复用原隔离target5c01a9f2与正常e353源码，只POST一次request `10f04
 
 D5当前仅余R4事件补报去重、R5节点并发与R6档案清理。D6的自然七天无引用临时包门独立：当前证据最早为2026-11-03T07:51:35.703Z（北京时间15:51:35.703），尚未到期，到期仍按实际版本链/活动引用裁决；不能改日期或把脚本/保留检查通过当作实际回收。docs-only d7f02fa649da8645bc37cc8132e0a7d97aad4f12的[质量40617322403](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40617322403)及[完整运行40617322418](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40617322418)均green，证明 `.deployment/ci-d7f02fa6-progress3-root-v1.json` SHA256 `4720cf8972a3503c108932eeb1e7eb90d4bdc1b3807173b50d7a462285091604`；应用仍为1e，没有新应用发行。
 
+### 中心事件补报待验与原任务收束（2026-10-28）
+
+R4仍待验，无产品修改。v1唯一request `f55eca3f-5ed2-4ccb-834e-8d07ffd78e83` / task `c663fddb-4391-4d91-9753-3e0202c5bc59` 已取得中心seq3/本机ACK2的真实窗口，随后因 `NEW_OR_CHANGED_TLS_NO_PROOF` 停止。v2在子进程argv身份校验拒绝，零POST，保留原失败。v3唯一request `7d38356a-bdd3-4679-ab2e-cf76578bcc04` / task `7953cef7-5a87-44b9-b2b4-a4cd54f82502` 的自有规则实际DROP5包/308B，但2秒公开GET超时，未取得合格的再次补报证明。两次实际restart最终均succeeded、seq=ACK3；无ss-K、无Agent信号，自有规则逆序清理后原filter表整字相等。原件v1结果2dab1e53…b48、v3结果2823afb9…16e4保持失败，不将任务自然完成当成R4通过。后续复用既定R5发布验证，不再增加restart。
+
+O1/O3所有者前后分别保留927/986个旧文件、九附件、全部当前业务投影和其他旧表Counter。O1原生auth_sessions为888→890（缺1/增3），事件5785→5763（缺22）；正式1e维护日志在02:48:53.618UTC确实记录deletedEventCount22/deletedReceiptCount0，原件c187b960…e68a。缺失事件原件仅保存整行散列，不能逐条反推类型/实体；会话NULL逆构因捕获后新增行已再次变化而明确unconfirmed（f19728bf…7d37），不声称原因已证。O3原生auth_sessions为895→898（缺1/增4），亦保留未知边界；其他原生42表保持。两阶段原compare提示均保留，不改写为全部旧行保持。原27任务/17版本逐完整行保留，仅增加两个restart，当前29/17规范化SHA `e779ff382baae50a724768ee41cb1a500a26980196037d33998ce750253d013f`，无新release、源码或工作区写。
+
+独立索引 `.deployment/d5-r4-r5-current-local-audit-v1.json` SHA256 `7a76772da0012eaff759b2d102be39d48820e131c4924bbe7c7fd5e438bbc658` 固定O1前8f8e4613…e9fd/后5388cb3b…b8e1、O3前e0caa58a…2733/后3fbee223…2558及各原件。只读观察器9558bc0c…54c4和独立复核adac4628…5c38只证明正式只读task/log投影及该次读取耗时，不是ACK丢失业务验收。代码/原自动测试/1e部署保持，R4真实业务仍待验。
+
+### 独立节点与跨项目部署准备（2026-10-28）
+
+B项目ada3d73f/env f1e3已用正常u-admin创建自有凭据bf664b3a、连接b1b86be9及固定e353源码包f0957c33，原package task16959364/request9c5a31ab为completed。连接仅id/name/url/credentialId，不选业务分支；未借D123凭据。正常原收据、publicIntent、manifest和下载均独立核对：backend.zip为3588B/6文件、SHA `35e74ab9c5d5b9d53bf1f7e888ec90c4b289e7ba5dd9e84cc0c3a74c87d4100c`，原entries/sources/status/limits及更新计划整值保持，仅连接revision0→1。独立原件 `.deployment/r5-b-source-package-real-v1/independent-readonly-v1.json` SHA256 `1ceac50fea5e4b92e6028f6f1d201797a49faca83ffa5c106172daf28408a3b1`；这是源码准备完成，不是部署通过。
+
+Node2 `ae498c20-74a5-4976-8b3d-0d60c7f9b25c` 已正常启动1888455/t44133252，unit为autoops-d5-r5-node2.service，原版1e/17源、自有BuildKit256MiB，原Node1 1753929、59368及客户CLI1608061保持。启动原件e8c69b52…854e及builder62ae333e…d897后，正常读取确认online/Agent1.6.0、保留6版本/1GiB、策略revision2实际applied；create/grant/bind/policy四个原UUID收据均completed，同serverId及原scope。原件 `.deployment/d5-r5-independent-node-prepared-v2/normal-online-and-original-receipts-v1.json` SHA256 `1190b877a0927d790e667f89cbea4e8ac3b26acc42af16b6d60ec7ea2bc394bb`。
+
+B/C正常setup由u-admin完成5写：批准Node1至B、绑定f1e3、新B服务e278d67e、新B目标d4593d1c（28903/Node1）和原D123服务3b77上的C目标cfeec8da（28904/Node2）。五个原intent/UUID、两项节点收据及响应已核；旧tasks/releases/services/sources和目标保护指纹整值保持，0部署任务/0模型，不冒称project-admin正控。原proof f47ef545…bfe5及上述独立索引保存实际前67190cf3…aff9/后1ca8f16a…cea0。R5并发/领取、R6清理、D6自然七天门均未完成；当前应用仍1e，docs-only `de1134d6c5f1614e761376cec6e9cf9edd600773` 的[质量40622019468](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40622019468)及[完整运行40622019486](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40622019486)均green，原件 `.deployment/ci-de1134d6-final-root-v1.json` SHA256 `c3a254294fd85dca5262c89cec125130405faea6ea7ec154b4fa599ad7b6adf1`，不代表新应用发行或总体完成。
+
 ### 同原日志地址撤权与恢复（2026-10-28）
 
 A3复用a2b8d768以来的原返回前授权合同。当前1e，原reader89dde30b仅正常登录一次，使用同一个RAM Cookie读取原Static任务11e3ecc8的同一日志地址：先200，管理员按固定UUID5c2eb4db-c351-4d1d-82ae-2762635eb2a5只停用该成员r5→6后，原地址精确404 PROJECT_NOT_FOUND且无task/logs；再按原UUIDd9a15dfb-cdf9-4506-a300-28c8cfad91bf恢复原值r7，同Cookie原地址恢复200。两次POST各一次，不启停账号或改密码；无论POST回复如何都只GET原UUID，完整receipt的actor/project/environment/operation/publicIntent及原成员结果分别精确r6/r7，不重POST。finally恢复已由正常原收据确认，原12日志、完整task及nextSeq13前后深相等。
