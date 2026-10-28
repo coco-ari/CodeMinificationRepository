@@ -1825,7 +1825,6 @@ A5平台共享场景在现行1e正常HTTPS界面实际执行：管理员进入D1
 
 前置失败保留：root遗漏上传README/测试文件在账户读取前拒绝；v3误把含心跳目标的identity整文件SHA视为稳定身份，零业务拒绝；真实RAM双读仅三个目标lastObservedAt/observation.observedAt变化，完整身份核心（含token）相同，证明b02073ea…e649，不回溯编造旧f56报告的具体差异。v4沿既有目标三个观测字段归一化，其余完整JSON/未知字段/顺序及权限保留，rawSHA每次留原件且是否字节相等真实记录；旧报告与源码不覆盖。既有整点清理移除Node固定镜像也在零意图前被原preflight拒绝，只按原registry锁恢复同digest（90089cdd…b718），保留1400MiB门禁。历史lastFailure不删，只拒相对固定grant新增失败；离线工具11/9项不代替业务。本次四状态关闭排队后撤权子项，D5其余矩阵、D6自然保留与全局交付继续。
 
-
 ### 原包保留与事件读取超时核对（2026-10-28，R4/R6未闭环）
 
 R6第二版B沿原请求 `21bd8471-d187-4d8a-bff2-ac4c2e410424` 仅POST一次，task `6a4f9124-7ddf-4253-88d6-5cc661a2b625` 固定e353/package7bad真实Maven发布、健康成功，中心67条日志与本机事件按正式默认status和发生/接收时间映射全值相等，seq=ACK67。current=6a4、previous=d8b，本机链3；3588B原ZIP SHA35e74ab9…4100c不变，builder和私有工作目录已清理。最初只读collector v1错误要求原事件与中心字段对称；67原件确认66条省略status，中心正式补running，第二候选未知event字段已排除。v2仅修正式映射，67正控和8篡改反例通过后实际只读核验成功，原v1失败保留；不修改产品。
