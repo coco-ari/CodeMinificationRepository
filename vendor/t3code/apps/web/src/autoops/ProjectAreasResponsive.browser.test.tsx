@@ -373,9 +373,13 @@ describe('部署运行记录与所选详情分离', () => {
       { router: '/deployments?projectId=p-one' },
     )
     await expect.element(screen.getByText('运行状态待核对', { exact: true })).toBeVisible()
+    const confirmedVersion = screen.getByRole('region', { name: '已确认部署版本', exact: true })
+    await expect
+      .element(confirmedVersion.getByText(data.targets[0]!.currentRelease!.revision!, { exact: true }))
+      .toBeVisible()
     await screen.getByRole('button', { name: '运行信息', exact: true }).click()
     await expect
-      .element(page.getByText(data.targets[0]!.currentRelease!.revision!, { exact: true }))
+      .element(page.getByLabelText('部署运行记录').getByText(data.targets[0]!.currentRelease!.revision!, { exact: true }))
       .toBeVisible()
     await userEvent.keyboard('{Escape}')
     for (const name of ['配置', '发布记录', '任务日志']) {
@@ -405,8 +409,11 @@ describe('部署运行记录与所选详情分离', () => {
       ],
     })
     await screen.getByRole('button', { name: '刷新部署状态', exact: true }).click()
+    const recoveredVersion = confirmedVersion.getByText(release.revision.slice(0, 12), { exact: true })
+    await expect.element(recoveredVersion).toBeVisible()
+    await expect.element(recoveredVersion).toHaveAttribute('title', release.revision)
     await screen.getByRole('button', { name: '运行信息', exact: true }).click()
-    await expect.element(page.getByText('recovered1234', { exact: true })).toBeVisible()
+    await expect.element(page.getByLabelText('部署运行记录').getByText('recovered1234', { exact: true })).toBeVisible()
     await expect
       .element(screen.getByText('运行状态待核对', { exact: true }))
       .not.toBeInTheDocument()
