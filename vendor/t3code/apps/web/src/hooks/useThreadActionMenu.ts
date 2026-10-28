@@ -1,3 +1,4 @@
+import { showThreadMenuWithVisibility } from "~/autoops/threadVisibilityMenu";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import {
@@ -142,7 +143,10 @@ export function useThreadActionMenu(input: {
         supports,
         snoozePresets,
       });
-      const clicked = await settlePromise(() => api.contextMenu.show(items, position));
+      const clicked = await settlePromise(() => showThreadMenuWithVisibility(api.contextMenu.show, items, position, {
+        threadId: thread.id, projectId: thread.projectId,
+        canOperate: () => readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
+      }));
       if (clicked._tag === "Failure" || clicked.value === null) return;
       const action: ThreadActionMenuId = clicked.value;
       if (

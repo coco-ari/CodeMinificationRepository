@@ -46,7 +46,7 @@ describe("FontFamilyPicker", () => {
       />,
     );
 
-    const input = document.querySelector<HTMLInputElement>('input[placeholder="Search fonts…"]');
+    const input = document.querySelector<HTMLInputElement>('input[placeholder="搜索字体…"]');
     expect(input).not.toBeNull();
     const press = (key: string) => userEvent.keyboard(`{${key}}`);
 

@@ -2,7 +2,7 @@
 
 import type { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { MenuAdapter as MenuRuntime } from "./radix-menu";
-import { CheckIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import type * as React from "react";
 
 import { cn } from "~/lib/utils";
@@ -133,7 +133,7 @@ function MenuCheckboxItem({
         "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center gap-2 rounded-sm py-1 ps-2 text-base text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         variant === "switch"
           ? "grid-cols-[1fr_auto] gap-4 pe-1.5"
-          : "grid-cols-[1rem_minmax(0,1fr)] pe-4",
+          : "grid-cols-1 pe-2 aria-checked:bg-foreground/[0.08]",
         className,
       )}
       data-slot="menu-checkbox-item"
@@ -150,24 +150,7 @@ function MenuCheckboxItem({
           </MenuRuntime.CheckboxItemIndicator>
         </>
       ) : (
-        <>
-          <MenuRuntime.CheckboxItemIndicator className="col-start-1">
-            <svg
-              fill="none"
-              height="24"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              width="24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="M5.252 12.7 10.2 18.63 18.748 5.37" />
-            </svg>
-          </MenuRuntime.CheckboxItemIndicator>
-          <span className="col-start-2">{children}</span>
-        </>
+        <span>{children}</span>
       )}
     </MenuRuntime.CheckboxItem>
   );
@@ -188,7 +171,7 @@ function MenuRadioItem({
   return (
     <MenuRuntime.RadioItem
       className={cn(
-        "[&_svg]:-mx-0.5 flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base text-foreground outline-none data-checked:bg-foreground/[0.08] data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "[&_svg]:-mx-0.5 flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base text-foreground outline-none aria-checked:bg-foreground/[0.08] data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="menu-radio-item"
@@ -196,23 +179,6 @@ function MenuRadioItem({
     >
       <span className="min-w-0 flex-1">{children}</span>
     </MenuRuntime.RadioItem>
-  );
-}
-
-function MenuRadioItemIndicator({
-  className,
-  children,
-  ...props
-}: MenuPrimitive.RadioItemIndicator.Props) {
-  return (
-    <MenuRuntime.RadioItemIndicator
-      aria-hidden
-      className={cn("flex shrink-0", className)}
-      data-slot="menu-radio-item-indicator"
-      {...props}
-    >
-      {children ?? <CheckIcon className="size-3.5" />}
-    </MenuRuntime.RadioItemIndicator>
   );
 }
 
@@ -338,7 +304,6 @@ export {
   MenuRadioGroup as DropdownMenuRadioGroup,
   MenuRadioItem,
   MenuRadioItem as DropdownMenuRadioItem,
-  MenuRadioItemIndicator,
   MenuGroupLabel,
   MenuGroupLabel as DropdownMenuLabel,
   MenuSeparator,

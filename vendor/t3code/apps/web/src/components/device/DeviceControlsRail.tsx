@@ -28,7 +28,6 @@ import {
   MenuTrigger,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuRadioItemIndicator,
 } from "~/components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import type { DeviceStreamHandle, DeviceViewControls } from "./DeviceStreamView";
@@ -171,7 +170,6 @@ export function DeviceControlsRail(props: {
                 <MenuRadioItem key={value} value={value}>
                   <span className="flex items-center gap-2">
                     <span className="flex-1">{label}</span>
-                    <MenuRadioItemIndicator />
                   </span>
                 </MenuRadioItem>
               ))}

@@ -411,16 +411,7 @@ export function showContextMenuFallback<T extends string>(
         if (typeof item.checked === "boolean") {
           button.setAttribute("role", "menuitemradio");
           button.setAttribute("aria-checked", item.checked ? "true" : "false");
-          const check = item.checked ? createIconElement("check", "neutral") : null;
-          if (check) {
-            button.appendChild(check);
-          } else {
-            const spacer = document.createElement("span");
-            spacer.className = "size-4.5 shrink-0 sm:size-4";
-            spacer.style.cssText = "display:inline-block;width:1rem;height:1rem;flex-shrink:0;";
-            spacer.setAttribute("aria-hidden", "true");
-            button.appendChild(spacer);
-          }
+          if (item.checked) button.style.background = "color-mix(in srgb, var(--foreground) 8%, transparent)";
         } else if (typeof item.icon === "string") {
           const icon = createIconElement(item.icon, isLeafDestructive ? "destructive" : "neutral");
           if (icon) {
@@ -457,7 +448,7 @@ export function showContextMenuFallback<T extends string>(
               ? isLeafDestructive
                 ? "color-mix(in srgb, var(--destructive) 10%, transparent)"
                 : "var(--accent)"
-              : "transparent";
+              : item.checked ? "color-mix(in srgb, var(--foreground) 8%, transparent)" : "transparent";
             button.style.color = isHighlighted
               ? isLeafDestructive
                 ? "var(--destructive-foreground)"

@@ -210,12 +210,12 @@ it('有调整权者更改范围后，重新选择助手整体重载原预设并�
   })
 })
 
-it('默认缺失展示真实原因及候选，不将首个助手或平台默认当成可发送配置', async () => {
+it('默认缺失不常驻提示，保留候选且不会把首个助手当成可发送配置', async () => {
   using _timers = fakeTimers({ shouldAdvanceTime: true })
   const id = 'missing-default-draft',
     f = setup(false, id, true)
   await using screen = await render(f.ui)
-  await expect.element(screen.getByText('请管理员配置默认助手')).toBeVisible()
+  await expect.element(screen.getByText('请管理员配置默认助手')).not.toBeInTheDocument()
   expect(readAutoOpsThreadScope(id, 'assistant-project')?.question).toBeUndefined()
   await screen.getByRole('button', { name: '助手', exact: true }).click()
   await expect

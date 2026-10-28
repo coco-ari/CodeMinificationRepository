@@ -23,7 +23,6 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuRadioItemIndicator,
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
@@ -204,7 +203,6 @@ function ScopeMenu({
                 <MenuRadioItem value={option.value} closeOnClick>
                   <span className="flex min-w-0 items-center gap-2">
                     <ScopeOptionLabel option={option} />
-                    <MenuRadioItemIndicator />
                   </span>
                 </MenuRadioItem>
                 {index === 0 && allOption ? <MenuSeparator /> : null}

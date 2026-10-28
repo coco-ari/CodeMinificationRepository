@@ -34,6 +34,9 @@ function recordEffect(action: string) {
   state.completed.resolve();
 }
 
+vi.mock("../autoops/threadVisibilityMenu", () => ({
+  showThreadMenuWithVisibility: (show: typeof state.show, items: Parameters<typeof state.show>[0], position: Parameters<typeof state.show>[1]) => show(items, position),
+}));
 vi.mock("../components/CustomSnoozeDialog", () => ({ requestCustomSnooze: vi.fn() }));
 vi.mock("react", () => ({
   useCallback: (callback: unknown) => callback,

@@ -1,5 +1,4 @@
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { CheckIcon } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { isMonospaceFamily, queryInstalledFontFamilies } from "../../appearanceFonts";
 import {
@@ -113,7 +112,8 @@ export function FontFamilyPicker({
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
-    if (nextOpen) setQuery("");
+    // 搜索输入也会报告打开状态，仅首次展开时清空旧查询。
+    if (nextOpen && !open) setQuery("");
   };
 
   const families = enumeration.status === "granted" ? enumeration.families : [];
@@ -158,9 +158,6 @@ export function FontFamilyPicker({
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             {isDefault ? <span className="text-3xs text-muted-foreground/60">默认</span> : null}
-            {item === selectedValue ? (
-              <CheckIcon className="size-3.5 text-muted-foreground" />
-            ) : null}
           </span>
         </div>
       </ComboboxItem>

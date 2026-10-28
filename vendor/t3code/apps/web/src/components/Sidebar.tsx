@@ -1,3 +1,4 @@
+import { showThreadMenuWithVisibility } from "~/autoops/threadVisibilityMenu";
 import { autoOpsFeature, filterAutoOpsThreadMenu, isAutoOpsHosted, isAutoOpsLite } from "~/autoops/capabilities";
 import { useAutoOpsProjectId } from "~/autoops/projectNavigation";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
@@ -4272,13 +4273,16 @@ export default function Sidebar() {
           session.worktreePath ??
           projectByKey.get(`${session.environmentId}:${session.projectId}`)?.workspaceRoot;
         const clicked = await settlePromise(() =>
-          api.contextMenu.show(
+          showThreadMenuWithVisibility(
+            api.contextMenu.show,
             buildDraftActionMenuItems({
               hasPath: Boolean(workspacePath),
               hasBranch: Boolean(session.branch),
               hasProject: projectGroup != null,
             }),
             position,
+            { threadId: session.threadId, projectId: session.projectId, draftId,
+              canOperate: () => readEnvironmentScope(session.environmentId, AuthOrchestrationOperateScope) },
           ),
         );
         if (clicked._tag === "Failure") return;
@@ -4352,7 +4356,8 @@ export default function Sidebar() {
             ),
           ) ?? null;
         const clicked = await settlePromise(() =>
-          api.contextMenu.show(
+          showThreadMenuWithVisibility(
+            api.contextMenu.show,
             buildThreadActionMenuItems({
               canOperate: readEnvironmentScope(
                 threadRef.environmentId,
@@ -4382,6 +4387,8 @@ export default function Sidebar() {
               snoozePresets,
             }),
             position,
+            { threadId: thread.id, projectId: thread.projectId,
+              canOperate: () => readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) },
           ),
         );
         if (clicked._tag === "Failure" || clicked.value === null) return;

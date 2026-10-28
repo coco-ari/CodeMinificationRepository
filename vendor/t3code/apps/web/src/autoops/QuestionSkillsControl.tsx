@@ -4,6 +4,7 @@ import {
   ComposerControl,
   ComposerControlChevron,
   ComposerControlIcon,
+  type ComposerControlSize,
 } from '~/components/chat/ComposerControl'
 import { ComposerContextLabel } from '~/components/ComposerContextLabel'
 import { useComposerMenuProps } from '~/components/chat/composerEventScope'
@@ -34,6 +35,7 @@ export function QuestionSkillsControl({
   onChange,
   onReconcileUnavailable,
   customerRuntime,
+  size = 'sm',
 }: {
   scope: AutoOpsThreadScope
   locked: boolean
@@ -41,6 +43,7 @@ export function QuestionSkillsControl({
   onChange(ids: string[]): void
   onReconcileUnavailable(ids: string[]): void
   customerRuntime?: CustomerRuntime | undefined
+  size?: ComposerControlSize
 }) {
   const question = scope.question
   const selected = question?.configuration.skillIds ?? []
@@ -171,6 +174,7 @@ export function QuestionSkillsControl({
       <>
         <ScopeComposerChoice
           label="技能"
+          size={size}
           labelWidth={2.5}
           summary={summary}
           icon={BookOpenIcon}
@@ -194,15 +198,15 @@ export function QuestionSkillsControl({
   return (
     <Menu modal={false}>
       <MenuTrigger
-        render={<ComposerControl />}
+        render={<ComposerControl size={size} />}
         aria-label="技能"
         aria-description={summary}
         disabled={disabled}
         data-composer-context-control
       >
-        <ComposerControlIcon icon={BookOpenIcon} size="sm" />
+        <ComposerControlIcon icon={BookOpenIcon} size={size} />
         <ComposerContextLabel reservedWidth={2.5}>{summary}</ComposerContextLabel>
-        <ComposerControlChevron />
+        <ComposerControlChevron size={size} />
       </MenuTrigger>
       <MenuPopup side="top" align="start" {...floating}>
         <MenuGroupLabel>技能</MenuGroupLabel>

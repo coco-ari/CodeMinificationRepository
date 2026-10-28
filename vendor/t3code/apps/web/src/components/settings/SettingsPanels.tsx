@@ -8,7 +8,7 @@ import { useScopedSettingsWriteAllowed } from './useScopedSettings'
 import { Spinner } from '~/components/ui/spinner'
 import { NotificationSettings } from './NotificationSettings'
 import { PRIVACY_POLICY_URL } from '../../legalLinks'
-import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from 'lucide-react'
+import { ArchiveIcon, ArchiveX, ChevronRightIcon, SettingsIcon } from 'lucide-react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import type { CSSProperties, ReactNode } from 'react'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
@@ -2847,7 +2847,6 @@ export function GeneralSettingsPanel() {
                   <SelectItem key={option.value} value={option.value}>
                     <span className="flex items-center justify-between gap-4">
                       {option.label}
-                      {settings.sendShortcut === option.value && <CheckIcon aria-hidden="true" />}
                     </span>
                   </SelectItem>
                 ))}

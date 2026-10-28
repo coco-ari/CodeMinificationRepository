@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -91,7 +91,6 @@ export function ComposerCodeBlockLanguagePicker(props: {
               <ComboboxItem key={entry.id || "plain"} value={entry}>
                 <LanguageIcon language={entry.id} theme={props.theme} />
                 <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-                {entry.id === current ? <CheckIcon className="ml-auto" /> : null}
               </ComboboxItem>
             )}
           </ComboboxList>

@@ -986,7 +986,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         ? selectedModelKeySet.has(modelKey)
                         : modelKey === activeModelKey
                     }
-                    showSelection={selectedModelKeys !== undefined}
                     showProvider
                     preferShortName={!isLocked}
                     useTriggerLabel={false}

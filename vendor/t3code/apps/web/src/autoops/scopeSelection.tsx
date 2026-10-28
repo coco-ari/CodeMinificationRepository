@@ -4,6 +4,7 @@ import {
   ComposerControl,
   ComposerControlChevron,
   ComposerControlIcon,
+  type ComposerControlSize,
 } from '~/components/chat/ComposerControl'
 import { ComposerContextLabel } from '~/components/ComposerContextLabel'
 import { useComposerMenuProps } from '~/components/chat/composerEventScope'
@@ -15,7 +16,6 @@ import {
   MenuGroupLabel,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuRadioItemIndicator,
   MenuSeparator,
 } from '~/components/ui/menu'
 import { Tooltip, TooltipTrigger, TooltipPopup } from '~/components/ui/tooltip'
@@ -48,6 +48,7 @@ export function ScopeComposerChoice({
   lockReason,
   keepSummaryVisible = false,
   labelWidth = 5,
+  size = 'sm',
 }: {
   label: string
   summary: string
@@ -61,20 +62,21 @@ export function ScopeComposerChoice({
   lockReason?: string | undefined
   keepSummaryVisible?: boolean
   labelWidth?: number
+  size?: ComposerControlSize
 }) {
   const floating = useComposerMenuProps()
   const content = (
     <>
-      <ComposerControlIcon icon={Icon} size={locked ? 'xs' : 'sm'} />
+      <ComposerControlIcon icon={Icon} size={locked ? 'xs' : size} />
       <ComposerContextLabel
         reservedWidth={labelWidth}
         compactBehavior={keepSummaryVisible ? 'truncate' : 'hide'}
       >
-        {summary}
+        <span className="block text-left">{summary}</span>
       </ComposerContextLabel>
     </>
   )
-  if (locked)
+  if (locked && !footer)
     return (
       <Tooltip>
         <TooltipTrigger
@@ -102,28 +104,27 @@ export function ScopeComposerChoice({
         <TooltipTrigger
           render={
             <MenuTrigger
-              render={<ComposerControl />}
+              render={<ComposerControl size={size} />}
               aria-label={label}
               aria-description={summary}
               disabled={disabled}
               data-composer-context-control
             >
               {content}
-              <ComposerControlChevron />
+              <ComposerControlChevron size={size} />
             </MenuTrigger>
           }
         />
-        <TooltipPopup>{summary}</TooltipPopup>
+        <TooltipPopup>{summary}{locked ? ` · ${lockReason ?? '首条消息已接受，切换范围请新建对话。'}` : ''}</TooltipPopup>
       </Tooltip>
       <MenuPopup side="top" align="start" {...floating}>
         <MenuGroup>
           <MenuGroupLabel>{label}</MenuGroupLabel>
           <MenuRadioGroup value={value} onValueChange={onChange}>
             {options.map((option) => (
-              <MenuRadioItem key={option.value} value={option.value} disabled={option.disabled} closeOnClick>
+              <MenuRadioItem key={option.value} value={option.value} disabled={locked || option.disabled} closeOnClick>
                 <span className="flex items-center gap-2">
                   <span className="min-w-0 flex-1">{option.label}</span>
-                  <MenuRadioItemIndicator />
                 </span>
               </MenuRadioItem>
             ))}

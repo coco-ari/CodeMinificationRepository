@@ -1,3 +1,5 @@
+import { showThreadMenuWithVisibility } from "~/autoops/threadVisibilityMenu";
+import { showContextMenuFallback } from "~/contextMenuFallback";
 import { createRef, useRef } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
@@ -7,12 +9,13 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  type ContextMenuItem,
   type ModelSelection,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { compileResolvedKeybindingsConfig } from "@t3tools/shared/keybindings";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { prepareHostThreadLaunch } from "@t3tools/client-runtime/host-integration";
 import { fakeTimers, render, stubGlobal } from "../../../test/render";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
@@ -588,7 +591,7 @@ it("有调整权者从实际模型菜单显式更换模型，发送只改变本�
   expect(f.preset.configuration.model.model).toBe("selected-actual-model");
 });
 
-it("管理员选择助手后仍可调整范围和可见性，停用助手显示原因且不能选用", async () => {
+it("管理员选择助手后仍可调整资料范围，停用助手不出现在候选中", async () => {
   const f = setup("actual-composer-scope-menu", true);
   const provider = { ...f.provider, models: [...f.provider.models,
     { ...f.provider.models[0]!, slug: "second-actual-model", name: "另一个模型" }] };
@@ -606,24 +609,20 @@ it("管理员选择助手后仍可调整范围和可见性，停用助手显示�
   await using screen = await render(<Harness fixture={f} providers={[provider]} />);
   await page.getByRole("button", { name: "助手", exact: true }).click();
   await expect.element(page.getByRole("menuitemradio", { name: "暂停助手 · 助手已停用", exact: true }))
-    .toHaveAttribute("aria-disabled", "true");
+    .not.toBeInTheDocument();
   await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
   await vi.waitFor(() => expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe("preset-two"));
   const workspace = screen.getByRole("button", { name: "资料范围", exact: true }).element();
-  const visibility = screen.getByRole("button", { name: "会话可见范围", exact: true }).element();
+  await expect.element(screen.getByRole("button", { name: "会话可见范围", exact: true })).not.toBeInTheDocument();
   await userEvent.click(workspace);
-  await userEvent.click(visibility);
   await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
   await screen.getByRole("button", { name: "技能", exact: true }).click();
   await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
-  await userEvent.click(visibility);
-  await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
-  await page.getByRole("menuitemradio", { name: "项目共享", exact: true }).click();
   await userEvent.click(workspace);
   await page.getByRole("menuitemradio", { name: "内部当前资料", exact: true }).click();
   await vi.waitFor(() => expect(readAutoOpsThreadScope(f.id, "composer-project")).toMatchObject({
-    workspaceType: "internal", visibility: "project", question: {
-      assistantId: "preset-two", configuration: { workspaceType: "internal", visibility: "project",
+    workspaceType: "internal", visibility: "private", question: {
+      assistantId: "preset-two", configuration: { workspaceType: "internal", visibility: "private",
         model: { model: "second-actual-model", reasoningEffort: "low" } },
     },
   }));
@@ -650,8 +649,8 @@ it("紧凑问答栏仍显示当前助手，菜单明确标记已选项并可重�
   await assistant.click();
   const selected = page.getByRole("menuitemradio", { name: f.preset.name, exact: true });
   await expect.element(selected).toHaveAttribute("aria-checked", "true");
-  expect(selected.element().querySelector("[data-slot=menu-radio-item-indicator]")?.getBoundingClientRect().width ?? 0)
-    .toBeGreaterThan(0);
+  expect(selected.element().querySelector("[data-slot=menu-radio-item-indicator]")).toBeNull();
+  expect(getComputedStyle(selected.element()).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
   await selected.click();
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
   expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe(f.preset.id);
@@ -662,8 +661,8 @@ it("紧凑问答栏仍显示当前助手，菜单明确标记已选项并可重�
   await assistant.click();
   const changed = page.getByRole("menuitemradio", { name: "另一个来源", exact: true });
   await expect.element(changed).toHaveAttribute("aria-checked", "true");
-  expect(changed.element().querySelector("[data-slot=menu-radio-item-indicator]")!.getBoundingClientRect().width)
-    .toBeGreaterThan(0);
+  expect(changed.element().querySelector("[data-slot=menu-radio-item-indicator]")).toBeNull();
+  expect(getComputedStyle(changed.element()).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
   await userEvent.keyboard("{Escape}");
   await expect.element(editor()).toHaveFocus();
   expect(f.bindings).toHaveLength(0);
@@ -841,8 +840,8 @@ it.each([{ width: 1280, dark: false }, { width: 390, dark: true }])("$width px �
 });
 
 
-it.each([1280, 390])("无助手的长提示独占反馈行，不挤动范围控件，宽度 %s", async (width) => {
-  await page.viewport(width, 780);
+it.each([1280, 390])("无助手不显示额外提示，刷新归入菜单，宽度 %s", async (width) => {
+  await page.viewport(width, 600);
   const f = setup(`empty-assistants-${width}`, true);
   const host = readAutoOpsHost()!;
   const reason = "尚无可用助手，请在项目管理中配置";
@@ -864,29 +863,122 @@ it.each([1280, 390])("无助手的长提示独占反馈行，不挤动范围控�
   );
   const { question: _question, ...scope } = readAutoOpsThreadScope(f.id, "composer-project")!;
   setAutoOpsThreadScope(f.id, scope);
-  using _fetch = stubGlobal("fetch", f.fetcher);
+  let refreshes = 0;
+  using _fetch = stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith("/autoops/bootstrap")) {
+      refreshes++;
+      return Response.json(host);
+    }
+    return f.fetcher(input, init);
+  });
   await using screen = await render(<Harness fixture={f} reason={reason} />);
-  await expect.element(screen.getByText(reason, { exact: true })).toBeVisible();
-  await expect.element(screen.getByRole("button", { name: "刷新助手", exact: true })).toBeVisible();
-  await expect
-    .poll(() => {
-      const strip = screen.container.querySelector<HTMLElement>("[data-autoops-thread-scope]")!;
-      const feedback = strip.querySelector<HTMLElement>('[role="status"]')!.getBoundingClientRect();
-      const controls = [...strip.querySelectorAll<HTMLElement>("button[aria-label]")].map((e) =>
-        e.getBoundingClientRect(),
-      );
-      return Math.max(...controls.map((r) => r.bottom)) <= feedback.top;
-    })
-    .toBe(true);
-  if (width === 1280) {
-    const controls = [
-      ...screen.container.querySelectorAll<HTMLElement>(
-        "[data-autoops-thread-scope] button[aria-label]",
-      ),
-    ];
-    await expect.poll(() => new Set(controls.map((e) => Math.round(e.getBoundingClientRect().top))).size).toBe(1);
-  }
+  const assistant = screen.getByRole("button", { name: "助手", exact: true });
+  await expect.element(assistant).toHaveTextContent("选择助手");
+  await expect.element(screen.getByLabelText("会话可见范围", { exact: true })).not.toBeInTheDocument();
+  await expect.element(screen.getByText(reason, { exact: true })).not.toBeInTheDocument();
+  expect(assistant.element().getBoundingClientRect().width).toBeLessThanOrEqual(140);
+  await expect.element(screen.getByRole("button", { name: "刷新助手", exact: true })).not.toBeInTheDocument();
+  const controls = () => [...screen.container.querySelectorAll<HTMLElement>(
+    '[data-autoops-thread-scope] button[aria-label]',
+  )];
+  await expect.poll(() => new Set(controls().map((e) => Math.round(e.getBoundingClientRect().top))).size).toBe(1);
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-  await editor().fill("连接恢复前保留草稿");
-  await expect.element(editor()).toHaveTextContent("连接恢复前保留草稿");
+  await editor().fill("刷新后保留这份草稿");
+  await assistant.click();
+  await expect.element(page.getByRole("menu").getByText(reason, { exact: true })).not.toBeInTheDocument();
+  await page.getByRole("menuitem", { name: "刷新助手", exact: true }).click();
+  await expect.poll(() => refreshes).toBe(1);
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+  await expect.element(editor()).toHaveTextContent("刷新后保留这份草稿");
+  await assistant.click();
+  await expect.element(page.getByRole("menuitemradio", { name: "当前助手", exact: true })).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(editor()).toHaveFocus();
+});
+
+
+it("助手候选隐藏停用项，保留启用但离线的真实状态，选中只用背景", async () => {
+  const f = setup("composer-hidden-disabled", true);
+  const host = readAutoOpsHost()!;
+  installAutoOpsHost({ ...host, projects: host.projects.map(project => ({ ...project,
+    assistants: { ...project.assistants!, items: [
+      project.assistants!.items[0]!,
+      { ...project.assistants!.items[1]!, preset: { ...project.assistants!.items[1]!.preset, enabled: false } },
+      { preset: { ...f.preset, id: "offline", name: "离线助手" }, available: false,
+        reason: { code: "CUSTOMER_DEVICE_OFFLINE", message: "设备离线" } },
+    ] },
+  })) }, window.location.origin);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} />);
+  await screen.getByRole("button", { name: "助手", exact: true }).click();
+  await expect.element(page.getByRole("menuitemradio", { name: "另一个来源", exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByRole("menuitemradio", { name: "离线助手 · 设备离线", exact: true })).toHaveAttribute("aria-disabled", "true");
+  const selected = page.getByRole("menuitemradio", { name: "当前助手", exact: true });
+  await expect.element(selected).toHaveAttribute("aria-checked", "true");
+  expect(selected.element().querySelector("svg")).toBeNull();
+  expect(getComputedStyle(selected.element()).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  await userEvent.keyboard("{Escape}");
+});
+
+it("刷新助手失败保留草稿，菜单可再次刷新恢复", async () => {
+  const f = setup("composer-refresh-recovery", true);
+  const host = readAutoOpsHost()!;
+  let requests = 0;
+  using _fetch = stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith("/autoops/bootstrap")) {
+      requests++;
+      return requests === 1 ? Response.json({ error: "测试读取失败" }, { status: 503 }) : Response.json(host);
+    }
+    return f.fetcher(input, init);
+  });
+  await using screen = await render(<Harness fixture={f} />);
+  await editor().fill("错误后保留草稿");
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await screen.getByRole("button", { name: "助手", exact: true }).click();
+    await page.getByRole("menuitem", { name: "刷新助手", exact: true }).click();
+    await expect.poll(() => requests).toBe(attempt);
+    await expect.element(editor()).toHaveTextContent("错误后保留草稿");
+  }
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe(f.preset.id);
+});
+
+it.each(["more", "right-click"])("会话 %s 菜单更改草稿可见范围，保留文本和模型且无勾选图标", async (entry) => {
+  const f = setup(`visibility-${entry}`, true);
+  useComposerDraftStore.getState().setProjectDraftThreadId(
+    scopeProjectRef(f.environmentId, ProjectId.make("composer-project")), f.draftId, { threadId: f.threadId },
+  );
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  const open = () => void showThreadMenuWithVisibility(showContextMenuFallback, [{ id: "discard", label: "丢弃草稿" }],
+    { x: 20, y: 20 }, { threadId: f.id, projectId: "composer-project", draftId: f.draftId, canOperate: () => true });
+  await using screen = await render(<><button onClick={open} onContextMenu={event => { event.preventDefault(); open(); }}>对话更多操作</button><Harness fixture={f} /></>);
+  await editor().fill("切换可见范围仍然保留");
+  await screen.getByRole("button", { name: "对话更多操作" }).click(entry === "right-click" ? { button: "right" } : {});
+  await page.getByRole("menuitem", { name: "会话可见范围", exact: true }).click();
+  const selected = page.getByRole("menuitemradio", { name: "仅自己", exact: true });
+  await expect.element(selected).toHaveAttribute("aria-checked", "true");
+  expect(selected.element().querySelector("svg")).toBeNull();
+  await page.getByRole("menuitemradio", { name: "项目共享", exact: true }).click();
+  await expect.poll(() => readAutoOpsThreadScope(f.id, "composer-project")?.visibility).toBe("project");
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.configuration.visibility).toBe("project");
+  await expect.element(editor()).toHaveTextContent("切换可见范围仍然保留");
+  expect(f.handle.current?.getSendContext().selectedModelSelection).toMatchObject(f.selected);
+  expect(f.bindings).toHaveLength(0);
+});
+
+it.each(["locked", "permission", "customer", "submitting"])("可见范围遵守 %s 限制，菜单打开后也会重核", async (mode) => {
+  const f = setup(`visibility-block-${mode}`, mode !== "permission", mode === "customer");
+  useComposerDraftStore.getState().setProjectDraftThreadId(
+    scopeProjectRef(f.environmentId, ProjectId.make("composer-project")), f.draftId, { threadId: f.threadId },
+  );
+  const current = readAutoOpsThreadScope(f.id, "composer-project")!;
+  const show = async <T extends string>(items: readonly ContextMenuItem<T>[]): Promise<T | null> => {
+    if (mode === "locked" || mode === "submitting") setAutoOpsThreadScope(f.id, { ...current,
+      scopeState: mode, scopeLocked: mode === "locked" });
+    else expect(items[0]?.children?.every(item => item.disabled)).toBe(true);
+    return "visibility:project" as T;
+  };
+  await showThreadMenuWithVisibility(show, [], { x: 0, y: 0 }, {
+    threadId: f.id, projectId: "composer-project", draftId: f.draftId, canOperate: () => true,
+  });
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.visibility).toBe("private");
 });
