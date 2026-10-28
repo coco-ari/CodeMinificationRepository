@@ -47,6 +47,7 @@ export function ScopeComposerChoice({
   footer,
   lockReason,
   keepSummaryVisible = false,
+  labelWidth = 5,
 }: {
   label: string
   summary: string
@@ -59,12 +60,16 @@ export function ScopeComposerChoice({
   footer?: ReactNode
   lockReason?: string | undefined
   keepSummaryVisible?: boolean
+  labelWidth?: number
 }) {
   const floating = useComposerMenuProps()
   const content = (
     <>
       <ComposerControlIcon icon={Icon} size={locked ? 'xs' : 'sm'} />
-      <ComposerContextLabel compactBehavior={keepSummaryVisible ? 'truncate' : 'hide'}>
+      <ComposerContextLabel
+        reservedWidth={labelWidth}
+        compactBehavior={keepSummaryVisible ? 'truncate' : 'hide'}
+      >
         {summary}
       </ComposerContextLabel>
     </>

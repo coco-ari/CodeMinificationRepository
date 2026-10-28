@@ -717,12 +717,11 @@ export const TraitsPicker = memo(function TraitsPicker({
                 <ComposerControl
                   disabled={disabled}
                   aria-label={triggerLabel}
+                  data-composer-reserved-width="true"
                   data-composer-shortcut={isComposerOwned ? "composer.effort" : undefined}
                   size={size}
                   className={cn(
-                    isCodexStyle
-                      ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap sm:max-w-48"
-                      : "shrink-0 whitespace-nowrap",
+                    "w-28 min-w-0 max-w-28 shrink justify-start overflow-hidden whitespace-nowrap [[data-composer-block-icon-only=true]_&]:w-auto",
                     triggerClassName,
                   )}
                 />
@@ -738,7 +737,7 @@ export const TraitsPicker = memo(function TraitsPicker({
               )}
             >
               <ComposerControlIcon icon={BrainIcon} size={size} />
-              <span data-composer-control-label className="min-w-0 truncate">
+              <span data-composer-control-label className="min-w-0 flex-1 truncate">
                 {triggerLabel}
               </span>
               <ComposerControlChevron size={size} />
@@ -746,7 +745,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           ) : (
             <>
               <ComposerControlIcon icon={BrainIcon} size={size} />
-              <span data-composer-control-label>{triggerLabel}</span>
+              <span data-composer-control-label className="min-w-0 flex-1 truncate">{triggerLabel}</span>
               <ComposerControlChevron size={size} />
             </>
           )}

@@ -28,6 +28,7 @@ export function WorkspaceScopeControl({
   const summary = `${selected === 'external' ? '外部脱敏' : '内部原始'} · 当前工作区`
   return (
     <ScopeComposerChoice
+      labelWidth={9}
       label="对话工作区"
       summary={summary}
       icon={selected === 'external' ? ShieldCheckIcon : FolderGit2Icon}

@@ -294,3 +294,19 @@ describe("ProviderModelPicker", () => {
     expect(label).toContain("CP");
   });
 });
+
+it("切换长短模型名称时预留同一槽位，不推挤相邻控件", async () => {
+  await page.viewport(1440, 600);
+  const entry = providerEntry("codex", "codex");
+  const options = [{ slug: "short", name: "短模型" }, { slug: "long", name: "这是一个很长的模型名称用于验证选择后布局稳定" }];
+  const view = (model: string) => <div className="flex items-center gap-2">
+    <ProviderModelPicker environmentId={null} activeInstanceId={entry.instanceId} model={model}
+      lockedProvider={null} instanceEntries={[entry]} modelOptionsByInstance={new Map([[entry.instanceId, options]])}
+      onInstanceModelChange={() => {}} />
+    <button>模型后面的操作</button>
+  </div>;
+  await using screen = await renderUi(view("short"));
+  const before = screen.getByRole("button", { name: "模型后面的操作" }).element().getBoundingClientRect().x;
+  await screen.rerender(view("long"));
+  expect(screen.getByRole("button", { name: "模型后面的操作" }).element().getBoundingClientRect().x).toBe(before);
+});

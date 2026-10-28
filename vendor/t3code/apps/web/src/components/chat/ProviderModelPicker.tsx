@@ -197,11 +197,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             aria-label={props.triggerAriaLabel ?? allModelNames}
             size={size}
             data-chat-provider-model-picker="true"
+            data-composer-reserved-width="true"
             className={cn(
               "min-w-0 shrink justify-between whitespace-nowrap",
               props.compact
-                ? "max-w-42 shrink-0"
-                : !props.isComposerOwned && "max-w-48 sm:max-w-56",
+                ? "w-42 max-w-42 shrink-0"
+                : size === "xs" ? "w-40 max-w-40" : "w-48 max-w-48",
               props.triggerClassName,
             )}
             disabled={props.disabled}

@@ -388,6 +388,7 @@ export function AutoOpsThreadScopeControl({
         {host.assistantDirectoryEnabled ? (
           <ScopeComposerChoice
             label="助手"
+            labelWidth={10}
             keepSummaryVisible
             summary={
               project.assistants?.items.find(
@@ -425,6 +426,7 @@ export function AutoOpsThreadScopeControl({
         {host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
           <ScopeComposerChoice
             label="资料范围"
+            labelWidth={6}
             summary={scope.workspaceType === "external" ? "外部当前资料" : "内部当前资料"}
             icon={EyeIcon}
             value={scope.workspaceType ?? "internal"}
@@ -496,6 +498,7 @@ export function AutoOpsThreadScopeControl({
         />
         <ScopeComposerChoice
           label="会话可见范围"
+          labelWidth={3}
           summary={scope.visibility === "private" ? "仅自己" : "项目共享"}
           icon={EyeIcon}
           value={scope.visibility}

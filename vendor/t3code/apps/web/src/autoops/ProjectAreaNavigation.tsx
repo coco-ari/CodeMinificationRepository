@@ -24,9 +24,8 @@ import { useThreadSelectionStore } from '~/threadSelectionStore'
 import { Button } from '~/components/ui/button'
 import { WorkspacePageHeader } from '~/components/WorkspacePageHeader'
 import { SidebarTrigger } from '~/components/ui/sidebar'
-import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
+import { ProjectModuleNavigation } from './ProjectModuleNavigation'
 import { toastManager } from '~/components/ui/toast'
-import { useMediaQuery } from '~/hooks/useMediaQuery'
 import {
   Combobox,
   ComboboxEmpty,
@@ -69,8 +68,6 @@ export function AutoOpsProjectRouteSync() {
   return null
 }
 
-type FunctionItem = (typeof areas)[number]
-
 /** 项目与模块集中排列，切换继续使用原生搜索和焦点流程。 */
 export function ProjectAreaTopbar() {
   const host = useAutoOpsHost()
@@ -78,28 +75,19 @@ export function ProjectAreaTopbar() {
   const location = useLocation()
   const pathname = location.pathname
   const navigate = useNavigate()
-  const wide = useMediaQuery('lg')
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
-  const [functionOpen, setFunctionOpen] = useState(false)
-  const [functionQuery, setFunctionQuery] = useState('')
   const filter = useComboboxFilter()
   useEffect(() => {
     setOpen(false)
     setQuery('')
-    setFunctionOpen(false)
-    setFunctionQuery('')
-  }, [projectId, pathname, wide])
+  }, [projectId, pathname])
   if (!host) return null
   const selected = host.projects.find((project) => project.id === projectId) ?? null
   const currentArea = autoOpsAreaFromPath(pathname)
   const settings = pathname === '/settings' || pathname.startsWith('/settings/')
   const filtered = host.projects.filter((project) => filter.contains(project.name, query))
   const availableAreas = areas.filter((area) => autoOpsAreaAvailable(area.id, host, projectId))
-  const commonAreas = availableAreas.filter((area) => area.common)
-  const items = availableAreas.filter((area) => !wide || !area.common)
-  const filteredFunctions = items.filter((item) => filter.contains(item.label, functionQuery))
-  const currentFunction = settings ? null : (items.find((item) => item.id === currentArea) ?? null)
   const currentLabel = settings
     ? '设置'
     : (areas.find((area) => area.id === currentArea)?.label ?? '选择模块')
@@ -140,8 +128,7 @@ export function ProjectAreaTopbar() {
       {settings || areas.find((area) => area.id === currentArea)?.sidebar ? (
         <SidebarTrigger aria-label="切换主侧栏" />
       ) : null}
-      <span className="hidden shrink-0 text-sm font-semibold sm:block">AutoOps</span>
-      <div className="min-w-0 flex-1 sm:max-w-52 sm:flex-none">
+      <div className="w-52 max-w-[38%] min-w-0 shrink-0">
         <Combobox
           items={host.projects}
           filteredItems={filtered}
@@ -178,6 +165,7 @@ export function ProjectAreaTopbar() {
                 variant="ghost"
                 size="sm"
                 aria-label="切换项目"
+                title={selected?.name ?? '选择项目'}
                 className="w-full min-w-0 justify-start"
               />
             }
@@ -210,92 +198,14 @@ export function ProjectAreaTopbar() {
           </ComboboxPopup>
         </Combobox>
       </div>
-      <div className="hidden h-5 w-px shrink-0 bg-border lg:block" aria-hidden="true" />
-      {wide ? (
-        <nav aria-label="常用模块" className="min-w-0 shrink-0">
-          <ToggleGroup
-            variant="segmented"
-            aria-label="项目功能"
-            value={
-              settings || !commonAreas.some((area) => area.id === currentArea) ? [] : [currentArea]
-            }
-            onValueChange={(value) => {
-              const area = commonAreas.find((entry) => entry.id === value[0])
-              if (area) go(area.id)
-            }}
-          >
-            {commonAreas.map((area) => (
-              <Toggle
-                key={area.id}
-                value={area.id}
-                aria-label={area.label}
-                aria-current={!settings && currentArea === area.id ? 'page' : undefined}
-                disabled={!projectId && area.scope === 'project'}
-              >
-                <area.icon />
-                <span>{area.label}</span>
-              </Toggle>
-            ))}
-          </ToggleGroup>
-        </nav>
-      ) : null}
-      {items.length > 0 ? (
-        <Combobox<FunctionItem>
-          items={items}
-          filteredItems={filteredFunctions}
-          aria-label="搜索功能"
-          autoHighlight
-          itemToStringLabel={(item) => item.label}
-          isItemEqualToValue={(left, right) => left.id === right.id}
-          value={currentFunction}
-          open={functionOpen}
-          onOpenChange={(value) => {
-            setFunctionOpen(value)
-            if (!value) setFunctionQuery('')
-          }}
-          onValueChange={(item) => {
-            if (item) go(item.id)
-          }}
-        >
-          <ComboboxTrigger
-            render={
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-label={wide ? '更多功能' : '切换模块'}
-                className="max-w-40 min-w-0 shrink-0"
-              />
-            }
-          >
-            {wide && currentFunction ? <currentFunction.icon /> : null}
-            <span className="truncate">
-              {wide ? (currentFunction?.label ?? '更多') : currentLabel}
-            </span>
-            <ChevronDownIcon className="size-3.5 shrink-0" />
-          </ComboboxTrigger>
-          <ComboboxPopup align="end" className="w-64 max-w-(--available-width)">
-            <ComboboxSearchInput
-              aria-label="搜索功能"
-              placeholder="搜索功能…"
-              value={functionQuery}
-              onChange={(event) => setFunctionQuery(event.target.value)}
-            />
-            <ComboboxEmpty>没有匹配的功能。</ComboboxEmpty>
-            <ComboboxList>
-              {(item: FunctionItem) => (
-                <ComboboxItem
-                  key={item.id}
-                  value={item}
-                  disabled={!projectId && item.scope !== 'global'}
-                >
-                  <item.icon className="size-4 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                </ComboboxItem>
-              )}
-            </ComboboxList>
-          </ComboboxPopup>
-        </Combobox>
-      ) : null}
+      <div className="h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+      <ProjectModuleNavigation
+        contextKey={projectId}
+        items={availableAreas.toSorted((a, b) => Number(b.common) - Number(a.common))}
+        current={settings ? null : currentArea}
+        currentLabel={currentLabel}
+        onNavigate={go}
+      />
     </WorkspacePageHeader>
   )
 }

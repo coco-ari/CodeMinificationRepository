@@ -6,9 +6,10 @@ import {
 } from "../composerFooterLayout";
 import { measureRestingComposerControls } from "./restingComposerControlsMeasurement";
 
-function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?: string }) {
+function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?: string; reserved?: boolean }) {
   const label = { clientWidth: input.clientWidth, scrollWidth: 160 };
   const picker = {
+    dataset: { composerReservedWidth: input.reserved ? "true" : undefined },
     getBoundingClientRect: () => ({ width: 52 }),
     querySelector: () => label,
   };
@@ -23,6 +24,7 @@ function measurePicker(input: { clientWidth: number; flexGrow: string; maxWidth?
     querySelectorAll: () => [
       {
         dataset: {},
+        querySelector: () => null,
         querySelectorAll: () => [],
         getBoundingClientRect: () => ({ width: 140 }),
       },
@@ -78,4 +80,9 @@ describe("measureRestingComposerControls", () => {
       measurePicker({ clientWidth: 0, flexGrow: "1", maxWidth: "180px" }).naturalFixedWidth,
     ).toBe(180);
   });
+});
+
+it("reserves the same model slot even when its short label fits the squeezed control", () => {
+  const measurement = measurePicker({ clientWidth: 160, flexGrow: "1", maxWidth: "192px", reserved: true });
+  expect(measurement.naturalFixedWidth).toBe(192);
 });
