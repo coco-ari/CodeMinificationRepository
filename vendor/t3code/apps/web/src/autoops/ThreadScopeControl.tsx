@@ -397,8 +397,13 @@ export function AutoOpsThreadScopeControl({
             value={scope.question?.assistantId ?? ""}
             options={
               project.assistants?.items
-                .filter((item) => item.available)
-                .map((item) => ({ value: item.preset.id, label: item.preset.name })) ?? []
+                .map((item) => ({
+                  value: item.preset.id,
+                  label: item.available
+                    ? item.preset.name
+                    : `${item.preset.name} · ${item.reason?.message ?? "暂不可用"}`,
+                  disabled: !item.available,
+                })) ?? []
             }
             locked={
               locked ||

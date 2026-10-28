@@ -17,6 +17,9 @@ export function useComposerMenuProps() {
     finalFocus: composerRef
       ? () => {
           const activeElement = document.activeElement;
+          // 相邻菜单已打开时保留其焦点，旧菜单关闭不能把焦点拉回输入框。
+          const activeLayer = activeElement?.closest(COMPOSER_FLOATING_LAYER_SELECTOR);
+          if (activeLayer?.getAttribute("data-state") === "open") return false;
           if (activeElement !== document.body && !isInsideComposerFloatingLayer(activeElement)) {
             return false;
           }

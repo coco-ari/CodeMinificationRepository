@@ -20,6 +20,7 @@ import { makeThreadFixture } from "~/test-fixtures";
 import { ComposerHandleContext } from "~/composerHandleContext";
 import {
   installAutoOpsHost,
+  readAutoOpsHost,
   readAutoOpsThreadScope,
   scopeFromAssistant,
   setAutoOpsThreadScope,
@@ -585,6 +586,49 @@ it("有调整权者从实际模型菜单显式更换模型，发送只改变本�
     },
   });
   expect(f.preset.configuration.model.model).toBe("selected-actual-model");
+});
+
+it("管理员选择助手后仍可调整范围和可见性，停用助手显示原因且不能选用", async () => {
+  const f = setup("actual-composer-scope-menu", true);
+  const provider = { ...f.provider, models: [...f.provider.models,
+    { ...f.provider.models[0]!, slug: "second-actual-model", name: "另一个模型" }] };
+  const host = readAutoOpsHost()!;
+  const project = host.projects[0]!;
+  installAutoOpsHost({ ...host, projects: [{ ...project, assistants: {
+    ...project.assistants!,
+    items: [...project.assistants!.items, {
+      preset: { ...f.preset, id: "paused-preset", name: "暂停助手", enabled: false },
+      available: false,
+      reason: { code: "ASSISTANT_DISABLED", message: "助手已停用" },
+    }],
+  } }] }, window.location.origin);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} providers={[provider]} />);
+  await page.getByRole("button", { name: "助手", exact: true }).click();
+  await expect.element(page.getByRole("menuitemradio", { name: "暂停助手 · 助手已停用", exact: true }))
+    .toHaveAttribute("aria-disabled", "true");
+  await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
+  await vi.waitFor(() => expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe("preset-two"));
+  const workspace = screen.getByRole("button", { name: "资料范围", exact: true }).element();
+  const visibility = screen.getByRole("button", { name: "会话可见范围", exact: true }).element();
+  await userEvent.click(workspace);
+  await userEvent.click(visibility);
+  await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
+  await screen.getByRole("button", { name: "技能", exact: true }).click();
+  await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
+  await userEvent.click(visibility);
+  await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1);
+  await page.getByRole("menuitemradio", { name: "项目共享", exact: true }).click();
+  await userEvent.click(workspace);
+  await page.getByRole("menuitemradio", { name: "内部当前资料", exact: true }).click();
+  await vi.waitFor(() => expect(readAutoOpsThreadScope(f.id, "composer-project")).toMatchObject({
+    workspaceType: "internal", visibility: "project", question: {
+      assistantId: "preset-two", configuration: { workspaceType: "internal", visibility: "project",
+        model: { model: "second-actual-model", reasoningEffort: "low" } },
+    },
+  }));
+  expect(project.assistants!.items[1]!.preset.configuration).toMatchObject({workspaceType: "external", visibility: "private"});
+  expect(f.bindings).toHaveLength(0);
 });
 
 it("实际输入器已有文本和未上传图片时切换来源新建干净草稿，原附件与选择保留", async () => {

@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { ServerIcon } from 'lucide-react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { act, fakeTimers, render, stubGlobal } from '../../test/render'
 import { QuestionSkillsControl } from './QuestionSkillsControl'
+import { ScopeComposerChoice } from './scopeSelection'
 import { installAutoOpsHost, readAutoOpsHost, type AutoOpsThreadScope } from './hostConfig'
 import type { CustomerAssistantRuntime } from '../../../../../../autoops/contracts/customer-assistant-runtime.ts'
 import { useCustomerRuntime, type CustomerRuntime } from './customerAgents'
@@ -414,6 +416,33 @@ function setupPlatform() {
   })
   return { library, fetcher }
 }
+
+it('技能和范围菜单相互切换不重叠，选择及Esc恢复不丢失原技能', async () => {
+  const f = setupPlatform(), changed = vi.fn()
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(
+    <div>
+      <ScopeComposerChoice label="业务环境" summary="无环境" icon={ServerIcon}
+        value="none" options={[{ value: 'none', label: '无环境' }]}
+        locked={false} disabled={false} onChange={() => {}} />
+      <Harness value={platformScope([])} onChange={changed} />
+    </div>,
+  )
+  const environment = screen.getByRole('button', { name: '业务环境', exact: true }).element()
+  const skills = screen.getByRole('button', { name: '技能', exact: true }).element()
+  await userEvent.click(environment)
+  await userEvent.click(skills)
+  await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1)
+  await page.getByRole('menuitemcheckbox', { name: '平台资料解读', exact: true }).click()
+  expect(changed).toHaveBeenCalledExactlyOnceWith(['platform-read'])
+  await userEvent.click(skills)
+  await userEvent.click(environment)
+  await expect.poll(() => document.querySelectorAll('[role="menu"]').length).toBe(1)
+  await userEvent.keyboard('{Escape}')
+  await expect.element(page.getByRole('menu')).not.toBeInTheDocument()
+  await expect.poll(() => document.activeElement).toBe(environment)
+  expect(changed).toHaveBeenCalledTimes(1)
+})
 
 it.each(['模型', '思考强度', '所选技能'])(
   '平台草稿改变%s时保留同授权目录的真实技能名称，不重复等待目录',

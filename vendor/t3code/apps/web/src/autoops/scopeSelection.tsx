@@ -50,7 +50,7 @@ export function ScopeComposerChoice({
   summary: string
   icon: LucideIcon
   value: string
-  options: ReadonlyArray<{ value: string; label: string }>
+  options: ReadonlyArray<{ value: string; label: string; disabled?: boolean }>
   locked: boolean
   disabled: boolean
   onChange: (value: string) => void
@@ -87,7 +87,7 @@ export function ScopeComposerChoice({
       </Tooltip>
     )
   return (
-    <Menu>
+    <Menu modal={false}>
       <Tooltip>
         <TooltipTrigger
           render={
@@ -110,7 +110,7 @@ export function ScopeComposerChoice({
           <MenuGroupLabel>{label}</MenuGroupLabel>
           <MenuRadioGroup value={value} onValueChange={onChange}>
             {options.map((option) => (
-              <MenuRadioItem key={option.value} value={option.value} closeOnClick>
+              <MenuRadioItem key={option.value} value={option.value} disabled={option.disabled} closeOnClick>
                 {option.label}
               </MenuRadioItem>
             ))}

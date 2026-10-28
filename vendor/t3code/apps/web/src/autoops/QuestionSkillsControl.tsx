@@ -191,7 +191,7 @@ export function QuestionSkillsControl({
       </>
     )
   return (
-    <Menu>
+    <Menu modal={false}>
       <MenuTrigger
         render={<ComposerControl />}
         aria-label="技能"
