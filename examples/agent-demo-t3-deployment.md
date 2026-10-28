@@ -20,7 +20,15 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前前端为自适应导航合并提交 `61549d38e6751e0d4cef83d54a06fb78ba144a61`，静态目录 `/home/tao/autoops-agent-demo/releases/t3-adaptive-61549d38-static/dist/web`；后端、worker 和客户包仍沿用 `37446ba7` 的 `t3-confirmed-37446ba7`。只更新网页网关 STATIC_DIR 并重启网关，网页 PID 3626398，worker PID 3568893 保持。851 个产物及 7 个入口 HTTP 资源通过，健康 200、workerReachable=true；HTML SHA256 `8aaf3a3a77a13516c5d634c6e4ef4b705e3517028e63530dbb44c80c853cf9c8`。未迁移或恢复数据。112 项关联回归、19 项导航、类型/边界和固定托管构建通过；实站桌面/390px、长项目名、搜索/键盘、助手选中及刷新通过。详见[本批验收](../docs/validation/adaptive-top-navigation.md#测试站发行与实际交互)。
+当前应用固定为 `b44b7bf8dccca153017447bb7ca30de26cf0afb7`，前端与后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-reconnect-b44b7bf8`，STATIC_DIR为同目录dist/web；客户CLI仍复用0.4.5。北京时间2026-10-28 21:31切换成功，Web3760892、worker launcher3760385运行目录一致，两unit active且NRestarts=0。健康workerReachable=true，HTML SHA256 `0d38255c5c76ffc23c39448d42dd56f54392199cefe2db302a7fbd9cfa001971`，两个Web Worker实际字节通过。发行清单 `16ff5e0648e3adb5a0a45293a2e588bed5abd4071a91a3cb85c02e10156609d0`，原生清单 `849d148d918b746bcd65cb64ba5b4747697a81f5dfa2ed02d69ddf6760544fcd`；原件为 `ROOT/reconnect-b44b7bf8/preflight.json`、`switch.json` 和 `live-observation.json`。无迁移变化、无备份或数据恢复，其他服务PID不变。
+
+本批修复会话授权目录重复读取造成的事件循环阻塞，以及无助手长提示挤压底部控件。45项服务、5项原生RPC、21项浏览器、类型/边界和固定归档构建通过；桌面/390px、刷新/草稿、切项目、正常会话和工作区目录读取已实测。上线约8分钟无新增卡顿日志，同会话列表短样本532ms→96ms；不代表模型上游或长期连接稳定已验。完整原因、对比及未测边界见[本批验收](../docs/validation/reconnect-and-composer.md)。
+
+程序回退需同时恢复两unit本批覆盖之前的有效配置：后端37446ba7、前端61549d38静态目录。先核当前覆盖与活动任务，再沿本批切换脚本及config记录恢复程序；不回滚业务数据，不能仅套用下方历史前端回退步骤。
+
+#### 上一615自适应导航静态发行历史（保留）
+
+当时前端为自适应导航合并提交 `61549d38e6751e0d4cef83d54a06fb78ba144a61`，静态目录 `/home/tao/autoops-agent-demo/releases/t3-adaptive-61549d38-static/dist/web`；后端、worker 和客户包仍沿用 `37446ba7` 的 `t3-confirmed-37446ba7`。只更新网页网关 STATIC_DIR 并重启网关，网页 PID 3626398，worker PID 3568893 保持。851 个产物及 7 个入口 HTTP 资源通过，健康 200、workerReachable=true；HTML SHA256 `8aaf3a3a77a13516c5d634c6e4ef4b705e3517028e63530dbb44c80c853cf9c8`。未迁移或恢复数据。112 项关联回归、19 项导航、类型/边界和固定托管构建通过；实站桌面/390px、长项目名、搜索/键盘、助手选中及刷新通过。详见[本批验收](../docs/validation/adaptive-top-navigation.md#测试站发行与实际交互)。
 
 切换原件为 `ROOT/adaptive-61549d38-static-result.json`。如需仅回退前端，先确认其中 dropin 仍为生效末项，再移除该条覆盖、daemon-reload 并重启网页网关，恢复 374 静态路径；不恢复业务数据或重启 worker。
 
