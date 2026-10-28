@@ -1,3 +1,4 @@
+import { PlusIcon, Trash2Icon } from 'lucide-react'
 import {
   useEffect,
   useId,
@@ -21,6 +22,7 @@ import {
 } from '~/components/ui/dialog'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
+import { randomUUID } from '~/lib/utils'
 import { Spinner } from '~/components/ui/spinner'
 import { AutoOpsRequestError, isAutoOpsAccessError } from './apiClient'
 import { readAutoOpsHost, subscribeAutoOpsHost } from './hostSnapshot'
@@ -49,7 +51,7 @@ const failure = (cause: unknown) =>
   cause instanceof Error ? cause.message : '更新设置读取失败，请重试。'
 const outcomes = {
   completed: '更新完成',
-  pending_review: '等待人工复核',
+  pending_review: '旧资料未生效，请重新更新',
   failed: '更新失败',
   rejected: '更新未被接受',
 }
@@ -99,6 +101,7 @@ function WorkspaceUpdateEditor({
   const [enabled, setEnabled] = useState(false),
     [interval, setInterval] = useState('60'),
     [timezone, setTimezone] = useState('Asia/Shanghai')
+  const [rules, setRules] = useState<Array<{ id: string; find: string; replace: string }>>([])
   const [confirmed, setConfirmed] = useState(false),
     [activity, setActivity] = useState<'saving' | 'checking' | null>(null),
     [denied, setDenied] = useState(!allowed)
@@ -167,6 +170,7 @@ function WorkspaceUpdateEditor({
         if (controller.signal.aborted) return
         setOverview(next)
         const current = next[scope]
+        setRules((current?.rules ?? []).map((rule) => ({ ...rule, id: randomUUID() })))
         setEnabled(current?.enabled ?? false)
         setInterval(String(current?.intervalMinutes ?? 60))
         setTimezone(current?.timezone ?? 'Asia/Shanghai')
@@ -231,12 +235,16 @@ function WorkspaceUpdateEditor({
       if (!Number.isSafeInteger(minutes) || minutes < 5 || minutes > 43_200)
         throw new Error('更新间隔须为 5 至 43200 分钟。')
       new Intl.DateTimeFormat('zh-CN', { timeZone: timezone }).format()
-      if (enabled && !confirmed) throw new Error('请确认本次更新使用的当前来源。')
+      if (scope === 'internal' && enabled && !confirmed)
+        throw new Error('请确认本次更新使用的当前来源。')
       const saved = prepareWorkspaceUpdate(projectId, scope, overview[scope]?.revision ?? 0, {
         enabled,
         intervalMinutes: minutes,
         timezone,
         sourceIds: overview.sources.map((value) => value.id),
+        ...(scope === 'external'
+          ? { rules: rules.map(({ find, replace }) => ({ find, replace })) }
+          : {}),
       })
       setPending(saved)
       setMissing(false)
@@ -341,30 +349,94 @@ function WorkspaceUpdateEditor({
                     onChange={(event) => setTimezone(event.target.value)}
                   />
                 </div>
-                <fieldset className="space-y-2">
-                  <legend className="mb-2 text-sm font-medium">更新来源</legend>
-                  <ul className="space-y-1 text-sm">
-                    {overview.sources.map((source) => (
-                      <li key={source.id} className="break-all">
-                        {source.name}
-                      </li>
-                    ))}
-                    <li>当前上传资料</li>
-                  </ul>
-                  <div className="flex items-start gap-2">
-                    <Checkbox
-                      id={confirmId}
-                      checked={confirmed}
-                      disabled={disabled || !enabled}
-                      onCheckedChange={(value) => setConfirmed(value === true)}
-                    />
-                    <Label htmlFor={confirmId}>确认使用当前全部来源</Label>
-                  </div>
-                </fieldset>
+                {scope === 'internal' ? (
+                  <fieldset className="space-y-2">
+                    <legend className="mb-2 text-sm font-medium">更新来源</legend>
+                    <ul className="space-y-1 text-sm">
+                      {overview.sources.map((source) => (
+                        <li key={source.id} className="break-all">
+                          {source.name}
+                        </li>
+                      ))}
+                      <li>当前上传资料</li>
+                    </ul>
+                    <div className="flex items-start gap-2">
+                      <Checkbox
+                        id={confirmId}
+                        checked={confirmed}
+                        disabled={disabled || !enabled}
+                        onCheckedChange={(value) => setConfirmed(value === true)}
+                      />
+                      <Label htmlFor={confirmId}>确认使用当前全部来源</Label>
+                    </div>
+                  </fieldset>
+                ) : null}
                 {scope === 'external' ? (
-                  <p className="text-sm text-muted-foreground">
-                    从当前内部资料按内置规则生成；待复核文件仍须人工确认。
-                  </p>
+                  <fieldset className="space-y-3">
+                    <legend className="text-sm font-medium">脱敏规则</legend>
+                    <p className="text-xs text-muted-foreground">
+                      手动和自动更新共用以下规则；成功后整体替换外部资料。默认过滤凭证和私钥，排除不能按文本处理的文件。
+                    </p>
+                    {rules.map((rule, index) => (
+                      <div key={rule.id} className="flex items-start gap-2">
+                        <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+                          <Input
+                            aria-label={`规则 ${index + 1} 原始文本`}
+                            placeholder="需要替换的文本"
+                            required
+                            maxLength={1000}
+                            value={rule.find}
+                            disabled={disabled}
+                            onValueChange={(find) =>
+                              setRules((items) =>
+                                items.map((item) =>
+                                  item.id === rule.id ? { ...item, find } : item,
+                                ),
+                              )
+                            }
+                          />
+                          <Input
+                            aria-label={`规则 ${index + 1} 替换文本`}
+                            placeholder="替换为（可留空）"
+                            maxLength={1000}
+                            value={rule.replace}
+                            disabled={disabled}
+                            onValueChange={(replace) =>
+                              setRules((items) =>
+                                items.map((item) =>
+                                  item.id === rule.id ? { ...item, replace } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`删除规则 ${index + 1}`}
+                          disabled={disabled}
+                          onClick={() =>
+                            setRules((items) => items.filter((item) => item.id !== rule.id))
+                          }
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={disabled || rules.length >= 100}
+                      onClick={() =>
+                        setRules((items) => [...items, { id: randomUUID(), find: '', replace: '' }])
+                      }
+                    >
+                      <PlusIcon />
+                      添加替换
+                    </Button>
+                  </fieldset>
                 ) : null}
                 <SettingsSection title="更新状态">
                   <SettingsGroup>
@@ -427,7 +499,11 @@ function WorkspaceUpdateEditor({
               ) : null}
             </>
           ) : (
-            <Button type="submit" form={formId} disabled={disabled || (enabled && !confirmed)}>
+            <Button
+              type="submit"
+              form={formId}
+              disabled={disabled || (scope === 'internal' && enabled && !confirmed)}
+            >
               {busy ? <Spinner size="sm" /> : null}保存
             </Button>
           )}

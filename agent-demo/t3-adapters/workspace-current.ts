@@ -362,10 +362,10 @@ export function createCurrentWorkspace({
   function externalFileReferences(project: string, versionId: string): WorkspaceInputFileReference[] | undefined {
     const version = store.getVersion(project, versionId)
     if (version.type !== 'external' || version.status !== 'published' || !version.sourceVersionId) return undefined
-    const parent = store.getVersion(project, version.sourceVersionId)
-    if (parent.type !== 'internal' || !parent.source.inputId) return undefined
+    const inputId = version.source.inputId ?? store.getVersion(project, version.sourceVersionId).source.inputId
+    if (!inputId) return undefined
     const files = store.files(project, version.id)
-    return authoring.publishedInputFileReferences(project, parent.source.inputId, files.map(file => file.path))
+    return authoring.publishedInputFileReferences(project, inputId, files.map(file => file.path))
       .map(reference => ({ ...reference, sha256: files.find(file => file.path === reference.path)!.sha256 }))
   }
   function mappedReferencePath(project: string, original: WorkspaceInputCapture, path: string, target: WorkspaceInputCapture) {

@@ -25,7 +25,7 @@ async function finish(store, task) {
   }
   assert.fail('工作区任务未在预期时间完成')
 }
-const publish = (store, version) => store.confirmExternal('p-test', version.id, { confirmedPaths: version.report.pendingFiles.map((entry) => entry.path), excludedPaths: [] })
+
 
 test('工作区任务限制并发和排队容量，重复提交不占容量，取消排队任务不生成发布物', async (t) => {
   const { store, version } = await fixture(t, { taskLimits: { maxConcurrent: 1, maxQueued: 1 } })
@@ -121,7 +121,7 @@ test('内部来源是真实持久化的独立 Git，固定提交与资料身份�
   assert.match(reopened.read('p-test', version.id, 'docs/设计.md').contents, /固定项目资料/)
 })
 
-test('脱敏移除全部Git并覆盖资料/源码，二进制确认前不可绑定或读取', async (t) => {
+test('脱敏移除全部Git并覆盖资料/源码，自动排除二进制后直接生效', async (t) => {
   const { store, version } = await fixture(t)
   const input = { sourceVersionId: version.id, rules: [{ find: 'INTERNAL-DEMO', replace: '公开项目' }], requestId: 'external-1' }
   const started = store.startExternal('p-test', input)
@@ -131,20 +131,14 @@ test('脱敏移除全部Git并覆盖资料/源码，二进制确认前不可绑�
   const completed = await finish(store, started)
   assert.equal(completed.status, 'completed')
   const external = store.overview('p-test').externalVersions[0]
-  assert.equal(external.status, 'pending_review')
+  assert.equal(external.status, 'published')
+  assert.equal(external.name, '外部工作区')
   assert.equal(external.report.removedGitEntries, 2)
   assert.ok(external.report.replacements >= 4)
-  assert.deepEqual(external.report.pendingFiles.map((entry) => entry.path), ['prototypes/示例图片.png'])
-  assert.throws(() => store.getVersion('p-test', external.id), /尚未发布/)
-  assert.throws(() => store.read('p-test', external.id, 'backend/.env.example'), /尚未发布/)
-  assert.throws(() => store.files('p-test', external.id), /尚未发布/)
-  assert.deepEqual(store.managementSearch('p-test', external.id, '示例图片', 20).entries, [{ path: 'prototypes/示例图片.png', kind: 'file' }])
+  assert.deepEqual(external.report.pendingFiles, [])
+  assert.deepEqual(external.report.excludedFiles, ['prototypes/示例图片.png'])
+  assert.deepEqual(store.managementSearch('p-test', external.id, '示例图片', 20).entries, [])
   assert.ok(store.managementTree('p-test', external.id).entries.some((entry) => entry.path === 'frontend' && entry.kind === 'directory'))
-  assert.doesNotMatch(store.managementRead('p-test', external.id, 'backend/.env.example').contents, /sk-example|example-password|192\.168\.99\.10/)
-  assert.equal(store.versionFile('p-test', external.id, 'prototypes/示例图片.png').mime, 'image/png')
-  assert.throws(() => store.confirmExternal('p-test', external.id, { confirmedPaths: [], excludedPaths: [] }), /遗漏/)
-  const published = publish(store, external)
-  assert.equal(published.status, 'published')
   assert.ok(!store.files('p-test', external.id).some((file) => file.path.split('/').includes('.git')))
   assert.ok(store.files('p-test', external.id).some((file) => file.path === 'frontend/.gitignore'))
   const contents = store.read('p-test', external.id, 'backend/.env.example').contents
@@ -152,16 +146,13 @@ test('脱敏移除全部Git并覆盖资料/源码，二进制确认前不可绑�
   assert.doesNotMatch(contents, /sk-example|example-password|192\.168\.99\.10/)
   assert.match(store.read('p-test', external.id, 'docs/设计.md').contents, /公开项目/)
   assert.doesNotMatch(JSON.stringify(external), /sk-example|example-password|INTERNAL-DEMO|\/Users\//)
-  assert.ok(store.readBytes('p-test', external.id, 'prototypes/示例图片.png').length > 1)
-  assert.throws(() => store.read('p-test', external.id, 'prototypes/示例图片.png'), /二进制/)
+  assert.throws(() => store.readBytes('p-test', external.id, 'prototypes/示例图片.png'), {status:404})
 })
 
-test('排除未能可靠检查的图片后才发布，不修改内部原件', async (t) => {
+test('自动排除二进制，不修改内部原件', async (t) => {
   const { store, version } = await fixture(t)
   await finish(store, store.startExternal('p-test', { sourceVersionId: version.id, requestId: 'exclude' }))
   const external = store.overview('p-test').externalVersions[0]
-  assert.throws(() => store.confirmExternal('p-test', external.id, { confirmedPaths: ['prototypes/示例图片.png'], excludedPaths: ['prototypes/示例图片.png'] }), /重复/)
-  store.confirmExternal('p-test', external.id, { confirmedPaths: [], excludedPaths: ['prototypes/示例图片.png'] })
   assert.ok(!store.files('p-test', external.id).some((file) => file.path.endsWith('.png')))
   assert.deepEqual(store.managementSearch('p-test', external.id, '示例图片', 20).entries, [])
   assert.ok(store.readBytes('p-test', version.id, 'prototypes/示例图片.png').length)
@@ -193,7 +184,7 @@ test('实际ZIP保留独立服务构建上下文和固定原始值，校验与ma
   }
   assert.equal(JSON.parse(Buffer.from(store.packageFile('p-test', release.id, 'manifest').bytes).toString()).sourceVersionId, version.id)
   await finish(store, store.startExternal('p-test', { sourceVersionId: version.id, requestId: 'external-source' }))
-  const external = publish(store, store.overview('p-test').externalVersions[0])
+  const external = store.overview('p-test').externalVersions[0]
   assert.throws(() => store.startPackages('p-test', { sourceVersionId: external.id, services: ['frontend'], requestId: 'wrong-source' }), /内部原始/)
 })
 
@@ -219,7 +210,7 @@ test('资源范围拒绝跨项目、目录穿越、绝对路径和符号链接�
 test('内部固定文件被改动时阻止导出，失败任务保留上个外部可用版本', async (t) => {
   const { store, dataDir, version } = await fixture(t)
   await finish(store, store.startExternal('p-test', { sourceVersionId: version.id, requestId: 'first' }))
-  const published = publish(store, store.overview('p-test').externalVersions[0])
+  const published = store.overview('p-test').externalVersions[0]
   const file = join(dataDir, 'project-workspaces', 'p-test', 'versions', version.id, 'files', 'docs', '设计.md')
   writeFileSync(file, '未经版本化的改变')
   assert.throws(() => store.read('p-test', version.id, 'docs/设计.md'), /校验失败/)

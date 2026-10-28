@@ -15,15 +15,16 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
     const { sourceVersionId: _sourceVersionId, ...rest } = version
     return { ...rest, source: { contentHash: version.source.contentHash, repositories: [] } }
   }
+  const currentExternal = (versions) => versions.filter(entry => entry.status === 'published').sort((a,b) => (b.publishedAt ?? b.createdAt).localeCompare(a.publishedAt ?? a.createdAt)).slice(0,1).map(entry => ({...entry,name:'外部工作区'}))
   if (method === 'GET') {
     if (!parts.length) {
       const overview = store.overview(projectId), internal = membership.workspaceAccess === 'internal'
-      return {status:200, body:{...overview, internalVersions: internal ? overview.internalVersions.filter((entry) => canManage || entry.status === 'published') : [], externalVersions: overview.externalVersions.filter((entry) => canManage || entry.status === 'published').map((entry) => internal ? entry : publicExternal(entry)), releases: canManage ? overview.releases : [], tasks: canManage ? overview.tasks : [], import: {...overview.import, supported:canManage, ...(internal ? {} : {hosts:[]})}}}
+      return {status:200, body:{...overview, internalVersions: internal ? overview.internalVersions.filter((entry) => canManage || entry.status === 'published') : [], externalVersions: currentExternal(overview.externalVersions).map((entry) => internal ? entry : publicExternal(entry)), releases: canManage ? overview.releases : [], tasks: canManage ? overview.tasks : [], import: {...overview.import, supported:canManage, ...(internal ? {} : {hosts:[]})}}}
     }
     if (parts[0] === 'versions' && parts.length === 3) {
       const [, versionId, action] = parts
       const overview = store.overview(projectId)
-      const version = [...overview.internalVersions, ...overview.externalVersions].find((entry) => entry.id === versionId && (canManage || entry.status === 'published'))
+      const version = [...overview.internalVersions, ...currentExternal(overview.externalVersions)].find((entry) => entry.id === versionId && (canManage || entry.status === 'published'))
       if (!version) fail(404, 'WORKSPACE_NOT_FOUND', '工作区版本不存在或尚未发布')
       access.requireWorkspace(principal, projectId, version.type, version.status === 'published' ? version.id : undefined)
       const path = url.searchParams.get('path') ?? ''
@@ -55,10 +56,7 @@ export async function handleWorkspaceRequest({access, store, principal, url, met
     if (parts.length === 1 && parts[0] === 'import') return {status:202, body:store.startImport(projectId, body, principal.id)}
     if (parts.length === 3 && parts[0] === 'versions' && parts[2] === 'publish') {
       access.requireProjectAction(principal, projectId, 'workspace.external.publish')
-      if(typeof maintainCurrent!=='function') fail(503,'WORKSPACE_MAINTENANCE_UNAVAILABLE','当前资料维护服务未接入，请稍后重试')
-      const version=store.confirmExternal(projectId, parts[1], body)
-      try {maintainCurrent(projectId)} catch {console.warn('当前外部资料已经发布，旧资料回收尚未核验，继续保留原件',{projectId})}
-      return {status:200, body:version}
+      fail(410, 'WORKSPACE_REVIEW_REMOVED', '外部工作区更新成功后直接生效，无需复核发布')
     }
     if (parts.length === 3 && parts[0] === 'tasks' && parts[2] === 'cancel')
       return {status:200, body:store.cancelTask(projectId, parts[1])}

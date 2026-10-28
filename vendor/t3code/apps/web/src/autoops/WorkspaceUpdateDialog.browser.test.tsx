@@ -205,19 +205,31 @@ it('默认关闭，显式周期时区和来源确认后保存；重新打开可�
   expect(f.writes[1]?.input.expectedRevision).toBe(1)
 })
 
-it('外部设置只作用于外部范围，清楚保留待复核步骤且不发确认发布请求', async () => {
+it('外部规则保存并恢复，自动更新不要求来源复核且只作用于外部范围', async () => {
   const f = setup()
   using _fetch = stubGlobal('fetch', f.fetcher)
   await using _screen = await render(<App fixture={f} scope="external" />)
   await open()
   await expect
-    .element(page.getByText('从当前内部资料按内置规则生成；待复核文件仍须人工确认。'))
-    .toBeVisible()
-  await enable()
+    .element(page.getByRole('checkbox', { name: '确认使用当前全部来源' }))
+    .not.toBeInTheDocument()
+  await page.getByRole('checkbox', { name: '启用定期更新' }).click()
+  await page.getByRole('button', { name: '添加替换' }).click()
+  await page.getByRole('textbox', { name: '规则 1 原始文本' }).fill('内部代号')
+  await page.getByRole('textbox', { name: '规则 1 替换文本' }).fill('公开名称')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   expect(f.writes.map((value) => value.scope)).toEqual(['external'])
   expect(f.plans.internal).toBeNull()
+  expect(f.plans.external?.rules).toEqual([{ find: '内部代号', replace: '公开名称' }])
+  await open()
+  await expect
+    .element(page.getByRole('textbox', { name: '规则 1 原始文本' }))
+    .toHaveValue('内部代号')
+  await page.getByRole('button', { name: '删除规则 1' }).click()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  expect(f.plans.external?.rules).toEqual([])
   expect(f.fetcher.mock.calls.every(([request]) => !String(request).includes('/publish'))).toBe(
     true,
   )
@@ -323,7 +335,7 @@ it('切换范围隔离原内部未知设置，外部计划可以独立配置', a
   await screen.rerender(<App fixture={f} scope="external" />)
   await expect.element(page.getByRole('heading', { name: '外部更新设置' })).toBeVisible()
   await expect.element(page.getByRole('textbox', { name: '时区' })).toBeEnabled()
-  await enable()
+  await page.getByRole('checkbox', { name: '启用定期更新' }).click()
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   expect(f.writes.map((value) => value.scope)).toEqual(['internal', 'external'])

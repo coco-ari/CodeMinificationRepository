@@ -29,15 +29,22 @@ function fileView(projectId: string, versionId: string): FileView {
 export function WorkspaceFileBrowser({
   projectId,
   version,
+  onRefresh,
 }: {
   projectId: string
   version: WorkspaceVersion
+  onRefresh?: () => void
 }) {
   const environmentId = usePrimaryEnvironmentId()
-  const [view, setView] = useState(() => fileView(projectId, version.id))
+  const [view, setView] = useState(() =>
+    fileView(projectId, version.type === 'external' ? 'external' : version.id),
+  )
   const root = useRef<HTMLElement | null>(null)
   useEffect(() => {
-    saveSelection(`${projectId}:files:${version.id}`, JSON.stringify(view))
+    saveSelection(
+      `${projectId}:files:${version.type === 'external' ? 'external' : version.id}`,
+      JSON.stringify(view),
+    )
   }, [projectId, version.id, view])
   useWorkspaceFileScroll(
     root,
@@ -89,6 +96,8 @@ export function WorkspaceFileBrowser({
         projectName={version.name}
         relativePath={view.selected}
         source={source}
+        compactNavigation
+        onRefresh={onRefresh}
         folderTrail={view.trail}
         onOpenFile={(path) => setView({ selected: path })}
         onNavigateFolder={(path, trail) => setView({ selected: path || null, trail })}

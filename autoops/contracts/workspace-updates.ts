@@ -4,8 +4,15 @@ import type { WorkspaceTask } from './workspaces.ts'
 
 export const WorkspaceUpdateScope = S.Literals(['internal', 'external'])
 export type WorkspaceUpdateScope = typeof WorkspaceUpdateScope.Type
+export const WorkspaceRedactionRules = S.Array(
+  S.Struct({
+    find: S.String.check(S.isMinLength(1), S.isMaxLength(1000)),
+    replace: S.String.check(S.isMaxLength(1000)),
+  }),
+).check(S.isMaxLength(100))
 export const WorkspaceUpdateSettings = S.Struct({
   enabled: S.Boolean,
+  rules: S.optionalKey(WorkspaceRedactionRules),
   intervalMinutes: S.Number.check(
     S.isInt(),
     S.isGreaterThanOrEqualTo(5),
@@ -27,14 +34,7 @@ export const RunWorkspaceUpdate = S.Struct({
     S.isPattern(/^[^\x00-\x1f\x7f]+$/),
   ),
   expectedRevision: S.optionalKey(S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(0))),
-  rules: S.optionalKey(
-    S.Array(
-      S.Struct({
-        find: S.String.check(S.isMinLength(1), S.isMaxLength(1000)),
-        replace: S.String.check(S.isMaxLength(1000)),
-      }),
-    ).check(S.isMaxLength(100)),
-  ),
+  rules: S.optionalKey(WorkspaceRedactionRules),
 })
 export type RunWorkspaceUpdate = typeof RunWorkspaceUpdate.Type
 

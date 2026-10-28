@@ -30,7 +30,6 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
-import { WorkspaceConversationLauncher } from '../autoops/WorkspaceConversationLauncher';
 import { isAutoOpsHosted } from '../autoops/capabilities';
 
 function ChatRouteGlobalShortcuts() {
@@ -214,7 +213,6 @@ function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
-      <WorkspaceConversationLauncher />
       {threadTarget?.kind === "server" ? (
         <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
       ) : null}

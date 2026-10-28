@@ -91,7 +91,7 @@ export const loadWorkspaceFileMetadata = (
 export const generateExternalWorkspace = (
   projectId: string,
   sourceVersionId: string | undefined,
-  rules: Array<{ find: string; replace: string }>,
+  rules: Array<{ find: string; replace: string }> | undefined,
   requestId: string,
 ) =>
   sourceVersionId
@@ -100,17 +100,6 @@ export const generateExternalWorkspace = (
         `/api/v1/projects/${encodeURIComponent(projectId)}/workspace/external`,
         { label: '外部工作区', body: { rules, requestId } },
       ).then(({ task }) => task)
-
-export const publishWorkspace = (
-  projectId: string,
-  versionId: string,
-  confirmedPaths: string[],
-  excludedPaths: string[],
-) =>
-  request<WorkspaceVersion>(projectId, `/versions/${encodeURIComponent(versionId)}/publish`, {
-    confirmedPaths,
-    excludedPaths,
-  })
 
 export const generateWorkspacePackages = (
   projectId: string,
@@ -146,15 +135,4 @@ export function workspacePackageUrl(
 
 export function workspaceFileDownloadUrl(projectId: string, versionId: string, path: string) {
   return `${workspaceBase(projectId)}/versions/${encodeURIComponent(versionId)}/download?path=${encodeURIComponent(path)}`
-}
-
-export function startWorkspaceConversation(
-  projectId: string,
-  workspaceType: 'internal' | 'external',
-) {
-  window.dispatchEvent(
-    new CustomEvent('autoops:new-workspace-thread', {
-      detail: { projectId, workspaceType },
-    }),
-  )
 }

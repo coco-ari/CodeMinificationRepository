@@ -6,15 +6,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import {
-  ArrowDownToLineIcon,
-  ChevronDownIcon,
-  GitBranchIcon,
-  PackageIcon,
-  PlusIcon,
-  ShieldCheckIcon,
-  Trash2Icon,
-} from 'lucide-react'
+import { ArrowDownToLineIcon, ChevronDownIcon, GitBranchIcon, PackageIcon } from 'lucide-react'
 import { Alert, AlertDescription } from '~/components/ui/alert'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
@@ -34,14 +26,8 @@ import { Label } from '~/components/ui/label'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '~/components/ui/select'
 import { Spinner } from '~/components/ui/spinner'
 import { formatBytes } from '~/lib/formatBytes'
-import { randomUUID } from '~/lib/utils'
 import type { WorkspaceBuildContext } from '../../../../../../autoops/contracts/workspaces.ts'
-import {
-  workspaceFileDownloadUrl,
-  type WorkspaceOverview,
-  type WorkspaceTask,
-  type WorkspaceVersion,
-} from './workspaces'
+import { type WorkspaceOverview, type WorkspaceTask, type WorkspaceVersion } from './workspaces'
 
 type DialogProps = {
   open: boolean
@@ -51,7 +37,6 @@ type DialogProps = {
   submissionNotice?: ReactNode
 }
 
-type RedactionRule = { find: string; replace: string }
 type Service = 'frontend' | 'backend'
 
 const dateLabel = (value: string) => new Date(value).toLocaleString('zh-CN')
@@ -118,7 +103,9 @@ export function WorkspaceSubmissionNotice({
   return (
     <Alert variant="info" role="status">
       <AlertDescription>
-        <p>{busy ? `正在${label}…` : paused ? '暂时无法获取结果，请重试。' : '正在确认操作结果…'}</p>
+        <p>
+          {busy ? `正在${label}…` : paused ? '暂时无法获取结果，请重试。' : '正在确认操作结果…'}
+        </p>
         {!busy ? (
           <div>
             <Button
@@ -289,138 +276,6 @@ export function WorkspaceImportDialog({
   )
 }
 
-export function ExternalWorkspaceDialog({
-  open,
-  onOpenChange,
-  finalFocus,
-  disabled,
-  onGenerate,
-  error,
-  submissionNotice,
-}: DialogProps & {
-  disabled: boolean
-  onGenerate: (rules: RedactionRule[]) => Promise<boolean>
-}) {
-  const [rules, setRules] = useState<Array<RedactionRule & { id: string }>>([])
-  const operation = useWorkspaceSubmit()
-  const unavailable = disabled || operation.pending
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!operation.pending) onOpenChange(next)
-      }}
-    >
-      <DialogPopup className="sm:max-w-xl" finalFocus={finalFocus}>
-        <form
-          className="flex min-h-0 flex-col"
-          onKeyDown={preventCompositionSubmit}
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (unavailable) return
-            void operation.submit(
-              () =>
-                onGenerate(
-                  rules.filter((rule) => rule.find).map(({ find, replace }) => ({ find, replace })),
-                ),
-              () => onOpenChange(false),
-            )
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>更新外部工作区</DialogTitle>
-          </DialogHeader>
-          <DialogPanel>
-            <p className="text-muted-foreground text-xs">自动脱敏后，复核发布即可供外部使用。</p>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-2">
-                <Label>额外脱敏规则</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={unavailable || rules.length >= 30}
-                  onClick={() =>
-                    setRules((previous) => [
-                      ...previous,
-                      { id: randomUUID(), find: '', replace: '' },
-                    ])
-                  }
-                >
-                  <PlusIcon />
-                  添加替换
-                </Button>
-              </div>
-              <p className="text-muted-foreground text-xs">默认已过滤凭证和私钥。</p>
-              {rules.map((rule, index) => (
-                <div key={rule.id} className="flex items-start gap-2">
-                  <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
-                    <Input
-                      aria-label={`规则 ${index + 1} 原始文本`}
-                      placeholder="需要替换的文本"
-                      required
-                      value={rule.find}
-                      disabled={unavailable}
-                      onValueChange={(find) =>
-                        setRules((previous) =>
-                          previous.map((entry) =>
-                            entry.id === rule.id ? { ...entry, find } : entry,
-                          ),
-                        )
-                      }
-                    />
-                    <Input
-                      aria-label={`规则 ${index + 1} 替换文本`}
-                      placeholder="替换为（可留空）"
-                      value={rule.replace}
-                      disabled={unavailable}
-                      onValueChange={(replace) =>
-                        setRules((previous) =>
-                          previous.map((entry) =>
-                            entry.id === rule.id ? { ...entry, replace } : entry,
-                          ),
-                        )
-                      }
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`删除规则 ${index + 1}`}
-                    disabled={unavailable}
-                    onClick={() =>
-                      setRules((previous) => previous.filter((entry) => entry.id !== rule.id))
-                    }
-                  >
-                    <Trash2Icon />
-                  </Button>
-                </div>
-              ))}
-            </div>
-            {submissionNotice}
-            <OperationError error={operation.error ?? error} />
-          </DialogPanel>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={operation.pending}
-              onClick={() => onOpenChange(false)}
-            >
-              取消
-            </Button>
-            <Button type="submit" disabled={unavailable}>
-              {operation.pending ? <Spinner size="sm" /> : <ShieldCheckIcon />}
-              {operation.pending ? '正在提交…' : '更新外部工作区'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogPopup>
-    </Dialog>
-  )
-}
-
 export function WorkspacePackagesDialog({
   open,
   onOpenChange,
@@ -576,98 +431,6 @@ export function WorkspacePackagesDialog({
   )
 }
 
-export function WorkspaceVersionDialog({
-  open,
-  onOpenChange,
-  finalFocus,
-  version,
-}: Omit<DialogProps, 'error'> & { version: WorkspaceVersion | undefined }) {
-  if (!version) return null
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="sm:max-w-xl" finalFocus={finalFocus}>
-        <DialogHeader>
-          <DialogTitle>版本详情</DialogTitle>
-        </DialogHeader>
-        <DialogPanel>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
-            <dt className="text-muted-foreground">版本</dt>
-            <dd className="break-words">{version.name}</dd>
-            <dt className="text-muted-foreground">类型</dt>
-            <dd>
-              {version.type === 'internal' ? '内部工作区' : '外部工作区'}
-              {version.isExample ? ' · 示例项目' : ''}
-            </dd>
-            <dt className="text-muted-foreground">状态</dt>
-            <dd>
-              <Badge
-                variant={
-                  version.status === 'published'
-                    ? 'success'
-                    : version.status === 'pending_review'
-                      ? 'warning'
-                      : 'error'
-                }
-              >
-                {version.status === 'published'
-                  ? '可用'
-                  : version.status === 'pending_review'
-                    ? '待复核'
-                    : '失败'}
-              </Badge>
-            </dd>
-            <dt className="text-muted-foreground">文件</dt>
-            <dd>
-              {version.fileCount.toLocaleString('zh-CN')} 个 · {formatBytes(version.byteLength)}
-            </dd>
-            <dt className="text-muted-foreground">创建时间</dt>
-            <dd>
-              <time dateTime={version.createdAt}>{dateLabel(version.createdAt)}</time>
-            </dd>
-          </dl>
-          <Collapsible>
-            <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
-              <ChevronDownIcon />
-              完整版本信息
-            </CollapsibleTrigger>
-            <CollapsiblePanel>
-              <dl className="mt-3 space-y-3 text-xs">
-                <div>
-                  <dt className="text-muted-foreground">版本标识</dt>
-                  <dd className="mt-1 break-all font-mono">{version.id}</dd>
-                </div>
-                {version.sourceVersionId ? (
-                  <div>
-                    <dt className="text-muted-foreground">来源内部版本</dt>
-                    <dd className="mt-1 break-all font-mono">{version.sourceVersionId}</dd>
-                  </div>
-                ) : null}
-                {version.source.repositories.map((repository) => (
-                  <div key={repository.path}>
-                    <dt className="break-all text-muted-foreground">
-                      {repository.path || '.'} · 提交
-                    </dt>
-                    <dd className="mt-1 break-all font-mono">{repository.commit}</dd>
-                  </div>
-                ))}
-                <div>
-                  <dt className="text-muted-foreground">内容校验 SHA-256</dt>
-                  <dd className="mt-1 break-all font-mono">{version.source.contentHash}</dd>
-                </div>
-              </dl>
-            </CollapsiblePanel>
-          </Collapsible>
-        </DialogPanel>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
-  )
-}
-
 export function WorkspaceTasksDialog({
   open,
   onOpenChange,
@@ -784,195 +547,6 @@ export function WorkspaceTasksDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             关闭
           </Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
-  )
-}
-
-export function WorkspaceReviewDialog({
-  open,
-  onOpenChange,
-  finalFocus,
-  projectId,
-  version,
-  busy,
-  onPublish,
-  error,
-}: DialogProps & {
-  projectId: string
-  version: WorkspaceVersion | undefined
-  busy: boolean
-  onPublish: (confirmed: string[], excluded: string[]) => Promise<boolean>
-}) {
-  const [decisionVersion, setDecisionVersion] = useState(version?.id)
-  const [decisions, setDecisions] = useState<Record<string, 'keep' | 'exclude'>>({})
-  if (decisionVersion !== version?.id) {
-    setDecisionVersion(version?.id)
-    setDecisions({})
-  }
-  const operation = useWorkspaceSubmit()
-  if (!version) return null
-  const report = version.report
-  const pendingFiles = report?.pendingFiles ?? []
-  const complete = pendingFiles.every((file) => decisions[file.path])
-  const canPublish = version.status === 'pending_review' && Boolean(report) && complete
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!operation.pending) onOpenChange(next)
-      }}
-    >
-      <DialogPopup className="sm:max-w-2xl" finalFocus={finalFocus}>
-        <DialogHeader>
-          <DialogTitle>脱敏复核</DialogTitle>
-        </DialogHeader>
-        <DialogPanel>
-          <p className="break-words text-sm font-medium">{version.name}</p>
-          {report ? (
-            <>
-              <dl className="grid grid-cols-3 gap-3 text-sm">
-                <div>
-                  <dt className="text-muted-foreground text-xs">移除 Git 元数据</dt>
-                  <dd className="mt-1 tabular-nums">{report.removedGitEntries} 处</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground text-xs">文本替换</dt>
-                  <dd className="mt-1 tabular-nums">{report.replacements} 次</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground text-xs">排除文件</dt>
-                  <dd className="mt-1 tabular-nums">{report.excludedFiles.length} 个</dd>
-                </div>
-              </dl>
-              {report.excludedFiles.length ? (
-                <Collapsible>
-                  <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
-                    <ChevronDownIcon />
-                    查看排除的文件
-                  </CollapsibleTrigger>
-                  <CollapsiblePanel>
-                    <ul className="mt-2 space-y-1 font-mono text-xs">
-                      {report.excludedFiles.map((path) => (
-                        <li className="break-all" key={path}>
-                          {path}
-                        </li>
-                      ))}
-                    </ul>
-                  </CollapsiblePanel>
-                </Collapsible>
-              ) : null}
-              {version.status === 'pending_review' ? (
-                <>
-                  <Alert variant="warning">
-                    发布前需要人工复核。平台无法检查以下文件的全部内容，请下载检查后逐个选择保留；无法确认时请排除。
-                  </Alert>
-                  <div className="divide-y">
-                    {pendingFiles.map((file) => (
-                      <div key={file.path} className="flex flex-col gap-2 py-3">
-                        <div className="min-w-0">
-                          <p className="break-all font-mono text-xs">{file.path}</p>
-                          <p className="mt-1 break-words text-muted-foreground text-xs">
-                            {file.reason}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            render={
-                              <a
-                                href={workspaceFileDownloadUrl(projectId, version.id, file.path)}
-                                download
-                              />
-                            }
-                          >
-                            <ArrowDownToLineIcon />
-                            下载检查
-                          </Button>
-                          <div className="min-w-0 flex-1 sm:max-w-52">
-                            <Select
-                              value={decisions[file.path] ?? 'pending'}
-                              disabled={busy || operation.pending}
-                              onValueChange={(next) => {
-                                if (next === 'keep' || next === 'exclude')
-                                  setDecisions((previous) => ({ ...previous, [file.path]: next }))
-                              }}
-                            >
-                              <SelectTrigger size="sm" aria-label={`复核 ${file.path}`}>
-                                <SelectValue>
-                                  {decisions[file.path] === 'keep'
-                                    ? '已检查，保留'
-                                    : decisions[file.path] === 'exclude'
-                                      ? '排除文件'
-                                      : '请选择处理方式'}
-                                </SelectValue>
-                              </SelectTrigger>
-                              <SelectPopup>
-                                <SelectItem value="keep">已检查，保留</SelectItem>
-                                <SelectItem value="exclude">排除文件</SelectItem>
-                              </SelectPopup>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-muted-foreground text-xs" aria-live="polite">
-                    已处理 {pendingFiles.filter((file) => decisions[file.path]).length} /{' '}
-                    {pendingFiles.length} 个待复核文件
-                  </p>
-                </>
-              ) : version.status === 'published' ? (
-                <p className="text-muted-foreground text-sm">
-                  此版本已通过检查并固定保存，可用于全新的外部工作区对话。
-                </p>
-              ) : (
-                <Alert variant="error">此版本生成失败，不能发布。请在任务记录中查看原因。</Alert>
-              )}
-            </>
-          ) : (
-            <Empty size="compact">
-              <EmptyHeader>
-                <EmptyTitle>暂无脱敏报告</EmptyTitle>
-                <EmptyDescription>完成外部工作区生成后，可查看检查结果。</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
-          <OperationError error={operation.error ?? error} />
-        </DialogPanel>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            disabled={operation.pending}
-            onClick={() => onOpenChange(false)}
-          >
-            {version.status === 'pending_review' ? '取消' : '关闭'}
-          </Button>
-          {version.status === 'pending_review' ? (
-            <Button
-              disabled={busy || operation.pending || !canPublish}
-              onClick={() => {
-                if (!canPublish || busy) return
-                void operation.submit(
-                  () =>
-                    onPublish(
-                      pendingFiles
-                        .filter((file) => decisions[file.path] === 'keep')
-                        .map((file) => file.path),
-                      pendingFiles
-                        .filter((file) => decisions[file.path] === 'exclude')
-                        .map((file) => file.path),
-                    ),
-                  () => onOpenChange(false),
-                )
-              }}
-            >
-              {operation.pending ? <Spinner size="sm" /> : <ShieldCheckIcon />}
-              {operation.pending ? '正在发布…' : '确认并发布版本'}
-            </Button>
-          ) : null}
         </DialogFooter>
       </DialogPopup>
     </Dialog>

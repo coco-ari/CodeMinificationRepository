@@ -245,7 +245,7 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     if (taskId && record.cachePurpose) { state.protectedReferences ??= {}; state.protectedReferences[`task:${taskId}`] = version.id }
     if (taskId) {
       const task = state.tasks.find((entry) => entry.id === taskId)
-      Object.assign(task, { status: 'completed', stage: 'completed', versionId: version.id, message: version.status === 'pending_review' ? '脱敏完成，有文件需要确认后发布' : '工作区版本已发布' })
+      Object.assign(task, { status: 'completed', stage: 'completed', versionId: version.id, message: version.type === 'external' ? '外部工作区已更新' : '工作区已更新' })
     }
     save(id, state)
     return version
@@ -485,10 +485,10 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
       for(const release of state.releases) if(!release.clearedAt) protectedIds.add(release.sourceVersionId)
       const latest=type=>state.versions.filter(version=>version.type===type&&version.status==='published'&&!version.cachePurpose).sort((a,b)=>(b.publishedAt??b.createdAt).localeCompare(a.publishedAt??a.createdAt))[0]
       for(const type of ['internal','external']) {const version=latest(type);if(version) protectedIds.add(version.id)}
-      for(const version of state.versions) if(version.status!=='published'||version.cachePurpose==='deployment') protectedIds.add(version.id)
+      for(const version of state.versions) if((version.type!=='external'&&version.status!=='published')||version.cachePurpose==='deployment') protectedIds.add(version.id)
       for(let changed=true;changed;) {
         changed=false
-        for(const version of state.versions) if(protectedIds.has(version.id)&&version.sourceVersionId&&!protectedIds.has(version.sourceVersionId)) {protectedIds.add(version.sourceVersionId);changed=true}
+        for(const version of state.versions) if(protectedIds.has(version.id)&&version.sourceVersionId&&!(version.type==='external'&&version.source.inputId)&&!protectedIds.has(version.sourceVersionId)) {protectedIds.add(version.sourceVersionId);changed=true}
       }
       const removed=state.versions.filter(version=>!protectedIds.has(version.id)).map(version=>version.id)
       state.retiredWorkspaceVersions??=[]
@@ -589,41 +589,25 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         await mkdir(root, { recursive: true, mode: 0o700 })
         progress('remove_git', '正在移除全部 Git 元数据')
         let replacements = 0
-        const pendingFiles = []
+        const excludedFiles = []
         progress('redacting', '正在脱敏源码、文档和原型')
         for (const file of sourceIndex.files) {
           if (signal.aborted) throw new Error('cancelled')
-          if (redact(file.path, rules).text !== file.path) fail(422, 'WORKSPACE_SENSITIVE_PATH', '来源文件名包含需要脱敏的文字，请先调整文件名再生成外部版本')
-          const bytes = readFileSync(checkedFile(sourceRoot, file.path)), text = textOf(bytes)
-          const output = text === null ? bytes : (() => { const result = redact(text, rules); replacements += result.replacements; return Buffer.from(result.text) })()
-          if (text === null) pendingFiles.push({ path: file.path, reason: '无法可靠检查的二进制文件，需要明确确认保留或排除' })
+          if (redact(file.path, rules).text !== file.path) fail(422, 'WORKSPACE_SENSITIVE_PATH', '来源文件名包含需要脱敏的文字，请先调整文件名再更新外部工作区')
+          const bytes = readFileSync(checkedFile(sourceRoot, file.path))
+          const text = file.mime.startsWith('text/') || ['application/json', 'application/xml', 'image/svg+xml'].includes(file.mime) ? textOf(bytes) : null
+          // 文本规则不能处理二进制；直接排除，不保存待复核副本。
+          if (text === null) { excludedFiles.push(file.path); continue }
+          const result = redact(text, rules); replacements += result.replacements
+          const output = Buffer.from(result.text)
           await mkdir(dirname(join(root, file.path)), { recursive: true, mode: 0o700 }); await writeFile(join(root, file.path), output, { mode: file.executable ? 0o700 : 0o600 })
         }
         progress('checking', '正在校验脱敏结果与版本身份')
-        const versionId = randomUUID(), count = load(id).versions.filter((entry) => entry.type === 'external').length + 1
-        const report = { removedGitEntries: sourceIndex.removedGitEntries, replacements, pendingFiles, excludedFiles: [], rulesVersion: RULES_VERSION, customRules: rules.length }
+        const versionId = randomUUID()
+        const report = { removedGitEntries: sourceIndex.removedGitEntries, replacements, pendingFiles: [], excludedFiles, rulesVersion: RULES_VERSION, customRules: rules.length }
         // source 只保存提交与相对路径；自定义匹配原文从不进入可见元数据。
-        await persistVersion(id, root, { id: versionId, name: `外部脱敏 v${String(count).padStart(3, '0')}`, type: 'external', status: pendingFiles.length ? 'pending_review' : 'published', sourceVersionId: parent.id, createdAt: now(), source: { repositories: parent.source.repositories.map(({ path, commit }) => ({ path, commit })) }, report, isExample: parent.isExample }, task.id, signal)
+        await persistVersion(id, root, { id: versionId, name: '外部工作区', type: 'external', status: 'published', sourceVersionId: parent.id, createdAt: now(), source: { repositories: parent.source.repositories.map(({ path, commit }) => ({ path, commit })), ...(parent.source.inputId ? {inputId: parent.source.inputId} : {}) }, report, isExample: parent.isExample }, task.id, signal)
       }, actorId)
-    },
-    confirmExternal(id, versionId, input) {
-      jobs.assertAccepting()
-      const state = load(id), version = state.versions.find((entry) => entry.id === safeId(versionId))
-      if (!version || version.type !== 'external') missing()
-      if (version.status === 'published') return publicVersion(version)
-      if (version.status !== 'pending_review') missing()
-      const confirmed = input.confirmedPaths, excluded = input.excludedPaths
-      if (!Array.isArray(confirmed) || !Array.isArray(excluded) || [...confirmed, ...excluded].some((path) => typeof path !== 'string')) fail(400, 'WORKSPACE_REVIEW_INVALID', '请为所有待确认文件选择保留或排除')
-      const pending = new Set(version.report.pendingFiles.map((entry) => entry.path)), answers = [...confirmed, ...excluded]
-      if (new Set(answers).size !== answers.length || answers.some((path) => !pending.has(path)) || answers.length !== pending.size) fail(400, 'WORKSPACE_REVIEW_INCOMPLETE', '每个待确认文件必须明确选择保留或排除，不能重复或遗漏')
-      const root = versionRoot(id, version)
-      const indexed = scan(root, { skipGit: true })
-      if (indexed.contentHash !== version.source.contentHash) fail(409, 'WORKSPACE_CONTENT_CHANGED', '待确认版本校验失败，请重新生成外部版本')
-      // 保留受控原件，仅原子更新发布索引；元数据写入失败不会先破坏待复核内容。
-      version.files = indexed.files.filter((file) => !excluded.includes(file.path)); version.fileCount = version.files.length; version.byteLength = version.files.reduce((sum, file) => sum + file.size, 0); version.source.contentHash = sha(JSON.stringify(version.files.map(({ path, sha256 }) => [path, sha256])))
-      version.report.excludedFiles = excluded; version.report.reviewedFiles = confirmed; version.report.pendingFiles = []; version.status = 'published'; version.publishedAt = now()
-      save(id, state)
-      return publicVersion(version)
     },
     startPackages(id, input, actorId) {
       const { previous } = requestTask(id, 'packages', input, actorId)

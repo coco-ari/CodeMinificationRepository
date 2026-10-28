@@ -18,7 +18,7 @@ import {
 
 export type WorkspaceTaskInput =
   | { type: 'import'; repositoryUrl: string; branch: string }
-  | { type: 'external'; sourceVersionId?: string; rules: Array<{ find: string; replace: string }> }
+  | { type: 'external'; sourceVersionId?: string; rules?: Array<{ find: string; replace: string }> }
   | {
       type: 'packages'
       sourceVersionId: string

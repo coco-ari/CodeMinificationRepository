@@ -35,6 +35,11 @@ CREATE TABLE workspace_update_audit (
 ) STRICT;
 `,
   },
+  {
+    version: 2,
+    name: '外部资料更新复用已保存脱敏规则',
+    sql: `ALTER TABLE workspace_update_plans ADD COLUMN rules_json TEXT NOT NULL DEFAULT '[]';`,
+  },
 ] as const
 
 export const openWorkspaceUpdateDatabase = (filename: string) =>

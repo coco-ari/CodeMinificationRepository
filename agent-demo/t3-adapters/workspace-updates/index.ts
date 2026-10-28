@@ -187,6 +187,8 @@ export function createWorkspaceUpdates({
     ).run(code, time(), project, scope, actor)
   }
   function configuredSources(row: Row, current: WorkspaceUpdateSources) {
+    // 外部始终处理当前内部内容；内部来源增删不另加复核门槛。
+    if (row.scope === 'external') return
     const configured = JSON.parse(asText(row, 'source_ids')) as string[]
     if (configured.some((id) => !current.sourceIds.includes(id))) {
       pause(
@@ -260,6 +262,14 @@ export function createWorkspaceUpdates({
       intervalMinutes: Number(row.interval_minutes),
       timezone: asText(row, 'timezone'),
       sourceIds: JSON.parse(asText(row, 'source_ids')) as string[],
+      ...(scope === 'external'
+        ? {
+            rules: JSON.parse(asText(row, 'rules_json')) as Array<{
+              find: string
+              replace: string
+            }>,
+          }
+        : {}),
       updatedAt: asText(row, 'updated_at'),
       nextRunAt: row.next_run_at === null ? null : new Date(Number(row.next_run_at)).toISOString(),
       ...(row.paused_code ? { pausedReason: safeError(asText(row, 'paused_code')) } : {}),
@@ -555,7 +565,13 @@ export function createWorkspaceUpdates({
         const promise = dispatch(
           project,
           scope,
-          { requestId, expectedRevision: sources.revision },
+          {
+            requestId,
+            expectedRevision: sources.revision,
+            ...(scope === 'external'
+              ? { rules: (publicPlan(row, false).rules ?? []).map((rule) => ({ ...rule })) }
+              : {}),
+          },
           actor,
           'scheduled',
           sources,
@@ -608,9 +624,19 @@ export function createWorkspaceUpdates({
       const sources = synchronous(ports.sources(project, actor))
       const internal = planRow(project, 'internal'),
         external = planRow(project, 'external')
+      let externalPlan = external ? publicPlan(external) : null
+      if (externalPlan) {
+        try {
+          requireAccess(project, actor, 'external', 'manage')
+        } catch (error) {
+          if (![403, 404].includes(Number((error as { status?: number }).status))) throw error
+          const { rules: _rules, ...visible } = externalPlan
+          externalPlan = visible
+        }
+      }
       return {
         internal: internal ? publicPlan(internal) : null,
-        external: external ? publicPlan(external) : null,
+        external: externalPlan,
         sources: sources.sourceIds.map((id) => ({ id, name: sources.names?.[id] ?? id })),
       }
     },
@@ -637,6 +663,8 @@ export function createWorkspaceUpdates({
       } catch {
         return fail(400, 'WORKSPACE_UPDATE_TIMEZONE_INVALID', '请选择有效时区')
       }
+      if (scope === 'internal' && input.value.rules)
+        fail(400, 'WORKSPACE_UPDATE_SETTINGS_INVALID', '内部更新不接受外部脱敏规则')
       const { sourceIds } = input.value
       if (new Set(sourceIds).size !== sourceIds.length)
         fail(400, 'WORKSPACE_UPDATE_SETTINGS_INVALID', '更新来源不能重复')
@@ -669,7 +697,7 @@ export function createWorkspaceUpdates({
         const revision = input.expectedRevision + 1,
           stamp = time()
         db.prepare(
-          'INSERT INTO workspace_update_plans VALUES(?,?,?,?,?,?,?,?,?,?,NULL) ON CONFLICT(project_id,scope) DO UPDATE SET revision=excluded.revision,actor_id=excluded.actor_id,enabled=excluded.enabled,interval_minutes=excluded.interval_minutes,timezone=excluded.timezone,source_ids=excluded.source_ids,updated_at=excluded.updated_at,next_run_at=excluded.next_run_at,paused_code=NULL',
+          'INSERT INTO workspace_update_plans(project_id,scope,revision,actor_id,enabled,interval_minutes,timezone,source_ids,updated_at,next_run_at,rules_json,paused_code) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL) ON CONFLICT(project_id,scope) DO UPDATE SET revision=excluded.revision,actor_id=excluded.actor_id,enabled=excluded.enabled,interval_minutes=excluded.interval_minutes,timezone=excluded.timezone,source_ids=excluded.source_ids,updated_at=excluded.updated_at,next_run_at=excluded.next_run_at,rules_json=excluded.rules_json,paused_code=NULL',
         ).run(
           project,
           scope,
@@ -681,6 +709,7 @@ export function createWorkspaceUpdates({
           JSON.stringify(sourceIds),
           stamp,
           input.value.enabled ? now() + input.value.intervalMinutes * 60_000 : null,
+          JSON.stringify(scope === 'external' ? (input.value.rules ?? []) : []),
         )
         const result = publicPlan(planRow(project, scope)!, false)
         db.prepare('INSERT INTO workspace_update_receipts VALUES(?,?,?,?,?,?)').run(
@@ -748,7 +777,16 @@ export function createWorkspaceUpdates({
         {
           requestId: input.requestId,
           expectedRevision,
-          ...(input.rules ? { rules: input.rules.map((value) => ({ ...value })) } : {}),
+          ...(scope === 'external'
+            ? {
+                rules: (
+                  input.rules ??
+                  (planRow(project, scope)
+                    ? (publicPlan(planRow(project, scope)!, false).rules ?? [])
+                    : [])
+                ).map((rule) => ({ ...rule })),
+              }
+            : {}),
         },
         actor,
         'manual',

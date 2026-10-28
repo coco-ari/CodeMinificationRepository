@@ -1,3 +1,4 @@
+import { Dialog, DialogPopup, DialogTitle } from '~/components/ui/dialog'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { page } from 'vite-plus/test/browser'
@@ -5,7 +6,6 @@ import { render } from '../../test/render'
 import { AutoOpsRequestError } from './apiClient'
 import { useWorkspaceTaskSubmission } from './useWorkspaceTaskSubmission'
 import {
-  ExternalWorkspaceDialog,
   WorkspaceImportDialog,
   WorkspacePackagesDialog,
   WorkspaceSubmissionNotice,
@@ -108,10 +108,17 @@ function Harness({
           onImport={(repositoryUrl, branch) => submission.submit({ type, repositoryUrl, branch })}
         />
       ) : type === 'external' ? (
-        <ExternalWorkspaceDialog
-          {...common}
-          onGenerate={(rules) => submission.submit({ type, rules })}
-        />
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogPopup>
+            <DialogTitle>更新外部工作区</DialogTitle>
+            <button disabled={submission.busy} onClick={() => void submission.submit({ type })}>
+              更新外部工作区
+            </button>
+            {notice}
+            {submission.error ? <div role="alert">{submission.error}</div> : null}
+            <button onClick={() => setOpen(false)}>取消</button>
+          </DialogPopup>
+        </Dialog>
       ) : (
         <WorkspacePackagesDialog
           {...common}
@@ -124,17 +131,17 @@ function Harness({
     </>
   )
 }
-const submitLabel = { import: '导入并保存版本', external: '更新外部工作区', packages: '生成部署包' }
+const submitLabel = {
+  import: '导入并保存版本',
+  external: '更新外部工作区',
+  packages: '生成部署包',
+}
 async function openAndFill(type: WorkspaceTask['type']) {
   await page.getByRole('button', { name: '打开操作', exact: true }).click()
   if (type === 'import')
     await page
       .getByRole('textbox', { name: 'HTTPS 仓库地址' })
       .fill('https://isolated.invalid/private-repository.git')
-  if (type === 'external') {
-    await page.getByRole('button', { name: '添加替换', exact: true }).click()
-    await page.getByRole('textbox', { name: '规则 1 原始文本' }).fill('private-example-value')
-  }
 }
 function setup() {
   vi.resetAllMocks()

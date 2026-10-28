@@ -1,4 +1,6 @@
 import test from 'node:test'
+import { openDatabase } from '../autoops/server/platform/database.ts'
+import { workspaceUpdateMigrations, openWorkspaceUpdateDatabase } from '../agent-demo/t3-adapters/workspace-updates/storage.ts'
 import assert from 'node:assert/strict'
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -936,7 +938,7 @@ test('实际资料服务：定期 Git 同步失败保留原当前内容，问答
   )
 })
 
-test('实际资料服务：定期外部生成不重拉 Git，二进制待复核和生成失败保留已发布内容', async (t) => {
+test('实际资料服务：定期外部更新使用保存规则，不重拉 Git，成功替换且失败保留当前内容', async (t) => {
   const f = await managedFixture(t)
   await f.upload('docs/公开说明.md', '第一份已发布资料')
   const firstTask = await f.updates.manual(
@@ -958,27 +960,29 @@ test('实际资料服务：定期外部生成不重拉 Git，二进制待复核�
       'base64',
     ),
   )
-  f.updates.save('project-a', 'external', command(0, { sourceIds: [] }), 'manager')
+  f.updates.save('project-a', 'external', command(0, { sourceIds: [], rules: [{find:'待检查',replace:'已替换'}] }), 'manager')
   f.advance()
   await f.updates.tick()
   await f.settle()
   const plan = f.updates.overview('project-a', 'manager').external
-  assert.equal(plan.lastRun.outcome, 'pending_review')
+  assert.equal(plan.lastRun.outcome, 'completed')
   assert.equal(
     f.store
       .overview('project-a')
       .externalVersions.filter((version) => version.status === 'published').length,
     1,
   )
-  assert.equal(f.store.read('project-a', first.id, 'docs/公开说明.md').contents, '第一份已发布资料')
+  assert.throws(() => f.store.getVersion('project-a', first.id), {status:404})
+  const current = f.store.overview('project-a').externalVersions[0]
+  assert.equal(f.store.read('project-a', current.id, 'docs/公开说明.md').contents, '已替换的新资料')
+  assert.deepEqual(current.report.excludedFiles, ['images/待复核.png'])
   assert.equal(f.state.resolves, 0)
   await f.upload('docs/192.168.1.2.md', '文件名敏感，真实规则必须拒绝')
   f.advance()
   await f.updates.tick()
   await f.settle()
   assert.equal(f.updates.overview('project-a', 'manager').external.lastRun.outcome, 'failed')
-  assert.equal(f.store.getVersion('project-a', first.id).status, 'published')
-  assert.equal(f.store.read('project-a', first.id, 'docs/公开说明.md').contents, '第一份已发布资料')
+  assert.equal(f.store.read('project-a', current.id, 'docs/公开说明.md').contents, '已替换的新资料')
 })
 
 test('实际权限服务：配置后撤回项目成员使定期任务停用，不能用保存时角色继续同步', async (t) => {
@@ -1076,4 +1080,42 @@ test('实际Worker：撤权后精确原任务终态可释放更新锁，新管�
     f.service.currentFile('project-a', 'source/README.md', 'second').bytes.toString(),
     '隔离原始仓库内容\n',
   )
+})
+
+
+test('保存的外部规则跨重启供手动和自动更新共用，来源增删不要求复核，重复请求不重复执行', async t => {
+ const f=await fixture(t)
+ const rules=[{find:'内部代号',replace:'公开名称'}]
+ f.owner.save('project-a','external',command(0,{rules}),'manager')
+ await f.owner.close()
+ const owner=f.open()
+ assert.deepEqual(owner.overview('project-a','manager').external.rules,rules)
+ const input={requestId:randomUUID()}
+ await owner.manual('project-a','external',input,'manager')
+ assert.deepEqual(f.state.calls[0].input.rules,rules)
+ await owner.manual('project-a','external',input,'manager')
+ assert.equal(f.state.calls.length,1)
+ const receipt=f.state.receipts.get(input.requestId)
+ receipt.task.status='completed';receipt.versionStatus='published'
+ f.state.sourceIds=['new-source'];f.state.fingerprint='new-config'
+ f.advance()
+ await owner.tick();await flush()
+ assert.equal(f.state.calls.length,2)
+ assert.deepEqual(f.state.calls[1].input.rules,rules)
+ assert.equal(owner.overview('project-a','manager').external.enabled,true)
+ assert.equal(owner.overview('project-a','reader').external.rules,undefined)
+})
+
+
+test('旧更新设置升级后保留计划，外部默认空自定义规则并可再次打开',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'workspace-rules-migration-'))
+ t.after(()=>rm(root,{recursive:true,force:true}))
+ const path=join(root,'state.sqlite')
+ const before=openDatabase(path,workspaceUpdateMigrations.slice(0,1))
+ before.db.prepare('INSERT INTO workspace_update_plans VALUES(?,?,?,?,?,?,?,?,?,?,NULL)').run('project-a','external',2,'manager',1,5,'UTC','[]','2026-10-28T00:00:00Z',123)
+ before.close()
+ const after=openWorkspaceUpdateDatabase(path)
+ assert.deepEqual({...after.db.prepare('SELECT revision,enabled,next_run_at,rules_json FROM workspace_update_plans').get()},{revision:2,enabled:1,next_run_at:123,rules_json:'[]'})
+ after.close()
+ const reopened=openWorkspaceUpdateDatabase(path);reopened.close()
 })
