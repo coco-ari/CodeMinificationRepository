@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { FolderGit2Icon, PlusIcon, RefreshCwIcon } from 'lucide-react'
+import { FolderGit2Icon, PencilIcon, PlusIcon, RefreshCwIcon, ServerIcon } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
@@ -14,9 +14,9 @@ import {
   DialogPanel,
   DialogFooter,
 } from '~/components/ui/dialog'
-import { SettingsGroup } from '~/components/settings/SettingsGroup'
 import { SettingsSection, SettingsRow } from '~/components/settings/settingsLayout'
 import { WorkspacePageContainer } from '~/components/WorkspacePageContainer'
+import { useMediaQuery } from '~/hooks/useMediaQuery'
 import { toastManager } from '~/components/ui/toast'
 import {
   ModuleHeader,
@@ -46,6 +46,7 @@ import { ProjectCredentialsPanel } from './ProjectCredentialsPanel'
 import { ProjectRepositoryPanel } from './ProjectRepositoryPanel'
 import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
 import { ProjectConfigurationFields } from './ProjectConfigurationFields'
+import { ProjectSettingsNavigation, ProjectSettingsTarget } from './ProjectSettingsNavigation'
 import { DeploymentServers } from './deployment'
 import { ProjectRemovalAction, ProjectRemovalDialog, type ProjectRemovalTarget } from './ProjectRemovalDialog'
 import { EnvironmentMcpDialog } from './EnvironmentMcpDialog'
@@ -77,6 +78,7 @@ export function AutoOpsProjectsPage() {
   )
 }
 function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}}) {
+  const wideHeader = useMediaQuery('sm')
   const [mcpEnvironment, setMcpEnvironment] = useState<{id: string; name: string} | null>(null)
   const mcpTrigger = useRef<HTMLButtonElement | null>(null)
   const [removalTarget, setRemovalTarget] = useState<ProjectRemovalTarget | null>(null)
@@ -275,16 +277,19 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       </ModuleSidebar>
       <ModuleHeader
         title="项目管理"
-        detail={explicit ? (selected?.name ?? '项目不可用') : '项目管理'}
+        detail={explicit ? (wideHeader ? '项目配置' : (selected?.name ?? '项目不可用')) : '全部项目'}
         actions={
           <>
             {host?.canManageDeploymentNodes ? (
-              <Button variant="outline" size="sm" disabled={busy || !!pending || credentialLocked || removalLocked}
+              <Button variant="outline" size={wideHeader ? 'sm' : 'icon-sm'}
+                aria-label="平台节点" title="平台节点"
+                disabled={busy || !!pending || credentialLocked || removalLocked}
                 onClick={(event) => {
                   nodeTrigger.current = event.currentTarget
                   setNodeScope({ scope: 'platform' })
                 }}>
-                平台节点
+                <ServerIcon />
+                {wideHeader ? '平台节点' : null}
               </Button>
             ) : null}
             <Button
@@ -319,7 +324,9 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
             {manageable && settings ? (
               <Button
                 variant="outline"
-                size="sm"
+                size={wideHeader ? 'sm' : 'icon-sm'}
+                aria-label="编辑项目"
+                title="编辑项目"
                 disabled={busy || !!pending || credentialLocked || removalLocked}
                 onClick={(event) =>
                   open(
@@ -333,7 +340,8 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                   )
                 }
               >
-                编辑项目
+                <PencilIcon />
+                {wideHeader ? '编辑项目' : null}
               </Button>
             ) : null}
             {manageable && settings ? <ProjectRemovalAction
@@ -344,6 +352,9 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
           </>
         }
       />
+      {!loading && explicit && current ? (
+        <ProjectSettingsNavigation canManage={manageable && settings !== null} />
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <WorkspacePageContainer>
           {error ? (
@@ -382,30 +393,28 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
             <p role="alert">项目不存在或无权访问</p>
           ) : !explicit ? (
             <SettingsSection title="项目">
-              <SettingsGroup>
-                {projects.map((project) => (
-                  <SettingsRow
-                    key={project.id}
-                    title={project.name}
-                    description={project.description || undefined}
-                    control={
-                      <Button variant="ghost" size="sm" onClick={() => go(project.id)}>
-                        打开
-                      </Button>
-                    }
-                  >
-                    <span className="text-xs text-muted-foreground">
-                      {project.environments.length} 个可见环境
-                    </span>
-                  </SettingsRow>
-                ))}
-              </SettingsGroup>
+              {projects.map((project) => (
+                <SettingsRow
+                  key={project.id}
+                  title={project.name}
+                  description={project.description || undefined}
+                  control={
+                    <Button variant="ghost" size="sm" onClick={() => go(project.id)}>
+                      打开
+                    </Button>
+                  }
+                >
+                  <span className="text-xs text-muted-foreground">
+                    {project.environments.length} 个可见环境
+                  </span>
+                </SettingsRow>
+              ))}
             </SettingsSection>
           ) : (
             <>
-              <SettingsSection title="项目信息">
-                <SettingsGroup>
-                  <SettingsRow title="名称" control={<span>{current?.name}</span>} />
+              <ProjectSettingsTarget area="general">
+                <SettingsSection title="项目信息">
+                  <SettingsRow title="名称" control={<span className="min-w-0 break-words">{current?.name}</span>} />
                   {current?.description ? (
                     <SettingsRow title="说明">
                       <p className="whitespace-pre-wrap break-words text-sm">
@@ -413,30 +422,30 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                       </p>
                     </SettingsRow>
                   ) : null}
-                </SettingsGroup>
-              </SettingsSection>
-              <SettingsSection
-                title="环境"
-                headerAction={
-                  manageable ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy || !!pending || credentialLocked || removalLocked}
-                      onClick={(event) =>
-                        open(
-                          { kind: 'environment', revision: 0, name: '', description: '' },
-                          event.currentTarget,
-                        )
-                      }
-                    >
-                      <PlusIcon />
-                      添加环境
-                    </Button>
-                  ) : undefined
-                }
-              >
-                <SettingsGroup>
+                </SettingsSection>
+              </ProjectSettingsTarget>
+              <ProjectSettingsTarget area="environments">
+                <SettingsSection
+                  title="环境"
+                  headerAction={
+                    manageable ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy || !!pending || credentialLocked || removalLocked}
+                        onClick={(event) =>
+                          open(
+                            { kind: 'environment', revision: 0, name: '', description: '' },
+                            event.currentTarget,
+                          )
+                        }
+                      >
+                        <PlusIcon />
+                        添加环境
+                      </Button>
+                    ) : undefined
+                  }
+                >
                   {current?.environments.map((env) => (
                     <SettingsRow
                       key={env.id}
@@ -494,34 +503,34 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                   {!current?.environments.length ? (
                     <SettingsRow title="暂无环境" description="可直接使用无环境问答。" />
                   ) : null}
-                </SettingsGroup>
-              </SettingsSection>
+                </SettingsSection>
+              </ProjectSettingsTarget>
               {manageable && settings ? (
-                <ProjectCredentialsPanel
-                  key={settings.project.id}
-                  projectId={settings.project.id}
-                  disabled={busy || !!pending}
-                  onChanged={() => setConfigurationRevision((value) => value + 1)}
-                  onLockChange={setCredentialLocked}
-                />
+                <ProjectSettingsTarget area="git">
+                  <ProjectRepositoryPanel
+                    projectId={settings.project.id}
+                    revision={configurationRevision}
+                    disabled={busy || !!pending || credentialLocked || removalLocked}
+                    onOpen={open}
+                    addButtonRef={repositoryAddButton}
+                  />
+                  <ProjectCredentialsPanel
+                    projectId={settings.project.id}
+                    disabled={busy || !!pending}
+                    onChanged={() => setConfigurationRevision((value) => value + 1)}
+                    onLockChange={setCredentialLocked}
+                  />
+                </ProjectSettingsTarget>
               ) : null}
               {manageable && settings ? (
-                <ProjectRepositoryPanel
-                  key={settings.project.id}
-                  projectId={settings.project.id}
-                  revision={configurationRevision}
-                  disabled={busy || !!pending || credentialLocked || removalLocked}
-                  onOpen={open}
-                  addButtonRef={repositoryAddButton}
-                />
-              ) : null}
-              {manageable && settings ? (
-                <ProjectConfigurationPanel
-                  project={settings}
-                  revision={configurationRevision}
-                  disabled={busy || !!pending || credentialLocked || removalLocked}
-                  onOpen={open}
-                />
+                <ProjectSettingsTarget area="access">
+                  <ProjectConfigurationPanel
+                    project={settings}
+                    revision={configurationRevision}
+                    disabled={busy || !!pending || credentialLocked || removalLocked}
+                    onOpen={open}
+                  />
+                </ProjectSettingsTarget>
               ) : null}
             </>
           )}

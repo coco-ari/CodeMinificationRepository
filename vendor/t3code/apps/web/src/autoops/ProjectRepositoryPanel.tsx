@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { EllipsisIcon } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from '~/components/ui/menu'
-import { SettingsGroup } from '~/components/settings/SettingsGroup'
 import { SettingsSection, SettingsRow } from '~/components/settings/settingsLayout'
 import { isAutoOpsAccessError } from './apiClient'
 import {
@@ -147,81 +146,79 @@ export function ProjectRepositoryPanel({
           正在读取仓库
         </p>
       ) : null}
-      <SettingsGroup>
-        {state?.items.map((repository) => (
-          <SettingsRow
-            key={repository.id}
-            title={repository.name}
-            description={
-              <span className="block min-w-0 space-y-1 break-all">
-                <span className="block">{repository.url}</span>
-                {repository.credentialId ? (
-                  <span className="block">
-                    凭证：
-                    {state.credentials.find((value) => value.id === repository.credentialId)
-                      ?.name ?? '已不可用'}
-                  </span>
-                ) : null}
-                {result[repository.id] ? (
-                  <span className="block" role={result[repository.id]!.error ? 'alert' : 'status'}>
-                    {result[repository.id]!.text}
-                  </span>
-                ) : null}
-              </span>
-            }
-            control={
-              <div className="flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={disabled || checking !== null}
-                  onClick={() => setChecking(repository.id)}
+      {state?.items.map((repository) => (
+        <SettingsRow
+          key={repository.id}
+          title={repository.name}
+          description={
+            <span className="block min-w-0 space-y-1 break-all">
+              <span className="block">{repository.url}</span>
+              {repository.credentialId ? (
+                <span className="block">
+                  凭证：
+                  {state.credentials.find((value) => value.id === repository.credentialId)
+                    ?.name ?? '已不可用'}
+                </span>
+              ) : null}
+              {result[repository.id] ? (
+                <span className="block" role={result[repository.id]!.error ? 'alert' : 'status'}>
+                  {result[repository.id]!.text}
+                </span>
+              ) : null}
+            </span>
+          }
+          control={
+            <div className="flex gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={disabled || checking !== null}
+                onClick={() => setChecking(repository.id)}
+              >
+                {checking === repository.id ? '正在检查' : '检查连接'}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                aria-label={`编辑仓库 ${repository.name}`}
+                onClick={(event) => open(event.currentTarget, repository)}
+              >
+                编辑
+              </Button>
+              <Menu>
+                <MenuTrigger
+                  ref={(element) => {
+                    manageButtons.current[repository.id] =
+                      element instanceof HTMLButtonElement ? element : null
+                  }}
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`管理仓库 ${repository.name}`}
+                      disabled={disabled}
+                    />
+                  }
                 >
-                  {checking === repository.id ? '正在检查' : '检查连接'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={disabled}
-                  aria-label={`编辑仓库 ${repository.name}`}
-                  onClick={(event) => open(event.currentTarget, repository)}
-                >
-                  编辑
-                </Button>
-                <Menu>
-                  <MenuTrigger
-                    ref={(element) => {
-                      manageButtons.current[repository.id] =
-                        element instanceof HTMLButtonElement ? element : null
+                  <EllipsisIcon />
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  <MenuItem
+                    onClick={() => {
+                      const button = manageButtons.current[repository.id]
+                      if (button) open(button, repository, true)
                     }}
-                    render={
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`管理仓库 ${repository.name}`}
-                        disabled={disabled}
-                      />
-                    }
                   >
-                    <EllipsisIcon />
-                  </MenuTrigger>
-                  <MenuPopup align="end">
-                    <MenuItem
-                      onClick={() => {
-                        const button = manageButtons.current[repository.id]
-                        if (button) open(button, repository, true)
-                      }}
-                    >
-                      移除连接
-                    </MenuItem>
-                  </MenuPopup>
-                </Menu>
-              </div>
-            }
-          />
-        ))}
-        {state && !state.items.length ? <SettingsRow title="暂无仓库" /> : null}
-      </SettingsGroup>
+                    移除连接
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
+            </div>
+          }
+        />
+      ))}
+      {state && !state.items.length ? <SettingsRow title="暂无仓库" /> : null}
     </SettingsSection>
   )
 }

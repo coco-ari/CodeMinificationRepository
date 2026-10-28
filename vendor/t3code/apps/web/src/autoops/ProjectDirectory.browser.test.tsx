@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, useLayoutEffect } from 'react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { fakeTimers, render, stubGlobal } from '../../test/render'
@@ -6,16 +6,19 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { projectAssistantReceiptIntent } from '../../../../../../autoops/contracts/project-management-receipts.ts'
 import { SidebarProvider } from '~/components/ui/sidebar'
+import { AppSidebarLayout } from '~/components/AppSidebarLayout'
+import { readAppearanceModePreference, readThemePreference, useTheme } from '~/hooks/useTheme'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
 import { installAutoOpsHost, readAutoOpsHost } from './hostConfig'
 import { prepareProjectMutation, prepareProjectWrite, submitProjectWrite, readPendingProjectWrite } from "./projectDirectory";
 import '../index.css'
+import './theme.css'
 
 const mocks = vi.hoisted(() => ({ select: vi.fn() }))
 vi.mock(import('./projectNavigation'), async (original) => ({ ...(await original()), selectAutoOpsProject: mocks.select,
 }))
-function setup({ manage = true, failFirst = false, loseResponse = false } = {}) {
+function setup({ manage = true, failFirst = false, loseResponse = false, manageNodes = false, projectName = '原项目', lite = false } = {}) {
   mocks.select.mockReset()
   window.sessionStorage.clear()
   let fail = failFirst, lost = loseResponse, writes = 0,
@@ -25,9 +28,11 @@ function setup({ manage = true, failFirst = false, loseResponse = false } = {}) 
   const queries: string[] = [],
     receipts = new Map<string, object>();
   const bodies: object[] = []
-  const project = { id: 'directory-project', name: '原项目', description: '', revision: 1, createdBy: 'directory-owner', createdAt: '2026-10-26T00:00:00Z', environments: [{ id: 'test', name: '测试环境', revision: 1 }],
+  const project = { id: 'directory-project', name: projectName, description: '', revision: 1, createdBy: 'directory-owner', createdAt: '2026-10-26T00:00:00Z', environments: [{ id: 'test', name: '测试环境', revision: 1 }],
   }
   const bootstrap = () => ({
+    canManageDeploymentNodes: manageNodes,
+    ...(lite ? { productProfile: { id: 'project-assistant-lite-v1' as const } } : {}),
     principal: { id: 'directory-owner', displayName: '目录用户' }, csrfToken: 'test-csrf', gatewayBasePath: '/api/agent-demo/t3', fixedModel: { instanceId: 'codex', model: 'test-model' }, runtimeMode: 'approval-required' as const, canCreateProject: true, capabilities: {},
     projects: [{ ...project, agents: [], capabilities: { 'project.manage': currentManage, 'workspace.read': true, 'workspace.manage': currentManage, 'deployment.read': true, 'deployment.execute': currentManage,
         },
@@ -116,6 +121,69 @@ function App() {
     </StrictMode>
   );
 }
+
+function ThemedProjectPage({ dark }: { dark: boolean }) {
+  const { setAppearanceMode } = useTheme()
+  useLayoutEffect(() => {
+    const previous = readAppearanceModePreference(readThemePreference())
+    setAppearanceMode(dark ? 'dark' : 'light')
+    return () => { setAppearanceMode(previous) }
+  }, [dark, setAppearanceMode])
+  return <AppSidebarLayout><AutoOpsProjectsPage /></AppSidebarLayout>
+}
+
+it('窄屏项目页保留可辨认的名称和管理入口', async () => {
+  await page.viewport(390, 600)
+  const f = setup({ manageNodes: true, projectName: '华东区域生产服务项目' })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<AppSidebarLayout><AutoOpsProjectsPage /></AppSidebarLayout>, { router: '/projects?projectId=directory-project' })
+  await expect.element(screen.getByRole('button', { name: '编辑项目', exact: true })).toBeEnabled()
+  await page.screenshot({ path: '../../.test-artifacts/ui-refinement/project-mobile-after.png' })
+  const heading = screen.getByRole('heading', { name: f.project.name, exact: true }).element()
+  expect(heading.getBoundingClientRect().width).toBeGreaterThanOrEqual(120)
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(391)
+  await screen.getByRole('button', { name: '编辑项目', exact: true }).click()
+  await expect.element(page.getByRole('dialog', { name: '编辑项目', exact: true })).toBeVisible()
+  await userEvent.keyboard('{Escape}')
+  await expect.element(screen.getByRole('button', { name: '编辑项目', exact: true })).toHaveFocus()
+})
+
+it.each([{ width: 1440, dark: false }, { width: 390, dark: true }])(
+  '配置分组在 $width px 直达原表单，保留焦点与当前资料且不重复读取',
+  async ({ width, dark }) => {
+    await page.viewport(width, 600)
+    const f = setup({ manageNodes: true, projectName: '华东区域生产服务项目', lite: true })
+    using _fetch = stubGlobal('fetch', f.fetch)
+    await using screen = await render(<ThemedProjectPage dark={dark} />, { router: '/projects?projectId=directory-project' })
+    await expect.element(screen.getByText('暂无助手', { exact: true })).toBeVisible()
+    await expect.element(screen.getByRole('button', { name: '添加仓库', exact: true })).toBeEnabled()
+    const configReads = () => f.fetch.mock.calls.filter(([input]) => String(input).includes('/projects/')).length
+    const initialReads = configReads()
+    const navigation = screen.getByRole('navigation', { name: '项目配置分组' })
+    await navigation.getByRole('button', { name: '仓库与凭证' }).click()
+    const repository = screen.getByRole('region', { name: '仓库与凭证' })
+    await expect.element(repository).toHaveFocus()
+    const navBottom = navigation.element().getBoundingClientRect().bottom
+    expect(repository.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(navBottom)
+    const addRepository = repository.getByRole('button', { name: '添加仓库', exact: true })
+    await userEvent.keyboard('{Tab}')
+    await expect.element(addRepository).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect.element(page.getByRole('dialog', { name: '添加仓库', exact: true })).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(addRepository).toHaveFocus()
+    await navigation.getByRole('button', { name: '助手与成员' }).click()
+    await expect.element(screen.getByRole('region', { name: '助手与成员' })).toHaveFocus()
+    await expect.element(screen.getByText('待管理员分配')).toBeVisible()
+    expect(configReads()).toBe(initialReads)
+    expect(f.bodies).toHaveLength(0)
+    await navigation.getByRole('button', { name: '环境', exact: true }).click()
+    await expect.element(screen.getByRole('region', { name: '环境', exact: true })).toHaveFocus()
+    await expect.element(screen.getByRole('button', { name: '管理测试环境 MCP' })).toBeEnabled()
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
+    await page.screenshot({ path: `../../.test-artifacts/ui-refinement/project-${width}-${dark ? 'dark' : 'light'}.png` })
+  },
+)
 
 it('项目A保存未知后切到项目B仍能正常保存，不核对或覆盖A的原请求', async () => {
   using _timers = fakeTimers({ shouldAdvanceTime: true })
@@ -358,6 +426,11 @@ it('只读成员可以查看项目和已分配环境，不请求成员设置或�
   await expect.element(screen.getByText('测试环境', { exact: true })).toBeVisible()
   await expect.element(screen.getByRole('button', { name: '编辑项目', exact: true })).not.toBeInTheDocument()
   await expect.element(screen.getByRole('button', { name: '添加环境' })).not.toBeInTheDocument()
+  const navigation = screen.getByRole('navigation', { name: '项目配置分组' })
+  await expect.element(navigation.getByRole('button', { name: '仓库与凭证' })).not.toBeInTheDocument()
+  await expect.element(navigation.getByRole('button', { name: '助手与成员' })).not.toBeInTheDocument()
+  await navigation.getByRole('button', { name: '环境', exact: true }).click()
+  await expect.element(screen.getByRole('region', { name: '环境', exact: true })).toHaveFocus()
   expect(f.fetch.mock.calls.some(([url]) => String(url).endsWith('/settings'))).toBe(false)
 })
 
