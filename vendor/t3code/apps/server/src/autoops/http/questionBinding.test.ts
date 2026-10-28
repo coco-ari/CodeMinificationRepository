@@ -175,3 +175,23 @@ it('技能查询真实 HTTP 按共同合同解析所选列表，空列表不回�
   for (const invalid of ['not-json', '["bad/path"]', 'null', '["x",1]'])
     expect((await f.handle(f.request(query(invalid)))).status).toBe(400)
 })
+
+it('已发送会话可往返调整可见范围，真实 HTTP 校验身份、权限、CSRF 与独立字段', async () => {
+  await using f = setup()
+  await f.handle(f.request('/autoops/thread-bindings', binding))
+  f.access.markThreadAccepted(binding.threadId)
+  const path = `/autoops/thread-bindings/${binding.threadId}/visibility`
+  const shared = { expectedVisibility: 'private', visibility: 'project' }
+  const response = await f.handle(f.request(path, shared))
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({ binding: { ...binding, visibility: 'project', scopeState: 'locked' } })
+  expect((await f.handle(f.request(`/autoops/thread-bindings/${binding.threadId}`, undefined, 'reader'))).status).toBe(200)
+  expect((await f.handle(f.request(path, { expectedVisibility: 'project', visibility: 'private' }, 'reader'))).status).toBe(403)
+  for (const invalid of [{ ...shared, projectId: 'other' }, { ...shared, ownerId: 'reader' }, { visibility: 'public' }])
+    expect((await f.handle(f.request(path, invalid))).status).toBe(400)
+  expect((await f.handle(f.request(path, shared, 'admin', false))).status).toBe(403)
+  const restored = await f.handle(f.request(path, { expectedVisibility: 'project', visibility: 'private' }))
+  expect(restored.status).toBe(200)
+  expect((await f.handle(f.request(`/autoops/thread-bindings/${binding.threadId}`, undefined, 'reader'))).status).toBe(404)
+  expect(f.access.getThreadBinding(binding.threadId)?.scopeState).toBe('locked')
+})

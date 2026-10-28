@@ -129,6 +129,8 @@ export interface AutoOpsAccess {
   markThreadDeleted(threadId: string): void;
   bindThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding;
   reserveThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding;
+  updateThreadVisibility(principal: AutoOpsPrincipal, threadId: string, input: import('../../autoops/contracts/assistants.ts').ThreadVisibilityRequest): ThreadBinding;
+  subscribeVisibilityChanges(listener: () => void): () => void;
   beginThreadSubmission(principal: AutoOpsPrincipal, threadId: string, commandId: string): ThreadBinding;
   finishThreadSubmission(threadId: string, commandId: string, accepted: boolean): ThreadBinding | undefined;
   markThreadAccepted(threadId: string): ThreadBinding | undefined;

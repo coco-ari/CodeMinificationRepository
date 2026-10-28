@@ -83,7 +83,9 @@ export function personalShellChanges(sessionId:string, location:"active"|"archiv
     Effect.sync(() => {
       const principal = principalFor(sessionId); const store = preferences();
       const remove = principal && store ? store.subscribe(principal.id, () => Queue.offerUnsafe(queue, undefined)) : () => {};
-      return remove;
+      // 可见范围修改后沿用原生快照刷新列表，不等待下一条消息或周期刷新。
+      const removeVisibility = configuredAutoOpsAccess()?.subscribeVisibilityChanges(() => Queue.offerUnsafe(queue, undefined));
+      return () => { remove(); removeVisibility?.(); };
     }),
     (remove) => Effect.sync(remove),
   ), {bufferSize:1,strategy:"sliding"});

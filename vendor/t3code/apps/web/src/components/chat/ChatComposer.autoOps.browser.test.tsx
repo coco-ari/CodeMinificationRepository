@@ -945,7 +945,8 @@ it("刷新助手失败保留草稿，菜单可再次刷新恢复", async () => {
   expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe(f.preset.id);
 });
 
-it.each(["more", "right-click"])("会话 %s 菜单更改草稿可见范围，保留文本和模型且无勾选图标", async (entry) => {
+it.each(["more", "right-click", "narrow"])("会话 %s 菜单更改草稿可见范围，保留文本和模型且无勾选图标", async (entry) => {
+  await page.viewport(entry === "narrow" ? 390 : 1280, 600);
   const f = setup(`visibility-${entry}`, true);
   installAutoOpsHost({ ...readAutoOpsHost()!, productProfile: { id: "project-assistant-lite-v1" } }, window.location.origin);
   useComposerDraftStore.getState().setProjectDraftThreadId(
@@ -953,7 +954,7 @@ it.each(["more", "right-click"])("会话 %s 菜单更改草稿可见范围，保
   );
   using _fetch = stubGlobal("fetch", f.fetcher);
   const open = () => void showThreadMenuWithVisibility(showContextMenuFallback, [{ id: "discard", label: "丢弃草稿" }],
-    { x: 20, y: 20 }, { threadId: f.id, projectId: "composer-project", draftId: f.draftId, canOperate: () => true });
+    { x: entry === "narrow" ? 260 : 20, y: 20 }, { threadId: f.id, projectId: "composer-project", draftId: f.draftId, canOperate: () => true });
   await using screen = await render(<><SidebarProvider><SidebarDraftBlock
     projectByKey={new Map()} projectDisplayNameByKey={new Map()}
     scopedProjectKeys={new Set([`${f.environmentId}:composer-project`])}
@@ -968,6 +969,11 @@ it.each(["more", "right-click"])("会话 %s 菜单更改草稿可见范围，保
     await row.getByRole("button", { name: "对话更多操作" }).click();
   }
   await page.getByRole("menuitem", { name: "会话可见范围", exact: true }).click();
+  if (entry === "narrow") {
+    const parent = page.getByRole("menuitem", { name: "会话可见范围", exact: true }).element().getBoundingClientRect();
+    const child = page.getByRole("menuitemradio", { name: "项目共享", exact: true }).element().getBoundingClientRect();
+    expect(child.right).toBeLessThan(parent.left);
+  }
   const selected = page.getByRole("menuitemradio", { name: "仅自己", exact: true });
   await expect.element(selected).toHaveAttribute("aria-checked", "true");
   expect(selected.element().querySelector("svg")).toBeNull();
@@ -995,4 +1001,42 @@ it.each(["locked", "permission", "customer", "submitting"])("可见范围遵守 
     threadId: f.id, projectId: "composer-project", draftId: f.draftId, canOperate: () => true,
   });
   expect(readAutoOpsThreadScope(f.id, "composer-project")?.visibility).toBe("private");
+});
+
+
+it.each(["locked", "submitting"])("已保存会话在 %s 状态可往返调整可见性，保存失败不伪造成功", async (state) => {
+  const f = setup(`mutable-visibility-${state}`, true);
+  let saved = { ...readAutoOpsThreadScope(f.id, "composer-project")!, ownerId: "actual-composer-user",
+    scopeState: state as "locked" | "submitting", scopeLocked: state === "locked" };
+  const writes: unknown[] = [];
+  let reject = false;
+  using _fetch = stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith(`/thread-bindings/${f.id}/visibility`)) {
+      const body = JSON.parse(String(init?.body));
+      writes.push(body);
+      if (reject) return Response.json({ code: "THREAD_VISIBILITY_CHANGED", error: "其他页面已修改" }, { status: 409 });
+      saved = { ...saved, visibility: body.visibility, ...(saved.question ? { question: { ...saved.question,
+        configuration: { ...saved.question.configuration, visibility: body.visibility } } } : {}) };
+      return Response.json({ binding: saved });
+    }
+    if (String(input).endsWith(`/thread-bindings/${f.id}`)) return Response.json({ binding: saved });
+    return f.fetcher(input, init);
+  });
+  const change = async (visibility: "private" | "project") => {
+    await showThreadMenuWithVisibility(async <T extends string>(items: readonly ContextMenuItem<T>[]) => {
+      expect(items[0]?.children?.every(item => !item.disabled)).toBe(true);
+      return `visibility:${visibility}` as T;
+    }, [], { x: 20, y: 20 }, { threadId: f.id, projectId: "composer-project", canOperate: () => true });
+  };
+  await change("project");
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.visibility).toBe("project");
+  reject = true;
+  await change("private");
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.visibility).toBe("project");
+  reject = false;
+  await change("private");
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.visibility).toBe("private");
+  expect(writes[0]).toEqual({ expectedVisibility: "private", visibility: "project" });
+  expect(saved.scopeState).toBe(state);
+  expect(saved.question?.configuration.model).toEqual(f.preset.configuration.model);
 });

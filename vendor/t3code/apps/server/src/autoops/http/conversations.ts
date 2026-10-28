@@ -1,7 +1,7 @@
 import * as ByteSize from 'effect/ByteSize'
 import * as HttpIncomingMessage from 'effect/http/HttpIncomingMessage'
 import { decodeContract } from '../../../../../../../autoops/contracts/index.ts'
-import { ThreadBindingRequest } from '../../../../../../../autoops/contracts/assistants.ts'
+import { ThreadBindingRequest, ThreadVisibilityRequest } from '../../../../../../../autoops/contracts/assistants.ts'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
@@ -25,6 +25,16 @@ const nativeSubmissionState = (threadId: string) => Effect.gen(function* () {
     );
   });
 return Layer.mergeAll(
+HttpRouter.add("POST", "/autoops/thread-bindings/:threadId/visibility", Effect.gen(function* () {
+      const current = yield* principal;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      yield* Effect.try(() => access.requireCsrf(current, request.headers["x-demo-csrf"]));
+      const threadId = decodeURIComponent(new URL(request.url, "http://localhost").pathname.split("/").at(-2) ?? "");
+      const input = yield* request.json.pipe(Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.kibibytes(4)), Effect.mapError(() => ({ status: 400, code: 'INVALID_VISIBILITY', message: '会话可见范围正文无效' })));
+      const command = yield* Effect.try(() => decodeContract(ThreadVisibilityRequest, input)).pipe(Effect.mapError(() => ({ status: 400, code: 'INVALID_VISIBILITY', message: '会话可见范围字段无效' })));
+      const binding = yield* Effect.try(() => access.updateThreadVisibility(current, threadId, command));
+      return HttpServerResponse.jsonUnsafe({ binding }, { headers: { "cache-control": "no-store" } });
+    }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))),
 HttpRouter.add("GET", "/autoops/thread-bindings/:threadId", Effect.gen(function* () {
       const current = yield* principal;
       const request = yield* HttpServerRequest.HttpServerRequest;

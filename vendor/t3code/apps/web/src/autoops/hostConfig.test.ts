@@ -240,7 +240,7 @@ describe('AutoOps host authentication boundary', () => {
       })
     vi.stubGlobal('fetch', fetch)
     await expect(
-      host.reserveAutoOpsThreadScope('accepted', { ...original, visibility: 'project' }),
+      host.reserveAutoOpsThreadScope('accepted', { ...original, workspaceType: 'external' }),
     ).rejects.toThrow(/已被接受/)
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(host.readKnownAutoOpsThreadScope('accepted')).toMatchObject({
@@ -256,6 +256,9 @@ describe('AutoOps host authentication boundary', () => {
     ).toThrow(/固定/)
     await expect(host.reserveAutoOpsThreadScope('accepted', original)).resolves.toMatchObject({
       scopeLocked: true,
+    })
+    await expect(host.reserveAutoOpsThreadScope('accepted', { ...original, visibility: 'project' })).resolves.toMatchObject({
+      visibility: 'private', scopeLocked: true,
     })
     expect(fetch.mock.calls.every(([, options]) => options.method !== 'POST')).toBe(true)
   })

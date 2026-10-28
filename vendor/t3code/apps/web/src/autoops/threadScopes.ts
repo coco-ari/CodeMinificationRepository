@@ -1,6 +1,7 @@
 import type {
   AssistantSelection,
   AssistantPreset,
+  ThreadVisibilityRequest,
 } from '../../../../../../autoops/contracts/assistants.ts'
 import type { ModelSelection } from '@t3tools/contracts'
 import { autoOpsRequest, AutoOpsRequestError } from './apiClient'
@@ -16,6 +17,7 @@ export type AutoOpsExecutionBinding =
       runtimeId: 'codex'
     }
 export interface AutoOpsThreadScope {
+  ownerId?: string
   question?: AssistantSelection
   executionBinding?: AutoOpsExecutionBinding
   projectId: string
@@ -230,7 +232,13 @@ export async function reserveAutoOpsThreadScope(
   if (previous) {
     publishThreadScope(threadId, previous)
     if (previous.scopeLocked || previous.scopeState === 'locked') {
-      if (!sameAutoOpsThreadScope(previous, desired))
+      // 另一个页面可能刚调整可见性；发送继续使用服务端当前值，不把它当作执行范围漂移。
+      const currentVisibility = { ...desired, visibility: previous.visibility,
+        ...(desired.question ? { question: { ...desired.question, configuration: {
+          ...desired.question.configuration, visibility: previous.visibility,
+        } } } : {}),
+      }
+      if (!sameAutoOpsThreadScope(previous, currentVisibility))
         throw new Error('前次发送已被接受，对话范围已固定。请新建对话切换。')
       return previous
     }
@@ -263,6 +271,17 @@ export async function loadAutoOpsThreadScope(
 ): Promise<AutoOpsThreadScope> {
   const binding = await findAutoOpsThreadScope(threadId, signal)
   if (!binding) throw new Error('对话范围尚未保存。')
+  return binding
+}
+
+/** 仅更新可见范围，不重新预约或改写已接受的执行绑定。 */
+export async function updateAutoOpsThreadVisibility(threadId: string, input: ThreadVisibilityRequest) {
+  const result = await autoOpsRequest<{ binding: AutoOpsThreadScope }>(
+    `/autoops/thread-bindings/${encodeURIComponent(threadId)}/visibility`,
+    { label: '无法更新会话可见范围', body: input },
+  )
+  const binding = requireThreadBinding(result, true)
+  publishThreadScope(threadId, binding)
   return binding
 }
 

@@ -167,3 +167,10 @@ export const ThreadBindingRequest = S.Struct({
   workspaceVersionId: S.optionalKey(DirectoryId),
   question: S.optionalKey(AssistantSelection),
 })
+
+/** 可见性是会话属性，独立于首次接受后固定的执行参数。 */
+export const ThreadVisibilityRequest = S.Struct({
+  expectedVisibility: S.Literals(['private', 'project']),
+  visibility: S.Literals(['private', 'project']),
+})
+export type ThreadVisibilityRequest = typeof ThreadVisibilityRequest.Type

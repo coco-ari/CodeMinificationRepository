@@ -24,6 +24,63 @@ function setup(t) {
 }
 const scope = { projectId: 'p-autoops', environmentId: 'env-test', agentId: 'a-project', visibility: 'private' }
 
+test('会话接受后及发送确认中仍能调整可见范围，执行绑定不变且权限即时生效', t => {
+  const { access, principal, bindingDb } = setup(t)
+  const owner = principal('u-admin'), member = principal('u-lin')
+  access.reserveThread(owner, { ...scope, threadId: 'mutable' })
+  access.beginThreadSubmission(owner, 'mutable', 'sending')
+  let notifications = 0
+  const unsubscribe = access.subscribeVisibilityChanges(() => { notifications++ })
+  const shared = access.updateThreadVisibility(owner, 'mutable', { expectedVisibility: 'private', visibility: 'project' })
+  assert.equal(shared.scopeState, 'submitting')
+  assert.equal(access.canSeeThread(member, 'mutable'), false)
+  access.finishThreadSubmission('mutable', 'sending', true)
+  assert.equal(access.canSeeThread(member, 'mutable'), true)
+  access.recordThreadAttachment(owner, 'mutable-attachment', 'mutable')
+  assert.equal(access.requireAttachment(member, 'mutable-attachment').threadId, 'mutable')
+  const before = access.getThreadBinding('mutable')
+  assert.throws(() => access.updateThreadVisibility(member, 'mutable', { expectedVisibility: 'project', visibility: 'private' }), { code: 'THREAD_OWNER_REQUIRED' })
+  access.updateThreadVisibility(owner, 'mutable', { expectedVisibility: 'project', visibility: 'private' })
+  assert.deepEqual(access.getThreadBinding('mutable'), { ...before, visibility: 'private' })
+  assert.equal(access.canSeeThread(member, 'mutable'), false)
+  assert.throws(() => access.requireAttachment(member, 'mutable-attachment'), { code: 'THREAD_NOT_FOUND' })
+  assert.throws(() => authorizeAutoOpsRpc(access, member, 'orchestration.getThreadProjection', { threadId: 'mutable' }), { status: 404 })
+  assert.equal(bindingDb.prepare('SELECT submission_command_id FROM t3_thread_bindings WHERE thread_id=?').get('mutable').submission_command_id, 'sending')
+  assert.throws(() => access.reserveThread(owner, { ...scope, threadId: 'mutable', environmentId: 'env-prod' }), { code: 'THREAD_SCOPE_LOCKED' })
+  assert.equal(notifications, 2)
+  assert.equal(bindingDb.prepare('SELECT COUNT(*) AS count FROM t3_thread_visibility_changes WHERE thread_id=?').get('mutable').count, 2)
+  unsubscribe()
+})
+
+test('可见性独立更新拒绝权限和并发覆盖，父会话变更同时同步原生子任务', t => {
+  const { access, principal, bindingDb, catalog } = setup(t)
+  const owner = principal('u-admin')
+  for (const id of ['parent-visible', 'child-visible']) access.bindThread(owner, { ...scope, threadId: id })
+  bindingDb.prepare('INSERT INTO t3_native_subagent_bindings VALUES(?,?,?,?)').run('child-visible', 'parent-visible', 'native-visible', 'now')
+  assert.throws(() => access.updateThreadVisibility(owner, 'child-visible', { expectedVisibility: 'private', visibility: 'project' }), { code: 'THREAD_VISIBILITY_INHERITED' })
+  access.updateThreadVisibility(owner, 'parent-visible', { expectedVisibility: 'private', visibility: 'project' })
+  assert.equal(access.requireThread(principal('u-lin'), 'child-visible').visibility, 'project')
+  assert.throws(() => access.updateThreadVisibility(owner, 'parent-visible', { expectedVisibility: 'private', visibility: 'private' }), { code: 'THREAD_VISIBILITY_CHANGED' })
+  catalog.users.find(user => user.id === owner.id).role = 'member'
+  const membership = catalog.projects.find(project => project.id === scope.projectId).memberships.find(member => member.userId === owner.id)
+  membership.role = 'reader'; membership.canAdjustChat = false; membership.environmentIds = ['env-test']
+  assert.throws(() => access.updateThreadVisibility(owner, 'parent-visible', { expectedVisibility: 'project', visibility: 'private' }), { code: 'PROJECT_ACTION_FORBIDDEN' })
+})
+
+test('可见性镜像随父子会话持久保存，必要审计失败时原子回滚', t => {
+  const { access, principal, bindingDb } = setup(t)
+  const owner = principal('u-admin')
+  access.bindThread(owner, { ...scope, threadId: 'audit-visible' })
+  const question = { assistantId: 'original', presetRevision: 1, configuration: { visibility: 'private', model: { model: 'fixed' } } }
+  bindingDb.prepare('UPDATE t3_thread_bindings SET question_json=? WHERE thread_id=?').run(JSON.stringify(question), 'audit-visible')
+  access.updateThreadVisibility(owner, 'audit-visible', { expectedVisibility: 'private', visibility: 'project' })
+  assert.deepEqual(access.getThreadBinding('audit-visible').question, { ...question, configuration: { ...question.configuration, visibility: 'project' } })
+  bindingDb.exec("CREATE TRIGGER reject_visibility_audit BEFORE INSERT ON t3_thread_visibility_changes BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END")
+  assert.throws(() => access.updateThreadVisibility(owner, 'audit-visible', { expectedVisibility: 'project', visibility: 'private' }), /audit unavailable/)
+  assert.equal(access.getThreadBinding('audit-visible').visibility, 'project')
+  assert.equal(access.getThreadBinding('audit-visible').question.configuration.visibility, 'project')
+})
+
 test('替换账号目录后所有身份入口都读取最新停用状态，不沿用旧数组', t => {
   const {access,catalog,principal}=setup(t)
   const admin=principal('u-admin')
@@ -271,6 +328,7 @@ test('customer conversation locks exact execution target after acceptance and hi
   registry.registerWorkspace(devicePrincipal,{registeredWorkspaceId:'local-other',projectId:'p-autoops',label:'其他目录',workspaceBindingRevision:1,runtimeId:'codex'})
   assert.throws(()=>access.reserveThread(owner,{...scope,environmentId:null,threadId:'customer-history',executionBinding:{...executionBinding,registeredWorkspaceId:'local-other'}}),{code:'THREAD_SCOPE_LOCKED'})
   access.finishThreadSubmission('customer-history','cmd-1',true)
+  assert.throws(() => access.updateThreadVisibility(owner, 'customer-history', { expectedVisibility: 'private', visibility: 'project' }), { status: 403 })
   registry.revokeWorkspace(devicePrincipal,'local-project')
   registry.revokeCredential(owner.id,paired.device.id)
   assert.equal(access.requireThread(owner,'customer-history').scopeState,'locked')

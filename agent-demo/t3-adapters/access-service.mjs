@@ -63,6 +63,10 @@ export function initializeAutoOpsAccessSchema(db) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS t3_thread_bindings_project ON t3_thread_bindings(project_id);
+    CREATE TABLE IF NOT EXISTS t3_thread_visibility_changes (
+      id INTEGER PRIMARY KEY, thread_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+      previous_visibility TEXT NOT NULL, visibility TEXT NOT NULL, created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS t3_native_subagent_bindings (
       child_thread_id TEXT PRIMARY KEY, parent_thread_id TEXT NOT NULL,
       native_thread_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
@@ -132,6 +136,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog: sourceCatal
     try { return read() } finally { authorizationRead = null }
   }
   let accepting = true
+  const visibilityListeners = new Set()
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
   const { refresh } = identity
@@ -330,6 +335,43 @@ export function createAccessService({ sessionDb, bindingDb, catalog: sourceCatal
     if (binding.compatibilityReadOnly) fail(409, 'LEGACY_THREAD_READ_ONLY', '历史兼容会话仅供查看')
     if (binding.executionBinding.kind === 'customer') requireCustomerSource(binding, binding.ownerId, options)
     return binding
+  }
+  const updateThreadVisibility = (principal, threadId, input) => {
+    const current = refresh(principal)
+    if (!['private', 'project'].includes(input.visibility) || !['private', 'project'].includes(input.expectedVisibility))
+      fail(400, 'INVALID_VISIBILITY', '会话可见范围无效')
+    let changed = false
+    bindingDb.exec('BEGIN IMMEDIATE')
+    try {
+      const binding = requireThread(current, threadId)
+      if (binding.ownerId !== current.id) fail(403, 'THREAD_OWNER_REQUIRED', '只有会话创建者可以修改可见范围')
+      requireProjectActionForUser(current.id, binding.projectId, 'chat.configure')
+      if (binding.nativeParentThreadId) fail(409, 'THREAD_VISIBILITY_INHERITED', '子任务跟随来源会话的可见范围')
+      if (binding.executionBinding.kind === 'customer' && input.visibility !== 'private')
+        fail(403, 'CUSTOMER_OWNER_REQUIRED', '本机对话仅自己可见')
+      if (binding.visibility !== input.visibility) {
+        if (binding.visibility !== input.expectedVisibility) fail(409, 'THREAD_VISIBILITY_CHANGED', '可见范围已在其他页面修改，请重新打开菜单')
+        // 同一事务同步子任务及助手中的可见性镜像，不改执行来源、输入、轮次或提交收据。
+        const descendants = bindingDb.prepare(`WITH RECURSIVE family(thread_id) AS (
+          SELECT ? UNION SELECT child_thread_id FROM t3_native_subagent_bindings JOIN family ON parent_thread_id=family.thread_id
+        ) SELECT thread_id FROM family`).all(threadId)
+        const write = bindingDb.prepare('UPDATE t3_thread_bindings SET visibility=?,question_json=? WHERE thread_id=?')
+        for (const row of descendants) {
+          const member = getThreadBinding(row.thread_id)
+          if (!member) continue
+          const question = member.question ? { ...member.question, configuration: { ...member.question.configuration, visibility: input.visibility } } : undefined
+          write.run(input.visibility, question ? JSON.stringify(question) : null, member.threadId)
+        }
+        bindingDb.prepare('INSERT INTO t3_thread_visibility_changes(thread_id,actor_id,previous_visibility,visibility,created_at) VALUES(?,?,?,?,?)')
+          .run(threadId, current.id, binding.visibility, input.visibility, new Date(now()).toISOString())
+        changed = true
+      }
+      bindingDb.exec('COMMIT')
+    } catch (error) { bindingDb.exec('ROLLBACK'); throw error }
+    if (changed) for (const listener of visibilityListeners) {
+      try { listener() } catch (error) { console.warn('会话可见范围已保存，列表通知失败', error) }
+    }
+    return getThreadBinding(threadId)
   }
   const beginThreadSubmission = (principal, threadId, commandId) => {
     requireThreadExecution(principal, threadId, { requireOnline: true })
@@ -627,6 +669,11 @@ export function createAccessService({ sessionDb, bindingDb, catalog: sourceCatal
     },
     bindThread,
     reserveThread,
+    updateThreadVisibility,
+    subscribeVisibilityChanges(listener) {
+      visibilityListeners.add(listener)
+      return () => visibilityListeners.delete(listener)
+    },
     beginThreadSubmission,
     finishThreadSubmission,
     markThreadAccepted,

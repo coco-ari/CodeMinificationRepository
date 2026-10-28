@@ -487,10 +487,6 @@ export function showContextMenuFallback<T extends string>(
               if (!childMenu) {
                 return;
               }
-              const childRect = childMenu.getBoundingClientRect();
-              if (childRect.right > window.innerWidth) {
-                clampMenuPosition(childMenu, rect.left - childRect.width - 4, rect.top);
-              }
               if (focusFirstItem) {
                 focusFirstEnabled(childMenu);
               }
@@ -524,11 +520,16 @@ export function showContextMenuFallback<T extends string>(
       menuHost.appendChild(menu);
       menuStack[level] = menu;
       submenuTriggerStack[level] = parentTrigger;
-      clampMenuPosition(menu, preferredLeft, preferredTop);
-
-      requestAnimationFrame(() => {
-        clampMenuPosition(menu, preferredLeft, preferredTop);
-      });
+      const positionMenu = () => {
+        const trigger = parentTrigger?.getBoundingClientRect();
+        const width = menu.getBoundingClientRect().width;
+        // 先按未裁剪的位置决定左右，避免窄屏子菜单覆盖父项并吃掉点击。
+        const left = trigger && preferredLeft + width > window.innerWidth - 4
+          ? trigger.left - width - 4 : preferredLeft;
+        clampMenuPosition(menu, left, preferredTop);
+      };
+      positionMenu();
+      requestAnimationFrame(positionMenu);
     };
 
     // Run before the modal's document-capture Escape handler; only keys owned

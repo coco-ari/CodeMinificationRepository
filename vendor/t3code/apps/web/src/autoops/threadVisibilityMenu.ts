@@ -6,7 +6,7 @@ import { questionCanAdjust } from './questionConfiguration'
 import {
   loadAutoOpsThreadScope,
   readAutoOpsThreadScope,
-  reserveAutoOpsThreadScope,
+  updateAutoOpsThreadVisibility,
   setAutoOpsThreadScope,
   type AutoOpsThreadScope,
 } from './threadScopes'
@@ -25,20 +25,18 @@ function lockedReason(scope: AutoOpsThreadScope, target: Target): string | null 
     if (!session || session.promotedTo || session.threadId !== target.threadId)
       return '草稿已发送或关闭'
   }
-  if (scope.scopeState === 'submitting') return '正在确认发送结果'
-  if (
-    scope.scopeLocked ||
-    scope.scopeState === 'locked' ||
-    scope.nativeParentThreadId ||
-    scope.compatibilityReadOnly
-  )
-    return '发送后固定'
-  if (!target.canOperate() || !questionCanAdjust(scope)) return '由项目管理员设置'
+  if (target.draftId && (scope.scopeState === 'submitting' || scope.scopeLocked))
+    return '草稿正在发送，请在会话中设置'
+  if (scope.nativeParentThreadId) return '跟随来源会话'
+  if (!target.draftId && scope.ownerId !== readAutoOpsHost()?.principal.id)
+    return '仅会话创建者可调整'
+  // 可见性不随发送状态锁定；仅沿用配置权限，提交中的执行参数仍不允许调整。
+  if (!target.canOperate() || !questionCanAdjust({ ...scope, scopeState: 'locked' })) return '由项目管理员设置'
   if (scope.executionBinding?.kind === 'customer') return '本机对话仅自己可见'
   return null
 }
 
-/** 侧栏更多和右键共用入口，只调整未发送范围，沿用原来的授权与锁定规则。 */
+/** 侧栏更多和右键共用入口，可见性独立于已固定的执行参数。 */
 export async function showThreadMenuWithVisibility<T extends string>(
   show: LocalApi['contextMenu']['show'],
   items: ReadonlyArray<ContextMenuItem<T>>,
@@ -100,7 +98,10 @@ export async function showThreadMenuWithVisibility<T extends string>(
         : {}),
     }
     if (target.draftId) setAutoOpsThreadScope(target.threadId, next)
-    else await reserveAutoOpsThreadScope(target.threadId, next)
+    else await updateAutoOpsThreadVisibility(target.threadId, {
+      expectedVisibility: current.visibility,
+      visibility,
+    })
   } catch (cause) {
     toastManager.add({
       type: 'error',
