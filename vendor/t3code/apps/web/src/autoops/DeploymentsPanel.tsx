@@ -26,6 +26,7 @@ import { ScrollArea } from '~/components/ui/scroll-area'
 import { Spinner } from '~/components/ui/spinner'
 import { Toggle, ToggleGroup } from '~/components/ui/toggle-group'
 import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
+import { useMediaQuery } from '~/hooks/useMediaQuery'
 import { randomUUID } from '~/lib/utils'
 import { readAutoOpsHost } from './hostConfig'
 import type { WorkspaceRelease } from './workspaces'
@@ -145,6 +146,7 @@ export function DeploymentsPanel({
   packageActions: PackageActions | null
   onRefreshPackages: () => void
 }) {
+  const wideToolbar = useMediaQuery('sm')
   const canExecute =
     readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.[
       'deployment.execute'
@@ -469,21 +471,7 @@ export function DeploymentsPanel({
             <PlusIcon />
           </Button>
         }
-        header={
-          <>
-            {navigation}
-            <div className="pt-2">
-              <Choice
-                label="部署环境"
-                value={environmentId}
-                options={environments.length ? environments : (overview?.environments ?? [])}
-                onChange={chooseEnvironment}
-                disabled={accessDenied || busy || !!pending}
-                placeholder="读取环境…"
-              />
-            </div>
-          </>
-        }
+        header={navigation}
       >
         <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
           <div className="px-[var(--sidebar-content-inset)]">
@@ -692,6 +680,165 @@ export function DeploymentsPanel({
           </>
         }
       />
+      <div
+        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-3 py-2"
+        data-deployment-toolbar=""
+      >
+        <div className="flex min-w-0 basis-80 grow items-center gap-2 sm:basis-auto sm:grow-0">
+          <div className="min-w-0 flex-1 space-y-1 sm:w-52 sm:flex-none">
+            <span className="block text-xs text-muted-foreground">部署环境</span>
+            <Choice
+              label="部署环境"
+              value={environmentId}
+              options={environments.length ? environments : (overview?.environments ?? [])}
+              onChange={chooseEnvironment}
+              disabled={accessDenied || busy || !!pending}
+              placeholder="读取环境…"
+            />
+          </div>
+          {target && overview ? (
+            <div className="min-w-0 flex-1 space-y-1 sm:w-52 sm:flex-none">
+              <span className="block text-xs text-muted-foreground">部署位置</span>
+              <Choice
+                label="部署位置"
+                value={target.id}
+                options={targets.map((entry) => ({
+                  id: entry.id,
+                  name:
+                    overview.servers.find((node) => node.id === entry.serverId)?.name ?? entry.name,
+                }))}
+                onChange={(value) =>
+                  setSelection({
+                    environmentId,
+                    serviceId: service?.id ?? '',
+                    targetId: value,
+                    taskId: '',
+                  })
+                }
+                disabled={busy || !!pending}
+              />
+            </div>
+          ) : null}
+        </div>
+        {target && overview ? (
+          <>
+            <ToggleGroup
+              aria-label="部署详情分类"
+              variant="segmented"
+              value={[detailTab]}
+              onValueChange={(value) => {
+                if (value[0] === 'logs' || value[0] === 'history' || value[0] === 'config')
+                  setDetailTab(value[0])
+              }}
+            >
+              <Toggle value="logs">
+                <FileTextIcon />
+                任务日志
+              </Toggle>
+              <Toggle value="history">
+                <HistoryIcon />
+                发布记录
+              </Toggle>
+              <Toggle value="config">
+                <SettingsIcon />
+                配置
+              </Toggle>
+            </ToggleGroup>
+            <div className="ml-auto shrink-0">
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      size={wideToolbar ? 'sm' : 'icon-sm'}
+                      variant="ghost"
+                      aria-label="运行信息"
+                      title="运行信息"
+                    />
+                  }
+                >
+                  <InfoIcon />
+                  {wideToolbar ? '运行信息' : null}
+                </PopoverTrigger>
+                <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
+                  <div className="space-y-3" aria-label="部署运行记录">
+                    <PopoverTitle>运行信息</PopoverTitle>
+                    <dl className="space-y-3 text-sm">
+                      <div>
+                        <dt className="text-xs text-muted-foreground">部署服务器</dt>
+                        <dd className="break-words">{server?.name ?? '服务器不可用'}</dd>
+                        <dd className="text-xs text-muted-foreground">
+                          执行器{online ? '在线' : '离线'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">最近观测</dt>
+                        <dd className="break-words">{deploymentObservationLabel(target)}</dd>
+                        <dd className="text-xs text-muted-foreground">
+                          {target.lastObservedAt
+                            ? `观测时间：${dateLabel(target.lastObservedAt)}`
+                            : '尚无观测时间'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-muted-foreground">上次确认版本</dt>
+                        <dd className="break-all font-mono text-xs">
+                          {runtimeStatus?.confirmedRelease?.revision ??
+                            runtimeStatus?.confirmedRelease?.id ??
+                            '尚无成功记录'}
+                        </dd>
+                      </div>
+                    </dl>
+                    {target.currentRelease?.sourceIdentity ? (
+                      <DeploymentSourceDetails
+                        source={target.currentRelease.sourceIdentity}
+                        label="查看已确认版本来源"
+                      />
+                    ) : null}
+                  </div>
+                </PopoverPopup>
+              </Popover>
+            </div>
+            {target.observation &&
+            target.observationStale === false &&
+            (target.observation.health === 'unhealthy' ||
+              (target.currentRelease &&
+                (target.observation.exists === false ||
+                  target.observation.managed === false ||
+                  ['exited', 'dead'].includes(target.observation.status)))) ? (
+              <Alert variant="error" className="basis-full">
+                <AlertDescription>{deploymentObservationLabel(target)}</AlertDescription>
+              </Alert>
+            ) : null}
+            {runtimeStatus?.state === 'uncertain' ? (
+              <Alert variant="warning" className="basis-full">
+                <AlertTitle>运行状态待核对</AlertTitle>
+                <AlertDescription>
+                  <p>{runtimeStatus.message}</p>
+                </AlertDescription>
+                <AlertAction>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    aria-label="查看待核对任务"
+                    onClick={() => {
+                      setDetailTab('logs')
+                      setSelection({
+                        environmentId,
+                        targetId: target.id,
+                        taskId: runtimeStatus.attentionTaskId ?? '',
+                      })
+                    }}
+                  >
+                    查看任务
+                  </Button>
+                </AlertAction>
+              </Alert>
+            ) : runtimeStatus?.state === 'updating' ? (
+              <p className="basis-full text-xs text-muted-foreground">{runtimeStatus.message}</p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
       {error || loadError || pending ? (
         <div className="shrink-0 border-b border-border/60 px-3 py-2">
           <Alert variant={pending ? 'warning' : 'error'}>
@@ -761,139 +908,6 @@ export function DeploymentsPanel({
                     该服务器尚未上报静态站点部署能力，请先完成部署执行器升级。
                   </p>
                 ) : null}
-                <div
-                  className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-3 py-2"
-                  data-deployment-toolbar=""
-                >
-                  <div className="min-w-0 max-w-full basis-52">
-                    <Choice
-                      label="部署位置"
-                      value={target.id}
-                      options={targets.map((entry) => ({
-                        id: entry.id,
-                        name:
-                          overview.servers.find((node) => node.id === entry.serverId)?.name ??
-                          entry.name,
-                      }))}
-                      onChange={(value) =>
-                        setSelection({
-                          environmentId,
-                          serviceId: service?.id ?? '',
-                          targetId: value,
-                          taskId: '',
-                        })
-                      }
-                      disabled={busy || !!pending}
-                    />
-                  </div>
-                  <ToggleGroup
-                    aria-label="部署详情分类"
-                    variant="segmented"
-                    value={[detailTab]}
-                    onValueChange={(value) => {
-                      if (value[0] === 'logs' || value[0] === 'history' || value[0] === 'config')
-                        setDetailTab(value[0])
-                    }}
-                  >
-                    <Toggle value="logs">
-                      <FileTextIcon />
-                      任务日志
-                    </Toggle>
-                    <Toggle value="history">
-                      <HistoryIcon />
-                      发布记录
-                    </Toggle>
-                    <Toggle value="config">
-                      <SettingsIcon />
-                      配置
-                    </Toggle>
-                  </ToggleGroup>
-                  <div className="ml-auto shrink-0">
-                    <Popover>
-                      <PopoverTrigger render={<Button size="sm" variant="ghost" />}>
-                        <InfoIcon />
-                        运行信息
-                      </PopoverTrigger>
-                      <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
-                        <div className="space-y-3" aria-label="部署运行记录">
-                          <PopoverTitle>运行信息</PopoverTitle>
-                          <dl className="space-y-3 text-sm">
-                            <div>
-                              <dt className="text-xs text-muted-foreground">部署服务器</dt>
-                              <dd className="break-words">{server?.name ?? '服务器不可用'}</dd>
-                              <dd className="text-xs text-muted-foreground">
-                                执行器{online ? '在线' : '离线'}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">最近观测</dt>
-                              <dd className="break-words">{deploymentObservationLabel(target)}</dd>
-                              <dd className="text-xs text-muted-foreground">
-                                {target.lastObservedAt
-                                  ? `观测时间：${dateLabel(target.lastObservedAt)}`
-                                  : '尚无观测时间'}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">上次确认版本</dt>
-                              <dd className="break-all font-mono text-xs">
-                                {runtimeStatus?.confirmedRelease?.revision ??
-                                  runtimeStatus?.confirmedRelease?.id ??
-                                  '尚无成功记录'}
-                              </dd>
-                            </div>
-                          </dl>
-                          {target.currentRelease?.sourceIdentity ? (
-                            <DeploymentSourceDetails
-                              source={target.currentRelease.sourceIdentity}
-                              label="查看已确认版本来源"
-                            />
-                          ) : null}
-                        </div>
-                      </PopoverPopup>
-                    </Popover>
-                  </div>
-                  {target.observation &&
-                  target.observationStale === false &&
-                  (target.observation.health === 'unhealthy' ||
-                    (target.currentRelease &&
-                      (target.observation.exists === false ||
-                        target.observation.managed === false ||
-                        ['exited', 'dead'].includes(target.observation.status)))) ? (
-                    <Alert variant="error" className="basis-full">
-                      <AlertDescription>{deploymentObservationLabel(target)}</AlertDescription>
-                    </Alert>
-                  ) : null}
-                  {runtimeStatus?.state === 'uncertain' ? (
-                    <Alert variant="warning" className="basis-full">
-                      <AlertTitle>运行状态待核对</AlertTitle>
-                      <AlertDescription>
-                        <p>{runtimeStatus.message}</p>
-                      </AlertDescription>
-                      <AlertAction>
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          aria-label="查看待核对任务"
-                          onClick={() => {
-                            setDetailTab('logs')
-                            setSelection({
-                              environmentId,
-                              targetId: target.id,
-                              taskId: runtimeStatus.attentionTaskId ?? '',
-                            })
-                          }}
-                        >
-                          查看任务
-                        </Button>
-                      </AlertAction>
-                    </Alert>
-                  ) : runtimeStatus?.state === 'updating' ? (
-                    <p className="basis-full text-xs text-muted-foreground">
-                      {runtimeStatus.message}
-                    </p>
-                  ) : null}
-                </div>
                 {detailTab === 'logs' ? (
                   <>
                     {taskId ? (

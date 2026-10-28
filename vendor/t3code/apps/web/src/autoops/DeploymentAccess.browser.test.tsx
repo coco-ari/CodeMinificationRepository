@@ -1,7 +1,11 @@
+import { useLayoutEffect, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import { page } from 'vite-plus/test/browser'
+import { page, userEvent } from 'vite-plus/test/browser'
 import { act, render } from '../../test/render'
+import { AppSidebarLayout } from '~/components/AppSidebarLayout'
 import { SidebarProvider } from '~/components/ui/sidebar'
+import { readAppearanceModePreference, readThemePreference, useTheme } from '~/hooks/useTheme'
+import { installAutoOpsHost } from './hostConfig'
 import { ModuleSidebarOutlet, ModuleSidebarProvider } from './ModuleWorkspace'
 import { DeploymentsPanel } from './DeploymentsPanel'
 import {
@@ -12,6 +16,7 @@ import {
 } from './deployments'
 import type { WorkspaceRelease } from './workspaces'
 import '../index.css'
+import './theme.css'
 
 const mocks = vi.hoisted(() => ({
   host: vi.fn(),
@@ -138,6 +143,21 @@ const view = (width = 1000, height = 600) => (
     </ModuleSidebarProvider>
   </SidebarProvider>
 )
+function ThemedShell({ dark, children }: { dark: boolean; children: ReactNode }) {
+  const { setAppearanceMode } = useTheme()
+  useLayoutEffect(() => {
+    const previous = readAppearanceModePreference(readThemePreference())
+    const rootBackground = document.documentElement.style.backgroundColor
+    const bodyBackground = document.body.style.backgroundColor
+    setAppearanceMode(dark ? 'dark' : 'light')
+    return () => {
+      setAppearanceMode(previous)
+      document.documentElement.style.backgroundColor = rootBackground
+      document.body.style.backgroundColor = bodyBackground
+    }
+  }, [dark, setAppearanceMode])
+  return <AppSidebarLayout>{children}</AppSidebarLayout>
+}
 async function click(label: string) {
   const button = [...document.querySelectorAll('button')].find(
     (element) =>
@@ -188,6 +208,68 @@ afterEach(async () => {
 })
 
 describe('部署撤权隔离', () => {
+  it.each([{ width: 390, dark: true }, { width: 1440, dark: false }])(
+    '部署环境在 $width px 主区域可见并可从读取失败恢复',
+    async ({ width, dark }) => {
+      await page.viewport(width, 600)
+      const host = mocks.host()
+      const environments = [{ id: 'env-one', name: '隔离环境' }, { id: 'env-two', name: '生产环境' }]
+      host.projects[0].environments = environments
+      mocks.host.mockReturnValue(installAutoOpsHost({
+        ...host, csrfToken: 'test-csrf', gatewayBasePath: '/api/agent-demo/t3',
+        fixedModel: { instanceId: 'codex', model: 'test-model' }, runtimeMode: 'approval-required',
+        capabilities: {},
+      }, window.location.origin))
+      let rejectEnvironment!: (cause: Error) => void
+      mocks.load.mockImplementation((_project: string, environment: string) =>
+        environment === 'env-two'
+          ? new Promise<DeploymentOverview>((_resolve, reject) => { rejectEnvironment = reject })
+          : Promise.resolve({ ...overview(), environments }),
+      )
+      await using screen = await render(
+        <ThemedShell dark={dark}>
+          <DeploymentsPanel projectId="p-one" packages={packages} sources={[]} sourcesError={null}
+            navigation={null} packageActions={null} onRefreshPackages={() => {}} />
+        </ThemedShell>, { router: '/deployments?projectId=p-one' },
+      )
+      await expect.element(screen.getByRole('heading', { name: '撤权服务' })).toBeVisible()
+      if (width >= 768) await screen.getByRole('button', { name: '切换主侧栏' }).click()
+      await page.screenshot({ path: `../../.test-artifacts/ui-refinement/deployment-context-${width}.png` })
+      const environment = screen.getByRole('combobox', { name: '部署环境' })
+      await expect.element(environment).toBeVisible()
+      const bounds = environment.element().getBoundingClientRect()
+      expect(bounds.top).toBeGreaterThanOrEqual(52)
+      expect(bounds.bottom).toBeLessThanOrEqual(220)
+      expect(bounds.width).toBeGreaterThanOrEqual(120)
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
+      if (width >= 768) {
+        const log = screen.getByLabelText('部署增量日志').element()
+        const viewport = log.closest('[data-slot="scroll-area-viewport"]')!
+        const header = screen.container.querySelector('[data-module-header]')!
+        expect(viewport.getBoundingClientRect().height / (600 - header.getBoundingClientRect().bottom)).toBeGreaterThanOrEqual(0.6)
+      }
+      const runtimeInfo = screen.getByRole('button', { name: '运行信息', exact: true })
+      await runtimeInfo.click()
+      await expect.element(page.getByLabelText('部署运行记录')).toBeVisible()
+      await userEvent.keyboard('{Escape}')
+      await expect.element(runtimeInfo).toHaveFocus()
+      await environment.click()
+      await page.getByRole('option', { name: '生产环境' }).click()
+      await expect.element(environment).toHaveTextContent('生产环境')
+      await expect.element(screen.getByText('正在读取部署服务…')).toBeVisible()
+      await act(() => rejectEnvironment(new Error('隔离的网络中断')))
+      await expect.element(screen.getByRole('alert').getByText('隔离的网络中断', { exact: true })).toBeVisible()
+      await expect.element(environment).toBeEnabled()
+      await environment.click()
+      await page.getByRole('option', { name: '隔离环境' }).click()
+      await expect.element(screen.getByRole('heading', { name: '撤权服务' })).toBeVisible()
+      await environment.click()
+      await userEvent.keyboard('{Escape}')
+      await expect.element(environment).toHaveFocus()
+      expect(mocks.load.mock.calls.some((call) => call[1] === 'env-two')).toBe(true)
+      expect(mocks.submit).not.toHaveBeenCalled()
+    },
+  )
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 390]) {
       it(`${theme} ${width}px 短窗口的未知结果提示保留完整核对按钮`, async () => {
@@ -197,6 +279,7 @@ describe('部署撤权隔离', () => {
         await using screen = await render(view(width, 420))
         await vi.waitFor(() => expect(screen.container.textContent).toContain('撤权服务'))
         await expect.element(page.getByRole('button', { name: '核对并重试原请求' })).toBeEnabled()
+        await expect.element(page.getByRole('combobox', { name: '部署环境' })).toBeDisabled()
         const alert = screen.container.querySelector<HTMLElement>('[role="alert"]')!
         const button = alert.querySelector('button')!
         const title = alert.querySelector<HTMLElement>('[data-slot="alert-title"]')!

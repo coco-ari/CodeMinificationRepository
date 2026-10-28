@@ -445,6 +445,25 @@ B1 的引用保护盘点发现：新建项目第一次打开工作区会自动�
 
 检查入口为 Web 目录 `pnpm exec vp test run src/autoops/ProjectDirectory.browser.test.tsx src/autoops/ProjectConfiguration.browser.test.tsx src/autoops/ProjectCredentials.browser.test.tsx src/autoops/ProjectRemovalDialog.browser.test.tsx src/autoops/ProjectRepositories.browser.test.tsx src/autoops/projectDirectory.test.ts src/autoops/projectAssistants.test.ts --project unit --project browser --no-file-parallelism`，以及 `pnpm exec tsc-rs --noEmit`。本机浏览器命令通过沙盒外授权运行，使用测试独有 Chromium。证据在本工作树 `vendor/t3code/apps/web/.test-artifacts/ui-refinement/`，包括窄屏前后、1440×600 浅色、390×600 深色及测试日志。未覆盖真实触屏、全部主题和其他业务模块，不将本批扩张为整站 UI 完成。
 
+### 独立 UI 分支：部署环境常驻工具栏（2026-10-28）
+
+接续同一 `feat/t3-ui-refinement` 分支。调用关系为部署页 → `DeploymentsPanel` → 原生 `Choice` / `ToggleGroup` / `Popover` 与现有发布、日志、历史面板。实现只改 `DeploymentsPanel` 的控件位置和窄屏按钮尺寸，测试补在 `DeploymentAccess.browser.test.tsx`；未调整选择存储、请求、权限过滤、任务绑定或发布/回退合同。参考锁定 T3 文件工具栏的贴边分组、原生 Select、ToggleGroup 和 Popover；没有另建工具栏框架。
+
+复现条件为真实 `AppSidebarLayout`、390×600、已授权环境和已加载服务、侧栏关闭。假设一：环境选择只存在于 `ModuleSidebar` 的 Portal，侧栏关闭时主区域无法访问；源码位置和失败浏览器用例支持。假设二：没有环境权限或部署加载失败导致控件缺失；同一夹具已提供两个授权环境，服务和日志读取成功，排除该原因。原失败日志为 `deployment-context-before.log`，环境控件不可见的原图已另存。
+
+环境与部署位置现在在主区域同一常驻工具栏，读取中、无部署位置或读取失败时仍保留环境选择。保留提交中、未知请求及撤权时原有禁用规则。窄屏运行信息使用原生 `icon-sm` 并保留可访问名称、弹出内容、Esc 和焦点返回，使日志继续占用剩余高度。没有增加刷新、发布或查询步骤。
+
+| 核心任务与相同起点           | 修改前                                            | 修改后                        | 验证与等待                                                           |
+| ---------------------------- | ------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------- |
+| 关闭侧栏时确认当前环境       | 打开侧栏→识别环境→关闭，2 次操作                  | 环境直接可见，0 次操作        | 桌面折叠与窄屏真实外壳检查通过                                       |
+| 关闭侧栏时切换环境并回到主区 | 打开侧栏→打开环境选择→选择→关闭侧栏，4 步         | 打开环境选择→选择，2 步       | 新路径实际跑通；保持原部署读取等待，不宣称后端提速                   |
+| 切换读取失败后恢复原环境     | 侧栏中重新打开选择器→选原环境，另计进入和退出侧栏 | 主区打开选择器→选原环境，2 步 | 注入一次网络错误，错误可见、选择仍可用、恢复原服务和日志，无发布写入 |
+| 查看运行信息并返回           | 点击运行信息→Esc，2 步                            | 点击同名按钮/图标→Esc，2 步   | 弹出内容可读，关闭返回原按钮                                         |
+
+旧路径操作数按原入口及控件流程盘点；修复后路径由真实 Chromium 用例执行。用户更容易辨认和切换执行环境；开发者只维护原有单份环境选择状态；Agent 可通过稳定名称在主区域找到选择与恢复入口。浅色 1440×600、深色 390×600 无横向溢出，桌面默认日志视口满足页头下可用高度至少 60% 的检查；真实触屏与线上真实部署未在本批执行。
+
+四类状态：代码完成；自动测试为部署相关 11 个文件共 112 项通过，Web 类型检查通过；部署生效为未部署、独立分支待合并；真实业务验收为真实浏览器操作加隔离接口夹具，不能替代真实发布—健康检查—版本链—回退验收。测试命令为 Web 目录 `pnpm exec vp test run src/autoops/DeploymentAccess.browser.test.tsx src/autoops/deployment src/autoops/deployments.test.ts --project unit --project browser --no-file-parallelism`；日志及前后截图保留在本工作树 `.test-artifacts/ui-refinement/`（相对 Web 目录）。
+
 ## 项目助手与成员管理页面（2026-10-26）
 
 本批接入已持久化项目/助手模块的管理界面，不启用新问答执行合同或跨用户电脑执行，也不修改林晓、陈一的真实授权。修改范围为项目页面、独立配置列表/受控表单及纯编辑合同、同一配置请求客户端、能力候选只读 API/公开策略及对应测试。权限与预设事实仍分别归项目和助手模块；模型与技能候选复用已登记运行器目录，不复制设备权限或凭据。页面只显示当前用户自己的电脑目录，平台管理员也不会获得其他人的私有接入目录。
