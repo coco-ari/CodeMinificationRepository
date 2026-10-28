@@ -214,6 +214,10 @@ const projectForViewer = (access, principal, project) => access.requireMembershi
   : project
 
 export function filterAutoOpsShell(access, principal, snapshot) {
+  return access.withAuthorizationRead(() => filterShell(access, principal, snapshot))
+}
+
+function filterShell(access, principal, snapshot) {
   access.refresh(principal)
   const permittedProject = (project) => {
     try { access.requireProject(principal, project.id); return true } catch (error) {

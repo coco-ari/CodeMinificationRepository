@@ -112,7 +112,25 @@ export function initializeAutoOpsAccessSchema(db) {
   initializeInputLifecycleSchema(db)
 }
 
-export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry, deploymentEnabled, configuration, questions }) {
+export function createAccessService({ sessionDb, bindingDb, catalog: sourceCatalog, now = Date.now, workspaceStore, customerRegistry: suppliedCustomerRegistry, deploymentEnabled, configuration, questions }) {
+  // 一次同步列表过滤共享目录读数；返回或抛错即释放，不能跨请求缓存授权。
+  let authorizationRead = null
+  const readCatalog = (key) => {
+    if (!authorizationRead) return sourceCatalog[key]
+    if (!authorizationRead.has(key)) authorizationRead.set(key, sourceCatalog[key])
+    return authorizationRead.get(key)
+  }
+  const catalog = {
+    get users() { return readCatalog('users') },
+    get projects() { return readCatalog('projects') },
+    get agents() { return readCatalog('agents') },
+    removedProjectAudience: (...args) => sourceCatalog.removedProjectAudience?.(...args) ?? [],
+  }
+  const withAuthorizationRead = (read) => {
+    if (authorizationRead) return read()
+    authorizationRead = new Map()
+    try { return read() } finally { authorizationRead = null }
+  }
   let accepting = true
   const assertAccepting = () => { if (!accepting) fail(503, 'AUTOOPS_STOPPING', '业务服务正在停止，请稍后重试') }
   const identity = createAccessIdentity({ sessionDb, bindingDb, findUser: (id) => catalog.users.find((entry) => entry.id === id), now, fail, identifier, assertAccepting })
@@ -375,6 +393,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     })
   }
   return {
+    withAuthorizationRead,
     assertAccepting,
     stopAccepting() { accepting = false },
     authenticateCookie: identity.authenticateCookie,
@@ -758,10 +777,12 @@ export function createAccessService({ sessionDb, bindingDb, catalog, now = Date.
     recordNativeSession: identity.recordNativeSession,
     principalForNativeSession: identity.principalForNativeSession,
     bootstrap(principal) {
-      const current = refresh(principal)
-      let canManageDeploymentNodes = false
-      try { requireDeploymentNodeManagerForUser(current.id); canManageDeploymentNodes = true } catch (error) { if (![403, 503].includes(error.status)) throw error }
-      return projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration: configuration(), canManageDeploymentNodes, ...(questions ? { assistantCatalog: (actor, project) => questions().catalog(actor, project) } : {}) })
+      return withAuthorizationRead(() => {
+        const current = refresh(principal)
+        let canManageDeploymentNodes = false
+        try { requireDeploymentNodeManagerForUser(current.id); canManageDeploymentNodes = true } catch (error) { if (![403, 503].includes(error.status)) throw error }
+        return projectAccessBootstrap({ current, catalog, membershipForUser, projectCapabilities, configuration: configuration(), canManageDeploymentNodes, ...(questions ? { assistantCatalog: (actor, project) => questions().catalog(actor, project) } : {}) })
+      })
     },
   }
 }

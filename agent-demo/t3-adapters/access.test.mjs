@@ -302,3 +302,23 @@ test('外部角色迁为无环境后，历史自用电脑保留固定身份和�
   assert.throws(() => access.reserveThread(owner, { ...scope, threadId: 'new-forged-environment', executionBinding }), { code: 'ENVIRONMENT_FORBIDDEN' })
   assert.throws(() => access.requireToolThread(binding.threadId), { code: 'CUSTOMER_BUSINESS_TOOLS_DISABLED' })
 })
+
+
+test('会话列表只读一次授权目录，后续请求立即反映撤权和停用', t => {
+  const { access, catalog, principal } = setup(t)
+  const admin=principal('u-admin'), lin=principal('u-lin')
+  const threads=Array.from({length:100},(_,i)=>({id:`batch-${i}`}))
+  for(const thread of threads) access.bindThread(admin,{...scope,threadId:thread.id,visibility:'project'})
+  access.bindThread(admin,{...scope,threadId:'batch-private'})
+  const snapshot={projects:[{id:'p-autoops'}],threads:[...threads,{id:'batch-private'}]}
+  const reads={users:0,projects:0,agents:0}, values={...catalog}
+  for(const key of Object.keys(reads)) Object.defineProperty(catalog,key,{get(){reads[key]++;return values[key]},set(value){values[key]=value}})
+  assert.deepEqual(filterAutoOpsShell(access,lin,snapshot).threads,threads)
+  assert.deepEqual(reads,{users:1,projects:1,agents:1})
+  catalog.projects=values.projects.map(p=>p.id==='p-autoops'?{...p,memberships:p.memberships.filter(m=>m.userId!==lin.id)}:p)
+  assert.deepEqual(filterAutoOpsShell(access,lin,snapshot).threads,[])
+  catalog.users=values.users.map(u=>u.id===lin.id?{...u,status:'disabled'}:u)
+  assert.throws(()=>filterAutoOpsShell(access,lin,snapshot),{code:'UNAUTHENTICATED'})
+  catalog.users=values.users.map(u=>u.id===lin.id?{...u,status:'active'}:u)
+  assert.deepEqual(filterAutoOpsShell(access,lin,snapshot).threads,[])
+})

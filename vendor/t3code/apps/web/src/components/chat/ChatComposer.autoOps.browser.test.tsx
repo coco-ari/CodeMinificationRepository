@@ -839,3 +839,54 @@ it.each([{ width: 1280, dark: false }, { width: 390, dark: true }])("$width px �
   await page.screenshot({ path: `../../.test-artifacts/adaptive-navigation/composer-${width}.png` });
   document.documentElement.classList.remove("dark");
 });
+
+
+it.each([1280, 390])("无助手的长提示独占反馈行，不挤动范围控件，宽度 %s", async (width) => {
+  await page.viewport(width, 780);
+  const f = setup(`empty-assistants-${width}`, true);
+  const host = readAutoOpsHost()!;
+  const reason = "尚无可用助手，请在项目管理中配置";
+  installAutoOpsHost(
+    {
+      ...host,
+      projects: host.projects.map((project) => ({
+        ...project,
+        assistants: {
+          items: [],
+          defaultAssistantId: null,
+          ready: false,
+          canAdjust: true,
+          reason: { code: "ASSISTANT_REQUIRED", message: reason },
+        },
+      })),
+    },
+    window.location.origin,
+  );
+  const { question: _question, ...scope } = readAutoOpsThreadScope(f.id, "composer-project")!;
+  setAutoOpsThreadScope(f.id, scope);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} reason={reason} />);
+  await expect.element(screen.getByText(reason, { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "刷新助手", exact: true })).toBeVisible();
+  await expect
+    .poll(() => {
+      const strip = screen.container.querySelector<HTMLElement>("[data-autoops-thread-scope]")!;
+      const feedback = strip.querySelector<HTMLElement>('[role="status"]')!.getBoundingClientRect();
+      const controls = [...strip.querySelectorAll<HTMLElement>("button[aria-label]")].map((e) =>
+        e.getBoundingClientRect(),
+      );
+      return Math.max(...controls.map((r) => r.bottom)) <= feedback.top;
+    })
+    .toBe(true);
+  if (width === 1280) {
+    const controls = [
+      ...screen.container.querySelectorAll<HTMLElement>(
+        "[data-autoops-thread-scope] button[aria-label]",
+      ),
+    ];
+    await expect.poll(() => new Set(controls.map((e) => Math.round(e.getBoundingClientRect().top))).size).toBe(1);
+  }
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  await editor().fill("连接恢复前保留草稿");
+  await expect.element(editor()).toHaveTextContent("连接恢复前保留草稿");
+});

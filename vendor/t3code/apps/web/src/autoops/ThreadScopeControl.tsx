@@ -379,191 +379,205 @@ export function AutoOpsThreadScopeControl({
   const agent = project.agents.find((entry) => entry.id === scope.agentId);
   return (
     <ComposerSurface.ContextStrip
-      ref={setStripElement}
+      className="flex-col items-stretch gap-1"
       data-compact={compact ? "" : undefined}
       data-autoops-thread-scope
       data-scope-state={locked ? "locked" : disabled ? "submitting" : "draft"}
     >
-      <div className="flex min-w-0 max-w-full flex-initial flex-wrap items-center gap-1">
-        {host.assistantDirectoryEnabled ? (
-          <ScopeComposerChoice
-            label="助手"
-            labelWidth={10}
-            keepSummaryVisible
-            summary={
-              project.assistants?.items.find(
-                (item) => item.preset.id === scope.question?.assistantId,
-              )?.preset.name ?? (locked ? "既有助手" : "请选择助手")
-            }
-            icon={BotIcon}
-            value={scope.question?.assistantId ?? ""}
-            options={
-              project.assistants?.items
-                .map((item) => ({
+      <div ref={setStripElement} className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-initial flex-wrap items-center gap-1">
+          {host.assistantDirectoryEnabled ? (
+            <ScopeComposerChoice
+              label="助手"
+              labelWidth={10}
+              keepSummaryVisible
+              summary={
+                project.assistants?.items.find(
+                  (item) => item.preset.id === scope.question?.assistantId,
+                )?.preset.name ?? (locked ? "既有助手" : "请选择助手")
+              }
+              icon={BotIcon}
+              value={scope.question?.assistantId ?? ""}
+              options={
+                project.assistants?.items.map((item) => ({
                   value: item.preset.id,
                   label: item.available
                     ? item.preset.name
                     : `${item.preset.name} · ${item.reason?.message ?? "暂不可用"}`,
                   disabled: !item.available,
                 })) ?? []
-            }
-            locked={
-              locked ||
-              (!canAdjust &&
-                !!scope.question &&
-                (project.assistants?.items.filter((item) => item.available).length ?? 0) <= 1)
-            }
-            lockReason={!canAdjust && !locked ? "由项目管理员分配" : undefined}
-            disabled={disabled}
-            onChange={(id) => {
-              const preset = project.assistants?.items.find(
-                (item) => item.preset.id === id && item.available,
-              )?.preset;
-              if (preset) void apply(scopeFromAssistant(preset), true);
-            }}
-          />
-        ) : null}
-        {host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
+              }
+              locked={
+                locked ||
+                (!canAdjust &&
+                  !!scope.question &&
+                  (project.assistants?.items.filter((item) => item.available).length ?? 0) <= 1)
+              }
+              lockReason={!canAdjust && !locked ? "由项目管理员分配" : undefined}
+              disabled={disabled}
+              onChange={(id) => {
+                const preset = project.assistants?.items.find(
+                  (item) => item.preset.id === id && item.available,
+                )?.preset;
+                if (preset) void apply(scopeFromAssistant(preset), true);
+              }}
+            />
+          ) : null}
+          {host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
+            <ScopeComposerChoice
+              label="资料范围"
+              labelWidth={6}
+              summary={scope.workspaceType === "external" ? "外部当前资料" : "内部当前资料"}
+              icon={EyeIcon}
+              value={scope.workspaceType ?? "internal"}
+              options={
+                project.membership?.workspaceAccess === "external"
+                  ? [{ value: "external", label: "外部当前资料" }]
+                  : [
+                      { value: "internal", label: "内部当前资料" },
+                      { value: "external", label: "外部当前资料" },
+                    ]
+              }
+              locked={configLocked}
+              lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
+              disabled={disabled}
+              onChange={(value) =>
+                void apply({
+                  workspaceType: value as "internal" | "external",
+                  workspaceVersionId: undefined,
+                })
+              }
+            />
+          ) : host.assistantDirectoryEnabled && scope.executionBinding?.kind === "customer" ? (
+            <ScopeComposerChoice
+              label="运行位置"
+              summary="已登记电脑目录"
+              icon={EyeIcon}
+              value="customer"
+              options={[]}
+              locked
+              disabled={disabled}
+              onChange={() => {}}
+            />
+          ) : (
+            <>
+              {host.customerAgentsEnabled || scope.executionBinding?.kind === "customer" ? (
+                <ConversationWorkspaceControl
+                  projectId={projectId}
+                  scope={scope}
+                  locked={locked}
+                  disabled={disabled}
+                  onChange={(patch) => void apply(patch)}
+                />
+              ) : (
+                <WorkspaceScopeControl
+                  projectId={projectId}
+                  scope={scope}
+                  locked={locked}
+                  disabled={disabled}
+                  onChange={(type) =>
+                    void apply({ workspaceType: type, workspaceVersionId: undefined })
+                  }
+                />
+              )}
+            </>
+          )}
           <ScopeComposerChoice
-            label="资料范围"
-            labelWidth={6}
-            summary={scope.workspaceType === "external" ? "外部当前资料" : "内部当前资料"}
-            icon={EyeIcon}
-            value={scope.workspaceType ?? "internal"}
-            options={
-              project.membership?.workspaceAccess === "external"
-                ? [{ value: "external", label: "外部当前资料" }]
-                : [
-                    { value: "internal", label: "内部当前资料" },
-                    { value: "external", label: "外部当前资料" },
-                  ]
-            }
-            locked={configLocked}
+            label="业务环境"
+            summary={scope.environmentId === null ? "无环境" : (environment?.name ?? "环境不可用")}
+            icon={ServerIcon}
+            value={scope.environmentId ?? "__none__"}
+            options={[
+              { value: "__none__", label: "无环境" },
+              ...project.environments.map((entry) => ({ value: entry.id, label: entry.name })),
+            ]}
+            locked={configLocked || scope.executionBinding?.kind === "customer"}
             lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
             disabled={disabled}
-            onChange={(value) =>
-              void apply({
-                workspaceType: value as "internal" | "external",
-                workspaceVersionId: undefined,
-              })
-            }
+            onChange={(value) => void apply({ environmentId: value === "__none__" ? null : value })}
           />
-        ) : host.assistantDirectoryEnabled && scope.executionBinding?.kind === "customer" ? (
           <ScopeComposerChoice
-            label="运行位置"
-            summary="已登记电脑目录"
+            label="会话可见范围"
+            labelWidth={3}
+            summary={scope.visibility === "private" ? "仅自己" : "项目共享"}
             icon={EyeIcon}
-            value="customer"
-            options={[]}
-            locked
+            value={scope.visibility}
+            options={
+              scope.executionBinding?.kind === "customer"
+                ? [{ value: "private", label: "仅自己" }]
+                : [
+                    { value: "private", label: "仅自己" },
+                    { value: "project", label: "项目共享" },
+                  ]
+            }
+            locked={configLocked || scope.executionBinding?.kind === "customer"}
+            lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
             disabled={disabled}
-            onChange={() => {}}
-          />
-        ) : (
-          <>
-            {host.customerAgentsEnabled || scope.executionBinding?.kind === "customer" ? (
-              <ConversationWorkspaceControl
-                projectId={projectId}
-                scope={scope}
-                locked={locked}
-                disabled={disabled}
-                onChange={(patch) => void apply(patch)}
-              />
-            ) : (
-              <WorkspaceScopeControl
-                projectId={projectId}
-                scope={scope}
-                locked={locked}
-                disabled={disabled}
-                onChange={(type) =>
-                  void apply({ workspaceType: type, workspaceVersionId: undefined })
-                }
-              />
-            )}
-          </>
-        )}
-        <ScopeComposerChoice
-          label="业务环境"
-          summary={scope.environmentId === null ? "无环境" : (environment?.name ?? "环境不可用")}
-          icon={ServerIcon}
-          value={scope.environmentId ?? "__none__"}
-          options={[
-            { value: "__none__", label: "无环境" },
-            ...project.environments.map((entry) => ({ value: entry.id, label: entry.name })),
-          ]}
-          locked={configLocked || scope.executionBinding?.kind === "customer"}
-          lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
-          disabled={disabled}
-          onChange={(value) => void apply({ environmentId: value === "__none__" ? null : value })}
-        />
-        <ScopeComposerChoice
-          label="会话可见范围"
-          labelWidth={3}
-          summary={scope.visibility === "private" ? "仅自己" : "项目共享"}
-          icon={EyeIcon}
-          value={scope.visibility}
-          options={
-            scope.executionBinding?.kind === "customer"
-              ? [{ value: "private", label: "仅自己" }]
-              : [
-                  { value: "private", label: "仅自己" },
-                  { value: "project", label: "项目共享" },
-                ]
-          }
-          locked={configLocked || scope.executionBinding?.kind === "customer"}
-          lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
-          disabled={disabled}
-          onChange={(value) => {
-            if (value === "private" || value === "project") void apply({ visibility: value });
-          }}
-        />
-        {host.assistantDirectoryEnabled ? (
-          <QuestionSkillsControl
-            scope={scope}
-            customerRuntime={customerRuntime}
-            locked={configLocked}
-            disabled={disabled}
-            onReconcileUnavailable={reconcileUnavailableSkills}
-            onChange={(skillIds) => {
-              if (scope.question)
-                void apply({
-                  question: {
-                    ...scope.question,
-                    configuration: { ...scope.question.configuration, skillIds },
-                  },
-                });
+            onChange={(value) => {
+              if (value === "private" || value === "project") void apply({ visibility: value });
             }}
           />
+          {host.assistantDirectoryEnabled ? (
+            <QuestionSkillsControl
+              scope={scope}
+              customerRuntime={customerRuntime}
+              locked={configLocked}
+              disabled={disabled}
+              onReconcileUnavailable={reconcileUnavailableSkills}
+              onChange={(skillIds) => {
+                if (scope.question)
+                  void apply({
+                    question: {
+                      ...scope.question,
+                      configuration: { ...scope.question.configuration, skillIds },
+                    },
+                  });
+              }}
+            />
+          ) : null}
+          {!host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
+            <ScopeComposerChoice
+              label="项目助手"
+              summary={agent?.name ?? "助手不可用"}
+              icon={BotIcon}
+              value={scope.agentId}
+              options={project.agents.map((entry) => ({ value: entry.id, label: entry.name }))}
+              locked={locked}
+              disabled={disabled}
+              onChange={(value) => void apply({ agentId: value })}
+            />
+          ) : null}
+        </div>
+        {locked && scope.executionBinding?.kind === "customer" ? (
+          <CustomerExecutionStatus threadId={threadId} />
         ) : null}
-        {!host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
-          <ScopeComposerChoice
-            label="项目助手"
-            summary={agent?.name ?? "助手不可用"}
-            icon={BotIcon}
-            value={scope.agentId}
-            options={project.agents.map((entry) => ({ value: entry.id, label: entry.name }))}
-            locked={locked}
-            disabled={disabled}
-            onChange={(value) => void apply({ agentId: value })}
+        {composerControlsHostRef ? (
+          <div
+            ref={composerControlsHostRef}
+            data-composer-context-control
+            data-chat-resting-composer-controls-host="true"
+            className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
+          />
+        ) : null}
+        {error ? (
+          <ScopeReadError
+            label="对话范围读取失败"
+            error={error}
+            busy={loading}
+            onRetry={() => {
+              if (scope.scopeState === "submitting") setPendingAttempt((value) => value + 1);
+              else setReadAttempt((value) => value + 1);
+            }}
           />
         ) : null}
       </div>
-      {locked && scope.executionBinding?.kind === "customer" ? (
-        <CustomerExecutionStatus threadId={threadId} />
-      ) : null}
-      {composerControlsHostRef ? (
-        <div
-          ref={composerControlsHostRef}
-          data-composer-context-control
-          data-chat-resting-composer-controls-host="true"
-          className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
-        />
-      ) : null}
       {host.assistantDirectoryEnabled &&
       (!project.assistants?.ready || !scope.question) &&
       !locked ? (
-        <div role="status" className="flex items-center gap-2 text-xs">
-          <span>{project.assistants?.reason?.message ?? "请选择助手"}</span>
+        <div role="status" className="flex min-w-0 items-center gap-2 px-1 text-xs">
+          <span className="min-w-0 flex-1 break-words">
+            {project.assistants?.reason?.message ?? "请选择助手"}
+          </span>
           <Button
             variant="ghost"
             size="xs"
@@ -572,17 +586,6 @@ export function AutoOpsThreadScopeControl({
             刷新助手
           </Button>
         </div>
-      ) : null}
-      {error ? (
-        <ScopeReadError
-          label="对话范围读取失败"
-          error={error}
-          busy={loading}
-          onRetry={() => {
-            if (scope.scopeState === "submitting") setPendingAttempt((value) => value + 1);
-            else setReadAttempt((value) => value + 1);
-          }}
-        />
       ) : null}
     </ComposerSurface.ContextStrip>
   );

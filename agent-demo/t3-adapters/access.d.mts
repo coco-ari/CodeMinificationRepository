@@ -53,6 +53,8 @@ export class AutoOpsAccessError extends Error { constructor(status:number,code:s
 export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding;question?: AssistantSelection};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
 export interface AutoOpsAccess {
+  /** 仅同步授权读取共用目录；调用结束后立即释放。 */
+  withAuthorizationRead<T>(read: () => T extends PromiseLike<unknown> ? never : T): T;
   deletionReferences(projectId: string, environmentId?: string): import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
   canReceiveProjectRemoval(principal: AutoOpsPrincipal, projectId: string): boolean;
   assertAccepting(): void;
