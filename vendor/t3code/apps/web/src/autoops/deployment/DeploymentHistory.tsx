@@ -21,6 +21,7 @@ import { readAutoOpsHost } from '../hostSnapshot'
 import type { DeploymentRelease, DeploymentTarget } from '../deployments'
 import { ConfigurationDetails } from './ConfigurationDetails'
 import { DeploymentSourceDetails } from './DeploymentSourceDetails'
+import { DeploymentReleaseIdentity } from './DeploymentReleaseIdentity'
 import { dateLabel, errorLabel } from './deploymentPresentation'
 
 type Props = {
@@ -196,9 +197,7 @@ function History({
             <div key={release.id} className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="truncate font-mono">
-                    {release.revision?.slice(0, 12) ?? release.id.slice(0, 8)}
-                  </span>
+                  <DeploymentReleaseIdentity release={release} />
                   {release.current ? (
                     <Badge size="sm" variant="secondary">
                       上次确认
@@ -210,7 +209,9 @@ function History({
                 </time>
                 {release.available === false ? (
                   <p className="text-xs text-muted-foreground">该版本目前不可恢复</p>
-                ) : release.archiveStatus && release.archiveStatus !== 'available' ? (
+                ) : release.archiveStatus === 'available' ? (
+                  <p className="text-xs text-muted-foreground">源码包可恢复</p>
+                ) : release.archiveStatus ? (
                   <p className="text-xs text-muted-foreground">
                     中心源码档案不可用；回退需目标服务器仍保留本机版本。
                   </p>

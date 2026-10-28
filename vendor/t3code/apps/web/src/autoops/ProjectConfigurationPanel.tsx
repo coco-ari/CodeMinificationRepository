@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '~/components/ui/button'
 import { SettingsSection, SettingsRow } from '~/components/settings/settingsLayout'
 import type { ProjectSettings } from './projectDirectory'
+import type { AssistantSetupSummary } from './ProjectSetupOverview'
 import { isAutoOpsAccessError } from './apiClient'
 import {
   loadAssistantSettings,
@@ -20,17 +21,25 @@ export function ProjectConfigurationPanel({
   disabled,
   revision,
   onOpen,
+  onSummary,
 }: {
   project: ProjectSettings
   disabled: boolean
   revision: number
   onOpen(editor: ProjectConfigurationEditor, button: HTMLButtonElement): void
+  onSummary?: (value: AssistantSetupSummary | null) => void
 }) {
   const [assistants, setAssistants] = useState<AssistantSettings | null>(null)
   const [choices, setChoices] = useState<AssistantChoices | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [accessDenied, setAccessDenied] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    onSummary?.(error ? { error } : assistants ? {
+      enabled: assistants.presets.filter((preset) => preset.enabled).length,
+      allocations: assistants.allocations.filter((allocation) => allocation.assistantIds.length > 0).length,
+    } : null)
+  }, [assistants, error, onSummary])
   useEffect(() => {
     const controller = new AbortController()
     setError(null)

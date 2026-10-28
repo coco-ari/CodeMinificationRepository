@@ -1,4 +1,5 @@
 import { StrictMode, useLayoutEffect } from 'react'
+import { useLocation } from '@tanstack/react-router'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { fakeTimers, render, stubGlobal } from '../../test/render'
@@ -10,6 +11,9 @@ import { AppSidebarLayout } from '~/components/AppSidebarLayout'
 import { readAppearanceModePreference, readThemePreference, useTheme } from '~/hooks/useTheme'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
+import { DeploymentsPanel } from './DeploymentsPanel'
+import type { ProjectRepositoryConnection } from './projectRepositories'
+import type { StaticDeploymentConfig } from './deployments'
 import { installAutoOpsHost, readAutoOpsHost } from './hostConfig'
 import { prepareProjectMutation, prepareProjectWrite, submitProjectWrite, readPendingProjectWrite } from "./projectDirectory";
 import '../index.css'
@@ -61,6 +65,7 @@ function setup({ manage = true, failFirst = false, loseResponse = false, manageN
     if (url.endsWith('/assistants/settings')) return Response.json({ presets: [], allocations: [] })
     if (url.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
     if (url.endsWith('/repositories')) return Response.json({ revision: 0, items: [] })
+    if (new URL(url, window.location.origin).pathname.endsWith('/deployments')) return Response.json({ enabled: true, services: [], targets: [], servers: [], environments: project.environments, tasks: [] })
     if (url.endsWith('/workspace/authoring')) return Response.json({ projectId: project.id, revision: 0, sources: [], entries: [], limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 },
       })
     if (url.endsWith('/workspace/credentials')) return Response.json({ credentials: [] })
@@ -131,6 +136,164 @@ function ThemedProjectPage({ dark }: { dark: boolean }) {
   }, [dark, setAppearanceMode])
   return <AppSidebarLayout><AutoOpsProjectsPage /></AppSidebarLayout>
 }
+
+it('从部署进入仓库配置后直接定位，保留返回当前项目部署的入口', async () => {
+  const f = setup()
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=directory-project&section=git&from=deployments' })
+  await expect.element(screen.getByRole('button', { name: '添加仓库', exact: true })).toBeEnabled()
+  await expect.element(screen.getByRole('region', { name: '仓库与凭证' })).toHaveFocus()
+  await screen.getByRole('link', { name: '返回部署', exact: true }).click()
+  await expect.poll(() => screen.router?.state.location.href).toBe('/deployments?projectId=directory-project')
+  expect(f.bodies).toHaveLength(0)
+})
+
+it.each([{ width: 1440, dark: false }, { width: 390, dark: true }])('配置概览在 $width px 展示真实配置并直达已有管理入口', async ({ width, dark }) => {
+  await page.viewport(width, 600)
+  const f = setup({ projectName: '华东区域生产服务项目' })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<ThemedProjectPage dark={dark} />, { router: '/projects?projectId=directory-project' })
+  const summary = screen.getByRole('region', { name: '项目配置概览', exact: true })
+  await expect.element(summary.getByText('尚未配置仓库', { exact: true })).toBeVisible()
+  await expect.element(summary.getByText('0 个资料文件 · 0 个源码来源', { exact: true })).toBeVisible()
+  await expect.element(summary.getByText('1 个环境 · 0 个节点绑定', { exact: true })).toBeVisible()
+  await expect.element(summary.getByText('0 个启用助手 · 0 项分配规则 · 1 位成员待分配', { exact: true })).toBeVisible()
+  await expect.element(summary.getByRole('link', { name: '打开工作区', exact: true })).toBeEnabled()
+  const repositoryReads = f.fetch.mock.calls.filter(([input]) => String(input).endsWith('/repositories')).length
+  await summary.getByRole('button', { name: '配置仓库', exact: true }).click()
+  await expect.element(screen.getByRole('region', { name: '仓库与凭证' })).toHaveFocus()
+  expect(f.fetch.mock.calls.filter(([input]) => String(input).endsWith('/repositories'))).toHaveLength(repositoryReads)
+  await screen.getByRole('navigation', { name: '项目配置分组' }).getByRole('button', { name: '基本信息' }).click()
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
+  expect(f.bodies).toHaveLength(0)
+  await page.screenshot({ path: `../../.test-artifacts/ui-refinement/project-overview-${width}.png` })
+})
+
+it('配置概览区分目录与文件，并展示凭证、同步和节点的实际状态', async () => {
+  const f = setup()
+  const original = f.fetch.getMockImplementation()!
+  const timestamp = '2026-10-28T00:00:00Z'
+  f.fetch.mockImplementation(async (input, init) => {
+    const path = new URL(String(input), window.location.origin).pathname
+    if (path.endsWith('/repositories')) return Response.json({ revision: 1, items: [{ id: 'repository', name: '业务仓库', url: 'https://isolated.invalid/business.git', credentialId: 'revoked-credential' }] })
+    if (path.endsWith('/workspace/credentials')) return Response.json({ credentials: [{ id: 'revoked-credential', projectId: f.project.id, name: '旧凭证', revision: 1, version: 1, revoked: true, createdAt: timestamp, updatedAt: timestamp }] })
+    if (path.endsWith('/workspace/authoring')) return Response.json({
+      projectId: f.project.id, revision: 1,
+      sources: [{ id: 'repository', name: '业务仓库', role: 'backend', url: 'https://isolated.invalid/business.git', refKind: 'branch', ref: 'main', mountPath: '.' }],
+      sourceStatus: [{ sourceId: 'repository', status: 'failed', error: { code: 'WORKSPACE_GIT_TIMEOUT', message: '同步超时' } }],
+      entries: [
+        { id: 'docs', path: 'docs', name: 'docs', kind: 'directory', revision: '1', updatedAt: timestamp, size: 0, mime: '', editable: false },
+        { id: 'readme', path: 'docs/README.md', name: 'README.md', kind: 'file', revision: '1', updatedAt: timestamp, size: 12, mime: 'text/markdown', editable: true },
+      ],
+      limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 },
+    })
+    if (path.endsWith('/deployments')) return Response.json({ enabled: true, services: [], targets: [], servers: [{ id: 'server', name: '业务节点', environmentId: 'test', online: false }], environments: f.project.environments, tasks: [] })
+    return original(input, init)
+  })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=directory-project' })
+  const summary = screen.getByRole('region', { name: '项目配置概览', exact: true })
+  await expect.element(summary.getByText('1 个仓库已配置 · 1 个仓库凭证不可用', { exact: true })).toBeVisible()
+  await expect.element(summary.getByText('1 个资料文件 · 1 个源码来源 · 0 个已同步 · 1 个同步失败', { exact: true })).toBeVisible()
+  await expect.element(summary.getByText('1 个环境 · 1 个节点绑定', { exact: true })).toBeVisible()
+  await expect.element(summary.getByRole('link', { name: '打开工作区', exact: true })).toBeEnabled()
+  expect(f.fetch.mock.calls.some(([input]) => /\/(refs|commits|check)(?:\?|$)/.test(String(input)))).toBe(false)
+  expect(f.bodies).toHaveLength(0)
+})
+
+it('概览的资料读取失败不阻塞其他配置，局部重试恢复且不重新读取仓库', async () => {
+  const f = setup()
+  const original = f.fetch.getMockImplementation()!
+  let rejectWorkspace = true
+  f.fetch.mockImplementation(async (input, init) => {
+    if (String(input).endsWith('/workspace/authoring') && rejectWorkspace) return Response.json({ error: '资料状态暂不可用' }, { status: 503 })
+    return original(input, init)
+  })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=directory-project' })
+  const summary = screen.getByRole('region', { name: '项目配置概览', exact: true })
+  await expect.element(summary.getByRole('alert')).toHaveTextContent('资料状态暂不可用')
+  await expect.element(screen.getByRole('button', { name: '添加仓库', exact: true })).toBeEnabled()
+  const repositoryReads = f.fetch.mock.calls.filter(([input]) => String(input).endsWith('/repositories')).length
+  rejectWorkspace = false
+  await summary.getByRole('button', { name: '重试资料状态' }).click()
+  await expect.element(summary.getByText('0 个资料文件 · 0 个源码来源', { exact: true })).toBeVisible()
+  await expect.element(summary.getByRole('alert')).not.toBeInTheDocument()
+  expect(f.fetch.mock.calls.filter(([input]) => String(input).endsWith('/repositories'))).toHaveLength(repositoryReads)
+  expect(f.bodies).toHaveLength(0)
+})
+
+it('只读角色不读取管理概览或展示仓库管理入口', async () => {
+  const f = setup({ manage: false })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App />, { router: '/projects?projectId=directory-project&section=git&from=deployments' })
+  await expect.element(screen.getByRole('region', { name: '基本信息', exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('region', { name: '项目配置概览' })).not.toBeInTheDocument()
+  expect(f.fetch.mock.calls.some(([input]) => /\/(repositories|workspace\/authoring|deployments)$/.test(String(input)))).toBe(false)
+})
+
+it('从生产环境的指定服务配置仓库后返回，恢复原环境与服务并可继续发布', async () => {
+  await page.viewport(1440, 600)
+  const f = setup()
+  f.project.environments.push({ id: 'production', name: '生产环境', revision: 1 })
+  const repositories: ProjectRepositoryConnection[] = []
+  const writes: Array<{ path: string; body: Record<string, unknown> }> = []
+  const original = f.fetch.getMockImplementation()!
+  const config: StaticDeploymentConfig = {
+    kind: 'static', module: '.', artifactPath: 'dist', buildImage: 'node:24', packageManager: 'npm', packageManagerVersion: '10.8.2', buildScript: 'build', buildArgs: [], build: { cpus: 1, memoryMb: 512 },
+    health: { url: 'https://isolated.invalid', bodyIncludes: '', status: 200, timeoutSeconds: 180, intervalSeconds: 5 },
+  }
+  f.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(String(input), window.location.origin)
+    if (url.pathname.endsWith('/repositories')) {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        writes.push({ path: url.pathname, body })
+        const repository = { id: 'new-repository', ...body.value }
+        repositories.push(repository)
+        return Response.json({ revision: 1, requestId: body.requestId, repository })
+      }
+      return Response.json({ revision: repositories.length, items: repositories })
+    }
+    if (url.pathname.endsWith('/deployments')) {
+      const environmentId = url.searchParams.get('environmentId') ?? 'test'
+      return Response.json({
+        enabled: true, environments: f.project.environments,
+        services: [{ id: 'api', name: '接口服务', kind: 'static', module: '.', configKey: 'api-config' }, { id: 'portal', name: '用户门户', kind: 'static', module: '.', configKey: 'portal-config' }],
+        targets: ['api', 'portal'].map((serviceId) => ({ id: `${serviceId}-${environmentId}`, name: serviceId, serviceId, environmentId, serverId: 'server', configKey: `${serviceId}-config`, config })),
+        servers: [{ id: 'server', name: '隔离部署节点', environmentId, online: true, capabilities: ['static-site-v1'] }], tasks: [],
+      })
+    }
+    if (url.pathname.endsWith('/releases')) return Response.json({ releases: [], total: 0, nextOffset: null })
+    return original(input, init)
+  })
+  using _fetch = stubGlobal('fetch', f.fetch)
+  function Flow() {
+    const location = useLocation()
+    return <AppSidebarLayout>{location.pathname === '/projects' ? <AutoOpsProjectsPage /> : <DeploymentsPanel projectId={f.project.id} packages={[]} sources={repositories} sourcesError={null} navigation={null} packageActions={null} onRefreshPackages={() => {}} />}</AppSidebarLayout>
+  }
+  await using screen = await render(<Flow />, { router: '/deployments?projectId=directory-project' })
+  await screen.getByRole('combobox', { name: '部署环境', exact: true }).click()
+  await page.getByRole('option', { name: '生产环境', exact: true }).click()
+  await screen.getByText('用户门户', { exact: true }).click()
+  await expect.element(screen.getByRole('heading', { name: '用户门户', exact: true })).toBeVisible()
+  await screen.getByRole('link', { name: '配置项目仓库', exact: true }).click()
+  const git = screen.getByRole('region', { name: '仓库与凭证', exact: true })
+  await expect.element(git).toHaveFocus()
+  await git.getByRole('button', { name: '添加仓库', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '添加仓库', exact: true })
+  await dialog.getByRole('textbox', { name: '名称', exact: true }).fill('门户源码')
+  await dialog.getByRole('textbox', { name: 'HTTPS 仓库地址', exact: true }).fill('https://isolated.invalid/portal.git')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect.element(dialog).not.toBeInTheDocument()
+  await screen.getByRole('link', { name: '返回部署', exact: true }).click()
+  await expect.element(screen.getByRole('combobox', { name: '部署环境', exact: true })).toHaveTextContent('生产环境')
+  await expect.element(screen.getByRole('heading', { name: '用户门户', exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('button', { name: '发布', exact: true })).toBeEnabled()
+  expect(writes).toHaveLength(1)
+  expect(writes[0]!.body.value).toEqual({ name: '门户源码', url: 'https://isolated.invalid/portal.git' })
+  expect(f.fetch.mock.calls.some(([input, init]) => String(input).includes('/deployments/tasks') && init?.method === 'POST')).toBe(false)
+})
 
 it('窄屏项目页保留可辨认的名称和管理入口', async () => {
   await page.viewport(390, 600)

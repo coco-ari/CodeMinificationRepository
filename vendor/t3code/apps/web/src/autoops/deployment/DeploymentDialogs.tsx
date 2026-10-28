@@ -17,6 +17,7 @@ import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
 import { Spinner } from '~/components/ui/spinner'
 import type { ProjectRepositoryConnection } from '../workspaceAuthoring'
+import { RepositorySetupNotice } from './RepositorySetupNotice'
 import {
   DeploymentSourceFields,
   DeploymentSourceNotice,
@@ -717,9 +718,7 @@ export function ReleaseDialog({
                         {sourcesError}
                       </Alert>
                     ) : !sources.length ? (
-                      <Alert variant="warning">
-                        还没有可用的 Git 仓库，请先在工作区配置源码来源。
-                      </Alert>
+                      <RepositorySetupNotice projectId={projectId} disabled={busy} />
                     ) : null}
                   </>
                 ) : (

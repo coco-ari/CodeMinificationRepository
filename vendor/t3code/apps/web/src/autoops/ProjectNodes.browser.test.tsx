@@ -31,6 +31,7 @@ function setup({ platform = false, manage = true, empty = false } = {}) {
     if (path.endsWith('/autoops/bootstrap')) return Response.json(bootstrap())
     if (path.endsWith('/autoops/deployment-servers')) return Response.json({ servers: [server], projects: empty ? [] : [{ ...project }], projectAccess: [], bindings: [] })
     if (path.endsWith('/deployments/servers')) return Response.json({ canAdmin: false, canBind: manage, availableServers: [server], servers: bound ? [{ ...server, environmentId: 'test', projectAllowed: true }] : [] })
+    if (path.endsWith('/deployments')) return Response.json({ enabled: true, services: [], targets: [], servers: bound ? [{ ...server, environmentId: 'test' }] : [], environments: project.environments, tasks: [] })
     if (path.endsWith('/assistants/choices')) return Response.json({ agents: [], sources: [], platformSkills: [] })
     if (path.endsWith('/assistants/settings')) return Response.json({ presets: [], allocations: [] })
     if (path.endsWith('/repositories')) return Response.json({ revision: 0, items: [] })

@@ -143,6 +143,87 @@ const view = (width = 1000, height = 600) => (
     </ModuleSidebarProvider>
   </SidebarProvider>
 )
+
+it('发布缺少仓库时直达项目配置，保留部署选择且不提交任务', async () => {
+  const host = mocks.host()
+  host.projects[0].capabilities['project.manage'] = true
+  mocks.host.mockReturnValue(installAutoOpsHost({
+    ...host, csrfToken: 'test-csrf', gatewayBasePath: '/api/agent-demo/t3',
+    fixedModel: { instanceId: 'codex', model: 'test-model' }, runtimeMode: 'approval-required', capabilities: {},
+  }, window.location.origin))
+  await using screen = await render(view(), { router: '/deployments?projectId=p-one' })
+  await screen.getByRole('button', { name: '发布', exact: true }).click()
+  await page.getByRole('combobox', { name: '发布来源', exact: true }).click()
+  await page.getByRole('option', { name: 'Git 仓库', exact: true }).click()
+  const selection = sessionStorage.getItem('autoops:deployments:owner-one:p-one:selection')
+  await page.getByRole('link', { name: '配置项目仓库', exact: true }).click()
+  await expect.poll(() => screen.router?.state.location.href).toBe('/projects?projectId=p-one&section=git&from=deployments')
+  expect(JSON.parse(selection!)).toMatchObject({ environmentId: 'env-one', serviceId: 'service-one', targetId: 'target-one' })
+  expect(sessionStorage.getItem('autoops:deployments:owner-one:p-one:selection')).toBe(selection)
+  expect(mocks.submit).not.toHaveBeenCalled()
+})
+
+it('主区域直接展示已确认版本，并保留最新任务运行结果未知的提示', async () => {
+  const value = overview()
+  value.targets[0]!.currentRelease = {
+    id: 'confirmed-release', targetId: 'target-one', revision: 'a'.repeat(40),
+    createdAt: '2026-10-22T00:00:00Z',
+    sourceIdentity: { repositories: [{ path: '.', commit: 'a'.repeat(40) }] },
+    sourceSelection: { sources: [{ sourceId: 'repo', refKind: 'branch', ref: 'release/v2', mountPath: '.' }], contexts: [] },
+  }
+  value.tasks[0] = { ...value.tasks[0]!, status: 'interrupted', stage: 'deploy' }
+  mocks.load.mockResolvedValue(value)
+  await using screen = await render(view())
+  const summary = screen.getByRole('region', { name: '已确认部署版本', exact: true })
+  await expect.element(summary.getByText('aaaaaaaaaaaa', { exact: true })).toBeVisible()
+  await expect.element(summary.getByText('release/v2', { exact: true })).toBeVisible()
+  await expect.element(screen.getByText('切换或恢复期间任务中断，当前运行状态待核对。')).toBeVisible()
+  expect(mocks.submit).not.toHaveBeenCalled()
+})
+
+it.each([{ width: 1440, dark: false }, { width: 390, dark: true }])('在 $width px 直接阅读长分支版本并查看固定 Commit，关闭详情恢复焦点', async ({ width, dark }) => {
+  await page.viewport(width, 600)
+  const host = mocks.host()
+  mocks.host.mockReturnValue(installAutoOpsHost({
+    ...host, csrfToken: 'test-csrf', gatewayBasePath: '/api/agent-demo/t3',
+    fixedModel: { instanceId: 'codex', model: 'test-model' }, runtimeMode: 'approval-required', capabilities: {},
+  }, window.location.origin))
+  const value = overview()
+  value.targets[0]!.currentRelease = {
+    id: 'confirmed-release', targetId: 'target-one', revision: 'a'.repeat(40), createdAt: '2026-10-22T00:00:00Z',
+    sourceIdentity: { repositories: [{ path: '.', commit: 'a'.repeat(40) }] },
+    sourceSelection: { sources: [{ sourceId: 'repo', refKind: 'branch', ref: 'release/华东区域生产服务长分支名称与历史固定资料', mountPath: '.' }], contexts: [] },
+  }
+  mocks.load.mockResolvedValue(value)
+  await using screen = await render(<ThemedShell dark={dark}><DeploymentsPanel projectId="p-one" packages={packages} sources={[]} sourcesError={null} navigation={null} packageActions={null} onRefreshPackages={() => {}} /></ThemedShell>, { router: '/deployments?projectId=p-one' })
+  if (width >= 768) await screen.getByRole('button', { name: '切换主侧栏' }).click()
+  const summary = screen.getByRole('region', { name: '已确认部署版本', exact: true })
+  await expect.element(summary.getByText('aaaaaaaaaaaa', { exact: true })).toBeVisible()
+  const details = summary.getByRole('button', { name: '版本来源', exact: true })
+  await details.click()
+  await expect.element(page.getByRole('dialog').getByText('a'.repeat(40), { exact: true })).toBeVisible()
+  await userEvent.keyboard('{Escape}')
+  await expect.element(details).toHaveFocus()
+  expect(summary.element().getBoundingClientRect().right).toBeLessThanOrEqual(width)
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
+  await page.screenshot({ path: `../../.test-artifacts/ui-refinement/deployment-version-${width}.png` })
+})
+
+it('没有项目管理权限时保留缺少仓库的原因，不提供无权使用的配置入口', async () => {
+  const host = mocks.host()
+  mocks.host.mockReturnValue(installAutoOpsHost({
+    ...host, csrfToken: 'test-csrf', gatewayBasePath: '/api/agent-demo/t3',
+    fixedModel: { instanceId: 'codex', model: 'test-model' }, runtimeMode: 'approval-required', capabilities: {},
+  }, window.location.origin))
+  await using screen = await render(view())
+  await screen.getByRole('button', { name: '发布', exact: true }).click()
+  await page.getByRole('combobox', { name: '发布来源', exact: true }).click()
+  await page.getByRole('option', { name: 'Git 仓库', exact: true }).click()
+  await expect.element(page.getByText('项目尚未配置 Git 仓库，请联系项目管理员。', { exact: true })).toBeVisible()
+  await expect.element(page.getByRole('link', { name: '配置项目仓库', exact: true })).not.toBeInTheDocument()
+  await expect.element(page.getByRole('button', { name: '确认发布', exact: true })).toBeDisabled()
+  expect(mocks.submit).not.toHaveBeenCalled()
+})
 function ThemedShell({ dark, children }: { dark: boolean; children: ReactNode }) {
   const { setAppearanceMode } = useTheme()
   useLayoutEffect(() => {

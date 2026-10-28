@@ -4,7 +4,7 @@ import {
   ModuleSidebarItem,
   ModuleSidebarEmpty,
 } from './ModuleWorkspace'
-import { DeploymentSourceDetails } from './deployment'
+import { DeploymentSourceDetails, DeploymentReleaseIdentity, RepositorySetupNotice } from './deployment'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   FileTextIcon,
@@ -809,6 +809,13 @@ export function DeploymentsPanel({
                 <AlertDescription>{deploymentObservationLabel(target)}</AlertDescription>
               </Alert>
             ) : null}
+            {runtimeStatus?.confirmedRelease ? (
+              <div role="region" aria-label="已确认部署版本" className="flex min-w-0 basis-full flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span className="shrink-0 text-muted-foreground">上次确认版本</span>
+                <DeploymentReleaseIdentity release={runtimeStatus.confirmedRelease} limit={1} />
+                {runtimeStatus.confirmedRelease.sourceIdentity ? <DeploymentSourceDetails source={runtimeStatus.confirmedRelease.sourceIdentity} label="版本来源" /> : null}
+              </div>
+            ) : null}
             {runtimeStatus?.state === 'uncertain' ? (
               <Alert variant="warning" className="basis-full">
                 <AlertTitle>运行状态待核对</AlertTitle>
@@ -839,6 +846,11 @@ export function DeploymentsPanel({
           </>
         ) : null}
       </div>
+      {overview && !accessDenied && !sourcesError && !sources.length && !packages.length ? (
+        <div className="shrink-0 border-b border-border/60 px-3 py-2">
+          <RepositorySetupNotice projectId={projectId} disabled={busy || !!pending} />
+        </div>
+      ) : null}
       {error || loadError || pending ? (
         <div className="shrink-0 border-b border-border/60 px-3 py-2">
           <Alert variant={pending ? 'warning' : 'error'}>

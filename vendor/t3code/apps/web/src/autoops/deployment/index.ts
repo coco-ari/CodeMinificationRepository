@@ -18,3 +18,5 @@ export {
 export { deriveDeploymentRuntimeStatus } from './deploymentRuntimeStatus'
 export { DeploymentSourcesDialog } from './DeploymentSourcesDialog'
 export { DeploymentSourceDetails } from './DeploymentSourceDetails'
+export { DeploymentReleaseIdentity } from './DeploymentReleaseIdentity'
+export { RepositorySetupNotice } from './RepositorySetupNotice'

@@ -11,6 +11,7 @@ import {
 } from './projectRepositories'
 import { loadAuthoringCredentials, type WorkspaceCredentialMetadata } from './workspaceAuthoring'
 import type { ProjectConfigurationEditor } from './projectConfiguration'
+import type { RepositorySetupSummary } from './ProjectSetupOverview'
 
 export function ProjectRepositoryPanel({
   projectId,
@@ -18,12 +19,14 @@ export function ProjectRepositoryPanel({
   disabled,
   onOpen,
   addButtonRef,
+  onSummary,
 }: {
   projectId: string
   revision: number
   disabled: boolean
   onOpen(editor: ProjectConfigurationEditor, button: HTMLButtonElement): void
   addButtonRef: RefObject<HTMLButtonElement | null>
+  onSummary?: (value: RepositorySetupSummary | null) => void
 }) {
   const [state, setState] = useState<{
     revision: number
@@ -35,6 +38,12 @@ export function ProjectRepositoryPanel({
   const manageButtons = useRef<Record<string, HTMLButtonElement | null>>({})
   const [checking, setChecking] = useState<string | null>(null)
   const [result, setResult] = useState<Record<string, { error: boolean; text: string }>>({})
+  useEffect(() => {
+    onSummary?.(error ? { error } : state ? {
+      count: state.items.length,
+      credentialIssues: state.items.filter((item) => item.credentialId && !state.credentials.some((credential) => credential.id === item.credentialId && !credential.revoked)).length,
+    } : null)
+  }, [state, error, onSummary])
   useEffect(() => {
     const controller = new AbortController()
     setError(null)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from '@tanstack/react-router'
-import { FolderGit2Icon, PencilIcon, PlusIcon, RefreshCwIcon, ServerIcon } from 'lucide-react'
+import { Link, useLocation, useNavigate } from '@tanstack/react-router'
+import { ProjectId } from '@t3tools/contracts'
+import { ArrowLeftIcon, FolderGit2Icon, PencilIcon, PlusIcon, RefreshCwIcon, ServerIcon } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
@@ -46,10 +47,11 @@ import { ProjectCredentialsPanel } from './ProjectCredentialsPanel'
 import { ProjectRepositoryPanel } from './ProjectRepositoryPanel'
 import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
 import { ProjectConfigurationFields } from './ProjectConfigurationFields'
-import { ProjectSettingsNavigation, ProjectSettingsTarget } from './ProjectSettingsNavigation'
+import { focusProjectSettingsArea, ProjectSettingsNavigation, ProjectSettingsTarget } from './ProjectSettingsNavigation'
 import { DeploymentServers } from './deployment'
 import { ProjectRemovalAction, ProjectRemovalDialog, type ProjectRemovalTarget } from './ProjectRemovalDialog'
 import { EnvironmentMcpDialog } from './EnvironmentMcpDialog'
+import { ProjectSetupOverview, type RepositorySetupSummary, type AssistantSetupSummary } from './ProjectSetupOverview'
 import {
   isConfigurationEditor,
   configurationMutation,
@@ -93,7 +95,8 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   const host = useAutoOpsHost()
   const location = useLocation()
   const navigate = useNavigate()
-  const explicit = (location.search as { projectId?: string }).projectId
+  const search = location.search as { projectId?: string; section?: string; from?: string }
+  const explicit = search.projectId
   const selected = host?.projects.find((project) => project.id === explicit)
   const manageable = selected?.capabilities?.['project.manage'] === true
   const [projects, setProjects] = useState<DirectoryProject[]>([])
@@ -103,6 +106,8 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   const [editor, setEditor] = useState<Editor | null>(null)
   const [busy, setBusy] = useState(false)
   const [configurationRevision, setConfigurationRevision] = useState(0)
+  const [repositorySummary, setRepositorySummary] = useState<RepositorySetupSummary | null>(null)
+  const [assistantSummary, setAssistantSummary] = useState<AssistantSetupSummary | null>(null)
   const readPending = () => readPendingProjectWrite(explicit ? { projectId: explicit } : undefined)
   const [pending, setPending] = useState(readPending)
   const alive = useRef(true)
@@ -149,6 +154,12 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
     void load()
     return () => request.current?.abort()
   }, [load])
+  const locatedSection = useRef<string | null>(null)
+  useEffect(() => {
+    if (loading || !settings || !manageable || search.section !== 'git' || locatedSection.current === location.href) return
+    locatedSection.current = location.href
+    focusProjectSettingsArea('git')
+  }, [loading, settings, manageable, search.section, location.href])
   const go = (id?: string) => {
     if (id) selectAutoOpsProject(id)
     void navigate({ href: id ? `/projects?projectId=${encodeURIComponent(id)}` : '/projects' })
@@ -301,6 +312,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
               onClick={() => {
                 void refreshProjectHost()
                   .then(() => load())
+                  .then(() => setConfigurationRevision((value) => value + 1))
                   .catch((cause) => setError(String(cause.message)))
               }}
             >
@@ -353,7 +365,19 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
         }
       />
       {!loading && explicit && current ? (
-        <ProjectSettingsNavigation canManage={manageable && settings !== null} />
+        <ProjectSettingsNavigation
+          canManage={manageable && settings !== null}
+          returnAction={search.from === 'deployments' && selected?.capabilities?.['deployment.read'] ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy || credentialLocked || removalLocked}
+              render={<Link to="/deployments" search={{ projectId: ProjectId.make(explicit) }} />}
+            >
+              <ArrowLeftIcon />返回部署
+            </Button>
+          ) : undefined}
+        />
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <WorkspacePageContainer>
@@ -423,6 +447,16 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                     </SettingsRow>
                   ) : null}
                 </SettingsSection>
+                {manageable && settings ? (
+                  <ProjectSetupOverview
+                    project={settings}
+                    repositories={repositorySummary}
+                    assistants={assistantSummary}
+                    revision={configurationRevision}
+                    canReadWorkspace={selected?.capabilities?.['workspace.manage'] === true}
+                    canReadDeployments={selected?.capabilities?.['deployment.read'] === true}
+                  />
+                ) : null}
               </ProjectSettingsTarget>
               <ProjectSettingsTarget area="environments">
                 <SettingsSection
@@ -513,6 +547,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                     disabled={busy || !!pending || credentialLocked || removalLocked}
                     onOpen={open}
                     addButtonRef={repositoryAddButton}
+                    onSummary={setRepositorySummary}
                   />
                   <ProjectCredentialsPanel
                     projectId={settings.project.id}
@@ -529,6 +564,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                     revision={configurationRevision}
                     disabled={busy || !!pending || credentialLocked || removalLocked}
                     onOpen={open}
+                    onSummary={setAssistantSummary}
                   />
                 </ProjectSettingsTarget>
               ) : null}
@@ -576,7 +612,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
           setError(cause instanceof Error ? cause.message : '当前节点权限已撤销')
           void refreshProjectHost().catch(() => {})
         }}
-        onChanged={() => { void load(true) }}
+        onChanged={() => { void load(true); setConfigurationRevision(value => value + 1) }}
       /> : null}
       <Dialog
         open={editor !== null}

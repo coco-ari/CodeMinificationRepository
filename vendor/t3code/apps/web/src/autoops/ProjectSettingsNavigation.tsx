@@ -11,10 +11,18 @@ const areas = [
 type ProjectSettingsArea = (typeof areas)[number]['id']
 const targetId = (area: ProjectSettingsArea) => `project-settings-${area}`
 
-export function ProjectSettingsNavigation({ canManage }: { canManage: boolean }) {
+export function focusProjectSettingsArea(area: ProjectSettingsArea) {
+  const target = document.getElementById(targetId(area))
+  // 只定位已挂载分组，避免切页卸载未确认的保存或凭证表单。
+  target?.scrollIntoView({ block: 'start' })
+  target?.focus({ preventScroll: true })
+}
+
+export function ProjectSettingsNavigation({ canManage, returnAction }: { canManage: boolean; returnAction?: ReactNode }) {
   return (
     <nav aria-label="项目配置分组" className="shrink-0 border-b border-border/60">
       <div className="mx-auto flex max-w-4xl flex-wrap gap-1 px-5 py-2 sm:px-6">
+        {returnAction}
         {areas
           .filter((area) => !area.manage || canManage)
           .map((area) => (
@@ -23,12 +31,7 @@ export function ProjectSettingsNavigation({ canManage }: { canManage: boolean })
               variant="ghost-muted"
               size="sm"
               aria-controls={targetId(area.id)}
-              onClick={() => {
-                const target = document.getElementById(targetId(area.id))
-                // 只定位已挂载分组，避免切页卸载未确认的保存或凭证表单。
-                target?.scrollIntoView({ block: 'start' })
-                target?.focus({ preventScroll: true })
-              }}
+              onClick={() => focusProjectSettingsArea(area.id)}
             >
               {area.label}
             </Button>
