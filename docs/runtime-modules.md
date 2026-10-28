@@ -45,6 +45,10 @@
 
 后来准备的23步未构成新增业务要求：1e v1在进入问答时守卫阻止克隆订阅/favicon，v3已确认真实服务器对这两请求拒绝，却又漏了ChatView直接mount的subscribeDeviceState；两轮均只4步、零自然visit/问答，失败原件6f9726fa…b23/0559336f…4107不追改。一次有界诊断912f7bd8…4f50只确认输入，不算业务通过。实际挂载链审计`.deployment/c2-current-mount-audit-v1/audit-v1.json` SHA256 `e040574cde6de486361ac0aa212393db02882d220f36f2e98a5032e66cf865aa`列明迟发device及条件VCS/PR/assets；分类为验收工具初始化遗漏，不放宽产品权限或所有readScope，不再为已有reader成功证据追加新observer发版。助手管理页经/_chat的null thread target→Outlet→ModuleSidebarOutlet→AssistantManagementPage，不挂ChatView/Composer，保存恢复另行验证。
 
+随后补齐合法差异参数的真实正例：正常管理员从新草稿选择原64cb/revision1预设（medium），显式选择高档high，一次发送A4-20261028-HIGH。新thread `7bf4d200-c448-43a6-8f90-ee7b2fa285d3`、user `b7aad28e-3376-4621-854a-ccd3846f2d5e`，唯一run/attempt/providerTurn实际completed，耗时6672ms并返回A4-HIGH-OK。正常HTTP原绑定的question.configuration.model、原生thread和run.modelSelection均为grok-4.6/high；原生turn `01a17fe9-9610-7b73-ae9d-02958bb79be1`完成，有真实token统计。公共预设仍revision1/medium，全部预设和分配前后完整相等SHA6931d4cb…07ab。未发动态工具；原command_execution仅保留正常Preparing workspace，不冒称没有准备动作。未捕获原命令收据，投影不称回执。
+
+原件`.deployment/a4-adjusted-real-1e014e71-v1/actual-projection.json` SHA256 `80fcdc05b0e5690060d2f770025ebcc5e51835781f2ab09f9e1b672574aacd23`、binding d4a93dec…7a1；根独立证明`independent-root-v1.json` SHA256 `2a456248ca466125875c9086ac0069961bc5b4d696b4ca4650d08b144c725670`。无产品UI修改，前后均新建→展开助手→选原预设→展开强度→选高→输入→发送7操作，首次新建异步完成后按实际DOM核对，未重复点击或重发旧问题；实际截图为旁证，tab44已关闭且原问答tab37保留。结合上述reader只读/篡改及既有自动回归，A4/C2四状态通过；C5/C6共享授权和E1/E3整页归原项，不增加其他模型逐个推理或角色全排列。
+
 影响范围为助手唯一管理导航、原接入面板、纯助手合同及其 SQLite v2 升级、本人/项目目录、原生 HTTP 装配与实际 ChatComposer 选择和发送。继续复用 T3 ModuleWorkspace、SettingsSection/Row、Menu/Dialog、原电脑接入、模型选择器及原会话启动合同；不复制执行器，也不变更平台/用户运行位置。已有项目助手与角色/成员分配继续复用，旧 devices 路由重定向到助手的“我提供的”，保留显式项目范围。低权限仅显示获分配预设，项目管理者不能代提供者修改本人助手或共享授权。
 
 本人来源来自登记目录及真实能力，不推测平台默认。提供者主动共享给明确项目，管理者随后分配；分配记录固定预设、共享修订与来源身份。提供者修改需要管理者重新确认，撤回拒绝新执行；原已接受配置沿原修订恢复。跨用户/跨项目执行仍明确拒绝：当前 transport、本机会话、目录、附件及技能尚缺完整的实际调用者隔离，不能删除硬拒绝就称为 C6 完成。旧接入/配对协议仍没有本批新预设的原请求收据，分别保留证据边界。
@@ -1137,6 +1141,8 @@ macOS 定向 Node 22 项、Web 8 项、独立 ZIP 分发及真实本地 WebSocke
 
 ## 当前资料输入保护与按引用回收（2026-10-26）
 
+2026-10-28复核后关闭D3的原约定范围，不再将部署包自然七天回收挂为D3缺口。历史14个输入/capture仅按正常终态和原持久来源释放，证明 `.deployment/current-release-switch/be768c19-d3-owner-readonly-audit.json` SHA256 `d1570b8fda0810ef84da3c32ffe1ef0483ffaa125660f7989c4f5c380a10954b`。四轮真实平台问答后input/capture均released、pins空，旧de8e目录实际不存在且有正常clearedAt/purgedAt，新a0f当前51文件及合法current/input引用保持；所有者原件 `.deployment/d123-recovery-20261027-v1/owner-readonly.json` SHA256 `0dfed17917c6891c3460f936ef5a08abab34799a908c6dba7951e983fc7c4c0e`。同链第2轮收到原RPC Exit后丢回执并断线，仅只读原消息恢复，没有重派；第3/4轮读取更新后的当前内容，state SHA256 `4a33be8ff5440ca38f05e23379ac256b8b32d121542f8bffb4dd054c4fa5ef8e`。真实撤权流程的三个owned终态输入及MCP输入均释放（da765437…9604）；持久运行中五个工具事件交给生产守卫时均拒绝提前释放，真实收尾后才允许（fff918ca…71d）。没有精确首次release时间，事件复核不冒称历史瞬间owner.status快照；电脑C6的noInputs恢复证据也不冒充平台GC。本项代码/自动/部署/真实四状态通过，D6自然到期仍独立待验。
+
 [access-input-lifecycle](../agent-demo/t3-adapters/access-input-lifecycle.mjs) 归属实际操作者的命令、输入、fork 与原 run 引用；[workspaceInputLifecycle](../vendor/t3code/apps/server/src/autoops/workspaceInputLifecycle.ts) 组合原生持久命令收据、排队/运行及 provider-native 子任务的可信状态，沿公开所有者合同归还。拒绝命令也通过提交后的原收据唤醒，不能因为没有 run 事件永久保护；运行、排队、未知、引用读取失败或原件缺损继续保留。原生最新来源通过迁移 068 的实体终态索引查询，不回放全部历史。
 
 共享 fork 固定原 inputOwner，子任务后续轮次保持首个输入而不混入父任务的新范围；原生新 child turn 登记早于上轮完成投影，避免中间空档误回收。普通当前资料、固定历史资料及 MCP 都按原 input/run/scope 恢复：MCP 保留原 database/连接/凭证版本，当前停用、撤权及跨环境仍拒绝；清理不能借管理员读取撤权后的私有资料。没有可信原收据或完整原件时明确失败或保留，不从最新资料代替。
@@ -1156,6 +1162,10 @@ macOS 定向 Node 22 项、Web 8 项、独立 ZIP 分发及真实本地 WebSocke
 v3 客户 ZIP `8481a189a8063570dee749c8448e980135b5f619030bfeb75b8cfcda715d80d3` 对应真实新探测通过，生产 owner 9 项、Headless 6 项、客户完整 64 项及类型检查通过。测试机原生 `model/list` 返回 8 个实际模型及各自默认/合法思考档位；首次 5 个内置技能经过生产配置再发现后全部禁用，最后启用数 0，容器停止已核对。`.deployment/shared-native-catalog-v3-result.json` 明确 `nativeCatalogPassed:true`、`noInference:true`、`curatedSkillsAccepted:false`、`sharedBusinessAccepted:false`；该结果证明真实目录与收束流程，不代替选定技能、模型推理、双用户执行或原收据恢复验收。两次失败目录和原 JSON 均保留，没有重做原任务伪装恢复。
 
 ## 提供者模型目录与验收边界（2026-10-26）
+
+2026-10-28按已确认范围收束C3/C4/C5/C6：独立审计 `.deployment/c3c6-existing-evidence-audit-v1.json` SHA256 `96eb44681d0b43b6b79ccada938685e7749fd9b1fbfc04434e72210d6d4a81d9` 引用的17份原件全部存在且完整SHA逐项相等。Mac自用文件/附件及重启读取、统一助手下的真实能力目录、所选grok4.6/medium和技能执行、Linux Docker只读profile内TXT/图片、双用户CID/HOME/tmp/附件和私有会话隔离、原完整收据/RPC恢复、运行中断线且唯一工具执行、提供者在途撤回及账号后台撤权分别已有真实证据，直接复用。12模型目录通过不等于12模型逐一推理；未验证来源继续拒绝共享，C7仍为用户取消。
+
+最后的未共享管理员负例在现行1e实际补齐：原manager仍是目标项目active project_admin并具project.manage，提供者原93222920预设仍revision1，向该项目的share前后均off2。仅一次正常目录POST精确403 ASSISTANT_NOT_ASSIGNED，没有创建模型、线程、执行许可或分配。原件 `.deployment/c5-unshared-admin-negative-real-v1/result.json` SHA256 `034723dd4e0e8481551eda2dacbe405a58e1aacb0e39be65064b98db835a412c`；before `3f3997c51203c12ac4d5468d8937a92a8dd6dde470e7aa4e5cf5131345f36be3`，after-full-facts `d0ec83fecc30ac0892a2e96ce98c2d02771aeb63067092f69a9d71964ece34b4`，after-scope `04cc163aecb20d6caee5ad7d0ed8d377006582715c736910aeafbbe9e9b4eafb`。独立逐值比较原范围、9session/28本机命令/64中央命令/8流、全部收据和15文件相等，不能只凭计数。原首次预OUT拒绝保留，未创建输出或登录/POST；只读11阶段诊断提供新证据后，原冻结main才执行唯一实际POST，辅助6项通过单列。上述四项代码、自动测试、现行部署和约定真实业务四状态通过；下列历史失败仍保留当时结果，不追写为成功，D5及页面独立验收继续。
 
 真实测试发现：[共享 profile](../agent-demo/customer-agent/shared-docker-profile.ts) 未传入提供者模型目录时，Codex 返回 8 个内置 GPT；当前提供者 CPA 实际公布 12 个 Grok，两者没有交集。第一项可能原因是本机 profile 没有目录字段、生成配置也没有 `model_catalog_json`，代码及原失败测试证实；第二项是 CLI 忽略该配置，既有 [native-catalog](../agent-demo/t3-adapters/native-catalog.mjs) 和官方 Codex 0.159.2 配置合同提供反证，随后真实新探测进一步排除。不能把内置目录可见当作提供者模型已可用。
 
@@ -1621,7 +1631,7 @@ D2 撤权阶段已沿原 core state 正常完成：同 manager 正常启用新�
 
 441402后续已沿正常单SIGTERM退出，证据 `.deployment/c6-owned-441402-stop-complete-actual-v1.json` SHA256 `c929008f6d44969465005a8585186c27eaf09b28b9a9d046a723b8b056dfd765`。本机八表、中央全部表、六原收据、三命令完整正文与收据、唯一已ack游标停前后全部相等，owned CID/name消失，无stop RPC、resolve或重发。七Python及三真实临时SQLite辅助检查由根独立通过；一次错误discover执行发现0测试，未计作七项通过，随后显式运行文件才完成实际七项。原relay440819未重置或替换，stop后正常GET显示connections=1且未arm、无original/dropped/fault，后续准入按该真实已用状态固定基线，不要求删历史归零。
 
-## 窄屏模拟触控选定验收及未完成菜单（2026-10-27）
+## 窄屏模拟触控选定验收（2026-10-27）
 
 复用当前54完整T3页与原D123项目r3、authoring9、原24576B文档，无产品变更，不宣称步骤减少。v1 parent正常admin登录及两个只读GET后因旧AccountClient明确拒绝query而失败，尚未启动child/browser或建立OUT；不能记成零网络。候选一是漏网关前缀，正式api方法确实补一次前缀，排除；候选二是部署GET的environmentId query触发原安全合同，原真实helper+虚构transport红测证实。原v1不改，v2只改为读取本owned项目全部环境的任务并继续严格要求所有终态，不放宽旧loader。Node9及Python6辅助检查由根独立通过。
 
@@ -1630,6 +1640,8 @@ v2实际390×520、hasTouch/isMobile manager完成长文档单项：认证三操
 随后菜单展开touchTap实际完成125ms，后续菜单观察失败；菜单显示等待仅4ms，catch仅留下TOUCH_OBSERVER_FAILED，不能据此认定菜单未打开或判断具体根因。Dialog未执行。原件 `.deployment/e3-touch-v2-actual-evidence-v1/e3-touch-evidence-20261027-v2/0032-result.json` SHA256 `b4a97bb054f082d7681db33e2419c71cb742a91e8f91e34d6a3280c35586da5f`。一项通过、两项未完成，继续核实际移动菜单语义/触发入口、观察器定位/ElementHandle和真实触控开闭；保存原失败，后续只定向未完项，不重跑旧50或已通过的长文档。全部HTTP守卫无拒绝、0业务写、结束九类原生活动0，parent前后工作区/部署/计划一致，owned浏览器0；原父445384/Node445397结束。
 
 四状态为现行页面代码复用、相关自动检查通过、54既有页面生效、上述长文档模拟触控单项真实通过。菜单与Dialog失败/未执行继续定位；物理触屏、完整角色/环境及非空部署整页仍未验，不能将截图或辅助测试作为整体E3通过。
+
+2026-10-28在现行1e只补原未完动作，不重跑已通过的长文档或旧50项。菜单两次可信触控完成展开、原触发位置外点关闭及精确回焦，原件 `.deployment/e3-touch-selected-1e014e71-v1-actual/result.json` SHA256 `ac3206fb8875176a713b8029a9a26e1f6459a3a53f2211490275fbe7b32f46fd`。该轮后续Dialog被“运行器繁忙”通知遮挡，命中守卫在触控前拒绝，保留失败，不推断为产品布局缺陷。Dialog独占续办实际无遮挡，零通知关闭操作；两次可信触控打开原项目信息并点原关闭按钮退出，焦点自然回到原入口，未使用键盘或Esc。原件 `.deployment/e3-touch-dialog-1e014e71-v1-actual/result.json` SHA256 `48aab79bd82d61e7a3ef3e6de492cbd899d5dcfc9ab9765916ad5b4375705568`。每次tap均有trusted/pointerType=touch的down/up，390×520、hasTouch/isMobile；模拟设备不冒称物理手机。菜单2步、Dialog2步，前后步骤相同，没有产品改动或减少步骤主张；辅助命中守卫10项、通知恢复4项独立通过。两轮业务POST/模型请求均0，完整24任务/16版本整行相等，全部自有浏览器正常关闭。本次关闭模拟触控三项，E3其余明确业务范围仍按原清单继续。
 
 ## 固定c261内联消息修复发行与原数据保留（2026-10-27）
 
@@ -1712,6 +1724,16 @@ v2实际390×520、hasTouch/isMobile manager完成长文档单项：认证三操
 完整恢复后，原暂停控制器经真实完成原件、精确身份及默认终止信号确认正常收尾，原操作锁释放。旧测试CLI446985在全局九类活动全零和最新全账本核对后一次SIGTERM正常退出；全部本机/中心表、stream、完整收据前后不变，原owned CID及名称正常回收。停止原件SHA256 `bb059ce20281357260d28abe29386a4568d601db3f2ca668e590a73995040c4f`。当前发行已为正式0dd，以部署记录首节为准。原grok4.6/medium真实上游兼容已一次HTTP200、自然流结束、completed1/failed0/error0、14.766秒通过，两owned容器已清理；答案未回传CLI，不计问答通过。接续正式CLI0.4.3正常启动及新共享问答。诊断HTTP响应、收据completed和本恢复单项均不能代替模型、技能、附件、共享隔离及其余真实业务验收。
 
 正式发行 `0dd9b107937bbdd8c24707759e51a2126539ece7` 随后严格切换成功，原件 `switch-0dd9b107-stable1.json` SHA256 `a5d594e1752df582b9b970d9d92f4d6467be126a63179cc7b6f960e68ec1163a`。post-worker/post-web两阶段完整owner均通过，保留问题为空，531原文件、11库及原行保留。实际Web764959/ticks35968188、launcher764808/ticks35966806、native764820/ticks35966983，cwd属于0dd发行目录（native为其vendor/t3code）；公网 `/agent-demo.html` SHA256 `4fdc991cae09b7590710a3f25cb2e316b4c380869abce2566e870f5a37318bb4`，健康engine=t3、workerReachable=true。四状态为代码固定、完整CI通过、正式部署通过、C6原终态恢复单项通过；正式CLI0.4.3随后沿原设备/state/profile正常运行765535/ticks36010276；最小新共享问答已经真实completed，接收者正常接口取回grok4.6/medium原结果，源码/附件/技能实际工具读取及只读拒写均有原件。正常projection SHA256 `69ad10fefcd5855bab4f4a3c065adaa7103b80e7db0692ad20b60b9039f49d8e`，原生原件 `b4c761671e004b47ad4a04d7a8f78517075dd1cee4f4598ed1d2c4743fcbe94b`；三条完整原收据经冻结0dd正式解码/投影独立通过，证明 `db5630aaac877e32c94398ba611b9bd04678a3c011a656e8f22d27b5178a196f`，本机tail/ack及中心received/applied均40，当前空闲。原验收脚本仅筛completed而漏掉预期failed拒写工具，原exit1保留；最小断言修正后只读复核原问题exit0、11项通过且pending为空，原件 `revalidation-v4-result-root-v1.json` SHA256 `34b3b3a5009e5288f7a38b3f7e0d120925b277886b14d0a0b14595c3277efea1`；未新派发/上传，提供者私有会话读取拒绝与正常接口正对照通过。最小业务链路通过；随后RPC成功回执和设备原completed收据各真实丢失后，正常重连恢复同command/session/grant/epoch。全部4条完整收据经正式解码/投影通过、原3条中央/本机整行不变，游标55，第二轮及nativeTurn唯一；root证明 `3543ca4a0cd1eb46b6a87e98c817da0d861b64e8e8e719c3e80df87eb4d3e5e0`，只读原件 `944b2bc9039c1eda192df0f48f2a6ddec18aa04b52758bb7e8abc1a44aaa7c18`。原轮403重试及正式Provider recovered完成项完整保留，后续以冻结T3正式构造函数及合同编解码完整重建相等；仅修辅助空failure误拒，未改生产或删历史。随后独立原生线程41e845c6-2547-4708-8445-f17aa9a46a13真实工具running后87ms由提供者正常撤回，原共享停用rev2、原成功收据仍rev1。固定同原scope的设备真实请求返回403 CUSTOMER_SHARED_SCOPE_REVOKED，源码工具在20秒前interrupted且无迟到输出，同原run/providerTurn failed、本机idle、全部三条完整传输收据正式投影通过且ACK34。实际接收者正常projection摘要 `d3fcf8a8cf83f2f8066408df27a7e74ab15ae22fba62896bf0bc00916176d5d0`，root因果证明 `0307bb5f4bca71ee1544e46da09bb917a00ce1f4ca0b4e692a8a2561c2cc39ea`。只因Codex未保留网关原错误码而产生的辅助pending由上述实际原scope/运行时序/中断与无迟到输出证据关闭，不把failed本身当撤回证明；原共享保持停用，不自动重开。全局九类活动已零；账号共享后台已另行验收，C7后经用户取消，其余矩阵继续验收，整体未完成。
+
+### Java 首次编译失败与原数据保留（2026-10-28）
+
+R1沿现行1e、同原Agent1.6.0，在全局空闲及MemAvailable2462MiB/磁盘门禁通过后，仅新建隔离service3b77a8d4和target5c01a9f2，端口28901及唯一alias不占原目标。固定源码提交99019fe515ad32dbf0cb4ea38c39682e8173610b仅将String返回改为return 1。两个setup UUID正常保存后，任务原UUIDe2066448-ade4-489e-b12d-6042919c6c4b只POST一次，task acc1a6d6-f85c-42f5-9d49-10383b658020实际building失败；Maven日志有COMPILATION ERROR及HealthMessage.java第7行诊断，没有image/deploying、release、previousRelease、rollback或cleanupError。编译前失败分支没有rollback字段，与切换后首次失败的unavailable分支不同，不伪补字段。
+
+原journal和44条事件保留、seq=ackSeq=44，与完整公开logs逐项相等；本任务maven/probe builder、运行容器和镜像确实不存在，work中的source.zip/source/image由Agent清除，current.json和成功版本未创建。整个work目录、日志、缓存、卷和中心源码包继续保留，没有手工删资源。原Java镜像/StartedAt/restartCount及健康保持；Static页面、制品标记和Nginx完整ID/StartedAt保持。源码包与中心档案均实际3568B、SHA256 `239cf93224fc67afbac6a66df67815c15c96fb4cb1cafa92aa2f804d556d17ee`，原包含真实return 1。
+
+完整所有者前cef8f898…6948、后98aa7afa…7d46覆盖11库/43原生表，12957条原行Counter无缺失、原inode/列/迁移/密钥保持；785旧文件中784字节不变，唯一工作区state仅新增本次version、package、原packages任务及capture保护引用，Node按生产JSON.stringify反去这四项后精确命中原SHA8a23c3b5…c9db。九个已交付附件沿原1e严格基线逐SHA核对，不虚称本次前置采过。原24任务/16版本及旧目标配置/指针保持，只新增上述service/target/唯一task/archive和两条setup收据；现在25任务/16版本。独立本地21组核验 `.deployment/d5-r1-javac-20261028-v1-root/independent-local-v1.json` SHA256 `516767e883dceda65e3ac63db4d877af51357bdeae63dddcd7ebc24b5cbc48c8`，Agent清理原件 `ea7ec18613f5c143542d34e9d0fe6cd1a68d5d5271c52c8e4f4faf30bda776ab`。原09126节点后台维护由applying变failed，实际Docker Hub拉取BuildKit连接重置，完整失败保留，不宣称全站维护正常或整份部署状态零变化；本次专属节点策略仍applied。前置辅助将全站24误作本环境12任务的拒绝发生在setup写前，旧账号配置PID拒绝发生在任务POST前，两次原件均保留，按实际范围/现行PID校正后才执行原任务，未重POST。
+
+本项复用已有代码、相关自动与1e完整CI，辅助8项不代替业务；现行1e生效，R1真实失败与清理业务通过。D5仍继续R2构建中断、R3切换后恢复、R4事件补报去重、R5节点并发、R6档案清理；D6自然七天到期独立待验，不因本项通过结束原任务。
 
 ### 排队任务撤权与专属Agent恢复（2026-10-27）
 
