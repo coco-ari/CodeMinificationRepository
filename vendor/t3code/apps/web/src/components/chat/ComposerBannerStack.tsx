@@ -14,6 +14,7 @@ export interface ComposerBannerStackItem {
   readonly id: string;
   readonly variant: ComposerBannerVariant;
   readonly priority?: "urgent" | "activity" | "notice";
+  readonly replacesSync?: boolean;
   readonly icon: ReactNode;
   readonly title: ReactNode;
   readonly description?: ReactNode;
@@ -349,7 +350,7 @@ function ComposerBannerStackAlert({
   }
   return (
     <ComposerBanner.Root
-      role="alert"
+      role={item.replacesSync && item.variant === "default" ? "status" : "alert"}
       placement={attached ? "attached" : "floating"}
       variant={item.variant}
       density="comfortable"

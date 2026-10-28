@@ -1,3 +1,4 @@
+import { Spinner } from "./ui/spinner";
 import { questionSendDisabledReason } from '~/autoops/questionConfiguration';
 import { customerFilesCwd } from "~/autoops/customerFiles";
 import {
@@ -2397,14 +2398,18 @@ export default function ChatView(props: ChatViewProps) {
     isServerUpdateFailureDismissed(serverUpdateState);
   const systemComposerBannerItems = (() => {
     const items: ComposerBannerStackItem[] = [];
-    if (customerSendBlock)
+    const customerConnectionPending =
+      customerRuntime.loading && !customerRuntime.error &&
+      readAutoOpsHost()?.customerAgentsEnabled === true;
+    if (customerSendBlock && !activeEnvironmentUnavailableState)
       items.push({
         id: "customer-connection",
-        variant: "warning",
-        icon: null,
+        replacesSync: true,
+        variant: customerConnectionPending ? "default" : "warning",
+        icon: customerConnectionPending ? <Spinner /> : null,
         title: customerSendBlock,
-        description: "本机已有执行不会因网页断线自动停止。",
-        actions: (
+        description: customerConnectionPending ? undefined : "本机已有执行不会因网页断线自动停止。",
+        actions: customerConnectionPending ? undefined : (
           <Button size="xs" variant="ghost" onClick={customerRuntime.refresh}>
             刷新
           </Button>
@@ -2437,12 +2442,16 @@ export default function ChatView(props: ChatViewProps) {
     if (activeEnvironmentUnavailableState && unavailableConnection && !suppressUnavailableBanner) {
       items.push({
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
-        variant: unavailableConnection.phase === "error" ? "error" : "warning",
-        icon: <WifiOffIcon />,
+        replacesSync: true,
+        variant: unavailableConnection.phase === "error"
+          ? "error"
+          : unavailableConnection.phase === "connecting" ? "default" : "warning",
+        icon: unavailableConnection.phase === "connecting" ? <Spinner /> : <WifiOffIcon />,
         title: isAutoOpsHosted()
-          ? environmentReconnecting ? "正在重新连接对话服务…" : "对话服务连接已断开"
+          ? unavailableConnection.phase === "connecting" ? "正在连接对话服务…"
+            : environmentReconnecting ? "正在重新连接对话服务…" : "对话服务连接已断开"
           : `${activeEnvironmentUnavailableState.label}${environmentReconnecting ? " 正在重新连接…" : " 已断开连接"}`,
-        description: activeEnvironment ? (
+        description: activeEnvironment && unavailableConnection.phase !== "connecting" ? (
           <ConnectionDiagnosisHeadline environment={activeEnvironment} />
         ) : undefined,
         actions: (
