@@ -1771,6 +1771,30 @@ Node2 `ae498c20-74a5-4976-8b3d-0d60c7f9b25c` 已正常启动1888455/t44133252，
 
 B/C正常setup由u-admin完成5写：批准Node1至B、绑定f1e3、新B服务e278d67e、新B目标d4593d1c（28903/Node1）和原D123服务3b77上的C目标cfeec8da（28904/Node2）。五个原intent/UUID、两项节点收据及响应已核；旧tasks/releases/services/sources和目标保护指纹整值保持，0部署任务/0模型，不冒称project-admin正控。原proof f47ef545…bfe5及上述独立索引保存实际前67190cf3…aff9/后1ca8f16a…cea0。R5并发/领取、R6清理、D6自然七天门均未完成；当前应用仍1e，docs-only `de1134d6c5f1614e761376cec6e9cf9edd600773` 的[质量40622019468](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40622019468)及[完整运行40622019486](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40622019486)均green，原件 `.deployment/ci-de1134d6-final-root-v1.json` SHA256 `c3a254294fd85dca5262c89cec125130405faea6ea7ec154b4fa599ad7b6adf1`，不代表新应用发行或总体完成。
 
+### 三原任务首发结果与准备失败边界（2026-10-28）
+
+本轮仍为1e，无产品修改。A/B/C各POST一次，原UUID分别ba4ff6ef/205ea465/e854c354，task分别8791f385/61b75098/60e53938。B的Node1目标d459与C的Node2目标cfee真实首发成功、容器healthy，中心88/92条日志与本机事件的seq/message/stage/agentTimestamp逐条相等，seq=ACK88/92；各只有一个当前版本，临时工作目录和本任务builder已清理。两原中心源码ZIP均3588B/6文件、SHA35e74ab9…4100c，固定e353及配置快照保持。原Java/Static身份与健康、A原目标currentRelease及全部原PID保持；B/C首发和独立节点同时构建这个子项通过，不替代R5的准备占位及同节点排队窗口。
+
+A真实私有Git8c3固定包task bffe7c38已completed，package f9cec553/sourceVersion dd733fe0、3690B/SHA `ccae4b105683452147763967a2104e5d76b572dcc9d2dbb4bca826e33ab4de47`；其完成35ms后，部署task8791以“固定工作区源码失败，请检查服务存储”结束，seq0、无startedAt/sourceIdentity/sourceArchive，未被Agent领取，原runtime保留。冻结1e的原Store/prepare方法与实际Python只读BEGIN在隔离DELETE数据库重现COMMIT errcode5，释放reader后正控成功，机制原件806bb2c0…9605/复核f64da7b8…74f1。另行核manifest/来源/上下文与正式自动源码端口，排除确定的Git/ref/context/接口缺失；第一identity提交或此前瞬时packageFile/mkdtemp/write/lstat仍是可产生相同签名的原因族。现场内层error被原catch折叠，未保留SQLITE_BUSY或IO原文，不能将机制复现写成唯一实际原因。替代原因审计 `.deployment/d5-r5-a-prepare-alternate-causes-v1/audit.json` SHA256 `f1904a4c75dccbe8f04b8891792172a4b34868a3b687427ac7ab4b5293aba01d` 与两项机制原件均明确actualFailureCauseProven=false。
+
+A失败使原准备/排队窗口未形成；parent等待结束后仅停止controller，submitter已join，未向Agent发信号、未ss-K、未布置网络故障，R4/R5均未通过。原filter比较出现B/C新容器172.19.0.4/.5的两条DOCKER/18081 ACCEPT增量，精确对应实际容器网络；无删除规则、无自有故障label，不能把合法Docker变化误报为污染或为此删规则。后续保留三原UUID与结果，不重发原任务；正常API观察和故障前网络基线按当前合法容器状态核对，不凭本轮原始before/after整字不等判定残留故障。
+
+完整原件在 `.deployment/d5-r5-and-r4-20261028-v1-root/`：owner前 `965d76bba9328990d6281b8d8f08247e0e36d1c9ee1f7b00cbfbe50ba8b73e94` / 后 `deeb42b52765061fd51f0fda02016d56ed8ab8b7bb78972adb8def4f55a3854f`，public `67e67b476e851d43d3987df2ee6179f5f77ff038a864df2b498ea39ae30e179a`，agent `0d4150933b262b1cb7eba650d63048aaf1c3bdc6cdc5d9744f1f776d99010685`。旧29任务/17版本逐完整行保留，新增三原任务与B/C两个版本，当前32/19规范化SHA `0fd8fa1c824f30b45f2e8c2f33419b7e953afcfef47875cacb26e76a3d5459a5`。986旧文件仅D123工作区state有本轮新源码包变化，新增72个源码/包文件；九附件、当前业务投影及其他旧表保持。authoring三表各新增一条本轮capture/source/deploymentInput，native auth_sessions906→908（缺1/增3）仍未归因，不写全部原行保持。原compare提示保留，R6/D6未执行或未到期的边界不变。
+
+代码/原自动测试/1e部署继续保留；本次真实业务仅B/C首发子项通过，R4/R5/R6不关闭。docs-only `90ade959e34b23d51de4898d8dcd2f66e548d653` 的[质量40628217217](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40628217217)及[完整运行40628217245](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40628217245)均green，原件 `.deployment/ci-90ade959-progress2-root-v1.json` SHA256 `bcffee68bf60aee5fabac99d365b9330bdd9cacdd72f46cc4b471c78d834b8eb`；没有新应用发行。
+
+### 跨项目节点互斥与独立领取闭环（2026-10-28）
+
+本轮只替换干扰性的测试观察方式，没有修改产品、WAL/timeout或实际1e发行。正常API内存投影替代运行中外部SQLite事务，不做R4网络故障；A/B/C三个全新原UUID `265af8d1-2d4f-4dc7-b8ab-d9b905afa5c6` / `1c28c9a5-24d7-40a8-9cde-b61f3f285f08` / `e6b2d079-6cf6-4b79-96fb-5e38ed1b4fe4` 各POST一次，正常原回复与v5持久操作全值相同。A task `d8b9de7b-ea0c-4091-afff-792c11a7f296` 固定8c3首发成功，B task `40010dfd-6914-43d9-87db-7506b7b95b14`、C task `b70f53aa-6906-4583-a845-5a097eeb2e19` 仅重启各自先前已首发成功的61b/60e；不重放首轮三个UUID，不把restart替代首次发布证明。
+
+三条既定事实分别通过原API响应及最终阶段历史核对：A preparing为04:16:37.371–37.838UTC，跨项目同Node1的B于37.519创建且queued；A实际领取04:16:43.021、04:17:19.406结束，B一直未领取，至04:17:21.205才started，晚1799ms。Node2的C于04:16:37.678独立领取、45.787结束，不受Node1占用阻塞。原件有三份实际live witness，但跨项目观察是两个正常GET，明确不声称同一原子快照；也不额外要求C必须在A短暂preparing内领取。
+
+A真实Maven BUILD SUCCESS、中心及本机事件59条/ACK59、健康通过。新package `9f440847-6a69-4adb-bfcf-9b4b978287cd`、archive `3a891c6e-fc71-476e-bdba-b9cfc6289d4b` 对应原sourceVersion dd733fe0及固定commit8c3；正常下载完整6文件源码ZIP为3690B、SHA `ccae4b105683452147763967a2104e5d76b572dcc9d2dbb4bca826e33ab4de47`，仅含隔离标记注释，业务返回未改。A current=d8b、previous=386c，原本机chain1正常追加为2。B/C各中心3条日志与本机事件逐项对应、ACK3；原CID/镜像/Config.Image/current/release/chain保持，正常docker restart使StartedAt分别重置为04:17:22.536733821/04:16:39.324870103UTC，均位于各自任务区间，未重build/activate、未生成新版本。三任务临时构建目录及builder已清理；原Java/Static身份健康、两个Agent/原59368/CLI1608061及应用PID保持，17源/启动不变；零Agent信号、零网络故障、零运行中外部SQLite连接。
+
+独立索引 `.deployment/d5-r5-normal-api-20261028-v1-root/independent-local-v1.json` SHA256 `1bfa6971d4c7c6ec41454dbdc5b45dfc142cbcc29a086a747f352fca2ac2b17d` 固定全部关键原件：owner前 `9b3f428d002653d27d5f2517e53e6525329ef9b9de41f7b001a8e758d06bc18a` / 后 `458f3745002bea4022b1acd4f93daa704dc6a78ec055a6d2f50e23d1545599eb`、public `ee95dc0362327f53f8d4c262c1652e65891d24b437930d669619afde53fff368`、agent `82861c772bb99ccbe903f39fad334aa662627caa29712e978b6b0ca8a5d4210c`，以及原POST回复/完整三日志、逐阶段时间和ZIP。32原任务/19版本逐完整行保持，仅加3任务/1版本，当前35/20规范化SHA `8cab8088ccd3c11e340c8ded2bb9a44c6b3d75aa1f6fdb303778b846b40a8d75`。11库列/inode/迁移/密钥及九附件保持，原1059文件仅D123工作区state按本批包变化，新增该包的manifest/ZIP两文件。authoring三表各增1；三个登录表各增2、无原行缺失。并行自有E3预设2c165按根正常UI操作r4→5、仍停用并加入49e技能，owner确认仅该预设一旧行替换及version/receipt/audit各增1；不从行哈希反推完整值，也不据此关闭E3，原三条compare提示保留。
+
+本单项代码复用已完成，原相关回归及1e完整CI/部署继续有效；本批11项离线合同只记辅助验证，实际R5由上述原收据、真实Maven/容器/健康、API阶段及全量后验共同通过。原控制器businessAcceptancePassed=false不追改，独立综合裁定R5四状态通过。首轮A准备失败、B/C首发及32/19原件完整保留；新成功不反推首轮唯一失败原因。R4补报去重与R6档案清理仍待验，D6自然七天门不变，E3继续按原具体流程验证；整体任务未完成。
+
 ### 同原日志地址撤权与恢复（2026-10-28）
 
 A3复用a2b8d768以来的原返回前授权合同。当前1e，原reader89dde30b仅正常登录一次，使用同一个RAM Cookie读取原Static任务11e3ecc8的同一日志地址：先200，管理员按固定UUID5c2eb4db-c351-4d1d-82ae-2762635eb2a5只停用该成员r5→6后，原地址精确404 PROJECT_NOT_FOUND且无task/logs；再按原UUIDd9a15dfb-cdf9-4506-a300-28c8cfad91bf恢复原值r7，同Cookie原地址恢复200。两次POST各一次，不启停账号或改密码；无论POST回复如何都只GET原UUID，完整receipt的actor/project/environment/operation/publicIntent及原成员结果分别精确r6/r7，不重POST。finally恢复已由正常原收据确认，原12日志、完整task及nextSeq13前后深相等。
