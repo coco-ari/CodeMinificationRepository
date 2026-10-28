@@ -1928,3 +1928,15 @@ R4 v7沿原UUID d63972d0-ce25-4eaf-92cb-bf983e8a25a1仅POST一次，task b773d8e
 下一轮复用公开AgentRunner({client})及真实CenterClient，在真实中心ACK后、交付Runner前有界扣留一次，由独立原任务GET与本机原journal证明中心S/本机ACK=S-1，再注入一次客户端交付失败，核原事件重发、完整前缀去重和终态追平。保持实际中心/身份/来源/Executor，不伪造上游或直接修改journal；临时入口/PID变化与原unit正常恢复须如实核验。此时仅准备，不计真实通过，也不称TCP丢包。
 
 v8第一轮在POST前明确退出，原request213d3d53及controller意图/失败原件保留，taskPosts=0、Agent未停。原b773 claim缺省sourceSelection曾被工具误要求null，已用真实原DTO先红后绿修为字段缺省且拒绝null/篡改；本轮随后被ORIGINAL_CURRENT_CHANGED拦截，根核正常overview的currentRelease省略applicationId/image/sourceArchiveId/sourceKind/sourceSnapshot五字段，其余共有值全等。后续仅让当前公开DTO与已固定公开原件逐全值核对；底层claim仍核原完整previousRelease摘要，不归一化未知字段或改产品。独立新输出保留原意图，不能直接重跑旧controller或把零任务退出当R4通过。
+
+### 原事件 ACK 交付失败与补报去重闭环（2026-10-28）
+
+R4 复用公开 `AgentRunner({client})`、真实 `CenterClient`、正式中心及执行器，无产品修改。原 request `302b7062-8d5a-4582-bca7-19686e1a5980` 只 POST 一次，task `abba49d0-a1e1-4df6-8f14-1b008a3e5f3e` 固定 e353/package7bad 真实 Maven 发布。中心已接收 seq4/ACK4 后，在交付 Runner 前有界扣留；独立正常任务 GET 与两次本机 journal 同时确认中心4、本机ACK3、已产出seq5。根解除扣留后只注入一次客户端 ACK 交付失败，原日志补报警告出现，原事件逐字重发一次并得到真实 ACK4；最终 succeeded、71事件/ACK71、一次领取和执行，没有第二次构建。故障类型明确为客户端 ACK 交付失败，不称 TCP 丢包；配置干预与自然业务结果分别记录。
+
+中心原前四条日志包括 receivedAt、原文件 SHA 全部保持；71条最终事件与本机原事件完整相等。原3588B ZIP/SHA35e74ab9…4100c 正常下载保持，current=abba、baseline=b773、版本链6。原38任务/23版本逐完整行保留，当前39任务/24版本完整行规范化 SHA256 `9ef164d4b969ee38908b69e4e70159898393b6efe41a56987916b7154c9016b1`。1061原文件、九附件、43原生表结构/迁移/密钥、档案及清理收据均保持；R6已清理A的ZIP仍物理不存在。三认证表差异单列未归因：原生 auth_sessions 旧行全部保留并新增2；映射缺失或变化7/新增2、demo.sessions缺失或变化6/新增2，不声称全部旧表行相等。
+
+临时入口正常结束，原 unit 按相同身份和启动文件恢复 owned Agent `2456395/t45263036`；17源文件及启动文件原样，942份旧 journal/event 原始 SHA 全部相同，其余六个原进程身份不变。五个实际目标健康均200，旧 Java、Static、B/C 实例完整身份保持；未改网络规则、直接编辑 journal、修改数据库或强制结束其他进程。
+
+独立索引 `.deployment/d5-r4-ack-delivery-20261028-v2-root/independent-local-v1.json` SHA256 `327b6392b44e5fdb2862f0ed5b37774330e0b0d4cfbba62a9f6bcf10c3ee287d` 固定23份原始安全导出、中心原件及根后验。owner-after `ead780557229640b94486569d4dd751abd027a2c6d8d7c86860b8117e384639c`、正常 public-after `d84cfde6c7aeaf6f7d2ec5c7a55e6c39dc0ebf75ada1cd65fd1b8e765ff5189c`、实际只读后验 `89024731a0034ebe550af8c3006f0600b1d229c08f9ec946928f61bb921a2f8e` 已交叉核验。原 v1–v7 失败与本轮零 POST 拒绝不追改；辅助脚本的 businessAcceptancePassed=false 保留，由上述真实链路和独立核验裁定 R4 通过。
+
+R4 四类状态为：原代码复用完成；既有相关回归及1e完整CI通过，新增定向真实合同/恢复边界回归仅算辅助；原1e已生效、未切换应用发行；真实 ACK 失败、原事件补报及数据保留通过。D5 R1–R6 与 E5 既定部署矩阵闭环；E3普通草稿连续性、新版整页发行和D6自然七天门仍未完成。文档提交 d6dfaa76 的质量40643064018/完整运行40643064019均green，不代表新应用部署。
