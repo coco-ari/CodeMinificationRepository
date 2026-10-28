@@ -20,7 +20,15 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用固定为 `b44b7bf8dccca153017447bb7ca30de26cf0afb7`，前端与后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-reconnect-b44b7bf8`，STATIC_DIR为同目录dist/web；客户CLI仍复用0.4.5。北京时间2026-10-28 21:31切换成功，Web3760892、worker launcher3760385运行目录一致，两unit active且NRestarts=0。健康workerReachable=true，HTML SHA256 `0d38255c5c76ffc23c39448d42dd56f54392199cefe2db302a7fbd9cfa001971`，两个Web Worker实际字节通过。发行清单 `16ff5e0648e3adb5a0a45293a2e588bed5abd4071a91a3cb85c02e10156609d0`，原生清单 `849d148d918b746bcd65cb64ba5b4747697a81f5dfa2ed02d69ddf6760544fcd`；原件为 `ROOT/reconnect-b44b7bf8/preflight.json`、`switch.json` 和 `live-observation.json`。无迁移变化、无备份或数据恢复，其他服务PID不变。
+当前应用固定为 `13d8ed34c1f103b30b462aa46c1651b0f383b4aa`，前端与后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-perf-13d8ed34`，STATIC_DIR为同目录dist/web；客户CLI复用未变化的0.4.5。北京时间2026-10-28 22:52切换成功，Web4013932、worker launcher4013435实际运行目录一致，两unit active且NRestarts=0。健康workerReachable=true，HTML SHA256 `de1cf25f33170802d08f4404e3c84012f56f01b08172383b9ac4e246dfbf6585`，两个Web Worker实际字节通过。发行清单 `450afa6fbd81cbb03bafc1ca7cea92c523d85fe17063d26009ba0c99bdb76126`，原生清单 `14ee392bb454dc6358e104c17e5cd338780bd3ad6e0261f37fc1f4697907b6ac`；原件为 `ROOT/perf-13d8ed34/preflight.json`、`switch.json`、`live-observation.json`。切换前没有活动问答、待处理客户命令或工作区租约；无迁移变化、无备份或数据恢复，其他服务PID不变。
+
+本批消除项目/内置助手目录内部重复账号投影，保持本次同步读取复用、下次撤权/改名生效。67项后端关联回归、Server类型/边界及同一固定候选完整构建通过。实站同admin正常登录、10项目/19会话、工作区根3项及子目录11项读取均200且响应字节数相同；五次短样本bootstrap中位59.15→26.08ms，会话列表54.76→28.61ms。仅支持本批目录开销减少，不承诺模型速度或长期连接稳定，具体复现和未测边界见[性能审查](../docs/validation/authorization-directory-performance.md)。本候选同时包含d50cb4f0/fa4614c0已协调的底栏与菜单修复，37项浏览器/52项单元及Web类型已通过，实际交互结果见[底栏验收](../docs/validation/composer-controls.md)。
+
+程序回退目标为上一完整前后端 `t3-reconnect-b44b7bf8`。先核当前有效覆盖、活动任务和本批switch收据，仅撤销本批拥有且摘要仍相同的两unit drop-in并恢复该完整发行；不回滚业务数据或套用下方历史静态回退。此批无schema变化，未重复执行未受影响的业务部署/原包回退矩阵。
+
+#### 上一b44重连发行历史（保留）
+
+当时应用固定为 `b44b7bf8dccca153017447bb7ca30de26cf0afb7`，前端与后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-reconnect-b44b7bf8`，STATIC_DIR为同目录dist/web；客户CLI仍复用0.4.5。北京时间2026-10-28 21:31切换成功，Web3760892、worker launcher3760385运行目录一致，两unit active且NRestarts=0。健康workerReachable=true，HTML SHA256 `0d38255c5c76ffc23c39448d42dd56f54392199cefe2db302a7fbd9cfa001971`，两个Web Worker实际字节通过。发行清单 `16ff5e0648e3adb5a0a45293a2e588bed5abd4071a91a3cb85c02e10156609d0`，原生清单 `849d148d918b746bcd65cb64ba5b4747697a81f5dfa2ed02d69ddf6760544fcd`；原件为 `ROOT/reconnect-b44b7bf8/preflight.json`、`switch.json` 和 `live-observation.json`。无迁移变化、无备份或数据恢复，其他服务PID不变。
 
 本批修复会话授权目录重复读取造成的事件循环阻塞，以及无助手长提示挤压底部控件。45项服务、5项原生RPC、21项浏览器、类型/边界和固定归档构建通过；桌面/390px、刷新/草稿、切项目、正常会话和工作区目录读取已实测。上线约8分钟无新增卡顿日志，同会话列表短样本532ms→96ms；不代表模型上游或长期连接稳定已验。完整原因、对比及未测边界见[本批验收](../docs/validation/reconnect-and-composer.md)。
 
