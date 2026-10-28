@@ -1557,6 +1557,10 @@ stable2随后在取基线前被原180秒认证窗口守卫拒绝，未产生基�
 
 同一真实project-admin manager沿管理页正常修复自己的disabled预设2c16580b：编辑→取消“49e · 已不可用”→保存，3操作；一次POST原UUID883fabae-bbf5-4c94-8fd0-45f90771ff88，r5/skills[49e]→r6/[]，未启用预设、未改公共64cb及其他配置。原完整receipt/publicIntent/actor/scope/result与200回复逐值相等，焦点回原编辑按钮，pending为空、browser0；根正常GET及整35任务/20版本前后核验通过。`.deployment/e3-owned-invalid-skill-repair-1e014e71-v2-actual/result.json` SHA90d49b23…1bf07，原receipt0645186c…ccb，根独立22e228cd…d07e。用户可修复自有合法预设；开发者复用既有配置及原收据合同；Agent可用同UUID确认结果。此流程修改前后均3操作，不声称减少步骤；受控组件无manage但可调组合只记自动正控，固定实站角色不制造此组合。代码/自动/1e部署均通过，本管理修复真实子项通过；E3整项仍等待普通草稿失效整理及既定整页发行。
 
+Linux普通草稿补验的真实上传/预览部分已通过：新草稿正常选择唯一75B TXT，原生mint仅一次、原File请求实际204，同manager正常metadata与正文GET200且SHA1f60ce88…f742，Dialog真实正文、原Grok4.7/high和技能名称保持。最新原件`.deployment/e3-draft-skill-focus-1e014e71-v4-actual-native-focus-flags-v1/result.json` SHAd36b0641…62e9、服务端字节cc375b6f…deb63、原草稿505d4702…32849及parent826a0cb6…49ef4保留，38/23全行相等、零问答、原九已交付附件保持；新文件仍为本次未发送草稿pending，不冒称已交付附件。
+
+真实focus双门仍未通过，49e未停用，自动整理未验收。此前工具误解签名上传口/204/File的CDP空body、FileChooser utility/main realm、headless_shell及Playwright焦点模拟等失败均保留；同锁定完整Chrome148/noDefaults默认context的真实空白页切换已通过，禁用原默认扩展后零worker启动门通过。实站后续仍缺逐次focus原值，不能据离线document.open丢监听推断实际产品根因。下一轮只在最终document加纯观察capture和有界事实记录，保持真实hasFocus与trusted事件双门；焦点失败短暂保留同原草稿/附件/浏览器供诊断，禁止以新上传或模拟事件替代原现场恢复。本段只补实际成功与待验边界，不把辅助回归记为E3业务通过。
+
 ## 共享来源启动误拒与整页接续（2026-10-27，未部署）
 
 C6 调用关系为原生 ThreadLaunchService/ThreadManagementService → ProviderInstanceAvailability → RemoteProviderRegistry → 原绑定与助手/来源 owner。候选原因一为目标原生项目未登记；同实际接收者正常 subscribeShell 读取到正确目标项目、根目录及模型，排除。原因二为可用性使用目标项目筛选来源登记；实际10发行 source map 与固定提交源码摘要一致，确实只有旧 listWorkspaces(device.ownerId, projectId)；真实 SQLite owner 的合法跨项目共享和分配可进入目录，却在粗可用性红测返回 false，确认该原因。另有原生旧合同与新合同对照测试，旧合同在创建前误拒，新合同仅创建原生元数据，不发送消息或推理。
@@ -1914,3 +1918,13 @@ R6复用现行SourceArchives与原HTTP，代码和既有自动/1e完整CI继续�
 根独立`.deployment/d5-r6-source-clear-prepared-v1/independent-root-acceptance-v1.json` SHA256 `7714661d1149ad9099cc04236c99427b154ea8e683b3a4663b5cc29e94da6cf8`，物理后验64c8e763…fedc4、owner后e908fc6e…8d4b。37任务/22版本历史均保留，只有A档案清理字段改变；规范化任务/版本完整行SHA `27e97902282bcc849d5492c0b476504e4b148af3688066ca6e99b9b7d6cdf071`。原文件/密钥/库身份、43原生表结构和九附件保持；认证会话行存在变化：C前后auth_sessions缺失/变化1、t3_native_auth_sessions6、demo.sessions4，清理前后另两认证表各1，具体旧行原因未归因，不能写所有旧行相等或伪成零异常。其余业务旧行与部署精确允许差分已核，认证历史边界保留，不追改旧snapshot。
 
 R6既定源码保护、唯一清理与恢复内容保留的四状态通过；辅助result的businessAcceptancePassed=false不追写，根综合原HTTP、原意图、正式fingerprint、物理文件与健康裁定本项。当前应用仍1e/原官方CLI0.4.5，未切换发行。D5仅余R4；D6自然七天门、E3普通草稿连续性和后续整页发行继续，整体未完成。
+
+### 构建窗口补报取证结果（2026-10-28）
+
+R4 v7沿原UUID d63972d0-ce25-4eaf-92cb-bf983e8a25a1仅POST一次，task b773d8ef-6632-4a4d-ba34-23b0837b7b92固定e353/package7bad，实际Maven发布、健康及82事件/ACK82通过；current=b773、baseline=3f1、本机链5。3588B原ZIP/SHA35e74ab9…4100c保持。独立`.deployment/d5-r4-building-20261028-v1-root/independent-local-v1.json` SHA256 `cccaf619f111a3bed269e5313094c8645269781996973a63598a973bd4ede813` 核中心日志与原事件全字段语义相等、原37任务/22版本逐完整行、旧档案及清理收据、1061旧文件、九附件、七进程和17源保持；五目标真实健康200，R6已清理A没有复活。当前38任务/23版本完整行SHA256 `e6e70a34a29dc92cc1d33077ae3468fa1b6cb526954135265775a88a267d4b58`。三认证表的旧行变化未归因，继续单列，不声称全库所有旧行相等。
+
+实际building前置已满足，专属规则安装12秒后仍报NO_ACCEPTED_UNACKNOWLEDGED_WINDOW；原filter完全恢复、零ss-K/Agent信号、observer已join。失败分支未保存DROP counter，不能断言实际丢包，也不能仅凭发布成功/ACK追平关闭R4。候选原31项工具回归只算辅助。已排除前轮两秒读取预算问题，但“规则未命中”及“ACK前已有请求阻塞/窗口未被观察”仍无法由该轮原件区分，不重复同样故障。
+
+下一轮复用公开AgentRunner({client})及真实CenterClient，在真实中心ACK后、交付Runner前有界扣留一次，由独立原任务GET与本机原journal证明中心S/本机ACK=S-1，再注入一次客户端交付失败，核原事件重发、完整前缀去重和终态追平。保持实际中心/身份/来源/Executor，不伪造上游或直接修改journal；临时入口/PID变化与原unit正常恢复须如实核验。此时仅准备，不计真实通过，也不称TCP丢包。
+
+v8第一轮在POST前明确退出，原request213d3d53及controller意图/失败原件保留，taskPosts=0、Agent未停。原b773 claim缺省sourceSelection曾被工具误要求null，已用真实原DTO先红后绿修为字段缺省且拒绝null/篡改；本轮随后被ORIGINAL_CURRENT_CHANGED拦截，根核正常overview的currentRelease省略applicationId/image/sourceArchiveId/sourceKind/sourceSnapshot五字段，其余共有值全等。后续仅让当前公开DTO与已固定公开原件逐全值核对；底层claim仍核原完整previousRelease摘要，不归一化未知字段或改产品。独立新输出保留原意图，不能直接重跑旧controller或把零任务退出当R4通过。
