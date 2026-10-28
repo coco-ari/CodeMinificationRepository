@@ -32,9 +32,10 @@ export const loadProjectSettings = (project: string, signal?: AbortSignal) =>
     label: '项目设置',
     ...(signal ? { signal } : {}),
   })
-export async function refreshProjectHost() {
+export async function refreshProjectHost(signal?: AbortSignal) {
   const bootstrap = await autoOpsRequest<AutoOpsT3Bootstrap>('/autoops/bootstrap', {
     label: '项目授权',
+    ...(signal ? { signal } : {}),
   })
   installAutoOpsHost(bootstrap, window.location.origin)
 }

@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
-import { BotIcon, UserIcon } from "lucide-react";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { ProjectId } from "@t3tools/contracts";
+import { ArrowLeftIcon, BotIcon, UserIcon } from "lucide-react";
 import { SidebarInset } from "~/components/ui/sidebar";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { WorkspacePageContainer } from "~/components/WorkspacePageContainer";
 import { SettingsGroup } from "~/components/settings/SettingsGroup";
 import { SettingsSection, SettingsRow } from "~/components/settings/settingsLayout";
 import { Button } from "~/components/ui/button";
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from "~/components/ui/empty";
 import { Label } from "~/components/ui/label";
 import { Checkbox } from "~/components/ui/checkbox";
 import {
@@ -65,6 +67,8 @@ export function AssistantManagementPage() {
     Object.hasOwn(location.search, "projectId") || selectedQuery
       ? `?projectId=${encodeURIComponent(selectedQuery)}&`
       : "?";
+  const fromProject = (location.search as { from?: string }).from === "projects";
+  const scopeQuery = `${projectQuery}${fromProject ? "from=projects&" : ""}`;
   return (
     <ModuleErrorBoundary label="助手" resetKey={`${host?.principal.id}:${projectId}:${provided}`}>
       <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-assistant-management>
@@ -76,7 +80,7 @@ export function AssistantManagementPage() {
             selected={!provided}
             onClick={() =>
               void navigate({
-                href: `/assistants${projectQuery}assistantView=project`,
+                href: `/assistants${scopeQuery}assistantView=project`,
               })
             }
           />
@@ -86,7 +90,7 @@ export function AssistantManagementPage() {
             selected={provided}
             onClick={() =>
               void navigate({
-                href: `/assistants${projectQuery}assistantView=provided`,
+                href: `/assistants${scopeQuery}assistantView=provided`,
               })
             }
           />
@@ -96,6 +100,20 @@ export function AssistantManagementPage() {
             {host ? (
               provided ? (
                 <ProviderAssistantPanel key={host.principal.id} />
+              ) : !host.projects.length && !Object.hasOwn(location.search, "projectId") ? (
+                <Empty size="compact">
+                  <EmptyHeader>
+                    <EmptyTitle role="heading" aria-level={2}>先选择一个项目</EmptyTitle>
+                    <EmptyDescription>
+                      {host.canCreateProject
+                        ? "在项目管理中创建项目，或联系管理员加入已有项目，再配置可使用的助手。"
+                        : "请联系项目管理员分配项目和助手，再到项目管理刷新。"}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent>
+                    <Button render={<Link to="/projects" />}>前往项目管理</Button>
+                  </EmptyContent>
+                </Empty>
               ) : (
                 <ProjectAssistantPanel
                   key={`${host.principal.id}:${projectId}`}
@@ -113,6 +131,7 @@ export function AssistantManagementPage() {
 }
 function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
+  const fromProject = useLocation({ select: (location) => (location.search as { from?: string }).from === "projects" });
   const host = useAutoOpsHost()!,
     project = host.projects.find((project) => project.id === projectId),
     manage = project?.capabilities?.["project.manage"] === true;
@@ -326,6 +345,15 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   const readonlyItems = project.assistants?.items ?? [];
   return (
     <div className="space-y-6">
+      {fromProject ? (
+        busy || pending || otherPending || editor ? (
+          <Button variant="ghost" size="sm" disabled><ArrowLeftIcon />返回项目配置</Button>
+        ) : (
+          <Button variant="ghost" size="sm" render={<Link to="/projects" search={{ projectId: ProjectId.make(projectId) }} />}>
+            <ArrowLeftIcon />返回项目配置
+          </Button>
+        )
+      ) : null}
       {otherPending ? (
         <Alert variant="info">
           <AlertDescription>
