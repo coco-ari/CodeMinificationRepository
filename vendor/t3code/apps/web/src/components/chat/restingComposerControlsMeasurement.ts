@@ -28,6 +28,9 @@ function providerModelPickerNaturalWidth(picker: HTMLElement): number {
   const hiddenLabelWidth =
     label && !labelIsCollapsed ? Math.max(0, label.scrollWidth - label.clientWidth) : 0;
   const maxWidth = Number.parseFloat(style.maxWidth);
+  if (picker.dataset?.composerReservedWidth === "true" && Number.isFinite(maxWidth)) {
+    return maxWidth + elementInlineMarginWidth(picker);
+  }
   const naturalWidth = Math.min(
     renderedWidth + hiddenLabelWidth,
     Number.isFinite(maxWidth) ? maxWidth : Number.POSITIVE_INFINITY,
@@ -61,6 +64,14 @@ function controlBlockWidths(block: HTMLElement): { natural: number; iconOnly: nu
     const gap = Number.parseFloat(getComputedStyle(icon.parentElement!).columnGap) || 0;
     natural -= compact ? width + gap : 0;
     iconOnly += compact ? 0 : width + gap;
+  }
+  const reserved = block.querySelector<HTMLElement>('[data-composer-reserved-width="true"]');
+  if (reserved) {
+    const maxWidth = Number.parseFloat(getComputedStyle(reserved).maxWidth);
+    // 名称省略及只显示图标后，仍按槽位宽度决定是否有空间恢复完整控件。
+    if (Number.isFinite(maxWidth)) {
+      natural = elementOuterWidth(block) - reserved.getBoundingClientRect().width + maxWidth;
+    }
   }
   return { natural, iconOnly: Math.min(natural, iconOnly) };
 }

@@ -45,6 +45,7 @@ export function ScopeComposerChoice({
   onChange,
   footer,
   lockReason,
+  labelWidth = 5,
 }: {
   label: string
   summary: string
@@ -56,12 +57,13 @@ export function ScopeComposerChoice({
   onChange: (value: string) => void
   footer?: ReactNode
   lockReason?: string | undefined
+  labelWidth?: number
 }) {
   const floating = useComposerMenuProps()
   const content = (
     <>
       <ComposerControlIcon icon={Icon} size={locked ? 'xs' : 'sm'} />
-      <ComposerContextLabel>{summary}</ComposerContextLabel>
+      <ComposerContextLabel reservedWidth={labelWidth}>{summary}</ComposerContextLabel>
     </>
   )
   if (locked)

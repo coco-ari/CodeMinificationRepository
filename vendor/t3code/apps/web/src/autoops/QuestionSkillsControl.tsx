@@ -171,6 +171,7 @@ export function QuestionSkillsControl({
       <>
         <ScopeComposerChoice
           label="技能"
+          labelWidth={2.5}
           summary={summary}
           icon={BookOpenIcon}
           value=""
@@ -200,7 +201,7 @@ export function QuestionSkillsControl({
         data-composer-context-control
       >
         <ComposerControlIcon icon={BookOpenIcon} size="sm" />
-        <ComposerContextLabel>{summary}</ComposerContextLabel>
+        <ComposerContextLabel reservedWidth={2.5}>{summary}</ComposerContextLabel>
         <ComposerControlChevron />
       </MenuTrigger>
       <MenuPopup side="top" align="start" {...floating}>

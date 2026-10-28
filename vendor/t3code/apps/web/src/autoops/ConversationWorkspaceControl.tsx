@@ -101,6 +101,7 @@ export function ConversationWorkspaceControl({
   ];
   const workspaceChoice = (
     <ScopeComposerChoice
+      labelWidth={9}
       label="对话工作区"
       summary={summary}
       icon={target ? LaptopIcon : FolderGit2Icon}

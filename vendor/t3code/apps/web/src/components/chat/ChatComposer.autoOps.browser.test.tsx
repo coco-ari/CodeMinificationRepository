@@ -766,3 +766,38 @@ it("真实客户能力读取迟到并报告离线后，输入器保留原模型�
   expect(f.sent).toHaveLength(0);
   expect(f.bindings).toHaveLength(0);
 });
+
+it.each([{ width: 1280, dark: false }, { width: 390, dark: true }])("$width px 实际输入器名称更新不移动相邻范围或模型控件", async ({ width, dark }) => {
+  await page.viewport(width, 600);
+  document.documentElement.classList.toggle("dark", dark);
+  const f = setup(`stable-composer-${width}`, true);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} />);
+  await expect.element(editor()).toBeVisible();
+  await editor().fill("保留当前草稿");
+  const assistant = screen.getByRole("button", { name: "助手", exact: true });
+  const controls = () => [...screen.container.querySelectorAll<HTMLElement>('[data-composer-context-control]')]
+    .filter((element) => element.checkVisibility({ visibilityProperty: true }))
+    .map((element) => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width }; });
+  await new Promise(requestAnimationFrame);
+  await new Promise(requestAnimationFrame);
+  await expect.poll(() => screen.container.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length).toBe(0);
+  const before = controls();
+  const host = readAutoOpsHost()!;
+  const longName = "助手名称很长仍然不应该挤动其他控件";
+  installAutoOpsHost({ ...host, projects: host.projects.map((project) => project.assistants ? ({ ...project,
+    assistants: { ...project.assistants, items: project.assistants.items.map((item) => ({ ...item,
+      preset: { ...item.preset, name: item.preset.id === f.preset.id ? longName : item.preset.name },
+    })) },
+  }) : project) }, window.location.origin);
+  await expect.element(assistant).toHaveAttribute("aria-description", longName);
+  await new Promise(requestAnimationFrame);
+  await new Promise(requestAnimationFrame);
+  await expect.poll(() => screen.container.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length).toBe(0);
+  expect(controls()).toEqual(before);
+  await expect.element(editor()).toHaveTextContent("保留当前草稿");
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  document.documentElement.classList.toggle("dark", dark);
+  await page.screenshot({ path: `../../.test-artifacts/adaptive-navigation/composer-${width}.png` });
+  document.documentElement.classList.remove("dark");
+});

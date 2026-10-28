@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { useComposerContextLabelsOverflow } from '~/components/BranchToolbar'
 import { ServerIcon } from 'lucide-react'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
@@ -101,4 +103,42 @@ it('不可用助手显示实际原因并拒绝键盘选择，可用助手仍能�
   await userEvent.keyboard('{Home}{Enter}')
   expect(onChange).toHaveBeenCalledTimes(1)
   expect(onChange.mock.calls[0]?.[0]).toBe('ready')
+})
+
+it('选项由短变长时控件与相邻操作位置保持稳定，长值仍能完整读取', async () => {
+  await page.viewport(1440, 600)
+  const onChange = vi.fn()
+  const view = (summary: string) => <div className="flex items-center gap-1">
+    <ScopeComposerChoice {...choice} summary={summary} onChange={onChange} />
+    <button>相邻操作</button>
+  </div>
+  await using screen = await render(view('无环境'))
+  const before = screen.getByRole('button', { name: '相邻操作' }).element().getBoundingClientRect().x
+  const long = '生产环境名称很长但不应该导致后面操作的位置发生变化'
+  await screen.rerender(view(long))
+  expect(screen.getByRole('button', { name: '相邻操作' }).element().getBoundingClientRect().x).toBe(before)
+  expect(screen.getByRole('button', { name: '业务环境', exact: true }).element().getAttribute('aria-description')).toBe(long)
+})
+
+function StableStrip({ summary, width }: { summary: string; width: number }) {
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
+  const compact = useComposerContextLabelsOverflow(element)
+  return <div ref={setElement} style={{ width }} className="group/composer-context flex" data-testid="stable-strip" data-compact={compact ? '' : undefined}>
+    <div className="flex gap-1">
+      <ScopeComposerChoice {...choice} summary={summary} onChange={() => {}} />
+      <ScopeComposerChoice {...choice} label="资料范围" onChange={() => {}} />
+    </div>
+  </div>
+}
+
+it('名称变化不触发整排紧凑模式，只有容器缩窄时收起并能再次展开', async () => {
+  await using screen = await render(<StableStrip summary="无环境" width={320} />)
+  const strip = screen.getByTestId('stable-strip')
+  await expect.element(strip).not.toHaveAttribute('data-compact')
+  await screen.rerender(<StableStrip summary={'很长的环境名称'.repeat(10)} width={320} />)
+  await expect.element(strip).not.toHaveAttribute('data-compact')
+  await screen.rerender(<StableStrip summary={'很长的环境名称'.repeat(10)} width={150} />)
+  await expect.element(strip).toHaveAttribute('data-compact')
+  await screen.rerender(<StableStrip summary={'很长的环境名称'.repeat(10)} width={320} />)
+  await expect.element(strip).not.toHaveAttribute('data-compact')
 })

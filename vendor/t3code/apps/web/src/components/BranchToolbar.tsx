@@ -459,6 +459,8 @@ function labelTextWidth(label: HTMLElement, range: Range): number {
   }
   const motion = label.querySelector<HTMLElement>("[data-composer-label-motion]");
   const maxWidth = motion ? Number.parseFloat(getComputedStyle(motion).maxWidth) : Number.NaN;
+  // 固定槽位按预留宽度判断收起，不能让长名称触发整排标签跳动。
+  if (label.hasAttribute("data-composer-label-fixed") && Number.isFinite(maxWidth)) return maxWidth;
   return Number.isFinite(maxWidth) ? Math.min(width, maxWidth) : width;
 }
 
