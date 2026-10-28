@@ -12,7 +12,17 @@
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用统一为a05f2eb9b4bab87b3e58ade74bc20dcf13a3679f，发行/home/tao/autoops-agent-demo/releases/t3-confirmed-a05f2eb9，STATIC_DIR为同目录dist/web；Web2925415/t46165632、launcher2923586/t46162320、native2923683/t46162502经实际/proc核对。ROOT/switch-a05f2eb9-stable3.json SHA7557b513110ee1e0cbdb64c0342f0c4615140fdc7c1a9d5e6911a35fb37976c9为switched，failure/restoration空、retentionProblems空、migrationChangedDatabases空、dataRestored=false；post-worker92f140ed…caea及post-webd8355301…aef6两阶段owner通过。完整43原生表、原行、1061件文件及九claimed附件、原Agent59368真实root报告、逐候选三库只读视图和原稳态门禁保持。健康、HTML8267f08e…f8ba及两个真实Web Worker资产HTTP字节匹配，manifest18b34431…a823/native45e52a9b…d7e5。候选两项完整CI40640451044/40640451033及八阶段构建通过，原失败stable2及更正原件保留。
+当前应用为项目引导集成候选 `e92e02b849b32b875b181b6a5eaee1c290c18f2b`，发行 `/home/tao/autoops-agent-demo/releases/t3-confirmed-e92e02b8`，STATIC_DIR为同目录dist/web。实际Web3163921/t46621417、launcher3163456/t46620821、native3163580/t46621021，进程目录均属于该发行。`ROOT/onboarding-switch-v1/switch-v1.json` SHA256 `410a8cf09ad3365ea7af39e11f3da4e799303a1faa8c05a55e38753888d42e9a` 为switched，迁移无变化，无数据恢复；新HTML `15db954f…0feed` 和两个Web Worker实际HTTP字节核验通过。release manifest `d0f161e203477ce27a28b6e51c119aea5efc89fb9d77acfa29cab6d5e0a10942`，native manifest `d2494f8210d50822a30dd17bf2cdd9c1be53c7491ad7aaa4e942935af3c516c8`。
+
+本批八阶段固定归档构建、Linux官方2038文件/21包、内外健康和实际版本通过；`ROOT/onboarding-switch-v1/runtime-v1.json` SHA256 `5660890be3e5c5eb4131581983a42916370b0caa17f8e526eb82f2d652231c08` 记录现场。切换前后均无在途任务，仅切两个授权unit，其余用户服务PID不变。客户CLI仍为已验证0.4.5，不更换或停机；未启用独立后端、不执行旧数据全量保留门或等待CI。
+
+ON1真实验收已完成：内部零项目账号从首页自动进入项目管理，正常创建71760418项目、配置自有平台助手并显式选择Grok4.6/medium，唯一问答10492b25已completed并返回 `ONBOARDING_OK_20261028`。外部零项目账号没有创建入口，创建403/读该项目404；助手真实停用r2→恢复r3、部署仓库深链→助手→原仓库分组→原部署及窄屏/键盘恢复通过。四类状态、原收据和完整原生终态见[ON1真实闭环](../docs/validation/project-onboarding.md#测试站真实闭环2026-10-28)；截图不代替业务终态，未新增自然弱网结论。后续文档收束不再构建或切换当前应用。
+
+最终有界运行核对 `.deployment/onboarding-real-v1/final-runtime-health-v1.json` SHA256 `9af094f9271a3891374f208f4f10f7ecfb949ef3c6ae770b5717ee515047a807`：上述三PID/ticks/目录一致，两unit active/running；正式 `/api/agent-demo/health` 200且workerReachable=true、原生环境及五个实际Java/static目标均200，活动部署任务0。零业务写入、登录或服务动作，无全历史冻结核验；辅助误探 `/health` 的404已单独保留并按正式路径更正，不称服务故障。
+
+#### 上一a05发行与验收历史（保留）
+
+当时应用统一为a05f2eb9b4bab87b3e58ade74bc20dcf13a3679f，发行/home/tao/autoops-agent-demo/releases/t3-confirmed-a05f2eb9，STATIC_DIR为同目录dist/web；Web2925415/t46165632、launcher2923586/t46162320、native2923683/t46162502经实际/proc核对。ROOT/switch-a05f2eb9-stable3.json SHA7557b513110ee1e0cbdb64c0342f0c4615140fdc7c1a9d5e6911a35fb37976c9为switched，failure/restoration空、retentionProblems空、migrationChangedDatabases空、dataRestored=false；post-worker92f140ed…caea及post-webd8355301…aef6两阶段owner通过。完整43原生表、原行、1061件文件及九claimed附件、原Agent59368真实root报告、逐候选三库只读视图和原稳态门禁保持。健康、HTML8267f08e…f8ba及两个真实Web Worker资产HTTP字节匹配，manifest18b34431…a823/native45e52a9b…d7e5。候选两项完整CI40640451044/40640451033及八阶段构建通过，原失败stable2及更正原件保留。
 
 官方电脑CLI为36d42f69/0.4.5，运行2932894/t46179330。ROOT/c6-releasea05f2eb9-stable3-resume-v1/root-welcome-retention-v1.json SHA6b0fb115d714f4e872253a775950bd365ec69cb3006a1035e59cf12043a56b0b确认在线、真实12模型/profile5及技能可用；原账本恢复为已完成历史，不再作后续开发硬门禁。当前39任务/24版本，无活动部署任务；ROOT/a05-final-runtime-health-root-v2.json SHA028dffbe6c1c5c367d5c2afe551102f2e822ca4b36d80f2cd31aa181ff02f5c0确认实际进程/目录/命令、内外健康、HTML及五Java/static目标响应正常。
 
