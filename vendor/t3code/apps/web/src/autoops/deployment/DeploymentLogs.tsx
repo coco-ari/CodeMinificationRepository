@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
-import { CopyIcon, DownloadIcon, ArrowDownIcon } from 'lucide-react'
+import { CopyIcon, DownloadIcon, ArrowDownIcon, ChevronRightIcon, XIcon } from 'lucide-react'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '~/components/ui/collapsible'
@@ -61,6 +61,7 @@ function DeploymentTaskLog({
   const [exportError, setExportError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const surface = useRef<HTMLDivElement | null>(null)
+  const search = useRef<HTMLInputElement | null>(null)
   const follow = useRef(true)
   const cursor = useRef(0)
   useEffect(() => {
@@ -146,6 +147,24 @@ function DeploymentTaskLog({
       entry.message.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   )
   const backfilling = !!task && cursor.current < (task.lastSeq ?? 0)
+  const recordedStages = [
+    ...new Set([
+      ...(task?.stageHistory ?? []).map((entry) => entry.stage),
+      ...logs.flatMap((entry) => (entry.stage ? [entry.stage] : [])),
+    ]),
+  ]
+  // 结束标记不一定是执行阶段；只展示任务实际报告过的阶段，不推断各阶段成败。
+  const reportedStage =
+    task && (!deploymentTaskFinished(task) || recordedStages.includes(task.stage))
+      ? task.stage
+      : undefined
+  const selectableStages = [
+    ...new Set([...recordedStages, ...(reportedStage ? [reportedStage] : [])]),
+  ]
+  const selectStage = (value: string) => {
+    setStage(value)
+    setCopied(false)
+  }
   const exportDisabled = !task || backfilling || !!error || !filtered.length
   const text = filtered
     .map(
@@ -195,11 +214,17 @@ function DeploymentTaskLog({
                 >
                   {deploymentStatusLabel(task.status)}
                 </Badge>
-                {!deploymentTaskFinished(task) ? (
-                  <>
-                    <Spinner size="sm" />
-                    <span>{deploymentStageLabel(task.stage)}</span>
-                  </>
+                {!deploymentTaskFinished(task) ? <Spinner size="sm" /> : null}
+                {reportedStage ? (
+                  <Button
+                    size="xs"
+                    variant={stage === reportedStage ? 'secondary' : 'ghost'}
+                    aria-label={`查看${deploymentStageLabel(reportedStage)}阶段日志`}
+                    aria-pressed={stage === reportedStage}
+                    onClick={() => selectStage(reportedStage)}
+                  >
+                    {deploymentStageLabel(reportedStage)}
+                  </Button>
                 ) : null}
                 {!taskPicker ? (
                   <span className="min-w-0 truncate text-muted-foreground">
@@ -239,11 +264,22 @@ function DeploymentTaskLog({
           {task?.stageHistory?.length ? (
             <CollapsiblePanel>
               <ol
-                className="flex flex-wrap gap-x-3 gap-y-1 pt-2 text-muted-foreground"
+                className="flex flex-wrap items-center gap-1 pt-2 text-muted-foreground"
                 aria-label="执行阶段记录"
               >
                 {task.stageHistory.map((entry, index) => (
-                  <li key={`${entry.stage}:${index}`}>{deploymentStageLabel(entry.stage)}</li>
+                  <li key={`${entry.stage}:${index}`} className="flex items-center gap-1">
+                    {index ? <ChevronRightIcon className="size-3" aria-hidden="true" /> : null}
+                    <Button
+                      size="xs"
+                      variant={stage === entry.stage ? 'secondary' : 'ghost'}
+                      aria-label={`查看${deploymentStageLabel(entry.stage)}阶段日志`}
+                      aria-pressed={stage === entry.stage}
+                      onClick={() => selectStage(entry.stage)}
+                    >
+                      {deploymentStageLabel(entry.stage)}
+                    </Button>
+                  </li>
                 ))}
               </ol>
             </CollapsiblePanel>
@@ -266,6 +302,7 @@ function DeploymentTaskLog({
       ) : null}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5">
         <Input
+          ref={search}
           className="min-w-28 flex-1"
           size="sm"
           aria-label="搜索部署日志"
@@ -282,16 +319,26 @@ function DeploymentTaskLog({
             value={stage}
             options={[
               { id: 'all', name: '全部阶段' },
-              ...[...new Set(logs.flatMap((entry) => (entry.stage ? [entry.stage] : [])))].map(
-                (id) => ({ id, name: deploymentStageLabel(id) }),
-              ),
+              ...selectableStages.map((id) => ({ id, name: deploymentStageLabel(id) })),
             ]}
-            onChange={(value) => {
-              setStage(value)
-              setCopied(false)
-            }}
+            onChange={selectStage}
           />
         </div>
+        {query || stage !== 'all' ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="清除日志筛选"
+            title="清除日志筛选"
+            onClick={() => {
+              setQuery('')
+              selectStage('all')
+              search.current?.focus()
+            }}
+          >
+            <XIcon />
+          </Button>
+        ) : null}
         <Button
           size="icon-xs"
           variant="ghost"

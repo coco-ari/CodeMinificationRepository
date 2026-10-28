@@ -15,7 +15,9 @@ import {
   MoreHorizontalIcon,
   PlusIcon,
   RefreshCwIcon,
+  SearchIcon,
   UploadIcon,
+  XIcon,
 } from 'lucide-react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
@@ -25,6 +27,7 @@ import { ReadOnlyWorkspaceFiles } from '~/components/files/ReadOnlyWorkspaceFile
 import { FileSurfaceAction } from '~/components/files/fileSurfaceChrome'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { Button } from '~/components/ui/button'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '~/components/ui/input-group'
 import { Badge } from '~/components/ui/badge'
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from '~/components/ui/popover'
 import { toastManager } from '~/components/ui/toast'
@@ -190,6 +193,7 @@ function SkillLibraryContent({
   const dialogReturnFocus = useRef<HTMLElement | null>(null)
   const libraryActionRef = useRef<HTMLButtonElement | null>(null)
   const gridRef = useRef<HTMLDivElement | null>(null)
+  const searchRef = useRef<HTMLInputElement | null>(null)
   const gridPosition = useRef({ top: 0, skillId: '' })
 
   // 编辑器关闭后再显示成功提示，避免提示层干扰用户继续选择分配目标。
@@ -416,17 +420,7 @@ function SkillLibraryContent({
           </>
         }
       />
-      <ModuleSidebar
-        label="技能管理"
-        search={{
-          value: query,
-          label: '搜索技能',
-          onChange: (value) => {
-            setQuery(value)
-            setDetailOpen(false)
-          },
-        }}
-      >
+      <ModuleSidebar label="技能管理">
         <div className="space-y-1 px-[var(--sidebar-content-inset)]">
           {Object.entries(scopeNames).map(([value, name]) => (
             <ModuleSidebarItem
@@ -474,70 +468,102 @@ function SkillLibraryContent({
             className={cn('flex min-h-0 min-w-0 flex-1 flex-col', showDetail && 'hidden')}
             aria-label="技能列表"
           >
-            <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
-              <WorkspacePageContainer width="wide" className="gap-3">
-                <div
-                  className="flex min-w-0 flex-wrap items-center gap-2"
-                  aria-label="技能库工具栏"
-                >
-                  {scope === 'agent' ? (
-                    <div className="w-40 min-w-0 max-w-full">
-                      <Select
-                        value={target?.id ?? ''}
-                        disabled={!targets.length}
-                        onValueChange={(value) => {
-                          if (typeof value === 'string') {
-                            selectView('agent', value)
-                          }
+            <div className="shrink-0 border-b border-border/60">
+              <WorkspacePageContainer
+                width="wide"
+                className="flex-row flex-wrap items-center gap-2 py-2"
+                aria-label="技能库工具栏"
+              >
+                <InputGroup className="min-w-32 flex-1 sm:max-w-80">
+                  <InputGroupAddon>
+                    <SearchIcon />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    ref={searchRef}
+                    size="sm"
+                    type="search"
+                    aria-label="搜索技能"
+                    placeholder="搜索技能"
+                    value={query}
+                    onChange={(event) => setQuery(event.currentTarget.value)}
+                  />
+                  {query ? (
+                    <InputGroupAddon align="inline-end">
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="清空技能搜索"
+                        onClick={() => {
+                          setQuery('')
+                          searchRef.current?.focus()
                         }}
                       >
-                        <SelectTrigger size="sm" className="min-w-0" aria-label="技能范围助手">
-                          <SelectValue>{target?.name ?? '没有可用目标'}</SelectValue>
-                        </SelectTrigger>
-                        <SelectPopup>
-                          {targets.map((entry) => (
-                            <SelectItem key={entry.id} value={entry.id}>
-                              {entry.name}
-                            </SelectItem>
-                          ))}
-                        </SelectPopup>
-                      </Select>
-                    </div>
+                        <XIcon />
+                      </Button>
+                    </InputGroupAddon>
                   ) : null}
-                  <span
-                    className="min-w-0 max-w-48 truncate text-xs text-muted-foreground"
-                    title={scope === 'project' ? projectName : undefined}
-                  >
-                    {scope === 'project' ? projectName : '全局共享'}
-                  </span>
-                  <div className="ml-auto flex shrink-0 items-center gap-1">
-                    <span
-                      className="text-xs text-muted-foreground"
-                      aria-label={`${visibleSkills.length} 项技能`}
+                </InputGroup>
+                {scope === 'agent' ? (
+                  <div className="w-40 min-w-0 max-w-full">
+                    <Select
+                      value={target?.id ?? ''}
+                      disabled={!targets.length}
+                      onValueChange={(value) => {
+                        if (typeof value === 'string') {
+                          selectView('agent', value)
+                        }
+                      }}
                     >
-                      {visibleSkills.length} 项技能
-                    </span>
-                    <Popover>
-                      <PopoverTrigger
-                        aria-label="技能分配说明"
-                        render={<Button size="icon-sm" variant="ghost-muted" />}
-                      >
-                        <InfoIcon />
-                      </PopoverTrigger>
-                      <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
-                        <PopoverTitle>技能分配</PopoverTitle>
-                        <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
-                          <p>技能库与助手分配全局共享，项目分配跟随顶部当前项目。</p>
-                          <p>
-                            点击助手或项目即可分配，再点取消。新分配使用最新版本，仅限内部工作区；未就绪版本不能分配。
-                          </p>
-                          <p>项目未单独分配时沿用助手设置。</p>
-                          <p>版本、来源和外部范围在技能菜单中查看或调整。</p>
-                        </div>
-                      </PopoverPopup>
-                    </Popover>
+                      <SelectTrigger size="sm" className="min-w-0" aria-label="技能范围助手">
+                        <SelectValue>{target?.name ?? '没有可用目标'}</SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup>
+                        {targets.map((entry) => (
+                          <SelectItem key={entry.id} value={entry.id}>
+                            {entry.name}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
                   </div>
+                ) : null}
+                <span
+                  className="min-w-0 max-w-48 truncate text-xs text-muted-foreground"
+                  title={scope === 'project' ? projectName : undefined}
+                >
+                  {scope === 'project' ? projectName : '全局共享'}
+                </span>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  <span
+                    className="text-xs text-muted-foreground"
+                    aria-label={`${visibleSkills.length} 项技能`}
+                  >
+                    {visibleSkills.length} 项技能
+                  </span>
+                  <Popover>
+                    <PopoverTrigger
+                      aria-label="技能分配说明"
+                      render={<Button size="icon-sm" variant="ghost-muted" />}
+                    >
+                      <InfoIcon />
+                    </PopoverTrigger>
+                    <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
+                      <PopoverTitle>技能分配</PopoverTitle>
+                      <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
+                        <p>技能库与助手分配全局共享，项目分配跟随顶部当前项目。</p>
+                        <p>
+                          点击助手或项目即可分配，再点取消。新分配使用最新版本，仅限内部工作区；未就绪版本不能分配。
+                        </p>
+                        <p>项目未单独分配时沿用助手设置。</p>
+                        <p>版本、来源和外部范围在技能菜单中查看或调整。</p>
+                      </div>
+                    </PopoverPopup>
+                  </Popover>
                 </div>
+              </WorkspacePageContainer>
+            </div>
+            <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+              <WorkspacePageContainer width="wide" className="gap-3 pt-3">
                 <div ref={gridRef} className="grid content-start gap-2 md:grid-cols-2">
                   {visibleSkills.map((skill) => {
                     const currentAssignment = assignments.find(

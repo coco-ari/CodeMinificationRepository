@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { page } from 'vite-plus/test/browser'
+import { page, userEvent } from 'vite-plus/test/browser'
 import { useState } from 'react'
 import { act, render } from '../../../test/render'
 import type { DeploymentTaskDetails } from '../deployments'
@@ -35,6 +35,99 @@ afterEach(() => {
 })
 
 describe('部署增量日志生命周期', () => {
+  it('从当前阶段直接查看日志，完整阶段记录与筛选保持一致', async () => {
+    const data = details('stage-navigation', 'target-one', '健康检查超时', 3)
+    data.task = {
+      ...data.task,
+      status: 'failed',
+      stage: 'verifying',
+      error: '健康检查超时',
+      stageHistory: [{ stage: 'building' }, { stage: 'deploying' }, { stage: 'verifying' }],
+    }
+    data.logs = [
+      { seq: 1, stage: 'building', message: '构建产物就绪' },
+      { seq: 2, stage: 'deploying', message: '开始切换服务' },
+      { seq: 3, stage: 'verifying', message: '等待健康响应超时' },
+    ]
+    load.mockResolvedValue(data)
+    await using screen = await render(
+      <DeploymentLogs
+        projectId="p-one"
+        targetId="target-one"
+        taskId="stage-navigation"
+        refresh={0}
+      />,
+    )
+    const logs = screen.getByLabelText('部署增量日志')
+    await vi.waitFor(() => expect(logs.element().textContent).toContain('构建产物就绪'))
+    await screen.getByRole('button', { name: '查看验证服务阶段日志', exact: true }).click()
+    await vi.waitFor(() => expect(logs.element().textContent).toContain('等待健康响应超时'))
+    expect(logs.element().textContent).not.toContain('构建产物就绪')
+    expect(screen.getByRole('combobox', { name: '日志阶段' }).element().textContent).toContain(
+      '验证服务',
+    )
+    await screen.getByRole('button', { name: '执行阶段（3）' }).click()
+    const history = screen.getByRole('list', { name: '执行阶段记录' })
+    const build = history.getByRole('button', { name: '查看构建阶段日志', exact: true })
+    await act(() => {
+      build.element().focus()
+    })
+    await userEvent.keyboard('{Enter}')
+    await vi.waitFor(() => expect(logs.element().textContent).toContain('构建产物就绪'))
+    expect(logs.element().textContent).not.toContain('等待健康响应超时')
+    expect(screen.getByRole('combobox', { name: '日志阶段' }).element().textContent).toContain(
+      '构建',
+    )
+    await screen.getByRole('button', { name: '清除日志筛选', exact: true }).click()
+    await expect.element(screen.getByRole('textbox', { name: '搜索部署日志' })).toHaveFocus()
+    await vi.waitFor(() => expect(logs.element().textContent).toContain('构建产物就绪'))
+    await vi.waitFor(() => expect(logs.element().textContent).toContain('等待健康响应超时'))
+    await expect.element(screen.getByRole('button', { name: '故障与恢复详情' })).toBeVisible()
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+
+  it('阶段先于日志到达时可先筛选，补读完成后保留选择与搜索条件', async () => {
+    const initial = details('stage-backfill', 'target-one', '构建产物就绪', 1)
+    initial.task.stage = 'verifying'
+    initial.task.lastSeq = 2
+    initial.task.stageHistory = [{ stage: 'building' }, { stage: 'verifying' }]
+    initial.logs[0]!.stage = 'building'
+    let finish!: (value: DeploymentTaskDetails) => void
+    load.mockResolvedValueOnce(initial).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    await using screen = await render(
+      <DeploymentLogs
+        projectId="p-one"
+        targetId="target-one"
+        taskId="stage-backfill"
+        refresh={0}
+      />,
+    )
+    await expect.poll(() => load.mock.calls.length).toBe(2)
+    const stage = screen.getByRole('button', { name: '查看验证服务阶段日志', exact: true })
+    await stage.click()
+    await screen.getByRole('textbox', { name: '搜索部署日志' }).fill('健康')
+    await expect.element(screen.getByLabelText('部署增量日志')).toHaveTextContent('正在补读日志…')
+    await expect.element(screen.getByRole('button', { name: '复制日志' })).toBeDisabled()
+    const completed = {
+      ...initial,
+      logs: [{ seq: 2, stage: 'verifying', message: '健康检查通过' }],
+      nextSeq: 3,
+    }
+    await act(() => finish(completed))
+    await expect.element(stage).toHaveAttribute('aria-pressed', 'true')
+    await expect.element(screen.getByRole('textbox', { name: '搜索部署日志' })).toHaveValue('健康')
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText('部署增量日志').element().textContent).toContain('健康检查通过'),
+    )
+    await expect.element(screen.getByRole('button', { name: '复制日志' })).toBeEnabled()
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
   for (const width of [1440, 390]) {
     for (const dark of [false, true]) {
       it(`${width}px ${dark ? '深色' : '浅色'}日志工具条同行且筛选复制可用`, async () => {
@@ -44,6 +137,8 @@ describe('部署增量日志生命周期', () => {
         document.documentElement.classList.toggle('dark', dark)
         try {
           const data = details('toolbar', 'target-one', '构建完成', 2)
+          data.task.stage = 'verifying'
+          data.task.stageHistory = [{ stage: 'building' }, { stage: 'verifying' }]
           data.logs = [
             { seq: 1, stage: 'building', message: '构建完成' },
             { seq: 2, stage: 'verifying', message: '健康检查通过' },
@@ -75,9 +170,28 @@ describe('部署增量日志生命周期', () => {
             expect(rect.left).toBeGreaterThanOrEqual(panel.left)
             expect(rect.right).toBeLessThanOrEqual(panel.right)
           }
+          const logViewport = screen
+            .getByLabelText('部署增量日志')
+            .element()
+            .closest('[data-slot="scroll-area-viewport"]')!
+          expect(logViewport.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+            panel.height * 0.6,
+          )
+          await page.screenshot({
+            path: `../../../.test-artifacts/ui-skills-deployment/logs-${width}-${dark ? 'dark' : 'light'}.png`,
+          })
           await stage.click()
           await page.getByRole('option', { name: '构建', exact: true }).click()
           await search.fill('完成')
+          const clear = screen.getByRole('button', { name: '清除日志筛选' })
+          for (const control of [search, stage, clear, copy, download]) {
+            const rect = control.element().getBoundingClientRect()
+            expect(rect.left).toBeGreaterThanOrEqual(panel.left)
+            expect(rect.right).toBeLessThanOrEqual(panel.right)
+          }
+          expect(logViewport.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+            panel.height * 0.6,
+          )
           await copy.click()
           expect(copied).toHaveBeenCalledWith('[构建] 构建完成')
           await expect.element(download).toBeEnabled()

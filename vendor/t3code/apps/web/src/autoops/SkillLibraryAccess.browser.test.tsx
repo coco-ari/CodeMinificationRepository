@@ -1,13 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import { page } from 'vite-plus/test/browser'
-import { act, render } from '../../test/render'
+import { page, userEvent } from 'vite-plus/test/browser'
+import { EnvironmentId } from '@t3tools/contracts'
+import { useLayoutEffect } from 'react'
+import { act, render, stubGlobal } from '../../test/render'
+import { AppSidebarLayout } from '~/components/AppSidebarLayout'
+import { readAppearanceModePreference, readThemePreference, useTheme } from '~/hooks/useTheme'
 import { SidebarProvider } from '~/components/ui/sidebar'
 import { AutoOpsSkillLibraryPage } from './SkillLibraryPage'
 import { AutoOpsRequestError } from './apiClient'
+import { autoOpsStorage, installAutoOpsHost } from './hostConfig'
 import type { SkillLibrary } from './skillLibrary'
 import '../index.css'
+import './theme.css'
 
 const mocks = vi.hoisted(() => ({ load: vi.fn(), change: vi.fn(), search: vi.fn(), host: vi.fn() }))
+vi.mock(import('../localEnvironment'), () => ({ isLocalEnvironmentDisabled: () => true }))
+vi.mock(import('../state/environments'), async (original) => ({
+  ...(await original()),
+  usePrimaryEnvironmentId: () => EnvironmentId.make('isolated-skills'),
+}))
 vi.mock(import('@tanstack/react-router'), async (original) => ({
   ...(await original()),
   useSearch: mocks.search,
@@ -223,6 +234,140 @@ function deferred<T>() {
   })
   return { promise, resolve }
 }
+
+function LibraryShell({ dark }: { dark: boolean }) {
+  const { setAppearanceMode } = useTheme()
+  useLayoutEffect(() => {
+    const previous = readAppearanceModePreference(readThemePreference())
+    setAppearanceMode(dark ? 'dark' : 'light')
+    return () => {
+      setAppearanceMode(previous)
+    }
+  }, [dark, setAppearanceMode])
+  return (
+    <AppSidebarLayout>
+      <AutoOpsSkillLibraryPage />
+    </AppSidebarLayout>
+  )
+}
+
+describe('技能库连续查找', () => {
+  it.each([
+    { width: 1440, dark: false },
+    { width: 390, dark: true },
+  ])('$width px 关闭侧栏仍能搜索、清空、浏览返回并就地分配', async ({ width, dark }) => {
+    const previousViewport = { width: window.innerWidth, height: window.innerHeight }
+    mocks.host.mockReturnValue(installAutoOpsHost(mocks.host(), window.location.origin))
+    const storage = autoOpsStorage(localStorage)
+    const previousSidebar = storage.getItem('autoops.workspace-sidebar-open')
+    await page.viewport(width, 600)
+    storage.setItem('autoops.workspace-sidebar-open', 'false')
+    try {
+      const initial = catalog()
+      initial.skills = Array.from({ length: 18 }, (_, index) => ({
+        ...initial.skills[0]!,
+        id: `skill-${index}`,
+        name: `skill-${index}`,
+        displayName: `项目部署与数据库排障技能 ${index + 1} · 面向测试环境的完整操作指南`,
+      }))
+      mocks.load.mockResolvedValue(initial)
+      await using screen = await render(<LibraryShell dark={dark} />, testLocation)
+      const title = screen.getByRole('button', {
+        name: initial.skills[0]!.displayName,
+        exact: true,
+      })
+      await expect.element(title).toBeVisible()
+      await page.screenshot({
+        path: `../../.test-artifacts/ui-skills-deployment/skills-${width}.png`,
+      })
+      const search = screen.getByRole('searchbox', { name: '搜索技能', exact: true })
+      await expect.element(search).toBeInViewport()
+      await search.fill('技能 18')
+      await expect.element(title).not.toBeInTheDocument()
+      await expect
+        .element(screen.getByRole('button', { name: initial.skills[17]!.displayName, exact: true }))
+        .toBeVisible()
+      expect(mocks.load).toHaveBeenCalledTimes(1)
+      expect(mocks.change).not.toHaveBeenCalled()
+      await search.fill('没有这个技能')
+      await expect.element(screen.getByText('没有匹配的技能', { exact: true })).toBeVisible()
+      await screen.getByRole('button', { name: '清空技能搜索', exact: true }).click()
+      await expect.element(search).toHaveValue('')
+      await expect.element(search).toHaveFocus()
+      await expect.element(title).toBeVisible()
+      const viewport = screen.container.querySelector(
+        '[aria-label="技能列表"] [data-slot="scroll-area-viewport"]',
+      )!
+      await act(() => {
+        viewport.scrollTop = viewport.scrollHeight
+      })
+      await expect.element(search).toBeVisible()
+      expect(search.element().getBoundingClientRect().bottom).toBeLessThan(600)
+      expect(screen.container.scrollWidth).toBeLessThanOrEqual(width)
+      expect(mocks.load).toHaveBeenCalledTimes(1)
+      expect(mocks.change).not.toHaveBeenCalled()
+
+      await search.fill('技能 1')
+      const last = screen.getByRole('button', {
+        name: initial.skills[17]!.displayName,
+        exact: true,
+      })
+      using content = stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = new URL(String(input), window.location.origin)
+          if (url.pathname.endsWith('/skill-17/versions/version-one/content')) {
+            return new Response('# 隔离技能正文\n\n核对测试环境后读取部署日志。', {
+              headers: { 'Content-Type': 'text/markdown' },
+            })
+          }
+          throw new Error(`未预期的测试请求：${url.pathname}`)
+        }),
+      )
+      await act(() => {
+        last.element().focus()
+      })
+      const scrollTop = viewport.scrollTop
+      await userEvent.keyboard('{Enter}')
+      await vi.waitFor(() => expect(screen.container.textContent).toContain('隔离技能正文'))
+      await screen.getByRole('button', { name: '返回技能库', exact: true }).click()
+      await expect.element(last).toHaveFocus()
+      await expect.element(search).toHaveValue('技能 1')
+      await vi.waitFor(() =>
+        expect(Math.abs(viewport.scrollTop - scrollTop)).toBeLessThanOrEqual(1),
+      )
+      mocks.change.mockResolvedValueOnce({
+        ...initial,
+        revision: 'revision-assigned',
+        assignments: [
+          {
+            id: 'assignment-17',
+            skillId: 'skill-17',
+            targetType: 'project',
+            targetId: 'p-one',
+            versionId: 'version-one',
+            workspaceTypes: ['internal'],
+            enabled: true,
+          },
+        ],
+      } satisfies SkillLibrary)
+      const card = page.elementLocator(
+        screen.container.querySelector('[data-skill-card="skill-17"]')!,
+      )
+      await card.getByRole('button', { name: '隔离项目：沿用助手设置', exact: true }).click()
+      await expect
+        .element(card.getByRole('button', { name: '隔离项目：内部 · version-', exact: true }))
+        .toHaveAttribute('aria-pressed', 'true')
+      expect(mocks.change).toHaveBeenCalledTimes(1)
+      expect(mocks.load).toHaveBeenCalledTimes(1)
+      await expect.element(search).toHaveValue('技能 1')
+    } finally {
+      if (previousSidebar === null) storage.removeItem('autoops.workspace-sidebar-open')
+      else storage.setItem('autoops.workspace-sidebar-open', previousSidebar)
+      await page.viewport(previousViewport.width, previousViewport.height)
+    }
+  })
+})
 function namedCatalog(name: string) {
   const value = catalog()
   value.skills[0]!.displayName = name

@@ -97,7 +97,7 @@ export function SkillLibraryCard({
             <button
               type="button"
               data-skill-row={skill.id}
-              className="w-full min-w-0 cursor-pointer truncate rounded-sm text-left text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card pointer-coarse:min-h-11"
+              className="line-clamp-2 w-full min-w-0 cursor-pointer rounded-sm text-left text-sm font-medium text-foreground outline-none wrap-anywhere focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card pointer-coarse:min-h-11"
               title={skill.displayName}
               onClick={onOpen}
             >
