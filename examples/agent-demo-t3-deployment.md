@@ -20,7 +20,15 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用固定为 `65c6043e13070c2d4d460bc85baa7982708331c0`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-visibility-65c6043e`，STATIC_DIR 为同目录 `dist/web`；客户 CLI 继续复用未变化的 0.4.5。两个 unit active、NRestarts=0，Web 229199、worker launcher 228701 的实际目录一致；健康 200、workerReachable=true。公网 HTML SHA256 `5771afa2bcf57aec803d89bc12f98c6299917537a644d3170570d3a50a510b50` 与发行回执一致，两个 Web Worker 资源通过。发行清单 `0c766a9ee9b3ac1d4125c8fd7ffc71e464382d32c0f1bbc93a283b5288e28e28`、原生清单 `984fc761ac8fe797766a453693789e6a27ff6600a307217ad7a8fb01f731c3ed`。
+当前应用固定为 `4971cab39ca6a788cea208edbd4a48f635128d2a`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-external-4971cab3`，STATIC_DIR 为同目录 `dist/web`；客户 CLI 复用未变化的 0.4.5。两个 unit active、NRestarts=0，Web 368659、worker launcher 368189 的实际目录一致；健康 ok=true、workerReachable=true。发行清单 `1f6cb4e2101243b2f49dd84d0e2bb989d7eff19b5d9c1866e874a7dfcac5a0a0`，原生清单 `8a515c8ded6378a77bdf115932d8084f7be7a484ed6faae623973c74c65e8a91`；切换时 HTML SHA256 `ed511ba6f898b1308183cfb1394ef6573b6612a15b749aa150a0311a20894951` 及两个 Web Worker 资源通过。
+
+固定归档一次构建，原件 `ROOT/external-4971cab3/preflight.json`、`switch.json`，结果 switched；未备份或恢复历史测试数据，其他服务 PID 不变。外部工作区改为按共用规则直接替换单份当前资料，取消复核、版本历史、任务记录及工作区会话入口。116 项 Node、17 项 HTTP、37 项浏览器关联回归与类型/边界、构建通过。实站已核对精简入口并保存样例规则；连续更新与响应式交互受浏览器已保存的访问拒绝限制，仍未验完。完整证据与待续样例见[外部当前工作区验收](../docs/validation/external-workspace-current.md)，不将自动回归作为实站闭环。
+
+上一完整前后端为 `t3-visibility-65c6043e`。本批更新计划存储已新增 rules_json，撤回前须核对旧程序与当前结构的兼容性及在途操作，只调整两 unit 的程序配置；不直接降级或恢复旧业务数据。本批未重新执行程序降级或未受影响的部署回退矩阵。
+
+#### 上一65c会话协作发行历史（保留）
+
+当时应用固定为 `65c6043e13070c2d4d460bc85baa7982708331c0`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-visibility-65c6043e`，STATIC_DIR 为同目录 `dist/web`；客户 CLI 继续复用未变化的 0.4.5。两个 unit active、NRestarts=0，Web 229199、worker launcher 228701 的实际目录一致；健康 200、workerReachable=true。公网 HTML SHA256 `5771afa2bcf57aec803d89bc12f98c6299917537a644d3170570d3a50a510b50` 与发行回执一致，两个 Web Worker 资源通过。发行清单 `0c766a9ee9b3ac1d4125c8fd7ffc71e464382d32c0f1bbc93a283b5288e28e28`、原生清单 `984fc761ac8fe797766a453693789e6a27ff6600a307217ad7a8fb01f731c3ed`。
 
 本批从固定归档一次构建网页、Worker、网关及发行包，原件 `ROOT/visibility-65c6043e/preflight.json`、`switch.json`，结果 `switched`，无数据恢复或备份，其他服务 PID 保持。新增原电脑会话实际运行者记录；相关自动测试、类型/边界和构建通过。已实测助手发送后只读、三个等宽摘要、单一行内 skill 入口、桌面/390px 窄短窗及已保存会话可见性菜单。跨账号原电脑模型实机验收因具体访问变更待授权，尚未执行；不将自动回归或菜单可点视为此项闭环。详见[会话协作与输入区验收](../docs/validation/conversation-collaboration.md)。代码已推送，不等待 GitHub CI。
 
