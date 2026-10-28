@@ -1,5 +1,7 @@
 # 当前运行模块与检查入口
 
+当前 AutoOps 测试实例按用户最新[测试数据策略](../AGENTS.md)执行：历史数据可丢弃、重建，本文旧批次的全行/全文件/原身份及认证窗口检查仅作为历史，不作为新批次门禁。后续保留固定候选、必要本地测试与构建、实际版本与健康、真实权限隔离、生命周期和恢复功能验证；开发测试不等待远端CI，不重复已充分验收且未受影响的链路。当前完成状态以[完整交付清单](development.md#完整交付实施清单)为准，下方各日期记录中的待办是当时状态。
+
 这里记录当前分支的实现及调用边界，不替代[开发规范](README.md)。线上工作台仍由 `agent-demo` 网关、锁定 T3 和业务适配器组成；独立 `autoops/server` 的账号与项目后端另用 `verify:autoops` 验证，尚未替代线上身份或数据。历史目录中仍被调用的能力继续保留。
 
 ## 启动与装配
@@ -1964,3 +1966,31 @@ B3独立综合索引`.deployment/b3-independent-composite-review-v1.json` SHA256
 原中止原件089e的health.webWorkers=3错误来自三服务角色计数；已独立调用原9fe `web_health`，经实际HTTP核HTML及两个Web Worker资产逐字一致，实际值2。更正原件`.deployment/a05-pre-service-abort-web-assets-correction-root-v1.json` SHA256 `efeaf3ae7de94fc8957ff8f6b597225255edb469ee1225f5266c1bf43acc76c2`保留原错误和原因，原恢复helper误预期3亦不追改、不复用。当前CLI在线及完整账本能力证据独立有效；不把错误计数当资产成功证明。原sudo读取器在最终UID1000 Python正常认证后红绿通过，`.deployment/sudo-same-process-readonly-v1/verify-actual-v2.json`保留实际同进程身份与原报告摘要；认证未落盘或放宽sudoers，实际切换仍待原全部门禁。辅助v1打开非seekable TTY时失败于getpass前，实证后最小改只写TTY流，保留旧源与失败；真实PTY非回显测试及原报告现场复验通过，未调用产品。
 
 同PID exec亦已真实验证：`.deployment/sudo-same-process-readonly-v1/verify-actual-after-exec-v1.json` SHA256 `5dc8d966892a711efd780bc44f8b8259082267e3f686f3f01bf6e4b9a80cb63b`记录最终Python2840942在正常认证前原读取器确实拒绝，认证后及真正exec后均沿原sudo-n读取器成功；PID及报告摘要一致，零wrapper/服务/业务动作。该验证只确认正式入口的认证上下文，不代替strict-stable3切换。fe3c2a80文档提交的质量40657344932及完整运行40657344933均green。两个实站缺口入口已核Linux所有源及外部依赖，空卡均在secret/browser之前退出2；根独立12项MCP/7项项目合同通过，实际业务仍待发行后执行。
+
+### a05生效与两个读取恢复缺口实站闭环（2026-10-28）
+
+固定a05已实际strict-stable3切换，原件7557b513…976c9、两启动owner92f140ed/d8355301、实际版本/健康/两个Web Worker资产通过；电脑助手2932894在线、原真实12模型能力可用，6b0fb115…56b0b确认。这是已完成的历史保留方式，不再把全旧数据及认证窗口作为后续测试门禁。当前规范已按用户测试数据可丢弃决定修订，继续功能验收。
+
+环境MCP配置读取503恢复已通过。实站结果 `.deployment/e1e3-mcp-read-retry-a05f2eb9-v2-actual/result.json` SHA256 `4f542fb534e7087f8dbb14c003a06a28f20e244098915616d95ee5db4f87feb3`：同一已授权环境精确GET一次观察器503，添加禁用且焦点留在弹窗；原“重试读取连接”真正转发后端并返回200，三项完整JSON与正常基线相等，旧错误消失、添加恢复，Esc回原触发按钮。503为注入，恢复为真实服务响应，未称自然故障。核心4操作（环境分组、打开、重试、Esc），登录另3；显示失败868ms、真实恢复177ms、错误移除21ms、关闭11ms及回焦39ms分别记等待。无业务POST、模型请求或连接测试。原代码及12项定向回归、a05完整CI、实际部署和本链路四状态通过，不代称整页已完成。
+
+项目未知保存Dialog Esc及续办已通过。实站结果 `.deployment/e3-project-unknown-escape-a05f2eb9-v2-actual/result.json` SHA256 `c3286cf867612ee2e6526aca8e34670c5f5c93229ea53b844e8cd8664634446e`：自有B说明编辑真实200回复丢失、首次原收据GET注入503；原未知表单禁改，Esc关闭并回焦刷新入口，原pending保留。切D123后无错误Dialog或他项目待恢复状态，返回B仅GET原UUID解除未知，再以新UUID恢复说明。db50b1f0/46bfdf10两个POST各一次，无原写重发，最终revision4、pending清空。核心13步，登录另3；未知确认473ms、Esc回焦101ms、原收据107ms及恢复可编辑753ms单列。第一次空nativeEnvironmentId控制卡在secret/browser前拒绝；补入真实environment端点值后执行，无产品补丁。原代码、7项定向回归、a05完整CI、部署与该业务四状态通过。
+
+两项截图只辅助上述交互原件。用户在错误后有明确恢复入口，开发者沿原请求合同和Dialog复用，Agent按真实GET/终态与scope判断成功；没有为验收放宽产品权限。当时的整页读取超时与D6待办已由下节分别完成恢复验证和受控时钟回收，不将自然七天观察冒称通过。
+
+### a05整页收束与D6受控回收（2026-10-28）
+
+本批没有修改产品实现。a05已包含的12个生产页面文件及6个浏览器测试文件按调用影响复验，原未受影响的三角色50场景、深色/触控、普通草稿、权限与真实业务证据继续复用。内置浏览器原管理员、同D123/环境/静态服务实际记录在 `.deployment/a05-ui-after-cua-observations-root-v1.json`，SHA256 `f9ff3a34899881456d068772a18a27a21dff3d4ebf1a2d11880ccbbefc99c4a5`；这是逐步交互及可访问性树/只读DOM的人工记录，不冒充抓包或自动测试。
+
+核心任务前后次数相同：部署选静态服务/配置后查看仓库并返回6步（滚动改为分组定位）；历史v2详情/来源/两次Esc共4步；自有助手本地编辑/窄屏重排/Esc取消6步；真实健康失败任务/恢复详情/Esc共4步。历史列表与日志入口各另1步，测试视口/主题配置另计，没有宣称减少操作。四个配置区保持挂载，宽屏仓库区获得焦点top173；深色390×520定位top177，Tab可达添加仓库。部署服务、环境和目标保留，详情分类仍回任务日志。支持的 `section=git&from=deployments` 深链实际定位并返回原部署；未造缺仓库数据或冒称点击其提示。
+
+390×520历史v2 Dialog实际为390×472、top48；内部滚动到scrollTop1193/scrollHeight1447/clientHeight254，页脚清理/下载/关闭均可达，未点击写操作。嵌套来源仍为e058历史版本、package0ae19931、摘要25a7022f…a770，两次Esc依次回原来源按钮和原历史详情。窄屏运行信息320×244、top208；更多菜单四项可用且未溢出，Esc回原触发。自有助手未保存名称在重排后保留，Esc取消后原名称与焦点正确。最后恢复原浅色1280×720，无页面错误。
+
+首次配置返回出现“工作区读取超时，请重试”，本次6步之外实际增加一次“重新加载”，随后错误移除、源码包两个操作恢复；此异常没有被删掉或算作无等待成功。按调用链核对，workspaces读取仅投影现状，不拉Git；正常授权本地/公开GET分别50.4ms/123.7ms、均200且完整34023B一致，后续深链及外观返回两次正常。没有该次网络跟踪，也无30秒根因证据；保留异常与未归因边界，不凭猜测修改产品、放宽授权或宣称已修根因。现有成功、错误显示及原入口恢复通过，本项不增加性能优化专项。
+
+D6使用真实 `WorkspaceStore → DeploymentService.cleanupSources → cleanupPackages → handleWorkspaceRequest`、SQLite和实际156B ZIP，在独占数据目录及回环HTTP运行。脚本80f61023…4d14只推进独占进程Date，不改宿主时钟、旧数据或生产七天常量。新包200；推进八天后queued引用保护、下载仍200且字节不变，版本删除明确拒绝；通过公开部署协议夹具报告终态后保留期内仍200；再推进八天，维护真实删除源码包和源码版本目录，公开GET410 `WORKSPACE_PACKAGE_EXPIRED`，清单保留，原UUID返回原任务且总任务仍1。终态是协议夹具，不称真实Agent构建；真实构建/健康/原包回退继续引用已通过的D5。
+
+Mac受控集成与Linux实际a05同源集成分别通过。Linux使用官方Node24.22.0及当前发行六模块，独占目录 `ROOT/d6-a05-controlled-clock-v1`；结果 `.deployment/d6-controlled-clock-live-v1/linux-v1/result-v2.json` SHA256 `b152a53c18ebfab3b025ab52f76671f158ccfdd4524255bf537782b60e079de5`，执行记录 `linux-execution-v1.json` SHA256 `c310b1fa0f82d7eb123cd54e6e2925b127d1d14ddecd913cd0f69a78002f1790`。代码完成、31+3既有定向自动回归及本次真实清理集成、a05部署代码一致、受控业务回收四状态通过。自然七天观察未执行，按最新开发测试规范单列且不阻塞交付。
+
+最终实际运行记录 `.deployment/a05-final-runtime-health-root-v2.json` SHA256 `028dffbe6c1c5c367d5c2afe551102f2e822ca4b36d80f2cd31aa181ff02f5c0`：应用a05、原Web/launcher/native及电脑CLI实际PID/启动标识/目录/命令相符，内外健康和HTML均200，按存储配置读取的五个Java/static目标均200且预期正文匹配；39任务/24版本，无活动部署任务。首个辅助探针误猜Java `/actuator/health` 得404，原失败4a3f2673…62af保留；复核实际配置为 `/health` 后正确验证，不把错误路径当服务故障或改产品。只清理本次三个created且未运行、无卷、无网络的精确缓存占位容器；94eeb044…5b7b记录，未删镜像/卷或动共享服务。原节点59368的DockerHub存储维护失败为既有独立问题，未宣称该维护通过。
+
+S1、A1–A6、B1–B6、C1–C6、D1–D6、E1–E6的本会话已确认开发交付范围至此有对应四状态证据。C7仅为用户取消；林晓/陈一仍不启用新授权。固定a05候选的完整集成验证和八阶段构建复用有效，当前纯文档收束不重复部署或等待远端CI；生产上线准备及自然长期观察未冒称已做。
