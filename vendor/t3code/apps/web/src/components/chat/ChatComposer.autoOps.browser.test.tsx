@@ -54,7 +54,7 @@ const keybindings = compileResolvedKeybindingsConfig([
   { key: "ctrl+alt+arrowdown", command: "composer.decreaseEffort" },
 ]);
 const noop = () => {};
-function setup(id: string, adjust: boolean, customer = false) {
+function setup(id: string, adjust: boolean, customer = false, assistantName = "当前助手") {
   mocks.createThread
     .mockReset()
     .mockResolvedValue({ threadId: `${id}-clean`, draftId: DraftId.make(`${id}-clean`) });
@@ -69,7 +69,7 @@ function setup(id: string, adjust: boolean, customer = false) {
   const preset: AssistantPreset = {
     id: "preset-one",
     projectId: "composer-project",
-    name: "当前助手",
+    name: assistantName,
     description: "",
     instructions: "",
     enabled: true,
@@ -628,6 +628,44 @@ it("管理员选择助手后仍可调整范围和可见性，停用助手显示�
     },
   }));
   expect(project.assistants!.items[1]!.preset.configuration).toMatchObject({workspaceType: "external", visibility: "private"});
+  expect(f.bindings).toHaveLength(0);
+});
+
+it("紧凑问答栏仍显示当前助手，菜单明确标记已选项并可重新选择", async () => {
+  await page.viewport(390, 600);
+  const f = setup("actual-composer-current-assistant", true, false,
+    "当前已选的项目助手与长名称验收".repeat(4));
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} />);
+  const assistant = screen.getByRole("button", { name: "助手", exact: true });
+  const label = assistant.element().querySelector<HTMLElement>("[data-composer-label]")!;
+  await expect.poll(() => assistant.element().closest("[data-autoops-thread-scope]")?.hasAttribute("data-compact"))
+    .toBe(true);
+  await expect.poll(() => label.getBoundingClientRect().width).toBeGreaterThan(0);
+  await expect.poll(() => getComputedStyle(label.firstElementChild!).opacity).toBe("1");
+  const strip = assistant.element().closest<HTMLElement>("[data-autoops-thread-scope]")!;
+  for (const control of strip.querySelectorAll<HTMLElement>("[data-composer-context-control]")) {
+    expect(control.getBoundingClientRect().right).toBeLessThanOrEqual(strip.getBoundingClientRect().right);
+  }
+  await assistant.click();
+  const selected = page.getByRole("menuitemradio", { name: f.preset.name, exact: true });
+  await expect.element(selected).toHaveAttribute("aria-checked", "true");
+  expect(selected.element().querySelector("[data-slot=menu-radio-item-indicator]")?.getBoundingClientRect().width ?? 0)
+    .toBeGreaterThan(0);
+  await selected.click();
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe(f.preset.id);
+  await assistant.click();
+  await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
+  await expect.element(assistant).toHaveAttribute("aria-description", "另一个来源");
+  await expect.poll(() => label.getBoundingClientRect().width).toBeGreaterThan(0);
+  await assistant.click();
+  const changed = page.getByRole("menuitemradio", { name: "另一个来源", exact: true });
+  await expect.element(changed).toHaveAttribute("aria-checked", "true");
+  expect(changed.element().querySelector("[data-slot=menu-radio-item-indicator]")!.getBoundingClientRect().width)
+    .toBeGreaterThan(0);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(editor()).toHaveFocus();
   expect(f.bindings).toHaveLength(0);
 });
 

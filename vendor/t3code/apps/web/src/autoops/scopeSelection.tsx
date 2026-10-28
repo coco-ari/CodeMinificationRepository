@@ -15,6 +15,7 @@ import {
   MenuGroupLabel,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuRadioItemIndicator,
   MenuSeparator,
 } from '~/components/ui/menu'
 import { Tooltip, TooltipTrigger, TooltipPopup } from '~/components/ui/tooltip'
@@ -45,6 +46,7 @@ export function ScopeComposerChoice({
   onChange,
   footer,
   lockReason,
+  keepSummaryVisible = false,
 }: {
   label: string
   summary: string
@@ -56,12 +58,15 @@ export function ScopeComposerChoice({
   onChange: (value: string) => void
   footer?: ReactNode
   lockReason?: string | undefined
+  keepSummaryVisible?: boolean
 }) {
   const floating = useComposerMenuProps()
   const content = (
     <>
       <ComposerControlIcon icon={Icon} size={locked ? 'xs' : 'sm'} />
-      <ComposerContextLabel>{summary}</ComposerContextLabel>
+      <ComposerContextLabel compactBehavior={keepSummaryVisible ? 'truncate' : 'hide'}>
+        {summary}
+      </ComposerContextLabel>
     </>
   )
   if (locked)
@@ -111,7 +116,10 @@ export function ScopeComposerChoice({
           <MenuRadioGroup value={value} onValueChange={onChange}>
             {options.map((option) => (
               <MenuRadioItem key={option.value} value={option.value} disabled={option.disabled} closeOnClick>
-                {option.label}
+                <span className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1">{option.label}</span>
+                  <MenuRadioItemIndicator />
+                </span>
               </MenuRadioItem>
             ))}
           </MenuRadioGroup>

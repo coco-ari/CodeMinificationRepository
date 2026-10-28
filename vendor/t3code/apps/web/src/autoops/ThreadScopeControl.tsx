@@ -384,10 +384,11 @@ export function AutoOpsThreadScopeControl({
       data-autoops-thread-scope
       data-scope-state={locked ? "locked" : disabled ? "submitting" : "draft"}
     >
-      <div className="flex min-w-0 flex-initial items-center gap-1">
+      <div className="flex min-w-0 max-w-full flex-initial flex-wrap items-center gap-1">
         {host.assistantDirectoryEnabled ? (
           <ScopeComposerChoice
             label="助手"
+            keepSummaryVisible
             summary={
               project.assistants?.items.find(
                 (item) => item.preset.id === scope.question?.assistantId,
