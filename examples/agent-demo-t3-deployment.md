@@ -8,7 +8,7 @@
 
 ### 当前验证发行
 
-本节 `ROOT=/home/tao/autoops-shared-validation-20261026`，应用数据目录为 `/home/tao/autoops-deployment-validation/data`；两者均属于当前开发验收实例。实际入口为 [AutoOps](https://auto.996788.xyz/agent-demo.html)，内网为 `192.168.31.157:28887`。
+本节 `ROOT=/home/tao/autoops-shared-validation-20261026`，应用数据目录为 `/home/tao/autoops-deployment-validation/data`；两者均属于当前开发验收实例。浏览器登录统一使用 [AutoOps HTTPS入口](https://auto.996788.xyz/agent-demo.html)；`192.168.31.157:28887` 是内网HTTP后端地址，不作为浏览器登录入口。当前会话Cookie启用Secure，HTTP页面即使密码正确、登录接口200也无法保存该会话，不应为内网登录关闭此保护。
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
