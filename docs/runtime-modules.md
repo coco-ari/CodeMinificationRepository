@@ -1733,7 +1733,29 @@ R1沿现行1e、同原Agent1.6.0，在全局空闲及MemAvailable2462MiB/磁盘�
 
 完整所有者前cef8f898…6948、后98aa7afa…7d46覆盖11库/43原生表，12957条原行Counter无缺失、原inode/列/迁移/密钥保持；785旧文件中784字节不变，唯一工作区state仅新增本次version、package、原packages任务及capture保护引用，Node按生产JSON.stringify反去这四项后精确命中原SHA8a23c3b5…c9db。九个已交付附件沿原1e严格基线逐SHA核对，不虚称本次前置采过。原24任务/16版本及旧目标配置/指针保持，只新增上述service/target/唯一task/archive和两条setup收据；现在25任务/16版本。独立本地21组核验 `.deployment/d5-r1-javac-20261028-v1-root/independent-local-v1.json` SHA256 `516767e883dceda65e3ac63db4d877af51357bdeae63dddcd7ebc24b5cbc48c8`，Agent清理原件 `ea7ec18613f5c143542d34e9d0fe6cd1a68d5d5271c52c8e4f4faf30bda776ab`。原09126节点后台维护由applying变failed，实际Docker Hub拉取BuildKit连接重置，完整失败保留，不宣称全站维护正常或整份部署状态零变化；本次专属节点策略仍applied。前置辅助将全站24误作本环境12任务的拒绝发生在setup写前，旧账号配置PID拒绝发生在任务POST前，两次原件均保留，按实际范围/现行PID校正后才执行原任务，未重POST。
 
-本项复用已有代码、相关自动与1e完整CI，辅助8项不代替业务；现行1e生效，R1真实失败与清理业务通过。D5仍继续R2构建中断、R3切换后恢复、R4事件补报去重、R5节点并发、R6档案清理；D6自然七天到期独立待验，不因本项通过结束原任务。
+本项复用已有代码、相关自动与1e完整CI，辅助8项不代替业务；现行1e生效，R1真实失败与清理业务通过。后续R2已由下节原件补齐，当前仅继续R3切换后恢复、R4事件补报去重、R5节点并发、R6档案清理；D6自然七天到期独立待验，不因单项通过结束原任务。
+
+### 构建中崩溃与原任务恢复（2026-10-28）
+
+R2复用原隔离target5c01a9f2和正常e353固定源码，只POST一次原UUID81923785-dbfd-49a6-afe4-720030ccf1fe，task e548f487-e052-4d51-80e9-db7f4566deb0实际进入building。控制器在核实原1147087/t39426842、实际Maven Java进程及精确builder CID后，先暂停该builder，再用pidfd仅一次SIGKILL原Agent；不是SIGTERM排空，也没有切换平台程序。crashIntent的actualMavenJava=true、apacheMavenPersisted=false，不能声称Apache日志已持久或javac已经执行。沿RAM中原unit/启动参数和身份恢复Agent1721110/t43421857，17源文件/启动与完整稳定身份保持。恢复按原journal将同任务置interrupted/building，原错误为“Agent 在部署开始前重启，未重复执行任务”；5条原事件与公开logs逐内容/原时间对应，seq=ACK5、nextSeq6，原UUID仅GET恢复，未重执行或生成成功版本。
+
+恢复流程已清本任务maven/probe builder和work内source.zip/source/image；运行容器、镜像、current.json及成功版本不存在，journal/events、原缓存/卷和源码档案保留。两份真实ZIP均3588B、SHA256 `35e74ab9c5d5b9d53bf1f7e888ec90c4b289e7ba5dd9e84cc0c3a74c87d4100c`，实际正常String源码保持；workspace package完成不等于目标部署成功。原Java和Nginx完整身份/StartedAt及健康与R1相等，原59368和客户CLI未动。
+
+原所有者before `cd3d9bdc…d463`、after `88c92f78…78b2`覆盖11库/43原生表，12992旧行Counter、原inode/列/迁移/密钥均保持。before含866文件及九附件，after基础snapshot的916文件漏合并九个附件，但独立attachments映射按原九键及全部SHA精确相等；原v1的11条compareProblems保留，不能追改成无异常。独立比较只将这九项合并为925文件后，唯一原文件变化为工作区state；反去本次version127d6bf0、package4f8a9bc6、原packages任务81923785和capture保护f5585cc5，Node按JSON.stringify精确重构原SHA24455416…e87d，新增仅57个固定来源文件和两个包文件。原25任务/16版本及所有目标配置/指针保持，只新增本任务，原档案e9be3876仅追加本次精确sourceIdentity的一个origin，没有新service/target/archive ID。原09126节点的独立BuildKit拉取维护仍failed，专属7937存储报告整体保持applied，不宣称全站维护正常或整份部署零变化。
+
+独立本地25组核验 `.deployment/d5-r2-building-20261028-v1-root/independent-local-v1.json` SHA256 `26246db5bb2487305059a73f9f2e0dfed9256d18b1165127871c89218af3062a` 联合原owner、Agent恢复/清理、公开任务及ZIP后确认R2业务子项通过；控制器自身businessAcceptancePassed=false只表明它不单独裁决整体业务，原件不改。代码复用、相关自动与现行1e部署保持，真实构建中崩溃恢复通过；R3–R6及D6自然到期继续。62216b3f8f98b26adf90fbc206fce207930f9032为上一批docs-only提交，[质量40613539184](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40613539184)与[完整运行40613539197](https://github.com/coco-ari/CodeMinificationRepository/actions/runs/40613539197)均green，原件 `.deployment/ci-62216b3f-progress3-root-v1.json` SHA256 `0a924fe199d75ccb6ba5aa3a1a82969b30718b8fb67b856d1bd05a7c4c37921c`；它不是新应用发行。
+
+### 同原日志地址撤权与恢复（2026-10-28）
+
+A3复用a2b8d768以来的原返回前授权合同。当前1e，原reader89dde30b仅正常登录一次，使用同一个RAM Cookie读取原Static任务11e3ecc8的同一日志地址：先200，管理员按固定UUID5c2eb4db-c351-4d1d-82ae-2762635eb2a5只停用该成员r5→6后，原地址精确404 PROJECT_NOT_FOUND且无task/logs；再按原UUIDd9a15dfb-cdf9-4506-a300-28c8cfad91bf恢复原值r7，同Cookie原地址恢复200。两次POST各一次，不启停账号或改密码；无论POST回复如何都只GET原UUID，完整receipt的actor/project/environment/operation/publicIntent及原成员结果分别精确r6/r7，不重POST。finally恢复已由正常原收据确认，原12日志、完整task及nextSeq13前后深相等。
+
+本次 `.deployment/a3-reader-original-log-status-root-v1/actual-v1/result.json` SHA256 `00a13637901b0501b6c53dd8ca0520e33f83f5485726ab83620762322c18d7ff`，完整两收据SHA为4b23fa59…1691/d68f3ccb…b8ba；完整admin快照仅将该reader revision7归一为5后整值相等，包含全部D123助手/分配、账号公共enabled/revision及林晓/陈一两项目pending设置。独立核对原intent/attempted/POST响应和完整收据通过；同Cookie由冻结入口6014cfa0…a8e9在写verified前核RAM原值，Cookie不落盘，不假称能从文件重读秘密。代码/原自动/部署及本同地址真实场景四状态通过；本轮只做最小离线合同，误用unittest discover实际0测试不能算通过，owner-before-root-v1仅按根现场采集记录，不冒称本次独立核验已读取。该次没有受控扣留在途HTTP；返回前二次授权仍以原真实HTTP/SQLite自动回归为证，不据此新增整矩阵或改写旧Lin RPC缺raw的边界。
+
+### 存量待分配成员发现与历史阅读边界（2026-10-28）
+
+A5现行1e只读发现原件 `.deployment/a5-question-discovery-20261027-v3-evidence/0019-result.json` SHA256 `3f3565f634e9db3bda57e84b2f877b11022353798053aeb3049e39717c3c8e1e`：林晓/陈一各自正常登录，原授权指纹前后相同，两人可见shell及合法locked/private/platform候选均为0，来源目录精确403 AUTHORIZATION_PENDING，未发问题/模型、未创建绑定或业务授权。所属元数据原件 `raw-owned-binding-metadata-root-v1.json` SHA256 `7e95cc38be5660a50233b71e4f3f4fbcf797b8d0eeec606320f65030b8d5a4e9` 仅有一条Lin本人private/locked绑定，但已于2026-10-23撤回、has_question=0且native_thread_id=null；全部legacyConversationCount=0。因此当前没有可合法复用的旧问答目标，不能解撤回、补question、创建旧数据或启用两人新授权来制造验收。
+
+这只关闭本次发现和待分配保留的事实，不算旧问答或实际MCP工具准备已通过。既有管理读取/绑定拒绝及无绑定RPC合同继续复用；project-shared受众及撤权后的历史阅读仍为A5明确待验项，不用私有会话拒绝、C5共享使用或本次同地址日志恢复替代。其余条目保持原归口。
 
 ### 排队任务撤权与专属Agent恢复（2026-10-27）
 
