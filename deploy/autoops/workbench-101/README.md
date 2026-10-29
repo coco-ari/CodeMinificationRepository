@@ -2,7 +2,27 @@
 
 目标为 `ubuntu@10.2.2.115:22`，Ubuntu 24.04、4 核、8 GB 内存、100 GB 磁盘。部署分支 `feat/workspace-deployment-validation`。当前发行见下，初始安装及历史更新记录保留在本文后部，实际镜像与检查结果按服务器 `/opt/autoops/releases/<提交>/` 查询。
 
-## 当前发行：bb068dbe 源码容量修复
+## 当前发行与产品模式
+
+当前应用镜像为 `autoops:949f1038`，代码提交 `949f103864b92d401c155ec5e17a2d529ba452e7`；包含源码容量、分支选择、助手简化与上游设置入口修复。本次产品模式修复只调整运行配置，不重建镜像、不回退代码、不清空数据，也不修改模型配置。
+
+本服务器必须在 `/opt/autoops/.env` 显式设置 `AUTOOPS_DEMO_PROFILE=project-assistant-lite-v1`。Compose 共享环境变量块使用 `${AUTOOPS_DEMO_PROFILE:?请明确指定产品模式}`，网关与 Worker 均继承；遗漏或空值时配置校验直接失败，不能依赖应用未配置时的完整模式默认值。能力范围见[精简产品规范](../../../examples/agent-demo-lite-profile.md)。
+
+确认当前问答、工作区和部署任务结束后应用配置：
+
+```sh
+cd /opt/autoops
+docker compose config -q
+docker compose up -d --force-recreate --wait --wait-timeout 180 gateway worker
+docker compose exec -T gateway printenv AUTOOPS_DEMO_PROFILE
+docker compose exec -T worker printenv AUTOOPS_DEMO_PROFILE
+```
+
+两个容器必须返回 `project-assistant-lite-v1`；还须通过已登录的 `/api/agent-demo/t3/autoops/bootstrap` 核对 `productProfile.id`，检查健康、问答、助手选择及设置搜索。仅检查 `.env` 文本不代表容器与界面已生效。配置修改前备份与本次证据位于 `/opt/autoops/releases/949f1038/profile-lite-20261029/`。
+
+2026-10-29 实际验证：服务器与仓库 Compose 解析结果一致，缺失/空产品模式校验拒绝启动；两个运行容器及已登录 bootstrap 均为精简模式，受限能力均关闭。网关、Worker、代理健康；常规设置保留模型、权限、skill、发送行为、版本与许可证，全局搜索“移动应用、隐私政策、通知、自定义快捷键、计划模式”无对应入口。实际选择既有“测试环境问答”助手并发送一轮简短请求，收到“模式验证通过”，页面脚本错误 0。除产品模式外环境配置逐项保持一致。仅进行上述定向验证，未重建镜像或运行完整回归；验收会话保留为本次问答证据。
+
+## 历史发行：bb068dbe 源码容量修复
 
 运行代码 `bb068dbe9027556088de33da095ba85f8bd17571` 已提交推送，镜像 `autoops:bb068dbe`，ID `sha256:d661e8da4a8afc24e6c053021fe4c2ea53e00acdf9b0297b5843ba2ecb5c59f0`。源码归档 SHA256 `1cd7dcbd8fd4b7fcf8c03830404d7129bffe9d22ccda4236667dad902a938c9c`。包含此前已部署的分支搜索选择、助手配置简化和最新删除功能。
 

@@ -19,6 +19,7 @@ x-common: &common
       max-size: 20m
       max-file: "5"
 x-environment: &environment
+  AUTOOPS_DEMO_PROFILE: ${AUTOOPS_DEMO_PROFILE:?请明确指定产品模式}
   AGENT_DEMO_ENGINE: t3
   DATA_DIR: /data
   STATIC_DIR: /app/dist/web
