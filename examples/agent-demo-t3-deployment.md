@@ -20,7 +20,15 @@ ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCount
 
 当前192.168.31.157:28887为用户确认的AutoOps开发验收实例，测试数据可按需丢弃、重建；历史数据冻结、全行/文件摘要不变、原身份或账本恢复、认证有效期窗口不再作为后续发行门禁。下方严格保留核验记录只描述已发生的历史；后续沿固定候选、必要本地测试与构建、实际版本和健康及功能验收继续，不等待远端CI，不重做已有通过步骤。不改变产品的数据生命周期和恢复能力，也不触及同机其他任务、共享服务或外部真实凭证。
 
-当前应用固定为 `4971cab39ca6a788cea208edbd4a48f635128d2a`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-external-4971cab3`，STATIC_DIR 为同目录 `dist/web`；客户 CLI 复用未变化的 0.4.5。两个 unit active、NRestarts=0，Web 368659、worker launcher 368189 的实际目录一致；健康 ok=true、workerReachable=true。发行清单 `1f6cb4e2101243b2f49dd84d0e2bb989d7eff19b5d9c1866e874a7dfcac5a0a0`，原生清单 `8a515c8ded6378a77bdf115932d8084f7be7a484ed6faae623973c74c65e8a91`；切换时 HTML SHA256 `ed511ba6f898b1308183cfb1394ef6573b6612a15b749aa150a0311a20894951` 及两个 Web Worker 资源通过。
+当前应用固定为 `3fe260abbefb05e43855d620b66a0945c1824e8a`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-workbench-3fe260ab`，STATIC_DIR为同目录 `dist/web`；客户CLI复用未变化的0.4.5。Web1666205、worker launcher1665813的实际目录一致，两个unit active、NRestarts=0，健康ok=true、workerReachable=true。HTML摘要 `bebe55cb4f37c8bace43d30f0b3f332e414346018d1a87f5ccea17ca97ed8da2` 及两个Web Worker资源通过；发行清单 `547deb9961cbcb29c69c11799d63bf149a2dd3b21ec411aba52629342d28ba44`，原生清单 `f099aa4b5662d4628fb5744a50c1134c2466935494397d13a09efd439f93c6fd`。
+
+本次拆分全局工作台/项目功能并统一助手页面编辑及行内启停，包含此前平台skills三级范围代码。97项浏览器组件、28项导航/设置返回、类型/边界及固定归档构建通过。原件 `ROOT/workbench-3fe260ab/preflight.json`、`switch.json`，结果switched；其他服务PID不变，未备份或恢复历史测试数据。实站浏览器访问仍被已保存设置拒绝，导航、开关、编辑及中央skill模型交互未验，详见[本批记录](../docs/validation/workbench-navigation.md)。电脑助手仍使用本机skills，不声称中央skill支持已实现。
+
+上一完整发行为4971。中央skill索引已有v3变更，撤回须先核对旧程序兼容性与在途操作，仅调整本批两项unit程序配置；不得盲目覆盖业务数据。本批未重测程序降级或未受影响的部署回退矩阵。
+
+#### 上一4971外部工作区发行历史（保留）
+
+当时应用固定为 `4971cab39ca6a788cea208edbd4a48f635128d2a`，前后端统一发行 `/home/tao/autoops-agent-demo/releases/t3-external-4971cab3`，STATIC_DIR 为同目录 `dist/web`；客户 CLI 复用未变化的 0.4.5。两个 unit active、NRestarts=0，Web 368659、worker launcher 368189 的实际目录一致；健康 ok=true、workerReachable=true。发行清单 `1f6cb4e2101243b2f49dd84d0e2bb989d7eff19b5d9c1866e874a7dfcac5a0a0`，原生清单 `8a515c8ded6378a77bdf115932d8084f7be7a484ed6faae623973c74c65e8a91`；切换时 HTML SHA256 `ed511ba6f898b1308183cfb1394ef6573b6612a15b749aa150a0311a20894951` 及两个 Web Worker 资源通过。
 
 固定归档一次构建，原件 `ROOT/external-4971cab3/preflight.json`、`switch.json`，结果 switched；未备份或恢复历史测试数据，其他服务 PID 不变。外部工作区改为按共用规则直接替换单份当前资料，取消复核、版本历史、任务记录及工作区会话入口。116 项 Node、17 项 HTTP、37 项浏览器关联回归与类型/边界、构建通过。实站已核对精简入口并保存样例规则；连续更新与响应式交互受浏览器已保存的访问拒绝限制，仍未验完。完整证据与待续样例见[外部当前工作区验收](../docs/validation/external-workspace-current.md)，不将自动回归作为实站闭环。
 

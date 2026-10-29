@@ -35,4 +35,8 @@ skills 全局和项目分开管理；上层继承只读显示。定向用例复�
 
 实站浏览器拒绝访问 `http://localhost:28887`，工具明确返回已保存的访问限制。本批不通过其他浏览器、地址或脚本绕过；实站导航、开关、页面编辑与中央 skill 模型问答未验，不能用组件测试或健康检查代替。现有SSH发行和版本/健康只验证部署本身。电脑助手中央 skill 支持仍未实现，本批保留其本机能力；未重跑未受影响的部署业务矩阵和自然长期观察。
 
-代码、固定候选、部署版本与健康结果将在实际完成后记录。
+代码固定提交 `3fe260abbefb05e43855d620b66a0945c1824e8a` 已正常推送。固定 Git 归档一次构建网页、Worker、Agent和发行包，包检查通过；Linux安装锁定原生依赖后核验2038个原生文件。远端CI依测试阶段要求不作为门禁。
+
+实际发行 `/home/tao/autoops-agent-demo/releases/t3-workbench-3fe260ab`。Web PID1666205、worker launcher PID1665813均在此目录，两个unit active、NRestarts=0；健康 ok=true、workerReachable=true。HTML摘要 `bebe55cb4f37c8bace43d30f0b3f332e414346018d1a87f5ccea17ca97ed8da2` 和两个Web Worker资源核对通过。发行清单摘要 `547deb9961cbcb29c69c11799d63bf149a2dd3b21ec411aba52629342d28ba44`，原生清单摘要 `f099aa4b5662d4628fb5744a50c1134c2466935494397d13a09efd439f93c6fd`。
+
+实际预检/切换记录为测试机 `/home/tao/autoops-shared-validation-20261026/workbench-3fe260ab/preflight.json`、`switch.json`，结果 switched、其他用户服务PID不变，未全量备份或恢复历史测试数据。部署通过不改变上述实站交互未验结论；上一发行4971的程序降级未重测，中央skill索引升级后不能盲目套用旧程序。
