@@ -53,7 +53,7 @@ export class AgentRunner {
     const [metrics, containers] = await Promise.all([this.monitor.metrics(), this.monitor.containers(this.identity)]);
     if (Number.isFinite(this.centerRttMs)) metrics.centerRttMs = this.centerRttMs;
     const started = performance.now();
-    const response = await this.client.post('heartbeat', { version: VERSION, capabilities: CAPABILITIES, metrics, containers, activeTaskId: this.activeTaskId, storageStatus: this.storageStatus });
+    const response = await this.client.post('heartbeat', { version: VERSION, capabilities: CAPABILITIES, metrics, containers, staticRoot: this.executor.static.root, activeTaskId: this.activeTaskId, storageStatus: this.storageStatus });
     this.centerRttMs = Math.max(0, Math.round(performance.now() - started));
     if (response.mode !== 'managed' || !Array.isArray(response.targets)) throw new Error('中心心跳响应无效');
     this.identity.mode = response.mode; this.identity.targets = response.targets;

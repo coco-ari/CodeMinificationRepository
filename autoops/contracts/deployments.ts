@@ -2,6 +2,34 @@ import type { WorkspaceBuildContext } from './workspaces.ts'
 import type { WorkspaceDeploymentSourceInput } from './workspace-authoring.ts'
 
 export type DeploymentKind = 'java' | 'static'
+export interface DeploymentEnvironmentCapabilities {
+  read: boolean
+  configure: boolean
+  publish: boolean
+  restart: boolean
+  rollback: boolean
+  sourceDownload: boolean
+  sourceClear: boolean
+  nodeBind: boolean
+}
+export interface DeploymentCapabilities {
+  serviceManage: boolean
+  environments: Record<string, DeploymentEnvironmentCapabilities>
+}
+export interface DeploymentSourceRef {
+  sourceId: string
+  refKind: 'default' | 'branch' | 'tag' | 'commit'
+  ref: string
+  commit: string
+}
+export interface DeploymentRequestReceipt {
+  state: 'not_observed' | 'accepted' | 'completed'
+  requestId: string
+  operation?: string
+  environmentId?: string | null
+  publicIntent?: { serviceId: string; environmentId: string; configKey: string }
+  result?: unknown
+}
 export interface JavaDeploymentConfig {
   kind: 'java'
   module: string
@@ -51,6 +79,7 @@ export interface DeploymentService {
   kind: DeploymentKind
   module: string
   configKey: string
+  hasTargets?: boolean
 }
 export interface DeploymentServiceSubmission {
   id?: string
@@ -103,6 +132,7 @@ export interface DeploymentRelease {
   sourceIdentity?: Partial<DeploymentSourceIdentity>
   sourceSelection?: Pick<WorkspaceDeploymentSourceInput, 'sources' | 'contexts'>
   config?: DeploymentConfig
+  sourceRefs?: DeploymentSourceRef[]
 }
 
 export interface DeploymentTarget {
@@ -115,6 +145,7 @@ export interface DeploymentTarget {
   service?: 'frontend' | 'backend'
   configKey: string
   config: DeploymentConfig
+  staticServingPath?: string | null
   networkIdentity?: { network: string; alias: string } | null
   observation?: {
     targetId: string
@@ -142,11 +173,21 @@ export interface DeploymentTask {
   environmentId?: string
   actor?: { id: string; displayName?: string }
   updatedAt?: string
+  startedAt?: string
+  finishedAt?: string
+  config?: DeploymentConfig
+  detailedAgentStages?: boolean
   error?: string | null
   lastSeq?: number
   requestId?: string
-  stageHistory?: Array<{ stage: string; startedAt?: string; finishedAt?: string }>
+  stageHistory?: Array<{
+    stage: string
+    startedAt?: string
+    finishedAt?: string
+    durationMs?: number
+  }>
   sourceIdentity?: Partial<DeploymentSourceIdentity>
+  sourceRefs?: DeploymentSourceRef[]
   result?: {
     error?: string
     cleanupError?: string
@@ -181,6 +222,9 @@ export interface DeploymentOverview {
   serviceSources?: DeploymentServiceSource[]
   targets: DeploymentTarget[]
   tasks: DeploymentTask[]
+  capabilities?: DeploymentCapabilities
+  availableServices?: DeploymentService[]
+  configuration?: Record<string, { missing: Array<'source' | 'target'>; configKey: string }>
 }
 
 export interface DeploymentSubmission {
@@ -192,6 +236,7 @@ export interface DeploymentSubmission {
   configKey: string
   releaseId?: string
   requestId: string
+  sourceRefs?: DeploymentSourceRef[]
 }
 
 export interface DeploymentTargetSubmission {
@@ -270,7 +315,16 @@ export type DeploymentNodePublicIntent =
 export interface DeploymentNodeReceipt {
   state: 'completed'
   requestId: string
-  operation: 'create' | 'bind' | 'unbind' | 'revoke' | 'delete' | 'storage' | 'access' | 'assign' | 'registration'
+  operation:
+    | 'create'
+    | 'bind'
+    | 'unbind'
+    | 'revoke'
+    | 'delete'
+    | 'storage'
+    | 'access'
+    | 'assign'
+    | 'registration'
   projectId: string | null
   environmentId: string | null
   serverId: string

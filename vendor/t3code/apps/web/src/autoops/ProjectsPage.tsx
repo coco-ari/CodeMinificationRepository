@@ -67,7 +67,7 @@ import {
   ProjectSettingsTarget,
 } from './ProjectSettingsNavigation'
 import { DeploymentServers } from './deployment'
-import { environmentNodesHref, nodePageHref } from './deployment/deploymentNodeNavigation'
+import { environmentNodesHref, nodePageHref } from './deployment'
 import {
   ProjectRemovalAction,
   ProjectRemovalDialog,

@@ -15,9 +15,14 @@ export function DeploymentReleaseIdentity({
     <div className="min-w-0 space-y-1">
       {repositories.length ? (
         repositories.slice(0, limit).map((repository) => {
-          const selection = selections.find(
+          const configured = selections.find(
             (entry) => normalizeDirectory(entry.mountPath) === normalizeDirectory(repository.path),
           )
+          const selection =
+            release.sourceRefs?.find(
+              (entry) =>
+                entry.sourceId === configured?.sourceId && entry.commit === repository.commit,
+            ) ?? configured
           return (
             <div
               key={repository.path}
@@ -43,7 +48,11 @@ export function DeploymentReleaseIdentity({
                   )}
                   <span className="truncate">{selection.ref}</span>
                 </span>
-              ) : null}
+              ) : (
+                <span className="text-muted-foreground">
+                  {selection?.refKind === 'commit' ? '完整提交' : '来源引用未记录'}
+                </span>
+              )}
               <span
                 className="inline-flex min-w-0 items-center gap-1"
                 title={`Commit ${repository.commit}`}

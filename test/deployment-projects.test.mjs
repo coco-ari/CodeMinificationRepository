@@ -8,6 +8,17 @@ import { pathToFileURL } from 'node:url'
 import { RepositoryService } from '../src/service.mjs'
 import { DeploymentService } from '../src/deployment.mjs'
 import { Store } from '../src/store.mjs'
+import { deploymentSourceRefs } from '../src/deployment-projects.mjs'
+
+test('完整提交与引用摘要必须逐仓库一致，摘要不能改变检出引用', () => {
+  const commit = 'a'.repeat(40), sourceId = randomUUID()
+  const selection = { sources: [{ sourceId, refKind: 'commit', ref: commit }] }
+  const refs = [{ sourceId, refKind: 'branch', ref: 'feature/发布', commit }]
+  assert.deepEqual(deploymentSourceRefs(refs, selection), refs)
+  assert.throws(() => deploymentSourceRefs([{ ...refs[0], commit: 'b'.repeat(40) }], selection), /固定提交|完整提交/)
+  assert.throws(() => deploymentSourceRefs([{ ...refs[0], secret: '虚构值' }], selection), /摘要无效/)
+  assert.equal(selection.sources[0].ref, commit)
+})
 
 const mutation = (fields = {}) => ({ ...fields, requestId: randomUUID(), actor: { id: 'u-test-manager' } })
 async function fixture(t, options = {}) {
@@ -23,6 +34,62 @@ async function fixture(t, options = {}) {
   const server = await projects.createServer('p-one', mutation({ name: '隔离节点', environmentId: 'test' }))
   return { root, repository, deployment, projects, server: server.server }
 }
+
+test('环境移除清理本环境位置及来源，保留共享服务和另一环境，原请求只读可恢复', async t => {
+  const f = await fixture(t)
+  const service = await f.projects.saveService('p-one', mutation({ name: '共享服务', kind: 'java', module: '.' }))
+  await f.projects.bindServer('p-one', mutation({ serverId: f.server.id, environmentId: 'prod' }))
+  const testTarget = await f.projects.createTarget('p-one', mutation({ serviceId: service.id, environmentId: 'test', serverId: f.server.id, config: {} }))
+  const prodTarget = await f.projects.createTarget('p-one', mutation({ serviceId: service.id, environmentId: 'prod', serverId: f.server.id, config: {} }))
+  const input = mutation({ configKey: f.projects.environmentConfigurationKey('p-one', service.id, 'test') })
+  await assert.rejects(f.projects.removeEnvironmentService('p-one', service.id, 'test', { ...input, configKey: 'changed' }), /配置已变化/)
+  assert.equal(f.projects.target('p-one', testTarget).target.id, testTarget)
+  const result = await f.projects.removeEnvironmentService('p-one', service.id, 'test', input)
+  assert.equal(result.deleted, true)
+  assert.throws(() => f.projects.target('p-one', testTarget), /不存在/)
+  assert.equal(f.projects.target('p-one', prodTarget).target.id, prodTarget)
+  assert.ok(f.projects.snapshot('p-one').services.some(row => row.id === service.id))
+  assert.deepEqual(await f.projects.removeEnvironmentService('p-one', service.id, 'test', input), result)
+  assert.equal(f.projects.requestReceipt('p-one', input.requestId, input.actor.id).state, 'completed')
+  assert.equal(f.projects.requestReceipt('p-one', input.requestId, '另一个人').state, 'not_observed')
+  await assert.rejects(f.projects.removeEnvironmentService('p-one', service.id, 'prod', input), /同一请求/)
+})
+
+test('环境移除失败保留原清理计划，撤权后不能继续，恢复授权后复用原请求完成', async t => {
+  let allowed = true
+  const f = await fixture(t, { authorizeProjectMutation() { if (!allowed) throw Object.assign(new Error('环境配置权限已撤销'), { status: 403 }) } })
+  const service = await f.projects.saveService('p-one', mutation({ name: '清理恢复服务', kind: 'java', module: '.' }))
+  const targetId = await f.projects.createTarget('p-one', mutation({ serviceId: service.id, environmentId: 'test', serverId: f.server.id, config: {} }))
+  const input = mutation({ configKey: f.projects.environmentConfigurationKey('p-one', service.id, 'test') })
+  const remove = f.projects.removeConfiguration.bind(f.projects)
+  let failOnce = true
+  f.projects.removeConfiguration = async (...args) => {
+    if (failOnce) { failOnce = false; throw new Error('隔离清理暂时不可用') }
+    return remove(...args)
+  }
+  await assert.rejects(f.projects.removeEnvironmentService('p-one', service.id, 'test', input), /暂时不可用/)
+  const pending = f.projects.requestReceipt('p-one', input.requestId, input.actor.id)
+  assert.equal(pending.state, 'accepted')
+  assert.deepEqual(pending.publicIntent, { serviceId: service.id, environmentId: 'test', configKey: input.configKey })
+  assert.equal(f.projects.target('p-one', targetId).target.deleting, true)
+  allowed = false
+  await assert.rejects(f.projects.removeEnvironmentService('p-one', service.id, 'test', input), { status: 403 })
+  allowed = true
+  await f.projects.removeEnvironmentService('p-one', service.id, 'test', input)
+  assert.equal(f.projects.requestReceipt('p-one', input.requestId, input.actor.id).state, 'completed')
+  assert.equal(f.projects.snapshot('p-one').targets.length, 0)
+  assert.ok(f.projects.service('p-one', service.id))
+})
+
+test('环境配置不能通过构建字段修改共享服务类型或构建目录', async t => {
+  const f = await fixture(t)
+  const service = await f.projects.saveService('p-one', mutation({ name: '共享配置保护', kind: 'java', module: 'backend' }))
+  for (const config of [{ module: 'other' }, { kind: 'static' }])
+    await assert.rejects(f.projects.createTarget('p-one', mutation({ serviceId: service.id, environmentId: 'test', serverId: f.server.id, config })), { status: 400, code: 'DEPLOYMENT_SHARED_SERVICE_FIELD' })
+  const targetId = await f.projects.createTarget('p-one', mutation({ serviceId: service.id, environmentId: 'test', serverId: f.server.id, config: {} }))
+  await assert.rejects(f.projects.updateTarget('p-one', targetId, mutation({ config: { module: 'other' }, configKey: f.deployment.configKey(targetId) })), { status: 400, code: 'DEPLOYMENT_SHARED_SERVICE_FIELD' })
+  assert.equal(f.projects.service('p-one', service.id).module, 'backend')
+})
 
 test('独立 Java 服务与多个部署位置共享身份，同名服务不自动合并', async t => {
   const f = await fixture(t)

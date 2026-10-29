@@ -13,6 +13,19 @@ export function deploymentsRoutes({ access, principal }: BusinessHttpContext) {
     if (request.method !== 'GET')
       yield* Effect.try(() => access.requireCsrf(current, request.headers['x-demo-csrf']))
     if (request.method !== 'GET') {
+      const environmentRemoval =
+        /^\/api\/v1\/projects\/([^/]+)\/environments\/([^/]+)\/deployment-services\/[^/]+$/.exec(
+          new URL(request.url, 'http://localhost').pathname,
+        )
+      if (environmentRemoval)
+        yield* Effect.try(() =>
+          access.requireDeploymentAction(
+            current,
+            decodeURIComponent(environmentRemoval[1]!),
+            'configure',
+            decodeURIComponent(environmentRemoval[2]!),
+          ),
+        )
       const node =
         /^\/autoops\/projects\/([^/]+)\/deployments\/servers(?:\/[^/]+(?:\/(bind|unbind|revoke|storage-policy))?)?$/.exec(
           new URL(request.url, 'http://localhost').pathname,
@@ -57,6 +70,16 @@ export function deploymentsRoutes({ access, principal }: BusinessHttpContext) {
   }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))
   return Layer.mergeAll(
     HttpRouter.add(
+      'GET',
+      '/api/v1/projects/:projectId/deployments/requests/:requestId',
+      deploymentRequest,
+    ),
+    HttpRouter.add(
+      'DELETE',
+      '/api/v1/projects/:projectId/environments/:environmentId/deployment-services/:serviceId',
+      deploymentRequest,
+    ),
+    HttpRouter.add(
       'DELETE',
       '/autoops/projects/:projectId/deployments/services/:serviceId',
       deploymentRequest,
@@ -69,7 +92,11 @@ export function deploymentsRoutes({ access, principal }: BusinessHttpContext) {
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments', deploymentRequest),
     HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),
-    HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/servers/receipts/:requestId', deploymentRequest),
+    HttpRouter.add(
+      'GET',
+      '/autoops/projects/:projectId/deployments/servers/receipts/:requestId',
+      deploymentRequest,
+    ),
     HttpRouter.add(
       'POST',
       '/autoops/projects/:projectId/deployments/servers/:serverId/bind',

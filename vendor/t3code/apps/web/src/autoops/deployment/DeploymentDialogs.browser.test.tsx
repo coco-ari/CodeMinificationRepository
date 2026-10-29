@@ -72,6 +72,47 @@ function fixture() {
 }
 
 describe('部署确认与配置', () => {
+  it('自动刷新不覆盖草稿或条件键，核对最新配置后才显式采用新版本', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const service: DeploymentService = {
+      id: 'shared-service',
+      name: '共享服务',
+      kind: 'java',
+      module: '.',
+      configKey: 'old-key',
+    }
+    const view = (value: DeploymentService) => (
+      <ServiceDialog
+        service={value}
+        embedded
+        open
+        busy={false}
+        error={null}
+        onSubmit={onSubmit}
+        onOpenChange={() => {}}
+        finalFocus={false}
+      />
+    )
+    await using screen = await render(view(service))
+    await screen.getByRole('textbox', { name: '服务名称', exact: true }).fill('尚未保存的名称')
+    await screen.rerender(view({ ...service, name: '其他人保存的名称', configKey: 'new-key' }))
+    await expect
+      .element(screen.getByRole('textbox', { name: '服务名称', exact: true }))
+      .toHaveValue('尚未保存的名称')
+    await screen.getByRole('button', { name: '保存服务', exact: true }).click()
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({
+      name: '尚未保存的名称',
+      configKey: 'old-key',
+    })
+    await screen.getByText('核对最新配置', { exact: true }).click()
+    await expect.element(screen.getByText(/其他人保存的名称/)).toBeVisible()
+    await screen.getByRole('button', { name: '已核对，保留输入并采用新版本' }).click()
+    await screen.getByRole('button', { name: '保存服务', exact: true }).click()
+    expect(onSubmit.mock.calls[1]![0]).toMatchObject({
+      name: '尚未保存的名称',
+      configKey: 'new-key',
+    })
+  })
   it('回退确认展示历史配置，提交仍使用现行配置键检查并发变更', async () => {
     const { target, release } = fixture()
     const onSubmit = vi.fn().mockResolvedValue(undefined)

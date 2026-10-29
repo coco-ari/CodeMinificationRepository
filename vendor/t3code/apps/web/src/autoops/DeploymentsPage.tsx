@@ -124,7 +124,7 @@ function ProjectDeployments({
       'workspace.manage'
     ] === true
   const [view, setView] = useState<'services' | 'packages'>(() =>
-    !nodeSearch.nodeEnvironmentId && (requestedSourceVersionId !== undefined || readSelection(projectId, 'view') === 'packages')
+    !nodeSearch.nodeEnvironmentId && requestedSourceVersionId !== undefined
       ? 'packages'
       : 'services',
   )
@@ -368,6 +368,7 @@ function ProjectDeployments({
             },
           }}
           onRefreshPackages={refresh}
+          onShowPackages={() => setView('packages')}
         />
       ) : !overview ? (
         error ? null : (

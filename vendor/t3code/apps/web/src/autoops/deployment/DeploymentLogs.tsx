@@ -1,3 +1,4 @@
+import { DeploymentProgress, normalizeDeploymentStage } from './DeploymentProgress'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
@@ -66,7 +67,10 @@ function DeploymentTaskLog({
   useEffect(() => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout>
+    let reading = false
     const poll = async () => {
+      if (controller.signal.aborted || document.hidden || reading) return
+      reading = true
       try {
         const result = await loadDeploymentTask(
           projectId,
@@ -106,10 +110,18 @@ function DeploymentTaskLog({
           setError({ message: errorLabel(cause), retrying: true })
           timer = setTimeout(poll, 3000)
         }
+      } finally {
+        reading = false
       }
     }
+    const visibility = () => {
+      clearTimeout(timer)
+      if (!document.hidden) void poll()
+    }
+    document.addEventListener('visibilitychange', visibility)
     void poll()
     return () => {
+      document.removeEventListener('visibilitychange', visibility)
       controller.abort()
       clearTimeout(timer)
     }
@@ -142,7 +154,7 @@ function DeploymentTaskLog({
   }
   const filtered = logs.filter(
     (entry) =>
-      (stage === 'all' || entry.stage === stage) &&
+      (stage === 'all' || normalizeDeploymentStage(entry.stage ?? '') === stage) &&
       entry.message.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   )
   const backfilling = !!task && cursor.current < (task.lastSeq ?? 0)
@@ -255,6 +267,7 @@ function DeploymentTaskLog({
           正在读取执行记录…
         </div>
       )}
+      {task ? <DeploymentProgress task={task} selected={stage} onSelect={setStage} /> : null}
       {error ? (
         <p
           className="shrink-0 border-b border-border/60 px-3 py-2 text-xs text-destructive"
@@ -282,9 +295,13 @@ function DeploymentTaskLog({
             value={stage}
             options={[
               { id: 'all', name: '全部阶段' },
-              ...[...new Set(logs.flatMap((entry) => (entry.stage ? [entry.stage] : [])))].map(
-                (id) => ({ id, name: deploymentStageLabel(id) }),
-              ),
+              ...[
+                ...new Set(
+                  logs.flatMap((entry) =>
+                    entry.stage ? [normalizeDeploymentStage(entry.stage)] : [],
+                  ),
+                ),
+              ].map((id) => ({ id, name: deploymentStageLabel(id) })),
             ]}
             onChange={(value) => {
               setStage(value)

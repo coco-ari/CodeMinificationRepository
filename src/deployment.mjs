@@ -11,7 +11,7 @@ import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
 import { DEFAULT_STORAGE_POLICY, storagePolicy, artifactId } from '../agent/storage-policy.mjs';
 import { networkIdentity } from '../agent/config.mjs';
-import { createProjectDeployments, normalizeDeploymentSourceSelection, projectDeploymentReferences } from './deployment-projects.mjs';
+import { createProjectDeployments, normalizeDeploymentSourceSelection, projectDeploymentReferences, deploymentSourceRefs } from './deployment-projects.mjs';
 
 export function readDeploymentDeletionReferences(directory, projectId, environmentId) {
   const file = path.join(directory,'state.sqlite');
@@ -484,6 +484,7 @@ export class DeploymentService extends EventEmitter {
     this.changed('server', serverId); return result;
   }
   async heartbeat(serverId, input) {
+    if (input.staticRoot !== undefined && (typeof input.staticRoot !== 'string' || input.staticRoot.length > 512 || !/^\/[A-Za-z0-9_./-]+$/.test(input.staticRoot) || input.staticRoot.split('/').some(part => part === '..' || part === '.'))) fail('静态发布根目录报告无效');
     if (input.metrics !== undefined && (!input.metrics || typeof input.metrics !== 'object' || Array.isArray(input.metrics))) fail('主机指标格式错误');
     const containers = list(input.containers, 500, '容器状态');
     const version = input.version === undefined ? undefined : requireText(input.version, 'Agent 版本', 80);
@@ -498,6 +499,7 @@ export class DeploymentService extends EventEmitter {
       const server = find(state.deployments.servers, serverId, '服务器');
       if (server.revoked) throw new HttpError(401, 'Agent 已撤销');
       Object.assign(server, { lastSeenAt: now(), metrics: input.metrics || null, activeTaskId: input.activeTaskId || null });
+      server.staticRoot = input.staticRoot ?? null;
       if (version !== undefined) server.version = version;
       if (storageStatus != null) server.storageStatus = structuredClone(storageStatus);
       if (input.capabilities !== undefined || version !== undefined) server.capabilities = capabilities(input.capabilities);
@@ -542,7 +544,8 @@ export class DeploymentService extends EventEmitter {
     if (!actor) fail('发布操作人不能为空');
     const scope = this.projects.target(projectId, input.targetId);
     const sourceSelection = normalizeDeploymentSourceSelection(input.sourceSelection || {}, scope.service, validateConfig);
-    const fingerprint = digest(JSON.stringify(['workspace-selection', projectId, input.targetId, sourceSelection, input.configKey, actor.id]));
+    const sourceRefs = deploymentSourceRefs(input.sourceRefs, sourceSelection);
+    const fingerprint = digest(JSON.stringify(['workspace-selection', projectId, input.targetId, sourceSelection, input.configKey, actor.id, ...(sourceRefs ? [sourceRefs] : [])]));
     const task = await this.store.change(state => {
       if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
       const data = state.deployments, existing = data.tasks.find(entry => entry.requestId === input.requestId);
@@ -558,7 +561,7 @@ export class DeploymentService extends EventEmitter {
       if (service.kind === 'static' && !target.config.health?.url) fail('请先配置站点访问地址，并将已有 Nginx 指向该目标的发布目录');
       if (data.tasks.filter(entry => !terminal.has(entry.status)).length >= 200) throw new HttpError(503, '部署队列已满');
       const created = { id: randomUUID(), targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: 'deploy', status: 'preparing', stage: 'preparing',
-        sourceKind: 'workspace-package', workspaceProjectId: projectId, sourceSelection, actor, requestId: input.requestId, requestFingerprint: fingerprint,
+        sourceKind: 'workspace-package', workspaceProjectId: projectId, sourceSelection, ...(sourceRefs ? { sourceRefs } : {}), actor, requestId: input.requestId, requestFingerprint: fingerprint,
         ...(submission ? { submissionFingerprint: submission } : {}),
         detailedAgentStages: !!server.capabilities?.includes('delivery-telemetry-v1'), recoveryAllowed: !!server.capabilities?.includes('source-archive-recovery-v1'),
         networkIdentity: structuredClone(target.networkIdentity || null), config: effectiveTargetConfig(data, target.id),
@@ -686,6 +689,7 @@ export class DeploymentService extends EventEmitter {
         createdAt: now(), updatedAt: now(), config: release ? structuredClone(release.config) : effectiveTargetConfig(data, target.id),
         sourceProjectId: sourceProject.id, sourceSnapshot: snapshot, source: archived ? { ...archived, url: `/api/agent/v1/tasks/${taskId}/source` } : null,
         ...(release?.sourceKind === 'workspace-package' ? { sourceKind: release.sourceKind, sourceIdentity: structuredClone(release.sourceIdentity) } : {}),
+        ...(release?.sourceRefs ? { sourceRefs: structuredClone(release.sourceRefs) } : {}),
         ...((release?.sourceSelection || data.tasks.find(entry => entry.id === release?.id)?.sourceSelection) ? { sourceSelection: structuredClone(release.sourceSelection || data.tasks.find(entry => entry.id === release.id).sourceSelection) } : {}),
         ...(input.actor === undefined ? {} : { actor: deploymentActor(input.actor) }),
         sourceArchiveId: archived?.archiveId, revision: release?.revision || input.revision, commitSubject: release?.commitSubject || selectedCommit?.subject,
@@ -967,6 +971,7 @@ export class DeploymentService extends EventEmitter {
             sourceSnapshot: task.sourceSnapshot, sourceArchiveId: task.sourceArchiveId,
             ...(task.sourceKind === 'workspace-package' ? { sourceKind: task.sourceKind, sourceIdentity: structuredClone(task.sourceIdentity) } : {}),
             ...(task.sourceSelection ? { sourceSelection: structuredClone(task.sourceSelection) } : {}),
+            ...(task.sourceRefs ? { sourceRefs: structuredClone(task.sourceRefs) } : {}),
             ...(task.actor ? { actor: structuredClone(task.actor) } : {}),
             buildSnapshot: release.buildSnapshot || task.release?.buildSnapshot,
             ...(release.id === task.id && task.action === 'rollback' ? { restoredFromReleaseId: task.release.id } : {}), createdAt: timing.at, available: true };

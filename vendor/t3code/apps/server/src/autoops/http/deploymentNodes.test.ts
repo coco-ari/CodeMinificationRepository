@@ -128,6 +128,28 @@ async function setup() {
 const base = '/autoops/deployment-servers'
 const projectNodes = '/autoops/projects/project/deployments/servers'
 
+it('原生路由按登录身份查询部署收据并移除当前环境配置，保留共享服务', async () => {
+  await using f = await setup()
+  const projectBase = '/autoops/projects/project/deployments'
+  const node = await (await f.handle(f.request(base, { requestId: randomUUID(), name: '环境移除验收节点' }))).json() as { server: { id: string } }
+  expect((await f.handle(f.request(`${base}/${node.server.id}/assignments`, { requestId: randomUUID(), projectId: 'project', environmentIds: ['test'], expectedRevision: 1 }))).status).toBe(200)
+  const saved = await (await f.handle(f.request(`${projectBase}/services`, { name: '隔离共享服务', kind: 'java', module: '.', requestId: randomUUID() }, 'manager'))).json() as { service: { id: string } }
+  expect((await f.handle(f.request(`${projectBase}/targets`, { serviceId: saved.service.id, environmentId: 'test', serverId: node.server.id, config: {}, requestId: randomUUID() }, 'manager'))).status).toBe(201)
+  const before = await (await f.handle(f.request(`${projectBase}?environmentId=test`, undefined, 'manager'))).json() as { targets: unknown[]; configuration: Record<string, { configKey: string }> }
+  expect(before.targets).toHaveLength(1)
+  const path = `/api/v1/projects/project/environments/test/deployment-services/${saved.service.id}`
+  const input = { requestId: randomUUID(), configKey: before.configuration[`test:${saved.service.id}`]!.configKey }
+  expect((await f.handle(f.request(path, input, 'manager', false, 'DELETE'))).status).toBe(403)
+  expect((await f.handle(f.request(path, input, 'reader', true, 'DELETE'))).status).toBe(403)
+  expect((await f.handle(f.request(path, input, 'manager', true, 'DELETE'))).status).toBe(200)
+  const receiptPath = `/api/v1/projects/project/deployments/requests/${input.requestId}`
+  expect(await (await f.handle(f.request(receiptPath, undefined, 'manager'))).json()).toMatchObject({ state: 'completed', requestId: input.requestId, result: { deleted: true, environmentId: 'test' } })
+  expect(await (await f.handle(f.request(receiptPath, undefined, 'other-manager'))).json()).toMatchObject({ state: 'not_observed' })
+  const after = await (await f.handle(f.request(`${projectBase}?environmentId=test&includeAvailableServices=1`, undefined, 'manager'))).json() as { services: unknown[]; targets: unknown[]; availableServices: { id: string }[] }
+  expect(after.targets).toEqual([]); expect(after.services).toEqual([])
+  expect(after.availableServices.map(row => row.id)).toContain(saved.service.id)
+})
+
 it('一次分配在当前授权下绑定全部环境，非法环境、越权和 CSRF 失败不产生部分结果', async () => {
   await using f = await setup()
   f.project.environments.push({ id: 'stage', name: '预发' })

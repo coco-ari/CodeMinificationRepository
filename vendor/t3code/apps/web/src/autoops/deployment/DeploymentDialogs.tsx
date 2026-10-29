@@ -1,3 +1,11 @@
+import {
+  ConfigurationDialog,
+  ConfigurationPopup,
+  ConfigurationHeader,
+  ConfigurationTitle,
+  ConfigurationPanel,
+  ConfigurationFooter,
+} from './ConfigurationSurface'
 import { useEffect, useId, useState, type ComponentProps, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
@@ -47,9 +55,42 @@ import { Choice } from './DeploymentControls'
 import { dateLabel, normalizeDirectory, packageDirectory } from './deploymentPresentation'
 
 type DialogProps = {
+  embedded?: boolean
+  onDirty?: (dirty: boolean) => void
   open: boolean
   onOpenChange: (open: boolean) => void
   finalFocus: ComponentProps<typeof DialogPopup>['finalFocus']
+}
+
+/** 版本变化仅提示核对，用户确认后更新条件键，保留当前输入。 */
+function ConfigurationRevision({
+  changed,
+  latest,
+  busy,
+  onAdopt,
+}: {
+  changed: boolean
+  latest: unknown
+  busy: boolean
+  onAdopt: () => void
+}) {
+  if (!changed) return null
+  return (
+    <Alert variant="warning">
+      <AlertDescription>
+        保存的配置已变化。当前输入已保留，请展开核对最新配置后再继续。
+        <details>
+          <summary className="cursor-pointer">核对最新配置</summary>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all text-xs">
+            {JSON.stringify(latest, null, 2)}
+          </pre>
+        </details>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onAdopt}>
+          已核对，保留输入并采用新版本
+        </Button>
+      </AlertDescription>
+    </Alert>
+  )
 }
 
 function Field({
@@ -85,14 +126,29 @@ export function ServiceDialog({
   error: string | null
   onSubmit: (input: Omit<DeploymentServiceSubmission, 'requestId'>) => Promise<void>
 }) {
-  const [service] = useState(liveService)
+  const [service, setService] = useState(liveService)
   const [name, setName] = useState(service?.name ?? '')
   const [kind, setKind] = useState<DeploymentKind>(service?.kind ?? 'static')
   const [module, setModule] = useState(service?.module ?? '.')
+  useEffect(() => {
+    dialog.onDirty?.(
+      name !== (service?.name ?? '') ||
+        kind !== (service?.kind ?? 'static') ||
+        module !== (service?.module ?? '.'),
+    )
+  }, [name, kind, module, service, dialog.onDirty])
   const valid = !!name.trim() && !!module.trim()
   return (
-    <Dialog open={dialog.open} onOpenChange={dialog.onOpenChange}>
-      <DialogPopup className="sm:max-w-lg" finalFocus={dialog.finalFocus}>
+    <ConfigurationDialog
+      embedded={dialog.embedded}
+      open={dialog.open}
+      onOpenChange={dialog.onOpenChange}
+    >
+      <ConfigurationPopup
+        embedded={dialog.embedded}
+        className="sm:max-w-lg"
+        finalFocus={dialog.finalFocus}
+      >
         <form
           className="flex min-h-0 flex-col"
           onSubmit={(event) => {
@@ -106,10 +162,23 @@ export function ServiceDialog({
               })
           }}
         >
-          <DialogHeader>
-            <DialogTitle>{service ? '编辑服务' : '添加服务'}</DialogTitle>
-          </DialogHeader>
-          <DialogPanel>
+          <ConfigurationHeader embedded={dialog.embedded}>
+            <ConfigurationTitle embedded={dialog.embedded}>
+              {service ? '编辑服务' : '添加服务'}
+            </ConfigurationTitle>
+          </ConfigurationHeader>
+          <ConfigurationPanel embedded={dialog.embedded}>
+            <ConfigurationRevision
+              changed={!!service && liveService?.configKey !== service.configKey}
+              latest={liveService}
+              busy={busy}
+              onAdopt={() => setService(liveService)}
+            />
+            {service ? (
+              <p className="text-xs text-muted-foreground">
+                共享信息影响所有环境的后续发布，已接受任务继续使用原快照。
+              </p>
+            ) : null}
             <Field label="服务名称">
               {(id) => (
                 <Input
@@ -148,8 +217,8 @@ export function ServiceDialog({
                 {error}
               </Alert>
             ) : null}
-          </DialogPanel>
-          <DialogFooter>
+          </ConfigurationPanel>
+          <ConfigurationFooter embedded={dialog.embedded}>
             <Button
               type="button"
               variant="outline"
@@ -162,10 +231,10 @@ export function ServiceDialog({
               {busy ? <Spinner size="sm" /> : <PlusIcon />}
               {service ? '保存服务' : '添加服务'}
             </Button>
-          </DialogFooter>
+          </ConfigurationFooter>
         </form>
-      </DialogPopup>
-    </Dialog>
+      </ConfigurationPopup>
+    </ConfigurationDialog>
   )
 }
 
@@ -193,7 +262,7 @@ export function TargetDialog({
   onSubmit: (input: Omit<DeploymentTargetSubmission, 'requestId'>) => Promise<void>
   onUpdate: (input: Omit<DeploymentTargetUpdate, 'requestId'>) => Promise<void>
 }) {
-  const [target] = useState(liveTarget)
+  const [target, setTarget] = useState(liveTarget)
   const usedServers = new Set(
     overview.targets
       .filter((entry) => entry.serviceId === service.id && entry.environmentId === environmentId)
@@ -235,12 +304,24 @@ export function TargetDialog({
   )
   const [network, setNetwork] = useState(target?.networkIdentity?.network ?? '')
   const [alias, setAlias] = useState(target?.networkIdentity?.alias ?? '')
+  const [initial] = useState(() => JSON.stringify([serverId, config, network, alias]))
+  useEffect(() => {
+    dialog.onDirty?.(JSON.stringify([serverId, config, network, alias]) !== initial)
+  }, [serverId, config, network, alias, initial, dialog.onDirty])
   const healthValid =
     config.kind === 'static' ? !!config.health.url : !!config.health.path && config.health.port > 0
   const valid = !!serverId && !!environmentId && healthValid && !!network.trim() === !!alias.trim()
   return (
-    <Dialog open={dialog.open} onOpenChange={dialog.onOpenChange}>
-      <DialogPopup className="sm:max-w-xl" finalFocus={dialog.finalFocus}>
+    <ConfigurationDialog
+      embedded={dialog.embedded}
+      open={dialog.open}
+      onOpenChange={dialog.onOpenChange}
+    >
+      <ConfigurationPopup
+        embedded={dialog.embedded}
+        className="sm:max-w-xl"
+        finalFocus={dialog.finalFocus}
+      >
         <form
           className="flex min-h-0 flex-col"
           onKeyDown={(event) => {
@@ -266,10 +347,26 @@ export function TargetDialog({
               })
           }}
         >
-          <DialogHeader>
-            <DialogTitle>{target ? '编辑部署配置' : '添加部署位置'}</DialogTitle>
-          </DialogHeader>
-          <DialogPanel>
+          <ConfigurationHeader embedded={dialog.embedded}>
+            <ConfigurationTitle embedded={dialog.embedded}>
+              {target ? '编辑部署配置' : '添加部署位置'}
+            </ConfigurationTitle>
+          </ConfigurationHeader>
+          <ConfigurationPanel embedded={dialog.embedded}>
+            <ConfigurationRevision
+              changed={!!target && liveTarget?.configKey !== target.configKey}
+              latest={
+                liveTarget && {
+                  config: liveTarget.config,
+                  networkIdentity: liveTarget.networkIdentity,
+                }
+              }
+              busy={busy}
+              onAdopt={() => {
+                setTarget(liveTarget)
+                if (liveTarget) setConfig((old) => ({ ...old, module: liveTarget.config.module }))
+              }}
+            />
             <div className="text-sm font-medium">
               {service.name} ·{' '}
               {overview.environments.find((entry) => entry.id === environmentId)?.name ??
@@ -388,8 +485,8 @@ export function TargetDialog({
                 {error}
               </Alert>
             ) : null}
-          </DialogPanel>
-          <DialogFooter>
+          </ConfigurationPanel>
+          <ConfigurationFooter embedded={dialog.embedded}>
             <Button
               type="button"
               variant="outline"
@@ -402,10 +499,10 @@ export function TargetDialog({
               {busy ? <Spinner size="sm" /> : <PlusIcon />}
               {target ? '保存配置' : '添加位置'}
             </Button>
-          </DialogFooter>
+          </ConfigurationFooter>
         </form>
-      </DialogPopup>
-    </Dialog>
+      </ConfigurationPopup>
+    </ConfigurationDialog>
   )
 }
 
@@ -431,16 +528,28 @@ export function ServiceSourceDialog({
   error: string | null
   onSubmit: (input: Omit<DeploymentServiceSourceSubmission, 'requestId'>) => Promise<void>
 }) {
-  const [source] = useState(liveSource)
+  const [source, setSource] = useState(liveSource)
   const draft = useDeploymentSourceDraft(
     sources,
     service.kind === 'java' ? 'backend' : 'frontend',
     service.module,
     source,
   )
+  const [initial] = useState(() => JSON.stringify(draft.input))
+  useEffect(() => {
+    dialog.onDirty?.(JSON.stringify(draft.input) !== initial)
+  }, [draft.input, initial, dialog.onDirty])
   return (
-    <Dialog open={dialog.open} onOpenChange={dialog.onOpenChange}>
-      <DialogPopup className="sm:max-w-xl" finalFocus={dialog.finalFocus}>
+    <ConfigurationDialog
+      embedded={dialog.embedded}
+      open={dialog.open}
+      onOpenChange={dialog.onOpenChange}
+    >
+      <ConfigurationPopup
+        embedded={dialog.embedded}
+        className="sm:max-w-xl"
+        finalFocus={dialog.finalFocus}
+      >
         <form
           className="flex min-h-0 flex-col"
           onSubmit={(event) => {
@@ -449,14 +558,23 @@ export function ServiceSourceDialog({
               void onSubmit({ ...draft.input, ...(source ? { configKey: source.configKey } : {}) })
           }}
         >
-          <DialogHeader>
-            <DialogTitle>默认发布来源</DialogTitle>
-          </DialogHeader>
-          <DialogPanel>
+          <ConfigurationHeader embedded={dialog.embedded}>
+            <ConfigurationTitle embedded={dialog.embedded}>默认发布来源</ConfigurationTitle>
+          </ConfigurationHeader>
+          <ConfigurationPanel embedded={dialog.embedded}>
+            <ConfigurationRevision
+              changed={liveSource?.configKey !== source?.configKey}
+              latest={liveSource && { sources: liveSource.sources, contexts: liveSource.contexts }}
+              busy={busy}
+              onAdopt={() => setSource(liveSource)}
+            />
             <p className="text-sm font-medium">
               {service.name}
               {environmentName ? ` · ${environmentName}` : ''}
             </p>
+            {!sources.length && projectId ? (
+              <RepositorySetupNotice projectId={projectId} disabled={busy} />
+            ) : null}
             <DeploymentSourceNotice
               missing={draft.missingSources}
               onReset={draft.resetSources}
@@ -490,8 +608,8 @@ export function ServiceSourceDialog({
                 {error}
               </Alert>
             ) : null}
-          </DialogPanel>
-          <DialogFooter>
+          </ConfigurationPanel>
+          <ConfigurationFooter embedded={dialog.embedded}>
             <Button
               type="button"
               variant="outline"
@@ -503,10 +621,10 @@ export function ServiceSourceDialog({
             <Button type="submit" disabled={busy || !draft.valid}>
               {busy ? <Spinner size="sm" /> : null}保存来源配置
             </Button>
-          </DialogFooter>
+          </ConfigurationFooter>
         </form>
-      </DialogPopup>
-    </Dialog>
+      </ConfigurationPopup>
+    </ConfigurationDialog>
   )
 }
 

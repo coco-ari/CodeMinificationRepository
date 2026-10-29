@@ -16,6 +16,28 @@ export async function handleDeploymentRequest({ access, store, principal, url, m
 }
 
 async function routeDeploymentRequest({ access, store, principal, url, method, input, checkAccess }) {
+  const receiptRoute = /^\/api\/v1\/projects\/([^/]+)\/deployments\/requests\/([^/]+)$/.exec(url.pathname)
+  const removeRoute = /^\/api\/v1\/projects\/([^/]+)\/environments\/([^/]+)\/deployment-services\/([^/]+)$/.exec(url.pathname)
+  if (receiptRoute || removeRoute) {
+    const projectId = decodeURIComponent((receiptRoute || removeRoute)[1])
+    checkAccess(() => access.requireProject(principal, projectId))
+    if (!store) fail(503, 'DEPLOYMENT_DISABLED', '部署尚未启用')
+    if (receiptRoute && method === 'GET') {
+      const id = decodeURIComponent(receiptRoute[2])
+      const receipt = store.requestReceipt(projectId, id, principal)
+      if (receipt.state !== 'not_observed')
+        checkAccess(() => access.requireDeploymentAction(principal, projectId, receipt.action, receipt.environmentId ?? undefined))
+      else checkAccess(() => access.requireDeploymentAction(principal, projectId, 'read'))
+      const { action: _action, actorId: _actorId, ...body } = receipt
+      return { status: 200, body }
+    }
+    if (removeRoute && method === 'DELETE') {
+      const environmentId = decodeURIComponent(removeRoute[2]), serviceId = decodeURIComponent(removeRoute[3])
+      access.requireDeploymentAction(principal, projectId, 'configure', environmentId)
+      return { status: 200, body: await store.removeEnvironmentService(projectId, serviceId, environmentId, { ...input, actor: { id: principal.id, displayName: principal.displayName } }) }
+    }
+    fail(404, 'DEPLOYMENT_ROUTE_NOT_FOUND', '此部署操作不存在')
+  }
   const match = /^\/autoops\/projects\/([^/]+)\/deployments(?:\/(.*))?$/.exec(url.pathname)
   if (!match) fail(404, 'DEPLOYMENT_ROUTE_NOT_FOUND', '此部署操作不存在')
   const projectId = decodeURIComponent(match[1]),
@@ -40,7 +62,19 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
               .filter((item) => membership.environmentIds.includes(item.id))
               .map((item) => item.id)
           : [explicit]
-    for (const environmentId of environmentIds) requireEnvironment(environmentId)
+    for (const environmentId of environmentIds) { requireEnvironment(environmentId); authorize('read', environmentId) }
+    const permits = (action, environmentId) => {
+      try { authorize(action, environmentId); return true }
+      catch (error) { if (error.status === 403 || error.code === 'DEPLOYMENT_DISABLED') return false; throw error }
+    }
+    const capabilities = { serviceManage: permits('service.configure'), environments: Object.fromEntries(environmentIds.map(id => [id, {
+      read: permits('read', id), configure: permits('configure', id), publish: permits('publish', id), restart: permits('restart', id), rollback: permits('rollback', id), sourceDownload: permits('source.download', id), sourceClear: permits('source.clear', id), nodeBind: permits('server.bind', id),
+    }])) }
+    const catalog = url.searchParams.get('includeAvailableServices') === '1'
+    if (catalog) {
+      if (!explicit) fail(400, 'DEPLOYMENT_ENVIRONMENT_REQUIRED', '请选择配置服务的环境')
+      authorize('configure', explicit)
+    }
     if (!store)
       return {
         status: 200,
@@ -55,7 +89,7 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
         },
       }
     await store.ensureProject(project)
-    return { status: 200, body: store.overview(project, environmentIds) }
+    return { status: 200, body: { ...store.overview(project, environmentIds, { catalog }), capabilities } }
   }
   if (!store) fail(503, 'DEPLOYMENT_DISABLED', '部署验证尚未启用')
   await store.ensureProject(project)
@@ -187,7 +221,7 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
     return { status: 202, body: await store.createTask(projectId, body, principal) }
   }
   if (method === 'GET' && parts.length === 2 && parts[0] === 'tasks') {
-    requireEnvironment(store.taskScope(projectId, parts[1]).environmentId)
+    authorize('read', requireEnvironment(store.taskScope(projectId, parts[1]).environmentId))
     return {
       status: 200,
       body: await store.taskDetails(
@@ -198,7 +232,7 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
     }
   }
   if (method === 'GET' && parts.length === 3 && parts[0] === 'targets' && parts[2] === 'releases') {
-    requireEnvironment(store.targetScope(projectId, parts[1]).environmentId)
+    authorize('read', requireEnvironment(store.targetScope(projectId, parts[1]).environmentId))
     return {
       status: 200,
       body: store.releases(

@@ -12,7 +12,9 @@ export interface DeploymentStore {
   ): import('../../autoops/contracts/project-directory.ts').DeletionBlocker[]
   initialize(): Promise<DeploymentStore>
   ensureProject(project: AutoOpsProject): Promise<void>
-  overview(project: AutoOpsProject, environmentIds: string[]): DeploymentOverview
+  overview(project: AutoOpsProject, environmentIds: string[], options?: { catalog?: boolean }): DeploymentOverview
+  requestReceipt(projectId: string, id: string, principal: AutoOpsPrincipal): import('../../autoops/contracts/deployments.ts').DeploymentRequestReceipt & { action?: import('../../autoops/contracts/project-access.ts').DeploymentAction }
+  removeEnvironmentService(projectId: string, serviceId: string, environmentId: string, input: Record<string, unknown>): Promise<{ deleted: true; id: string; environmentId: string }>
   createServer(
     projectId: string,
     input: Record<string, unknown>,

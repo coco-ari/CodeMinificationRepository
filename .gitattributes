@@ -2,3 +2,5 @@
 *.pdf binary
 # Linux 安装脚本统一使用 LF，避免 Windows 检出产生无效的 Bash 选项。
 *.sh text eol=lf
+# 旧发行源码夹具校验原始摘要，检出时保留 Git 中的 LF 字节。
+test/fixtures/deployment-projects-27fa5b34/deployment-projects.mjs text eol=lf

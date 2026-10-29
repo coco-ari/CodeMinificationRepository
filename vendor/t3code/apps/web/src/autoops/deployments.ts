@@ -1,4 +1,10 @@
 import { autoOpsRequest, AutoOpsRequestError } from './apiClient'
+import type { DeploymentRequestReceipt } from '../../../../../../autoops/contracts/deployments.ts'
+export type {
+  DeploymentRequestReceipt,
+  DeploymentSourceRef,
+  DeploymentCapabilities,
+} from '../../../../../../autoops/contracts/deployments.ts'
 import type {
   DeploymentRepositoryRefs,
   DeploymentRepositoryHistory,
@@ -86,12 +92,41 @@ async function request<T>(
   }
 }
 
-export const loadDeployments = (projectId: string, environmentId?: string, signal?: AbortSignal) =>
+export const loadDeployments = (
+  projectId: string,
+  environmentId?: string,
+  signal?: AbortSignal,
+  catalog = false,
+) =>
   request<DeploymentOverview>(
     projectId,
-    environmentId ? `?environmentId=${encodeURIComponent(environmentId)}` : '',
+    environmentId
+      ? `?environmentId=${encodeURIComponent(environmentId)}${catalog ? '&includeAvailableServices=1' : ''}`
+      : '',
     undefined,
     signal,
+  )
+export const loadDeploymentRequest = async (projectId: string, requestId: string) => {
+  const result = await autoOpsRequest<DeploymentRequestReceipt>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/deployments/requests/${encodeURIComponent(requestId)}`,
+    { label: '部署结果' },
+  )
+  if (
+    result?.requestId !== requestId ||
+    !['not_observed', 'accepted', 'completed'].includes(result.state)
+  )
+    throw new DeploymentRequestError('原请求结果格式无法核对，请稍后再检查。', true)
+  return result
+}
+export const removeEnvironmentDeploymentService = (
+  projectId: string,
+  environmentId: string,
+  serviceId: string,
+  input: { requestId: string; configKey: string },
+) =>
+  autoOpsRequest<{ deleted: true }>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(environmentId)}/deployment-services/${encodeURIComponent(serviceId)}`,
+    { label: '移除环境服务', method: 'DELETE', body: input },
   )
 export const createDeploymentTarget = (projectId: string, input: DeploymentTargetSubmission) =>
   request<{ target: DeploymentTarget }>(projectId, '/targets', input)

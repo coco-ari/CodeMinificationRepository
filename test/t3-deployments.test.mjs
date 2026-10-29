@@ -227,9 +227,24 @@ test('真实角色经 HTTP 与引擎同源裁决环境覆盖，伪造环境和�
   const server = (await provisionNode(f, { name: '生产隔离节点', environmentId: 'env-two', requestId: randomUUID() }, platformPrincipal)).server
   const production = (await f.request('/targets', 'POST', { ...r.targetInput, name: '生产隔离目标', serverId: server.id, environmentId: 'env-two', requestId: randomUUID() })).body.target
   Object.assign(membership, { role: 'developer', environmentRoles: { 'env-one': 'release_operator', 'env-two': 'reader' } })
+  const scoped = (await f.request('?environmentId=env-one')).body
+  assert.equal(scoped.capabilities.serviceManage, false)
+  assert.equal(scoped.capabilities.environments['env-one'].configure, true)
+  assert.equal(scoped.capabilities.environments['env-one'].publish, true)
+  assert.deepEqual(scoped.services.map(row => row.id), [r.target.serviceId])
+  const readOnly = (await f.request('?environmentId=env-two')).body
+  assert.equal(readOnly.capabilities.environments['env-two'].publish, false)
+  assert.equal(readOnly.capabilities.environments['env-two'].configure, false)
+  await assert.rejects(f.request('?environmentId=env-two&includeAvailableServices=1'), { code: 'DEPLOYMENT_ACTION_FORBIDDEN' })
+  const reusable = (await f.request('?environmentId=env-one&includeAvailableServices=1')).body
+  assert.ok(reusable.availableServices.some(row => row.id === production.serviceId))
+  assert.ok(reusable.targets.every(row => row.environmentId === 'env-one'))
   const input = { targetId: r.target.id, action: 'deploy', service: 'frontend', packageId: r.pack.id, configKey: r.target.configKey, requestId: randomUUID() }
   const task = (await f.request('/tasks', 'POST', input)).body.task
   assert.equal(task.environmentId, 'env-one')
+  const receipt = await handleDeploymentRequest({ access: realAccess, store: f.store, principal: realPrincipal, url: new URL(`http://demo/api/v1/projects/p-one/deployments/requests/${input.requestId}`), method: 'GET' })
+  assert.equal(receipt.body.state, 'accepted')
+  assert.equal(receipt.body.result.task.id, task.id)
   assert.equal((await f.request(`/tasks/${task.id}`)).body.task.id, task.id)
   const forged = { ...input, targetId: production.id, configKey: production.configKey, requestId: randomUUID(), environmentId: 'env-one' }
   await assert.rejects(f.request('/tasks', 'POST', forged), { code: 'DEPLOYMENT_ACTION_FORBIDDEN' })

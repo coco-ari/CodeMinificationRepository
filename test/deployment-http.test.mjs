@@ -54,7 +54,7 @@ function fixture() {
       principal,
       method,
       input,
-      url: new URL(`http://localhost/autoops/projects/project/deployments${suffix}`),
+      url: new URL(suffix.startsWith('/api/v1/') ? `http://localhost${suffix}` : `http://localhost/autoops/projects/project/deployments${suffix}`),
     })
   return { user, member, principal, store, file, request }
 }
@@ -131,4 +131,40 @@ test('历史清理使用当前可信操作者与目标环境，伪造正文不�
     status: 404,
     code: 'PROJECT_NOT_FOUND',
   })
+})
+
+test('原请求查询按原动作和环境重新授权，未知结果不冒充失败', async () => {
+  const f = fixture()
+  f.member.role = 'release_operator'
+  f.store.requestReceipt = (projectId, id, actor) => {
+    assert.equal(projectId, 'project'); assert.equal(actor.id, 'manager')
+    return { requestId: id, state: 'accepted', action: 'publish', operation: 'task', environmentId: 'test', actorId: 'manager', result: { task: { id: 'original-task' } } }
+  }
+  const path = '/api/v1/projects/project/deployments/requests/original-request'
+  const result = (await f.request(path)).body
+  assert.equal(result.state, 'accepted')
+  assert.equal(result.result.task.id, 'original-task')
+  assert.equal(result.action, undefined); assert.equal(result.actorId, undefined)
+  f.member.role = 'reader'
+  await assert.rejects(f.request(path), { status: 403 })
+  f.store.requestReceipt = (_project, requestId) => ({ requestId, state: 'not_observed' })
+  assert.deepEqual((await f.request(path)).body, { requestId: 'original-request', state: 'not_observed' })
+})
+
+test('环境移除入口校验配置权限并覆盖伪造操作人，不授予共享服务管理权', async () => {
+  const f = fixture()
+  f.member.role = 'release_operator'
+  let writes = 0
+  f.store.removeEnvironmentService = async (projectId, serviceId, environmentId, input) => {
+    writes++; assert.equal(projectId, 'project'); assert.equal(serviceId, 'service'); assert.equal(environmentId, 'test')
+    assert.deepEqual(input.actor, { id: 'manager', displayName: '项目管理者' })
+    return { deleted: true, id: serviceId, environmentId }
+  }
+  const path = '/api/v1/projects/project/environments/test/deployment-services/service'
+  assert.equal((await f.request(path, 'DELETE', { requestId: 'original', configKey: 'key', actor: { id: 'admin' } })).status, 200)
+  f.member.role = 'reader'
+  await assert.rejects(f.request(path, 'DELETE', {}), { status: 403 })
+  assert.equal(writes, 1)
+  f.member.role = 'release_operator'
+  await assert.rejects(f.request('/services', 'POST', { name: '伪造共享服务' }), { status: 403 })
 })

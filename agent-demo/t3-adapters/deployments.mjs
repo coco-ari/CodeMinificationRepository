@@ -44,11 +44,13 @@ function submissionFingerprint(projectId, input, actorId) {
     }) : input.sourceSelection.sources,
     Array.isArray(input.sourceSelection.contexts) ? input.sourceSelection.contexts.map(context => [context?.service, context?.root, context?.workingDirectory]) : input.sourceSelection.contexts,
   ] : null
-  return sha(JSON.stringify([projectId, input.targetId, input.action, input.service, input.configKey, input.packageId || null, input.releaseId || null, selection, actorId]))
+  const fields = [projectId, input.targetId, input.action, input.service, input.configKey, input.packageId || null, input.releaseId || null, selection, actorId]
+  if (input.sourceRefs !== undefined) fields.push(input.sourceRefs)
+  return sha(JSON.stringify(fields))
 }
 function safeRelease(value) {
   if (!value) return value
-  return {...pick(value, ['id', 'targetId', 'kind', 'action', 'revision', 'commitSubject', 'createdAt', 'available', 'current', 'archiveStatus', 'archiveProtected', 'config', 'restoredFromReleaseId', 'recoveryMethod', 'artifactId', 'artifact', 'sourceClearedAt', 'buildSnapshot']), ...(value.sourceIdentity ? {sourceIdentity:safeIdentity(value.sourceIdentity)} : {}), ...(value.sourceSelection ? {sourceSelection:safeSelection(value.sourceSelection)} : {}), ...(value.actor ? {actor:safeActor(value.actor)} : {})}
+  return {...pick(value, ['id', 'targetId', 'kind', 'action', 'revision', 'commitSubject', 'createdAt', 'available', 'current', 'archiveStatus', 'archiveProtected', 'config', 'restoredFromReleaseId', 'recoveryMethod', 'artifactId', 'artifact', 'sourceClearedAt', 'buildSnapshot', 'sourceRefs']), ...(value.sourceIdentity ? {sourceIdentity:safeIdentity(value.sourceIdentity)} : {}), ...(value.sourceSelection ? {sourceSelection:safeSelection(value.sourceSelection)} : {}), ...(value.actor ? {actor:safeActor(value.actor)} : {})}
 }
 function safeResult(value) {
   if (!value || typeof value !== 'object') return undefined
@@ -62,7 +64,7 @@ function safeResult(value) {
   return result
 }
 function safeTask(value, environmentId) {
-  return {...pick(value, ['id', 'targetId', 'serverId', 'action', 'status', 'stage', 'stageHistory', 'createdAt', 'updatedAt', 'startedAt', 'finishedAt', 'error', 'revision', 'commitSubject', 'config', 'lastSeq', 'requestId', 'detailedAgentStages', 'recoveryAllowed', 'recoveryMethod']), environmentId,
+  return {...pick(value, ['id', 'targetId', 'serverId', 'action', 'status', 'stage', 'stageHistory', 'createdAt', 'updatedAt', 'startedAt', 'finishedAt', 'error', 'revision', 'commitSubject', 'config', 'lastSeq', 'requestId', 'detailedAgentStages', 'recoveryAllowed', 'recoveryMethod', 'sourceRefs']), environmentId,
     ...(value.sourceIdentity ? {sourceIdentity:safeIdentity(value.sourceIdentity)} : {}), ...(value.actor ? {actor:safeActor(value.actor)} : {}), ...(value.result ? {result:safeResult(value.result)} : {}), ...(value.release ? {release:safeRelease(value.release)} : {}), ...(value.previousRelease ? {previousRelease:safeRelease(value.previousRelease)} : {})}
 }
 
@@ -122,7 +124,9 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
   const targetDto = (projectId, id) => {
     const {target, service, environmentId} = ownedTarget(projectId, id)
     const observedAt = Date.parse(target.lastObservedAt), observation = safeObservation(target.observation, target)
+    const staticRoot = service.kind === 'static' ? deployment.projects.server(projectId, target.serverId).staticRoot : null
     return {...pick(target, ['id', 'serviceId', 'serverId', 'createdAt', 'updatedAt', 'lastDeployedAt', 'networkIdentity']), name:service.name, environmentId, kind:service.kind, service:service.kind === 'java' ? 'backend' : 'frontend', config:deployment.effectiveConfig(id), configKey:deployment.configKey(id), currentRelease:safeRelease(target.currentRelease),
+      ...(service.kind === 'static' ? { staticServingPath: staticRoot ? `${staticRoot}/${target.id}/current` : null } : {}),
       observation, lastObservedAt:Number.isFinite(observedAt) ? target.lastObservedAt : null, observationStale:!observation || !Number.isFinite(observedAt) || Date.now() - observedAt > 60_000 || observedAt > Date.now()}
   }
   const taskDto = (projectId, task) => safeTask(task, ownedTarget(projectId, task.targetId).environmentId)
@@ -208,12 +212,31 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
       const pending = projectInitializations.get(projectId) ?? 0
       return [...(pending ? [{kind:'deployment-initializing',count:pending,message:'部署目录正在初始化'}] : []),...deployment.projects.deletionReferences(projectId,environmentId)]
     },
-    overview(project, environmentIds) {
+    overview(project, environmentIds, { catalog = false } = {}) {
       const all = deployment.projects.snapshot(project.id), map = all.mapping, allowed = new Set(environmentIds)
       const targets = all.targets.filter((item) => item.applicationId === map.applicationId).map((item) => targetDto(project.id, item.id)).filter((item) => allowed.has(item.environmentId)), ids = new Set(targets.map((item) => item.id))
       const scopedTasks = all.tasks.filter((item) => ids.has(item.targetId))
       const tasks = scopedTasks.filter((item, index) => index >= scopedTasks.length - 200 || !['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(item.status)).reverse().map((item) => taskDto(project.id, item))
-      return {enabled:true, environments:project.environments.filter((item) => allowed.has(item.id)).map((item) => ({id:item.id, name:item.name})), servers:map.servers.filter(bound => allowed.has(bound.environmentId)).flatMap(bound => { const server = all.servers.find(item => item.id === bound.serverId); return server ? [safeServer(server, bound.environmentId)] : [] }), services:all.services.map(item => pick(item, ['id', 'name', 'kind', 'module', 'configKey'])), serviceSources:all.serviceSources.filter(item => allowed.has(item.environmentId)), targets, tasks}
+      const serviceSources = all.serviceSources.filter(item => allowed.has(item.environmentId))
+      const idsInEnvironment = new Set([...targets.map(item => item.serviceId), ...serviceSources.map(item => item.serviceId)])
+      const services = all.services.filter(item => idsInEnvironment.has(item.id)).map(item => ({ ...pick(item, ['id', 'name', 'kind', 'module', 'configKey']), hasTargets: all.targets.some(target => target.serviceId === item.id) }))
+      const configuration = Object.fromEntries(environmentIds.flatMap(environmentId => services.filter(item => targets.some(row => row.serviceId === item.id && row.environmentId === environmentId) || serviceSources.some(row => row.serviceId === item.id && row.environmentId === environmentId)).map(item => [environmentId + ':' + item.id, {
+        missing: [...(!serviceSources.some(row => row.serviceId === item.id && row.environmentId === environmentId) ? ['source'] : []), ...(!targets.some(row => row.serviceId === item.id && row.environmentId === environmentId) ? ['target'] : [])],
+        configKey: deployment.projects.environmentConfigurationKey(project.id, item.id, environmentId),
+      }])))
+      return {enabled:true, environments:project.environments.filter((item) => allowed.has(item.id)).map((item) => ({id:item.id, name:item.name})), servers:map.servers.filter(bound => allowed.has(bound.environmentId)).flatMap(bound => { const server = all.servers.find(item => item.id === bound.serverId); return server ? [safeServer(server, bound.environmentId)] : [] }), services, serviceSources, targets, tasks, configuration,
+        ...(catalog ? { availableServices: all.services.map(item => ({ ...pick(item, ['id', 'name', 'kind', 'module', 'configKey']), hasTargets: all.targets.some(target => target.serviceId === item.id) })) } : {}) }
+    },
+    requestReceipt(projectId, id, principal) {
+      const receipt = deployment.projects.requestReceipt(projectId, id, principal.id)
+      if (receipt.state !== 'not_observed') return receipt
+      const task = deployment.projects.taskForRequest(projectId, id)
+      if (!task || task.actor?.id !== principal.id) return receipt
+      const scope = ownedTarget(projectId, task.targetId)
+      return { state: 'accepted', requestId: id, operation: 'task', action: task.action === 'deploy' ? 'publish' : task.action, environmentId: scope.environmentId, result: { task: taskDto(projectId, task) } }
+    },
+    removeEnvironmentService(projectId, serviceId, environmentId, input) {
+      return accept(() => deployment.projects.removeEnvironmentService(projectId, serviceId, environmentId, input))
     },
     availableServers(projectId) { return servers.availableServers(projectId) },
     globalNodeCatalog(principal) { access.requireDeploymentNodeManager(principal); const value = deployment.projects.globalNodeCatalog({ actor: safeActor(principal) }); return { ...value, installation, servers: value.servers.map(server => safeServer(server)) } },
@@ -296,7 +319,7 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
           const selection = input.sourceSelection || deployment.projects.serviceSource(projectId, service.id, environmentId)
           if (!selection) fail(400, 'DEPLOYMENT_SOURCE_REQUIRED', '请先选择发布源码')
           validateSources(projectId, selection, principal.id)
-          const task = await deployment.createTaskFromWorkspaceSource({projectId, sourceSelection:pick(selection, ['sources', 'contexts']), targetId:target.id, requestId:input.requestId, configKey:input.configKey, submissionFingerprint:fingerprint, actor})
+          const task = await deployment.createTaskFromWorkspaceSource({projectId, sourceSelection:pick(selection, ['sources', 'contexts']), sourceRefs:input.sourceRefs, targetId:target.id, requestId:input.requestId, configKey:input.configKey, submissionFingerprint:fingerprint, actor})
           return {task:taskDto(projectId, task)}
         }
         const prepared = await preparePackage(projectId, input.packageId, role, deployment.effectiveConfig(target.id).module)

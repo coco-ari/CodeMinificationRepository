@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { environmentNodesHref, nodePageHref, type NodePageSearch } from './deployment/deploymentNodeNavigation'
+import { environmentNodesHref, nodePageHref, type NodePageSearch } from './deployment'
 import { ServerIcon } from 'lucide-react'
 import { SidebarInset } from '~/components/ui/sidebar'
 import { WorkspacePageContainer } from '~/components/WorkspacePageContainer'
