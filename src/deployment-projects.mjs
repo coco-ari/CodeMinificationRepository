@@ -64,6 +64,7 @@ export function createProjectDeployments({
   saveEntity,
   configKey,
   insertServer,
+  renewRegistration,
   publicServer,
   revokeServer,
   deleteServer,
@@ -158,19 +159,20 @@ export function createProjectDeployments({
       value.projectId !== projectId || !Array.isArray(value.fields))
       fail(503, 'DEPLOYMENT_RECEIPT_INVALID', '节点原收据范围不可核对，操作仍待确认')
     if (typeof input.actor?.id !== 'string' || value.actorId !== input.actor.id) return null
-    const globalOperations = { 'create-global-server': 'create', 'global-server-revoke': 'revoke', 'global-server-delete': 'delete', 'global-server-storage': 'storage', 'server-project-access': 'access' }
+    const globalOperations = { 'create-global-server': 'create', 'global-server-revoke': 'revoke', 'global-server-delete': 'delete', 'global-server-storage': 'storage', 'server-project-access': 'access', 'assign-server': 'assign', 'renew-server-registration': 'registration' }
     const operation = projectId === null ? globalOperations[value.operation] : ({ 'bind-server': 'bind', 'unbind-server': 'unbind' })[value.operation]
     if (!operation) fail(503, 'DEPLOYMENT_RECEIPT_INVALID', '节点原收据操作不可核对，操作仍待确认')
     const environmentId = projectId === null ? null : value.fields[1]
     if (projectId !== null && environmentId !== input.environmentId) return null
     const publicIntent = operation === 'create' ? { name: value.fields[0] }
+      : operation === 'assign' ? { serverId: value.fields[0], projectId: value.fields[1], environmentIds: value.fields[2], expectedRevision: value.fields[3] }
       : operation === 'access' ? { projectId: value.fields[0], serverId: value.fields[1], allowed: value.fields[2], expectedRevision: value.fields[3] }
       : operation === 'storage' ? { serverId: value.fields[0], expectedRevision: value.fields[1], retainedVersions: value.fields[2], buildCacheGiB: value.fields[3] }
       : operation === 'bind' || operation === 'unbind' ? { serverId: value.fields[0], environmentId }
       : { serverId: value.fields[0] }
     return { state: 'completed', requestId: saved.requestId, operation, projectId, environmentId,
       serverId: operation === 'create' ? saved.result.id : operation === 'access' ? value.fields[1] : value.fields[0],
-      ...(operation === 'access' ? { targetProjectId: value.fields[0] } : {}), publicIntent, result: copy(saved.result) }
+      ...(operation === 'access' ? { targetProjectId: value.fields[0] } : operation === 'assign' ? { targetProjectId: value.fields[1] } : {}), publicIntent, result: copy(saved.result) }
   }
   function sourceKey(value) { return digest(JSON.stringify([value.serviceId, value.environmentId, value.sources, value.contexts])) }
   function serviceSource(projectId, serviceId, environmentId, state = store.state) {
@@ -362,6 +364,50 @@ export function createProjectDeployments({
         return created ?? { server: saved, registrationToken: null, expiresAt: null, repeated: true }
       })
       changed('server', result.server.id); return result
+    },
+    async renewServerRegistration(serverId, input) {
+      const result = await store.change(state => {
+        authorize(null, 'server.admin', input)
+        let issued
+        const saved = nodeReceipt(nodeReceipts(state), 'renew-server-registration', input, [serverId], () => {
+          globalServer(serverId, state)
+          issued = renewRegistration(state, serverId)
+          return publicServer(issued.server)
+        })
+        return issued ?? { server: saved, registrationToken: null, expiresAt: null, repeated: true }
+      })
+      changed('server', serverId)
+      return result
+    },
+    async assignServer(serverId, input) {
+      if (!Array.isArray(input.environmentIds) || input.environmentIds.length > 50 || new Set(input.environmentIds).size !== input.environmentIds.length)
+        fail(400, 'DEPLOYMENT_ASSIGNMENT_INVALID', '环境选择无效或重复')
+      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)
+        fail(400, 'DEPLOYMENT_ASSIGNMENT_INVALID', '缺少有效的项目授权版本')
+      const result = await store.change(state => {
+        authorize(null, 'server.admin', input)
+        // 全部环境先校验，再在同一事务内写入授权及绑定，避免半成功。
+        for (const id of input.environmentIds) authorize(input.projectId, 'server.bind', input, id)
+        return nodeReceipt(nodeReceipts(state), 'assign-server', input, [serverId, input.projectId, input.environmentIds, input.expectedRevision], () => {
+          const map = mapping(input.projectId, state), selected = globalServer(serverId, state)
+          if (map.nodeAccessRevision !== input.expectedRevision) fail(409, 'DEPLOYMENT_SERVER_ACCESS_CHANGED', '项目授权已变化，请刷新并重新确认分配')
+          if (selected.revoked || selected.deleting || selected.mode !== 'managed') fail(409, 'DEPLOYMENT_SERVER_UNAVAILABLE', '节点已撤销或正在删除，不能分配')
+          for (const id of input.environmentIds) environment(map, id)
+          let updated = false
+          if (!map.allowedServerIds.includes(serverId)) { map.allowedServerIds.push(serverId); updated = true }
+          for (const id of input.environmentIds) {
+            if (!map.servers.some(bound => bound.serverId === serverId && bound.environmentId === id)) {
+              map.servers.push({ serverId, environmentId: id }); updated = true
+            }
+          }
+          if (input.environmentIds.length && !state.deployments.serverBindings.some(bound => bound.serverId === serverId && bound.applicationId === map.applicationId))
+            state.deployments.serverBindings.push({ serverId, applicationId: map.applicationId, createdAt: now() })
+          if (updated) map.nodeAccessRevision++
+          return { serverId, projectId: input.projectId, environmentIds: [...input.environmentIds], revision: map.nodeAccessRevision }
+        })
+      })
+      changed('server-access', serverId)
+      return result
     },
     async mutateGlobalServer(serverId, operation, input) {
       if (!['revoke', 'delete', 'storage'].includes(operation))

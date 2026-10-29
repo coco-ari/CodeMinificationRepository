@@ -25,7 +25,7 @@ test('旧项目节点登记只能恢复原收据，共享绑定仍须明确项�
   await assert.rejects(servers.createServer('p-one', input), {status:410,code:'DEPLOYMENT_NODE_ROUTE_RETIRED'})
   const created = await deployment.projects.createServer('p-one', input)
   assert.equal(deployment.projects.globalNodeCatalog(mutation({})).projectAccess.find(entry => entry.projectId === 'p-one').revision, 2)
-  assert.match(created.installCommand, /^curl -fsS 'https:\/\/deploy\.example\.invalid\/agent\/install\.sh'/)
+  assert.match(created.installCommand, /curl -fsS --proto '=https' --tlsv1\.2 'https:\/\/deploy\.example\.invalid\/agent\/install\.sh'/)
   assert.equal(typeof created.registrationToken, 'string')
   const repeated = await servers.createServer('p-one', input)
   assert.equal(repeated.server.id, created.server.id)

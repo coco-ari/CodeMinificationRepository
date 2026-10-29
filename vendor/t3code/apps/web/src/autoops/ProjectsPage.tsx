@@ -67,6 +67,7 @@ import {
   ProjectSettingsTarget,
 } from './ProjectSettingsNavigation'
 import { DeploymentServers } from './deployment'
+import { environmentNodesHref, nodePageHref } from './deployment/deploymentNodeNavigation'
 import {
   ProjectRemovalAction,
   ProjectRemovalDialog,
@@ -124,7 +125,7 @@ function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolea
   const host = useAutoOpsHost()
   const location = useLocation()
   const navigate = useNavigate()
-  const search = location.search as { projectId?: string; section?: string; from?: string }
+  const search = location.search as { projectId?: string; section?: string; from?: string; nodeEnvironmentId?: string }
   const explicit = search.projectId
   const hasExplicitProject = Object.hasOwn(search, 'projectId')
   const selected = host?.projects.find((project) => project.id === explicit)
@@ -141,6 +142,12 @@ function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolea
   const [configurationRevision, setConfigurationRevision] = useState(0)
   const [repositorySummary, setRepositorySummary] = useState<RepositorySetupSummary | null>(null)
   const [assistantSummary, setAssistantSummary] = useState<AssistantSetupSummary | null>(null)
+  useEffect(() => {
+    if (!search.nodeEnvironmentId) { setNodeScope(null); return }
+    if (explicit && manageable && selected?.environments.some(value => value.id === search.nodeEnvironmentId)) {
+      setNodeScope({ scope: 'project', projectId: explicit, environmentId: search.nodeEnvironmentId })
+    } else { setNodeScope(null); setError('返回的环境不存在或无权访问，请重新选择环境。') }
+  }, [explicit, manageable, search.nodeEnvironmentId, selected])
   const readPending = () => readPendingProjectWrite(explicit ? { projectId: explicit } : undefined)
   const [pending, setPending] = useState(readPending)
   const alive = useRef(true)
@@ -191,17 +198,18 @@ function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolea
   }, [load])
   const locatedSection = useRef<string | null>(null)
   useEffect(() => {
+    const section = search.nodeEnvironmentId ? 'environments' : search.section
     if (
       loading ||
       !settings ||
       !manageable ||
-      search.section !== 'git' ||
+      (section !== 'git' && section !== 'environments') ||
       locatedSection.current === location.href
     )
       return
     locatedSection.current = location.href
-    focusProjectSettingsArea('git')
-  }, [loading, settings, manageable, search.section, location.href])
+    focusProjectSettingsArea(section)
+  }, [loading, settings, manageable, search.section, search.nodeEnvironmentId, location.href])
   const go = (id?: string) => {
     if (id) selectAutoOpsProject(id)
     void navigate({ href: id ? `/projects?projectId=${encodeURIComponent(id)}` : '/projects' })
@@ -641,6 +649,7 @@ function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolea
                               variant="ghost"
                               size="sm"
                               aria-label={`管理${env.name}节点`}
+                              id={`deployment-node-trigger-${env.id}`}
                               disabled={busy || !!pending || credentialLocked || removalLocked}
                               onClick={(event) => {
                                 nodeTrigger.current = event.currentTarget
@@ -649,6 +658,7 @@ function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolea
                                   projectId: current!.id,
                                   environmentId: env.id,
                                 })
+                                void navigate({ href: environmentNodesHref({ from: 'projects', projectId: current!.id, environmentId: env.id }) })
                               }}
                             >
                               节点
@@ -773,9 +783,10 @@ function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolea
         <DeploymentServers
           {...nodeScope}
           open
-          finalFocus={nodeTrigger}
+          finalFocus={() => nodeTrigger.current ?? (nodeScope.scope === 'project' ? document.getElementById(`deployment-node-trigger-${nodeScope.environmentId}`) : null)}
+          onManageNodes={nodeScope.scope === 'project' ? (serverId) => void navigate({ href: nodePageHref({ from: 'projects', projectId: nodeScope.projectId, environmentId: nodeScope.environmentId, ...(serverId ? { nodeId: serverId, nodeView: 'details' as const, nodeSection: 'storage' as const } : {}) }) }) : undefined}
           onOpenChange={(value) => {
-            if (!value) setNodeScope(null)
+            if (!value) { setNodeScope(null); void navigate({ href: `/projects?${new URLSearchParams({ projectId: explicit! })}` }) }
           }}
           onAccessDenied={(cause) => {
             setError(cause instanceof Error ? cause.message : '当前节点权限已撤销')

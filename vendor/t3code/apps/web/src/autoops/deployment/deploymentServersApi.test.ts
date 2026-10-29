@@ -98,6 +98,8 @@ it("七类节点收据逐项核对公开原参数，参数篡改及缺失不能�
   const requestId = "original-request", serverId = "node-one";
   const cases: Array<{ pending: DeploymentServerMutation; intent: DeploymentNodeReceipt["publicIntent"]; scope: { projectId?: string; environmentId?: string } }> = [
     { pending: { kind: "create", input: { requestId, name: "原节点" } }, intent: { name: "原节点" }, scope: {} },
+    { pending: { kind: 'registration', serverId, input: { requestId } }, intent: { serverId }, scope: {} },
+    { pending: { kind: 'assign', serverId, input: { requestId, projectId: 'project-one', environmentIds: ['test', 'stage'], expectedRevision: 3 } }, intent: { serverId, projectId: 'project-one', environmentIds: ['test', 'stage'], expectedRevision: 3 }, scope: {} },
     { pending: { kind: "access", serverId, projectId: "project-one", input: { requestId, allowed: true, expectedRevision: 3 } }, intent: { serverId, projectId: "project-one", allowed: true, expectedRevision: 3 }, scope: {} },
     { pending: { kind: "storage", serverId, input: { requestId, expectedRevision: 3, retainedVersions: 4, buildCacheGiB: 6 } }, intent: { serverId, expectedRevision: 3, retainedVersions: 4, buildCacheGiB: 6 }, scope: {} },
     ...(["bind", "unbind"] as const).map(kind => ({ pending: { kind, serverId, input: { requestId, environmentId: "test" } }, intent: { serverId, environmentId: "test" }, scope: { projectId: "project-one", environmentId: "test" } })),
@@ -105,7 +107,7 @@ it("七类节点收据逐项核对公开原参数，参数篡改及缺失不能�
   ];
   for (const { pending, intent, scope } of cases) {
     const original = structuredClone(pending);
-    const receipt: DeploymentNodeReceipt = { state: "completed", requestId, operation: pending.kind, projectId: scope.projectId ?? null, environmentId: scope.environmentId ?? null, serverId, ...(pending.kind === "access" ? { targetProjectId: pending.projectId } : {}), publicIntent: intent, result: { ok: true } };
+    const receipt: DeploymentNodeReceipt = { state: "completed", requestId, operation: pending.kind, projectId: scope.projectId ?? null, environmentId: scope.environmentId ?? null, serverId, ...(pending.kind === "access" ? { targetProjectId: pending.projectId } : pending.kind === 'assign' ? { targetProjectId: pending.input.projectId } : {}), publicIntent: intent, result: { ok: true } };
     expect(matchesDeploymentNodeReceipt(pending, receipt, scope)).toBe(true);
     for (const [key, value] of Object.entries(intent)) {
       const changed = typeof value === "boolean" ? !value : typeof value === "number" ? value + 1 : `${value}-changed`;

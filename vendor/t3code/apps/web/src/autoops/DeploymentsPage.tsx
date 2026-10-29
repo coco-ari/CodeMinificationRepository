@@ -118,12 +118,13 @@ function ProjectDeployments({
   requestedSourceVersionId: string | null | undefined
 }) {
   const navigate = useNavigate()
+  const nodeSearch = useSearch({ strict: false }) as { nodeEnvironmentId?: string }
   const canManage =
     readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.[
       'workspace.manage'
     ] === true
   const [view, setView] = useState<'services' | 'packages'>(() =>
-    requestedSourceVersionId !== undefined || readSelection(projectId, 'view') === 'packages'
+    !nodeSearch.nodeEnvironmentId && (requestedSourceVersionId !== undefined || readSelection(projectId, 'view') === 'packages')
       ? 'packages'
       : 'services',
   )

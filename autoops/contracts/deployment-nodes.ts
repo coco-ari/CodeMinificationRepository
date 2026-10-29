@@ -17,3 +17,9 @@ export const DeploymentNodeProjectAccess = S.Struct({
   allowed: S.Boolean,
   expectedRevision: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1)),
 })
+export const AssignDeploymentNode = S.Struct({
+  ...NodeCommand.fields,
+  projectId: DirectoryId,
+  environmentIds: S.Array(DirectoryId).check(S.isMaxLength(50)),
+  expectedRevision: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1)),
+})

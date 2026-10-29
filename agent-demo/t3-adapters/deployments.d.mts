@@ -41,6 +41,8 @@ export interface DeploymentStore {
     input: Record<string, unknown>,
     principal: AutoOpsPrincipal,
   ): Promise<DeploymentServer | { ok: true }>
+  renewServerRegistration(id: string, input: Record<string, unknown>, principal: AutoOpsPrincipal): Promise<DeploymentServerRegistration>
+  assignServer(id: string, input: Record<string, unknown>, principal: AutoOpsPrincipal): Promise<import('../../autoops/contracts/deployments.ts').DeploymentNodeAssignment>
   setServerAccess(
     projectId: string,
     input: Record<string, unknown>,
@@ -134,7 +136,7 @@ export interface DeploymentStore {
   stopAccepting(): void
   close(): Promise<void>
 }
-export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;workspaceManagement?:WorkspaceManagement;access:Pick<AutoOpsAccess,'requireDeploymentActor'|'requireDeploymentActionForActor'|'requireDeploymentNodeManagerForActor'|'requireDeploymentNodeManager'>;agentPort?:number;installAssetsRoot?:string;publicOrigin?:string}):DeploymentStore;
+export function createDeploymentStore(options:{dataDir:string;workspaceStore:WorkspaceStore;workspaceManagement?:WorkspaceManagement;access:Pick<AutoOpsAccess,'requireDeploymentActor'|'requireDeploymentActionForActor'|'requireDeploymentNodeManagerForActor'|'requireDeploymentNodeManager'>;agentPort?:number;installAssetsRoot?:string;publicOrigin?:string;caPath?:string;caSha256?:string}):DeploymentStore;
 export function configuredDeploymentStore():DeploymentStore|undefined;
 export function configuredDeploymentDeletionReferences(projectId:string,environmentId?:string):import('../../autoops/contracts/project-directory.ts').DeletionBlocker[];
 

@@ -92,9 +92,13 @@ function agentEventTime(task, timestamp, receivedAt) {
 function safeServer(server) {
   const { tokenHash, registrationHash, registrationExpiresAt, ...safe } = server;
   const policy = storagePolicy(server.storagePolicy);
-  const storageState = !server.capabilities?.includes('storage-policy-v1') ? 'unsupported'
+  const online = !server.revoked && !!server.lastSeenAt && Date.now() - Date.parse(server.lastSeenAt) <= 60000;
+  const storageState = !server.registeredAt ? 'pending' : !server.capabilities?.includes('storage-policy-v1') ? 'unsupported'
     : server.storageStatus?.revision === policy.revision ? server.storageStatus.state : server.activeTaskId ? 'waiting' : 'pending';
-  return { ...safe, storagePolicy: policy, storageState, online: !server.revoked && !!server.lastSeenAt && Date.now() - Date.parse(server.lastSeenAt) <= 60000 };
+  return { ...safe, storagePolicy: policy, storageState, online,
+    storageWaitingReason: ['pending', 'waiting'].includes(storageState) ? (!online ? 'offline' : server.activeTaskId ? 'busy' : null) : null,
+    registrationState: server.revoked ? 'revoked' : server.registeredAt ? 'registered' : Date.parse(registrationExpiresAt) > Date.now() ? 'pending' : 'expired',
+    registrationExpiresAt: !server.revoked && !server.registeredAt ? registrationExpiresAt ?? null : null };
 }
 
 function revokeServerRecord(state, id) {
@@ -199,13 +203,21 @@ function insertServer(data, input, origin) {
   const name = requireText(input.name, '服务器名称', 80), mode = managedMode(input.mode);
   if (data.servers.length >= 500) fail('服务器数量已达到上限');
   if (input.applicationId) find(data.applications, input.applicationId, '项目');
-  const registrationToken = randomSecret(), expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
-  const server = { id: randomUUID(), name, mode, createdAt: now(), registrationHash: digest(registrationToken), registrationExpiresAt: expiresAt,
+  const server = { id: randomUUID(), name, mode, createdAt: now(),
     registeredAt: null, lastSeenAt: null, version: null, revoked: false, metrics: null, containers: [] };
   data.servers.push(server);
   if (input.applicationId) data.serverBindings.push({ applicationId: input.applicationId, serverId: server.id, createdAt: now() });
-  return { server: structuredClone(safeServer(server)), registrationToken, expiresAt,
-    installCommand: origin ? `curl -fsS '${origin}/agent/install.sh' -o /tmp/cmr-agent-install.sh && sudo bash /tmp/cmr-agent-install.sh --url '${origin}' --token '${registrationToken}'` : null };
+  return issueRegistration(server, origin);
+}
+
+function issueRegistration(server, origin) {
+  if (server.registeredAt || server.revoked || server.deleting) throw new HttpError(409, '节点已注册、已撤销或正在删除，不能重新生成接入口令');
+  const registrationToken = randomSecret(), expiresAt = new Date(Date.now() + 15 * 60000).toISOString();
+  server.registrationHash = digest(registrationToken);
+  server.registrationExpiresAt = expiresAt;
+  // 独立临时文件避免其他账号安装后留下的固定文件阻止重试；子 Shell 保留失败退出码。
+  const installCommand = origin ? `(cmr_installer=$(mktemp /tmp/cmr-agent-install.XXXXXX) && trap 'rm -f -- "$cmr_installer"' EXIT && curl -fsS --proto '=https' --tlsv1.2 '${origin}/agent/install.sh' -o "$cmr_installer" && sudo bash "$cmr_installer" --url '${origin}' --token '${registrationToken}')` : null;
+  return { server: structuredClone(safeServer(server)), registrationToken, expiresAt, installCommand };
 }
 
 // 旧入口与项目用例复用同一事务规则，避免配置和归属校验产生两套实现。
@@ -334,6 +346,7 @@ export class DeploymentService extends EventEmitter {
       authorizeMutation: authorizeProjectMutation,
       cleanupTasks: (ids) => this.cleanupDeletedTasks(ids),
       insertServer: (data, input) => insertServer(data, input, this.publicOrigin),
+      renewRegistration: (state, serverId) => issueRegistration(find(state.deployments.servers, serverId, '服务器'), this.publicOrigin),
       changed: (type, id) => this.changed(type, id),
     })
   }

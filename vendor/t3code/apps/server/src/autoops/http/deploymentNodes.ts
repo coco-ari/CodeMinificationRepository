@@ -9,13 +9,14 @@ import {
   RegisterDeploymentNode,
   DeploymentNodePolicy,
   DeploymentNodeProjectAccess,
+  AssignDeploymentNode,
 } from '../../../../../../../autoops/contracts/deployment-nodes.ts'
 import { configuredDeploymentStore } from '../../../../../../../agent-demo/t3-adapters/deployments.mjs'
 import { responseError } from './responses.ts'
 import type { BusinessHttpContext } from './context.ts'
 
 export function deploymentNodesRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'list' | 'receipt' | 'create' | 'revoke' | 'delete' | 'storage' | 'project') =>
+  const handle = (operation: 'list' | 'receipt' | 'create' | 'revoke' | 'delete' | 'storage' | 'project' | 'assign' | 'registration') =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -81,6 +82,15 @@ export function deploymentNodesRoutes({ access, principal }: BusinessHttpContext
       if (operation === 'create') {
         const input = yield* parse(RegisterDeploymentNode)
         result = yield* Effect.tryPromise(() => store.createGlobalServer(input, current))
+      } else if (operation === 'registration') {
+        const input = yield* parse(NodeCommand)
+        result = yield* Effect.tryPromise(() => store.renewServerRegistration(serverId, input, current))
+      } else if (operation === 'assign') {
+        const input = yield* parse(AssignDeploymentNode)
+        const project = yield* Effect.try(() => access.requireProject(current, input.projectId))
+        yield* Effect.tryPromise(() => store.ensureProject(project))
+        yield* Effect.try(check)
+        result = yield* Effect.tryPromise(() => store.assignServer(serverId, { ...input, environmentIds: [...input.environmentIds] }, current))
       } else if (operation === 'project') {
         const input = yield* parse(DeploymentNodeProjectAccess)
         const projectId = yield* Effect.try(() => decodeURIComponent(parts[5] ?? ''))
@@ -113,6 +123,8 @@ export function deploymentNodesRoutes({ access, principal }: BusinessHttpContext
     HttpRouter.add('GET', '/autoops/deployment-servers', handle('list')),
     HttpRouter.add('GET', '/autoops/deployment-servers/receipts/:requestId', handle('receipt')),
     HttpRouter.add('POST', '/autoops/deployment-servers', handle('create')),
+    HttpRouter.add('POST', '/autoops/deployment-servers/:serverId/assignments', handle('assign')),
+    HttpRouter.add('POST', '/autoops/deployment-servers/:serverId/registration', handle('registration')),
     HttpRouter.add('POST', '/autoops/deployment-servers/:serverId/revoke', handle('revoke')),
     HttpRouter.add('DELETE', '/autoops/deployment-servers/:serverId', handle('delete')),
     HttpRouter.add(

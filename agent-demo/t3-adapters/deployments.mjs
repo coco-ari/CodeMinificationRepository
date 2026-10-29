@@ -9,7 +9,7 @@ import { handleAgentRequest } from '../../src/deploy-http.mjs'
 import { configuredWorkspaceStore } from './workspaces.mjs'
 import { configuredAutoOpsAccess } from './access.mjs'
 import { configuredWorkspaceManagement } from './workspace-management.ts'
-import { createDeploymentServers, deploymentServerDto as safeServer } from './deployment-servers.mjs'
+import { createDeploymentServers, deploymentServerDto as safeServer, deploymentInstallationInfo } from './deployment-servers.mjs'
 import { handleInstallRequest } from '../../src/install-http.mjs'
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), {status, code}) }
@@ -67,10 +67,11 @@ function safeTask(value, environmentId) {
 }
 
 
-export function createDeploymentStore({dataDir, workspaceStore, workspaceManagement, access, agentPort, installAssetsRoot, publicOrigin = ''} = {}) {
+export function createDeploymentStore({dataDir, workspaceStore, workspaceManagement, access, agentPort, installAssetsRoot, publicOrigin = '', caPath = '', caSha256 = ''} = {}) {
   if (!dataDir || !workspaceStore) fail(500, 'DEPLOYMENT_NOT_CONFIGURED', '部署验证存储尚未配置')
   if (!access || typeof access.requireDeploymentActor !== 'function' || typeof access.requireDeploymentActionForActor !== 'function') fail(500, 'DEPLOYMENT_AUTHORIZATION_REQUIRED', '部署任务和写入必须配置当前授权检查')
   const directory = join(resolve(dataDir), 'deployment-center')
+  const installation = deploymentInstallationInfo(publicOrigin, caPath, caSha256)
   const denied = async () => fail(403, 'DEPLOYMENT_GIT_DISABLED', '部署只接受已经固定 Git 提交与构建上下文的源码包')
   const repository = new RepositoryService({directory, builder:{initialize:async () => {}, build:denied, history:denied, branches:denied}})
   const deployment = new DeploymentService(repository, {publicOrigin,
@@ -215,11 +216,11 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
       return {enabled:true, environments:project.environments.filter((item) => allowed.has(item.id)).map((item) => ({id:item.id, name:item.name})), servers:map.servers.filter(bound => allowed.has(bound.environmentId)).flatMap(bound => { const server = all.servers.find(item => item.id === bound.serverId); return server ? [safeServer(server, bound.environmentId)] : [] }), services:all.services.map(item => pick(item, ['id', 'name', 'kind', 'module', 'configKey'])), serviceSources:all.serviceSources.filter(item => allowed.has(item.environmentId)), targets, tasks}
     },
     availableServers(projectId) { return servers.availableServers(projectId) },
-    globalNodeCatalog(principal) { access.requireDeploymentNodeManager(principal); const value = deployment.projects.globalNodeCatalog({ actor: safeActor(principal) }); return { ...value, servers: value.servers.map(server => safeServer(server)) } },
+    globalNodeCatalog(principal) { access.requireDeploymentNodeManager(principal); const value = deployment.projects.globalNodeCatalog({ actor: safeActor(principal) }); return { ...value, installation, servers: value.servers.map(server => safeServer(server)) } },
     globalNodeRequest(id, principal) {
       access.requireDeploymentNodeManager(principal)
       const value = deployment.projects.globalNodeRequest(id, { actor: safeActor(principal) })
-      return value ? { ...value, result: ['create', 'storage'].includes(value.operation) ? safeServer(value.result) : value.result } : null
+      return value ? { ...value, result: ['create', 'storage', 'registration'].includes(value.operation) ? safeServer(value.result) : value.result } : null
     },
     projectNodeRequest(projectId, id, environmentId, principal) {
       const value = deployment.projects.projectNodeRequest(projectId, id, { actor: safeActor(principal), environmentId })
@@ -229,6 +230,8 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
       return { ...value, result: safeServer({ ...value.result, projectAllowed: allowed }, environmentId) }
     },
     createGlobalServer(input, principal) { return accept(async () => { const value = await deployment.projects.createGlobalServer({ ...input, actor: safeActor(principal) }); return { ...value, server: safeServer(value.server) } }) },
+    renewServerRegistration(id, input, principal) { return accept(async () => { const value = await deployment.projects.renewServerRegistration(id, { ...input, actor: safeActor(principal) }); return { ...value, server: safeServer(value.server) } }) },
+    assignServer(id, input, principal) { return accept(() => deployment.projects.assignServer(id, { ...input, actor: safeActor(principal) })) },
     mutateGlobalServer(id, operation, input, principal) { return accept(async () => { const value = await deployment.projects.mutateGlobalServer(id, operation, { ...input, actor: safeActor(principal) }); return operation === 'storage' ? safeServer(value) : value }) },
     setServerAccess(projectId, input, principal) { return accept(() => deployment.projects.setServerAccess(projectId, { ...input, actor: safeActor(principal) })) },
     serverScope(projectId, serverId) { const snapshot = deployment.projects.snapshot(projectId); return snapshot.mapping.servers.filter(bound => bound.serverId === serverId).map(bound => bound.environmentId) },
@@ -368,6 +371,6 @@ export function configuredDeploymentStore() {
   const port = process.env.AUTOOPS_DEPLOYMENT_AGENT_PORT
   // Worker 打包会移动模块位置，安装资产沿用启动器已固定的业务资源根。
   const installAssetsRoot = process.env.AUTOOPS_BUSINESS_RESOURCES_DIR ? resolve(process.env.AUTOOPS_BUSINESS_RESOURCES_DIR, '../..') : undefined
-  if (!configured || configured.dataDir !== dataDir) configured = {dataDir, store:createDeploymentStore({dataDir, workspaceStore, workspaceManagement:configuredWorkspaceManagement(configuredAutoOpsAccess()), access:configuredAutoOpsAccess(), ...(port === undefined ? {} : {agentPort:Number(port)}), ...(installAssetsRoot === undefined ? {} : {installAssetsRoot}), publicOrigin:process.env.AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN || ''})}
+  if (!configured || configured.dataDir !== dataDir) configured = {dataDir, store:createDeploymentStore({dataDir, workspaceStore, workspaceManagement:configuredWorkspaceManagement(configuredAutoOpsAccess()), access:configuredAutoOpsAccess(), ...(port === undefined ? {} : {agentPort:Number(port)}), ...(installAssetsRoot === undefined ? {} : {installAssetsRoot}), publicOrigin:process.env.AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN || '', caPath:process.env.AUTOOPS_DEPLOYMENT_CA_PATH || '', caSha256:process.env.AUTOOPS_DEPLOYMENT_CA_SHA256 || ''})}
   return configured.store
 }

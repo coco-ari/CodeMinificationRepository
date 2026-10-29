@@ -1,18 +1,18 @@
-import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { Link, useBlocker } from '@tanstack/react-router'
+import { ProjectId } from '@t3tools/contracts'
 import {
   ArrowLeftIcon,
-  CopyIcon,
   LinkIcon,
   MoreHorizontalIcon,
   PlusIcon,
   RefreshCwIcon,
   ServerIcon,
-} from "lucide-react";
-import { useStableCallback } from "~/hooks/useStableCallback";
-import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import { SettingsRow, SettingsSection } from "~/components/settings/settingsLayout";
-import { Alert, AlertAction, AlertDescription } from "~/components/ui/alert";
-import { Button } from "~/components/ui/button";
+} from 'lucide-react'
+import { useStableCallback } from '~/hooks/useStableCallback'
+import { SettingsRow, SettingsSection } from '~/components/settings/settingsLayout'
+import { Alert, AlertAction, AlertDescription } from '~/components/ui/alert'
+import { Button } from '~/components/ui/button'
 import {
   Dialog,
   DialogFooter,
@@ -20,15 +20,25 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from "~/components/ui/dialog";
-import { Input } from "~/components/ui/input";
-import { Label } from "~/components/ui/label";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
-import { Spinner } from "~/components/ui/spinner";
-import { randomUUID } from "~/lib/utils";
-import { AutoOpsRequestError, isAutoOpsAccessError } from "../apiClient";
-import { readAutoOpsHost } from "../hostSnapshot";
-import { Choice } from "./DeploymentControls";
+} from '~/components/ui/dialog'
+import { Input } from '~/components/ui/input'
+import { Label } from '~/components/ui/label'
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '~/components/ui/menu'
+import { Spinner } from '~/components/ui/spinner'
+import { randomUUID } from '~/lib/utils'
+import { AutoOpsRequestError, isAutoOpsAccessError } from '../apiClient'
+import { readAutoOpsHost } from '../hostSnapshot'
+import { Choice } from './DeploymentControls'
+import {
+  NodeAssignmentFields,
+  NodeConnectionPanel,
+  NodeInstallationGuide,
+  NodeStorageFields,
+  nodeStatus as status,
+  storageStateText,
+  type NodeAssignmentDraft,
+} from './DeploymentNodeFields'
+import { type NodePageSearch, type NodeReturnContext } from './deploymentNodeNavigation'
 import {
   loadDeploymentServers,
   loadDeploymentNodeReceipt,
@@ -42,114 +52,105 @@ import {
   type DeploymentServerManagement,
   type DeploymentServerMutation,
   type DeploymentServerRegistration,
-} from "./deploymentServersApi";
+} from './deploymentServersApi'
 
 type Props = (
-  { scope?: "project"; projectId: string; environmentId: string } | { scope: "platform" }
+  { scope?: 'project'; projectId: string; environmentId: string } | { scope: 'platform' }
 ) & {
-  embedded?: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  finalFocus: ComponentProps<typeof DialogPopup>["finalFocus"];
-  onAccessDenied: (cause: unknown) => void;
-  onChanged: () => void;
-};
+  embedded?: boolean
+  nodeLocation?: NodePageSearch | undefined
+  returnContext?: NodeReturnContext | undefined
+  onNodeNavigate?: ((search: Pick<NodePageSearch, 'nodeId' | 'nodeView'>) => void) | undefined
+  onManageNodes?: ((serverId?: string) => void) | undefined
+  onReturn?: (() => void) | undefined
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  finalFocus: ComponentProps<typeof DialogPopup>['finalFocus']
+  onAccessDenied: (cause: unknown) => void
+  onChanged: () => void
+}
 type View =
-  | { kind: "list" }
-  | { kind: "create" }
-  | { kind: "bind" }
-  | { kind: "projects"; server: DeploymentServer }
+  | { kind: 'list' }
+  | { kind: 'create' }
+  | { kind: 'bind' }
+  | { kind: 'assign' | 'connect'; server: DeploymentServer }
   | {
-      kind: "access";
-      server: DeploymentServer;
-      projectId: string;
-      projectName: string;
-      allowed: boolean;
-      expectedRevision: number;
+      kind: 'access'
+      server: DeploymentServer
+      projectId: string
+      projectName: string
+      allowed: boolean
+      expectedRevision: number
     }
-  | { kind: "details"; server: DeploymentServer }
-  | { kind: "unbind"; server: DeploymentServer }
-  | { kind: "revoke"; server: DeploymentServer }
-  | { kind: "delete"; server: DeploymentServer };
+  | { kind: 'details'; server: DeploymentServer }
+  | { kind: 'unbind'; server: DeploymentServer }
+  | { kind: 'revoke'; server: DeploymentServer }
+  | { kind: 'delete'; server: DeploymentServer }
 
-const storageLabels = {
-  unsupported: "暂不支持存储管理",
-  waiting: "等待节点连接",
-  pending: "等待应用",
-  applying: "正在应用",
-  applied: "已应用",
-  failed: "应用失败",
-};
 const operationLabels = {
-  create: "接入节点",
-  bind: "绑定节点",
-  unbind: "解绑节点",
-  revoke: "撤销节点",
-  delete: "删除节点",
-  storage: "保存存储设置",
-  access: "保存项目准入",
-};
+  create: '接入节点',
+  bind: '绑定节点',
+  unbind: '解绑节点',
+  revoke: '撤销节点',
+  delete: '删除节点',
+  storage: '保存存储设置',
+  access: '保存项目授权',
+  assign: '分配节点',
+  registration: '更新安装命令',
+}
 const time = (value?: string | null) =>
-  value && Number.isFinite(Date.parse(value))
-    ? new Date(value).toLocaleString("zh-CN")
-    : "暂无观测";
+  value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN') : '暂无观测'
 const bytes = (value: number | null | undefined) =>
   value == null
-    ? "—"
-    : `${(value / 1024 ** 3).toLocaleString("zh-CN", { maximumFractionDigits: 1 })} GiB`;
+    ? '—'
+    : `${(value / 1024 ** 3).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} GiB`
 const usage = (value?: { used: number | null; total: number | null } | null) =>
-  value ? `${bytes(value.used)} / ${bytes(value.total)}` : "—";
-const status = (server: DeploymentServer) =>
-  server.projectAllowed === false
-    ? "准入已撤回"
-    : server.revoked
-      ? "已撤销"
-      : server.online
-        ? "在线"
-        : "离线";
-const message = (cause: unknown) => (cause instanceof Error ? cause.message : "操作失败，请重试。");
+  value ? `${bytes(value.used)} / ${bytes(value.total)}` : '—'
+const message = (cause: unknown) => (cause instanceof Error ? cause.message : '操作失败，请重试。')
 const isRegistration = (value: unknown): value is DeploymentServerRegistration => {
-  if (!value || typeof value !== "object") return false;
+  if (!value || typeof value !== 'object') return false
   return (
-    "server" in value &&
-    "registrationToken" in value &&
-    (value.registrationToken === null || typeof value.registrationToken === "string") &&
-    "expiresAt" in value &&
-    (value.expiresAt === null || typeof value.expiresAt === "string")
-  );
-};
+    'server' in value &&
+    'registrationToken' in value &&
+    (value.registrationToken === null || typeof value.registrationToken === 'string') &&
+    'expiresAt' in value &&
+    (value.expiresAt === null || typeof value.expiresAt === 'string')
+  )
+}
 
 function Field({
   label,
   children,
   inline = false,
 }: {
-  label: string;
-  children: (id: string) => ReactNode;
-  inline?: boolean;
+  label: string
+  children: (id: string) => ReactNode
+  inline?: boolean
 }) {
-  const id = useId();
+  const id = useId()
   if (inline)
     return (
       <SettingsRow
         title={<Label htmlFor={id}>{label}</Label>}
         control={<div className="w-24">{children(id)}</div>}
       />
-    );
+    )
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
       {children(id)}
     </div>
-  );
+  )
 }
 
 function NodeImpact({
   catalog,
   serverId,
+  onRevoke,
 }: {
-  catalog: DeploymentGlobalNodeCatalog;
-  serverId: string;
+  catalog: DeploymentGlobalNodeCatalog
+  serverId: string
+  onRevoke?: ((projectId: string, projectName: string, revision: number) => void) | undefined
 }) {
   const projects = catalog.projects.filter(
     (project) =>
@@ -159,227 +160,423 @@ function NodeImpact({
       catalog.bindings.some(
         (entry) => entry.projectId === project.id && entry.serverId === serverId,
       ),
-  );
+  )
   return (
-    <SettingsSection title="影响范围">
-      {projects.map((project) => {
-        const bindings = catalog.bindings.filter(
-          (entry) => entry.projectId === project.id && entry.serverId === serverId,
-        );
-        return (
-          <SettingsRow
-            key={project.id}
-            title={project.name}
-            description={
-              bindings.length
-                ? `已绑定：${bindings
-                    .map(
-                      (binding) =>
-                        project.environments.find(
-                          (environment) => environment.id === binding.environmentId,
-                        )?.name ?? binding.environmentId,
-                    )
-                    .join("、")}`
-                : "尚未绑定环境"
-            }
-          />
-        );
-      })}
-      {!projects.length ? <SettingsRow title="未分配项目" /> : null}
-    </SettingsSection>
-  );
+    <div id="deployment-node-assignments" tabIndex={-1}>
+      <SettingsSection title="项目与环境">
+        {projects.map((project) => {
+          const bindings = catalog.bindings.filter(
+            (entry) => entry.projectId === project.id && entry.serverId === serverId,
+          )
+          return (
+            <SettingsRow
+              key={project.id}
+              title={project.name}
+              description={
+                bindings.length
+                  ? `已绑定：${bindings
+                      .map(
+                        (binding) =>
+                          project.environments.find(
+                            (environment) => environment.id === binding.environmentId,
+                          )?.name ?? binding.environmentId,
+                      )
+                      .join('、')}`
+                  : '尚未绑定环境'
+              }
+              control={
+                <div className="flex flex-wrap gap-2">
+                  {bindings.map((binding) => (
+                    <Button
+                      key={binding.environmentId}
+                      variant="outline"
+                      size="sm"
+                      render={
+                        <Link
+                          to="/projects"
+                          search={{
+                            projectId: ProjectId.make(project.id),
+                            nodeEnvironmentId: binding.environmentId,
+                          }}
+                        />
+                      }
+                    >
+                      管理
+                      {project.environments.find((value) => value.id === binding.environmentId)
+                        ?.name ?? '环境'}
+                      节点
+                    </Button>
+                  ))}
+                  {onRevoke &&
+                  catalog.projectAccess.some(
+                    (value) => value.projectId === project.id && value.serverIds.includes(serverId),
+                  ) ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        onRevoke(
+                          project.id,
+                          project.name,
+                          catalog.projectAccess.find((value) => value.projectId === project.id)!
+                            .revision,
+                        )
+                      }
+                    >
+                      撤回项目授权
+                    </Button>
+                  ) : null}
+                </div>
+              }
+            />
+          )
+        })}
+        {!projects.length ? <SettingsRow title="未分配项目" /> : null}
+      </SettingsSection>
+    </div>
+  )
 }
 
 function readPending(key: string): DeploymentServerMutation | null {
   try {
     const value = JSON.parse(
-      sessionStorage.getItem(key) ?? "null",
-    ) as DeploymentServerMutation | null;
+      sessionStorage.getItem(key) ?? 'null',
+    ) as DeploymentServerMutation | null
     return value &&
       Object.hasOwn(operationLabels, value.kind) &&
-      typeof value.input?.requestId === "string"
+      typeof value.input?.requestId === 'string'
       ? value
-      : null;
+      : null
   } catch {
-    return null;
+    return null
   }
 }
 
 export function DeploymentServers(props: Props) {
-  const identity = readAutoOpsHost()?.principal.id ?? "";
+  const identity = readAutoOpsHost()?.principal.id ?? ''
   return (
     <DeploymentServersScope
-      key={`${identity}:${props.scope === "platform" ? "platform" : `${props.projectId}:${props.environmentId}`}:${props.open}`}
+      key={`${identity}:${props.scope === 'platform' ? 'platform' : `${props.projectId}:${props.environmentId}`}:${props.open}`}
       {...props}
       identity={identity}
     />
-  );
+  )
 }
 
 function DeploymentServersScope(props: Props & { identity: string }) {
-  const { open, onOpenChange, finalFocus, onAccessDenied, onChanged, identity } = props;
-  const platform = props.scope === "platform";
-  const projectId = props.scope === "platform" ? undefined : props.projectId;
-  const environmentId = props.scope === "platform" ? undefined : props.environmentId;
-  const pendingKey = `autoops:deployment-servers:${identity}:${platform ? "platform" : `${projectId}:${environmentId}`}`;
-  const [data, setData] = useState<DeploymentServerManagement | null>(null);
-  const [catalog, setCatalog] = useState<DeploymentGlobalNodeCatalog | null>(null);
-  const [view, setView] = useState<View>({ kind: "list" });
-  const [pending, setPending] = useState(() => readPending(pendingKey));
-  const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [registration, setRegistration] = useState<DeploymentServerRegistration | null>(null);
-  const [name, setName] = useState("");
-  const [serverId, setServerId] = useState("");
-  const [retainedVersions, setRetainedVersions] = useState("2");
-  const [buildCacheGiB, setBuildCacheGiB] = useState("2");
-  const [refresh, setRefresh] = useState(0);
-  const active = useRef(true);
-  const submitting = useRef(false);
-  const mutationController = useRef<AbortController | null>(null);
-  const changed = useStableCallback(onChanged);
+  const { open, onOpenChange, finalFocus, onAccessDenied, onChanged, identity } = props
+  const platform = props.scope === 'platform'
+  const projectId = props.scope === 'platform' ? undefined : props.projectId
+  const environmentId = props.scope === 'platform' ? undefined : props.environmentId
+  const pendingKey = `autoops:deployment-servers:${identity}:${platform ? 'platform' : `${projectId}:${environmentId}`}`
+  const [data, setData] = useState<DeploymentServerManagement | null>(null)
+  const [catalog, setCatalog] = useState<DeploymentGlobalNodeCatalog | null>(null)
+  const [view, setView] = useState<View>({ kind: 'list' })
+  const [pending, setPending] = useState(() => readPending(pendingKey))
+  const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [assignment, setAssignment] = useState<NodeAssignmentDraft>({
+    projectId: '',
+    environmentIds: [],
+    expectedRevision: 1,
+    projectOnly: false,
+  })
+  const [reducePolicy, setReducePolicy] = useState(false)
+  const [leaveView, setLeaveView] = useState<View | null>(null)
+  const [registration, setRegistration] = useState<DeploymentServerRegistration | null>(null)
+  const [name, setName] = useState('')
+  const [serverId, setServerId] = useState('')
+  const [retainedVersions, setRetainedVersions] = useState('2')
+  const [buildCacheGiB, setBuildCacheGiB] = useState('2')
+  const [refresh, setRefresh] = useState(0)
+  const active = useRef(true)
+  const submitting = useRef(false)
+  const mutationController = useRef<AbortController | null>(null)
+  const handledLocation = useRef('')
+  const allowNavigation = useRef(false)
+  const dirty =
+    view.kind === 'details' &&
+    platform &&
+    !!view.server.storagePolicy &&
+    (retainedVersions !== String(view.server.storagePolicy.retainedVersions) ||
+      buildCacheGiB !== String(view.server.storagePolicy.buildCacheGiB))
+  const blocker = useBlocker({
+    shouldBlockFn: () => !allowNavigation.current && dirty && !pending,
+    enableBeforeUnload: dirty && !pending,
+    withResolver: true,
+  })
+  const changed = useStableCallback(onChanged)
   const accessDenied = useStableCallback((cause: unknown) => {
-    active.current = false;
-    setData(null);
-    setCatalog(null);
-    setView({ kind: "list" });
-    setName("");
-    setServerId("");
-    setRegistration(null);
-    setPending(null);
-    setError(null);
-    mutationController.current?.abort();
+    active.current = false
+    setData(null)
+    setCatalog(null)
+    setView({ kind: 'list' })
+    setName('')
+    setServerId('')
+    setRegistration(null)
+    setPending(null)
+    setError(null)
+    mutationController.current?.abort()
     // 原操作仍由原账号/范围保存；恢复授权后只能 GET 核对，不重新提交。
-    onAccessDenied(cause);
-    onOpenChange(false);
-  });
+    onAccessDenied(cause)
+    onOpenChange(false)
+  })
 
   useEffect(() => {
-    active.current = true;
+    active.current = true
     return () => {
-      active.current = false;
-      mutationController.current?.abort();
-    };
-  }, []);
+      active.current = false
+      mutationController.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
-    if (!open || !active.current) return;
-    const controller = new AbortController();
-    setLoading(true);
-    const load = platform
-      ? loadGlobalDeploymentNodes(controller.signal).then((result) => {
-          if (!controller.signal.aborted && active.current) {
-            setCatalog(result);
-            setData({
-              servers: result.servers,
-              availableServers: [],
-              canAdmin: true,
-              canBind: false,
-            });
-          }
+    if (!open || !active.current) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let running = false
+    const poll = async () => {
+      if (document.hidden || running || controller.signal.aborted) return
+      running = true
+      setLoading(true)
+      const load = platform
+        ? loadGlobalDeploymentNodes(controller.signal).then((result) => {
+            if (!controller.signal.aborted && active.current) {
+              setCatalog(result)
+              setData({
+                servers: result.servers,
+                availableServers: [],
+                canAdmin: true,
+                canBind: false,
+              })
+            }
+          })
+        : loadDeploymentServers(projectId!, environmentId!, controller.signal).then((result) => {
+            if (!controller.signal.aborted && active.current)
+              setData({ ...result, canAdmin: false })
+          })
+      await load
+        .then(() => {
+          if (!controller.signal.aborted) setLoadError(null)
         })
-      : loadDeploymentServers(projectId!, environmentId!, controller.signal).then((result) => {
-          if (!controller.signal.aborted && active.current) setData({ ...result, canAdmin: false });
-        });
-    void load
-      .catch((cause: unknown) => {
-        if (controller.signal.aborted || !active.current) return;
-        if (isAutoOpsAccessError(cause)) accessDenied(cause);
-        else setError(message(cause));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && active.current) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [platform, projectId, environmentId, open, refresh, accessDenied]);
-
-  function go(next: View) {
-    setView(next);
-    setError(null);
-    setRegistration(null);
-    if (next.kind === "details") {
-      setRetainedVersions(String(next.server.storagePolicy?.retainedVersions ?? 2));
-      setBuildCacheGiB(String(next.server.storagePolicy?.buildCacheGiB ?? 2));
+        .catch((cause: unknown) => {
+          if (controller.signal.aborted || !active.current) return
+          if (isAutoOpsAccessError(cause)) accessDenied(cause)
+          else setLoadError(message(cause))
+        })
+        .finally(() => {
+          if (!controller.signal.aborted && active.current) setLoading(false)
+        })
+      running = false
+      if (!controller.signal.aborted && active.current && !document.hidden)
+        timer = setTimeout(poll, 5000)
     }
+    const visible = () => {
+      clearTimeout(timer)
+      if (!document.hidden) void poll()
+    }
+    document.addEventListener('visibilitychange', visible)
+    void poll()
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [platform, projectId, environmentId, open, refresh, accessDenied])
+
+  function go(next: View, discard = false) {
+    if (dirty && !pending && !discard) {
+      setLeaveView(next)
+      return
+    }
+    allowNavigation.current = true
+    setView(next)
+    setError(null)
+    setNotice(null)
+    setReducePolicy(false)
+    if (next.kind !== 'connect') setRegistration(null)
+    if (next.kind === 'details') {
+      setRetainedVersions(String(next.server.storagePolicy?.retainedVersions ?? 2))
+      setBuildCacheGiB(String(next.server.storagePolicy?.buildCacheGiB ?? 2))
+    }
+    if (next.kind === 'assign') {
+      const context = props.returnContext
+      const project = catalog?.projects.find((value) => value.id === context?.projectId)
+      setAssignment({
+        projectId: project?.id ?? '',
+        environmentIds: project?.environments.some((value) => value.id === context?.environmentId)
+          ? [context!.environmentId]
+          : [],
+        expectedRevision:
+          catalog?.projectAccess.find((value) => value.projectId === project?.id)?.revision ?? 1,
+        projectOnly: false,
+      })
+    }
+    const target: Pick<NodePageSearch, 'nodeId' | 'nodeView'> | null =
+      next.kind === 'list'
+        ? {}
+        : next.kind === 'create'
+          ? { nodeView: 'create' }
+          : next.kind === 'details' || next.kind === 'assign' || next.kind === 'connect'
+            ? { nodeId: next.server.id, nodeView: next.kind }
+            : null
+    if (target && props.onNodeNavigate) {
+      handledLocation.current = `${target.nodeView ?? 'list'}:${target.nodeId ?? ''}`
+      props.onNodeNavigate(target)
+    }
+    setTimeout(() => {
+      allowNavigation.current = false
+    }, 0)
   }
 
-  async function submit(input: DeploymentServerMutation) {
-    if (submitting.current || !active.current || pending) return;
-    const operation = input;
-    try {
-      sessionStorage.setItem(pendingKey, JSON.stringify(operation));
-    } catch {
-      setError("浏览器无法保存操作记录，请允许站点存储后重试。");
-      return;
+  useEffect(() => {
+    if (!platform || !props.nodeLocation || !data) return
+    const { nodeId, nodeView } = props.nodeLocation
+    const kind = nodeView ?? (nodeId ? 'details' : 'list')
+    const key = `${kind}:${nodeId ?? ''}`
+    if (handledLocation.current === key) return
+    handledLocation.current = key
+    const server = data.servers.find((value) => value.id === nodeId)
+    if (kind === 'list') {
+      setView({ kind: 'list' })
+      setRegistration(null)
+    } else if (kind === 'create') {
+      setView({ kind: 'create' })
+      setRegistration(null)
+    } else if (server) {
+      setView({ kind, server })
+      if (kind !== 'connect') setRegistration(null)
+      setRetainedVersions(String(server.storagePolicy?.retainedVersions ?? 2))
+      setBuildCacheGiB(String(server.storagePolicy?.buildCacheGiB ?? 2))
+      if (kind === 'assign') {
+        const context = props.returnContext
+        const project = catalog?.projects.find((value) => value.id === context?.projectId)
+        setAssignment({
+          projectId: project?.id ?? '',
+          environmentIds: project?.environments.some((value) => value.id === context?.environmentId)
+            ? [context!.environmentId]
+            : [],
+          expectedRevision:
+            catalog?.projectAccess.find((value) => value.projectId === project?.id)?.revision ?? 1,
+          projectOnly: false,
+        })
+      }
+    } else {
+      setView({ kind: 'list' })
+      setError('此节点不存在或已不可用，请返回节点列表。')
     }
-    setPending(operation);
-    setError(null);
-    setBusy(true);
-    submitting.current = true;
-    const controller = new AbortController();
-    mutationController.current = controller;
+  }, [platform, props.nodeLocation, props.returnContext, data, catalog])
+
+  useEffect(() => {
+    if (view.kind !== 'details' || !props.nodeLocation?.nodeSection) return
+    const section = props.nodeLocation.nodeSection
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(`deployment-node-${section}`)
+      target?.scrollIntoView({ block: 'start' })
+      target?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [view.kind, props.nodeLocation?.nodeId, props.nodeLocation?.nodeSection])
+
+  async function submit(input: DeploymentServerMutation) {
+    if (submitting.current || !active.current || pending) return
+    const operation = input
+    try {
+      sessionStorage.setItem(pendingKey, JSON.stringify(operation))
+    } catch {
+      setError('浏览器无法保存操作记录，请允许站点存储后重试。')
+      return
+    }
+    setPending(operation)
+    setError(null)
+    setBusy(true)
+    submitting.current = true
+    const controller = new AbortController()
+    mutationController.current = controller
     try {
       const result = platform
         ? await mutateGlobalDeploymentNode(operation, controller.signal)
-        : await mutateDeploymentServer(projectId!, operation, controller.signal);
-      if (!active.current || controller.signal.aborted) return;
-      if ("available" in result && result.available === false) {
+        : await mutateDeploymentServer(projectId!, operation, controller.signal)
+      if (!active.current || controller.signal.aborted) return
+      if ('available' in result && result.available === false) {
         accessDenied(
-          new AutoOpsRequestError("操作已保存，当前管理权限已撤销。", "ACCESS_DENIED", 403),
-        );
-        return;
+          new AutoOpsRequestError('操作已保存，当前管理权限已撤销。', 'ACCESS_DENIED', 403),
+        )
+        return
       }
-      setPending(null);
+      setPending(null)
       try {
-        sessionStorage.removeItem(pendingKey);
+        sessionStorage.removeItem(pendingKey)
       } catch {
         /* 存储清理失败时仍只按原标识读取收据。 */
       }
-      setView({ kind: "list" });
-      if (operation.kind === "create" && isRegistration(result)) setRegistration(result);
-      setRefresh((value) => value + 1);
-      changed();
+      if (
+        (operation.kind === 'create' || operation.kind === 'registration') &&
+        isRegistration(result)
+      ) {
+        go({ kind: 'connect', server: result.server }, true)
+        setRegistration(result)
+      } else if (operation.kind === 'storage' && 'id' in result && 'name' in result) {
+        go({ kind: 'details', server: result }, true)
+        setNotice('存储设置已保存；实际应用结果以节点报告为准。')
+      } else if (operation.kind === 'assign' && selected) {
+        go({ kind: 'details', server: selected }, true)
+        const project = catalog?.projects.find((value) => value.id === operation.input.projectId)
+        const names = operation.input.environmentIds.map(
+          (id) => project?.environments.find((value) => value.id === id)?.name ?? id,
+        )
+        setNotice(
+          `已分配给“${project?.name ?? operation.input.projectId}”${names.length ? `，绑定环境：${names.join('、')}` : '，尚未绑定环境'}。`,
+        )
+      } else {
+        go({ kind: 'list' }, true)
+        setNotice(`${operationLabels[operation.kind]}成功。`)
+      }
+      setRefresh((value) => value + 1)
+      changed()
     } catch (cause) {
-      if (!active.current || controller.signal.aborted) return;
+      if (!active.current || controller.signal.aborted) return
       if (isAutoOpsAccessError(cause)) {
         if (cause instanceof AutoOpsRequestError && !cause.uncertain) {
           try {
-            sessionStorage.removeItem(pendingKey);
+            sessionStorage.removeItem(pendingKey)
           } catch {
             /* 明确拒绝未接受本次操作。 */
           }
         }
-        accessDenied(cause);
-        return;
+        accessDenied(cause)
+        return
       }
       if (cause instanceof AutoOpsRequestError && !cause.uncertain) {
-        setPending(null);
+        setPending(null)
         try {
-          sessionStorage.removeItem(pendingKey);
+          sessionStorage.removeItem(pendingKey)
         } catch {
           /* 明确拒绝不会生成新业务操作。 */
         }
       }
       setError(
         cause instanceof AutoOpsRequestError && cause.uncertain
-          ? "暂时无法确认操作结果，请核对原收据。"
+          ? '暂时无法确认操作结果，请点击“核对结果”；不会重复提交。'
           : message(cause),
-      );
+      )
     } finally {
-      submitting.current = false;
-      if (active.current) setBusy(false);
+      submitting.current = false
+      if (active.current) setBusy(false)
     }
   }
 
   async function recover() {
-    if (!pending || submitting.current || !active.current) return;
-    const operation = pending;
-    const controller = new AbortController();
-    mutationController.current = controller;
-    submitting.current = true;
-    setBusy(true);
-    setError(null);
+    if (!pending || submitting.current || !active.current) return
+    const operation = pending
+    const controller = new AbortController()
+    mutationController.current = controller
+    submitting.current = true
+    setBusy(true)
+    setError(null)
     try {
       // 未知请求只读取原收据；目录变化、空收据或网络失败均不构成重新写入的依据。
       const receipt = platform
@@ -389,46 +586,60 @@ function DeploymentServersScope(props: Props & { identity: string }) {
             environmentId!,
             operation.input.requestId,
             controller.signal,
-          );
-      if (!active.current || controller.signal.aborted) return;
+          )
+      if (!active.current || controller.signal.aborted) return
       if (!receipt) {
-        setError("尚未找到可核对的原收据，操作仍待确认。请稍后再次核对。");
-        return;
+        setError('尚未找到可核对的原收据，操作仍待确认。请稍后再次核对。')
+        return
       }
       if (!matchesDeploymentNodeReceipt(operation, receipt, { projectId, environmentId })) {
-        throw new Error("返回的原收据与当前操作范围不符，操作仍待确认。");
+        throw new Error('返回的原收据与当前操作范围不符，操作仍待确认。')
       }
-      if (operation.kind === "create") {
-        if (!("id" in receipt.result) || typeof receipt.result.name !== "string")
-          throw new Error("原节点事实不可核对，操作仍待确认。");
+      if (operation.kind === 'create' || operation.kind === 'registration') {
+        if (!('id' in receipt.result) || typeof receipt.result.name !== 'string')
+          throw new Error('原节点事实不可核对，操作仍待确认。')
         setRegistration({
           server: receipt.result,
           registrationToken: null,
           expiresAt: null,
           repeated: true,
-        });
+        })
+        go({ kind: 'connect', server: receipt.result }, true)
+      } else if (
+        operation.kind === 'storage' &&
+        'id' in receipt.result &&
+        'name' in receipt.result
+      ) {
+        go({ kind: 'details', server: receipt.result }, true)
+        setNotice('已确认存储设置保存成功，等待节点报告应用结果。')
+      } else {
+        go({ kind: 'list' }, true)
+        setNotice(`已确认${operationLabels[operation.kind]}成功。`)
       }
-      setPending(null);
+      setPending(null)
       try {
-        sessionStorage.removeItem(pendingKey);
+        sessionStorage.removeItem(pendingKey)
       } catch {
         /* 重开仍只 GET 原收据。 */
       }
-      setView({ kind: "list" });
-      setRefresh((value) => value + 1);
-      changed();
+      setRefresh((value) => value + 1)
+      changed()
     } catch (cause) {
-      if (!active.current || controller.signal.aborted) return;
-      if (isAutoOpsAccessError(cause)) accessDenied(cause);
-      else setError(message(cause));
+      if (!active.current || controller.signal.aborted) return
+      if (isAutoOpsAccessError(cause)) accessDenied(cause)
+      else setError(message(cause))
     } finally {
-      submitting.current = false;
-      if (active.current) setBusy(false);
+      submitting.current = false
+      if (active.current) setBusy(false)
     }
   }
 
-  const disabled = busy || !!pending;
-  const selected = "server" in view ? view.server : null;
+  const disabled = busy || !!pending
+  const selected =
+    'server' in view
+      ? (data?.servers.find((value) => value.id === view.server.id) ?? view.server)
+      : null
+  const canManage = readAutoOpsHost()?.canManageDeploymentNodes === true
   const available =
     data?.availableServers.filter(
       (server) =>
@@ -436,65 +647,86 @@ function DeploymentServersScope(props: Props & { identity: string }) {
         !data.servers.some(
           (bound) => bound.id === server.id && bound.environmentId === environmentId,
         ),
-    ) ?? [];
+    ) ?? []
   const policyValid =
     Number.isInteger(Number(retainedVersions)) &&
     Number(retainedVersions) >= 2 &&
     Number(retainedVersions) <= 20 &&
     Number.isInteger(Number(buildCacheGiB)) &&
     Number(buildCacheGiB) >= 1 &&
-    Number(buildCacheGiB) <= 20;
-  const title = registration
-    ? "接入节点"
-    : selected
-      ? selected.name
-      : view.kind === "create"
-        ? "接入节点"
-        : view.kind === "bind"
-          ? "绑定已有节点"
-          : platform
-            ? "平台节点"
-            : "部署节点";
-  const back = () => go({ kind: "list" });
+    Number(buildCacheGiB) <= 20
+  const title = selected
+    ? selected.name
+    : view.kind === 'create'
+      ? '接入节点'
+      : view.kind === 'bind'
+        ? '绑定已有节点'
+        : platform
+          ? '平台节点'
+          : '部署节点'
+  const back = () => go({ kind: 'list' })
   const confirmDisabled =
     disabled ||
-    view.kind === "list" ||
-    view.kind === "projects" ||
-    (view.kind === "create" && !name.trim()) ||
-    (view.kind === "bind" && !serverId) ||
-    (view.kind === "details" &&
-      (!policyValid || !data?.canAdmin || !view.server.storagePolicy || view.server.revoked));
+    view.kind === 'list' ||
+    view.kind === 'connect' ||
+    (view.kind === 'assign' &&
+      (!assignment.projectId ||
+        (!assignment.projectOnly && !assignment.environmentIds.length) ||
+        !!selected?.revoked)) ||
+    (view.kind === 'create' && !name.trim()) ||
+    (view.kind === 'bind' && !serverId) ||
+    (view.kind === 'details' &&
+      (!policyValid || !data?.canAdmin || !view.server.storagePolicy || selected?.revoked))
   const confirm = () => {
-    if (confirmDisabled) return;
-    const requestId = randomUUID();
-    if (view.kind === "create")
-      void submit({ kind: "create", input: { name: name.trim(), requestId } });
-    else if (view.kind === "bind" && environmentId)
-      void submit({ kind: "bind", serverId, input: { environmentId, requestId } });
-    else if (view.kind === "access")
+    if (confirmDisabled) return
+    const requestId = randomUUID()
+    if (view.kind === 'create')
+      void submit({ kind: 'create', input: { name: name.trim(), requestId } })
+    else if (view.kind === 'bind' && environmentId)
+      void submit({ kind: 'bind', serverId, input: { environmentId, requestId } })
+    else if (view.kind === 'assign')
       void submit({
-        kind: "access",
+        kind: 'assign',
+        serverId: view.server.id,
+        input: {
+          projectId: assignment.projectId,
+          environmentIds: assignment.projectOnly ? [] : assignment.environmentIds,
+          expectedRevision: assignment.expectedRevision,
+          requestId,
+        },
+      })
+    else if (view.kind === 'access')
+      void submit({
+        kind: 'access',
         serverId: view.server.id,
         projectId: view.projectId,
         input: { allowed: view.allowed, expectedRevision: view.expectedRevision, requestId },
-      });
-    else if (view.kind === "delete")
-      void submit({ kind: "delete", serverId: view.server.id, input: { requestId } });
-    else if (view.kind === "revoke")
+      })
+    else if (view.kind === 'delete')
+      void submit({ kind: 'delete', serverId: view.server.id, input: { requestId } })
+    else if (view.kind === 'revoke')
       void submit({
         kind: view.kind,
         serverId: view.server.id,
         input: { requestId },
-      });
-    else if (view.kind === "unbind" && environmentId)
+      })
+    else if (view.kind === 'unbind' && environmentId)
       void submit({
-        kind: "unbind",
+        kind: 'unbind',
         serverId: view.server.id,
         input: { environmentId, requestId },
-      });
-    else if (view.kind === "details" && view.server.storagePolicy)
+      })
+    else if (view.kind === 'details' && view.server.storagePolicy) {
+      if (
+        !reducePolicy &&
+        (Number(retainedVersions) < view.server.storagePolicy.retainedVersions ||
+          Number(buildCacheGiB) < view.server.storagePolicy.buildCacheGiB)
+      ) {
+        setReducePolicy(true)
+        return
+      }
       void submit({
-        kind: "storage",
+        kind: 'storage',
         serverId: view.server.id,
         input: {
           expectedRevision: view.server.storagePolicy.revision,
@@ -502,31 +734,32 @@ function DeploymentServersScope(props: Props & { identity: string }) {
           buildCacheGiB: Number(buildCacheGiB),
           requestId,
         },
-      });
-  };
+      })
+    }
+  }
 
-  const Header = props.embedded ? PageHeader : DialogHeader;
-  const Title = props.embedded ? PageTitle : DialogTitle;
-  const Panel = props.embedded ? PagePanel : DialogPanel;
-  const Footer = props.embedded ? PageFooter : DialogFooter;
+  const Header = props.embedded ? PageHeader : DialogHeader
+  const Title = props.embedded ? PageTitle : DialogTitle
+  const Panel = props.embedded ? PagePanel : DialogPanel
+  const Footer = props.embedded ? PageFooter : DialogFooter
   const content = (
     <form
       className="flex min-h-0 flex-col"
       onSubmit={(event) => {
-        event.preventDefault();
-        confirm();
+        event.preventDefault()
+        confirm()
       }}
       onKeyDown={(event) => {
         if (
-          event.key === "Enter" &&
+          event.key === 'Enter' &&
           (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)
         )
-          event.preventDefault();
+          event.preventDefault()
       }}
     >
       <Header>
         <div className="flex min-w-0 items-center gap-2 pr-6">
-          {view.kind !== "list" || registration ? (
+          {view.kind !== 'list' || registration ? (
             <Button
               variant="ghost"
               size="icon"
@@ -538,13 +771,63 @@ function DeploymentServersScope(props: Props & { identity: string }) {
             </Button>
           ) : null}
           <Title className="min-w-0 break-words">{title}</Title>
+          {props.onReturn ? (
+            <Button variant="outline" size="sm" disabled={busy} onClick={props.onReturn}>
+              返回原环境
+            </Button>
+          ) : null}
         </div>
       </Header>
       <Panel>
+        {leaveView || blocker.status === 'blocked' ? (
+          <Alert variant="info">
+            <AlertDescription>
+              <p>有尚未保存的存储修改。</p>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setLeaveView(null)
+                    blocker.reset?.()
+                  }}
+                >
+                  继续编辑
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (blocker.status === 'blocked') blocker.proceed()
+                    else if (leaveView) go(leaveView, true)
+                    setLeaveView(null)
+                  }}
+                >
+                  放弃修改
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {notice ? (
+          <Alert variant="info">
+            <AlertDescription>{notice}</AlertDescription>
+          </Alert>
+        ) : null}
+        {loadError ? (
+          <Alert variant="error">
+            <AlertDescription>{loadError}</AlertDescription>
+            <AlertAction>
+              <Button variant="outline" size="sm" onClick={() => setRefresh((value) => value + 1)}>
+                重新读取节点
+              </Button>
+            </AlertAction>
+          </Alert>
+        ) : null}
         {error || (pending && !busy) ? (
           <Alert variant="error">
             <AlertDescription>
-              {error ?? `${operationLabels[pending!.kind]}尚未确认，请核对原收据。`}
+              {error ?? `${operationLabels[pending!.kind]}尚未确认，请核对结果。`}
             </AlertDescription>
             {pending ? (
               <AlertAction>
@@ -553,52 +836,75 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                 </Button>
               </AlertAction>
             ) : null}
-          </Alert>
-        ) : null}
-        {registration ? (
-          <div className="space-y-4">
-            <SettingsRow
-              title={registration.server.name}
-              description={
-                registration.repeated
-                  ? "节点已创建，口令仅提供一次。若未保存且尚未接入，请返回节点列表，撤销并删除后再接入新节点。"
-                  : `在目标服务器执行安装命令，连接后即可部署。口令有效期至 ${time(registration.expiresAt)}。`
-              }
-            />
-            {registration.installCommand ? (
-              <>
-                <pre
-                  className="max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs"
-                  aria-label="节点安装命令"
-                >
-                  {registration.installCommand}
-                </pre>
+            {error &&
+            !pending &&
+            view.kind === 'details' &&
+            selected?.storagePolicy &&
+            view.server.storagePolicy?.revision !== selected.storagePolicy.revision ? (
+              <AlertAction>
                 <Button
                   variant="outline"
+                  size="sm"
                   onClick={() => {
-                    void writeTextToClipboard(registration.installCommand!, "节点安装命令")
-                      .catch(() => setError("复制失败，请手动选择安装命令复制。"));
+                    setView({ kind: 'details', server: selected })
+                    setError(null)
+                    setReducePolicy(false)
                   }}
                 >
-                  <CopyIcon />
-                  复制安装命令
+                  保留输入，按最新配置重新核对
                 </Button>
-              </>
-            ) : registration.registrationToken ? (
-              <Field label="接入口令">
-                {(id) => <Input id={id} readOnly value={registration.registrationToken!} />}
-              </Field>
+              </AlertAction>
             ) : null}
-          </div>
-        ) : view.kind === "list" ? (
+            {error && !pending && view.kind === 'assign' ? (
+              <AlertAction>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setAssignment((value) => ({
+                      ...value,
+                      expectedRevision:
+                        catalog?.projectAccess.find((entry) => entry.projectId === value.projectId)
+                          ?.revision ?? 1,
+                    }))
+                    setError(null)
+                  }}
+                >
+                  重新核对项目授权
+                </Button>
+              </AlertAction>
+            ) : null}
+          </Alert>
+        ) : null}
+        {view.kind === 'connect' && selected ? (
+          <NodeConnectionPanel
+            assigned={
+              catalog?.projectAccess.some((entry) => entry.serverIds.includes(selected.id)) ?? false
+            }
+            server={selected}
+            registration={registration}
+            installation={catalog?.installation}
+            disabled={disabled}
+            onError={setError}
+            onRenew={() =>
+              void submit({
+                kind: 'registration',
+                serverId: selected.id,
+                input: { requestId: randomUUID() },
+              })
+            }
+            onAssign={() => go({ kind: 'assign', server: selected })}
+            onSkip={back}
+          />
+        ) : view.kind === 'list' ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
               {platform ? (
                 <Button
                   size="sm"
                   onClick={() => {
-                    setName("");
-                    go({ kind: "create" });
+                    setName('')
+                    go({ kind: 'create' })
                   }}
                   disabled={disabled || !data}
                 >
@@ -612,12 +918,22 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                   size="sm"
                   disabled={disabled || !available.length}
                   onClick={() => {
-                    setServerId(available[0]?.id ?? "");
-                    go({ kind: "bind" });
+                    setServerId(available[0]?.id ?? '')
+                    go({ kind: 'bind' })
                   }}
                 >
                   <LinkIcon />
                   绑定已有节点
+                </Button>
+              ) : null}
+              {!platform && canManage && props.onManageNodes ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={disabled}
+                  onClick={() => props.onManageNodes?.()}
+                >
+                  管理／接入节点
                 </Button>
               ) : null}
               <Button
@@ -627,8 +943,8 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                 aria-label="刷新节点"
                 disabled={loading || busy}
                 onClick={() => {
-                  setError(null);
-                  setRefresh((value) => value + 1);
+                  setError(null)
+                  setRefresh((value) => value + 1)
                 }}
               >
                 <RefreshCwIcon />
@@ -640,7 +956,21 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                 读取节点…
               </div>
             ) : data && !data.servers.length ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">暂无部署节点</p>
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                {platform
+                  ? '尚未接入节点。点击“接入节点”开始。'
+                  : available.length
+                    ? '当前环境尚未绑定节点，请选择“绑定已有节点”。'
+                    : '当前环境尚未绑定节点，且没有可绑定节点。需要先接入节点并授权给此项目。'}
+              </p>
+            ) : null}
+            {!platform && !canManage ? (
+              <p className="text-sm text-muted-foreground">
+                节点接入和存储设置由平台管理员维护。
+                {data?.canBind
+                  ? '你可以绑定此项目已获授权的节点。'
+                  : '当前账号没有环境节点绑定权限。'}
+              </p>
             ) : null}
             {data?.servers.length ? (
               <SettingsSection title="节点" hideTitle>
@@ -655,100 +985,157 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                     }
                     description={
                       server.projectAllowed === false ? (
-                        "准入已撤回"
+                        '项目授权已撤回'
                       ) : (
                         <span className="block space-y-1">
                           <span className="block">
                             {status(server)} · {time(server.lastSeenAt)}
                           </span>
                           <span className="block">
-                            CPU{" "}
+                            CPU{' '}
                             {server.metrics?.cpuPercent == null
-                              ? "—"
-                              : `${server.metrics.cpuPercent.toLocaleString("zh-CN", { maximumFractionDigits: 1 })}%`}{" "}
-                            · 内存 {usage(server.metrics?.memory)} · 磁盘{" "}
-                            {usage(server.metrics?.disk)} · RTT{" "}
+                              ? '—'
+                              : `${server.metrics.cpuPercent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%`}{' '}
+                            · 内存 {usage(server.metrics?.memory)} · 磁盘{' '}
+                            {usage(server.metrics?.disk)} · RTT{' '}
                             {server.metrics?.centerRttMs == null
-                              ? "—"
+                              ? '—'
                               : `${server.metrics.centerRttMs} ms`}
                           </span>
                           <span className="block">
-                            存储：{storageLabels[server.storageState ?? "unsupported"]}
+                            存储：
+                            {server.storagePolicy
+                              ? `保留 ${server.storagePolicy.retainedVersions} 个成功版本 · 构建缓存 ${server.storagePolicy.buildCacheGiB} GiB · `
+                              : ''}
+                            {storageStateText(server)}
                           </span>
+                          {platform && catalog ? (
+                            <span className="block">
+                              {catalog.projectAccess
+                                .filter((entry) => entry.serverIds.includes(server.id))
+                                .map((entry) => {
+                                  const project = catalog.projects.find(
+                                    (value) => value.id === entry.projectId,
+                                  )
+                                  const environments = catalog.bindings
+                                    .filter(
+                                      (value) =>
+                                        value.serverId === server.id &&
+                                        value.projectId === entry.projectId,
+                                    )
+                                    .map(
+                                      (value) =>
+                                        project?.environments.find(
+                                          (env) => env.id === value.environmentId,
+                                        )?.name ?? value.environmentId,
+                                    )
+                                  return `${project?.name ?? entry.projectId}（${environments.join('、') || '尚未绑定环境'}）`
+                                })
+                                .join('；') || '未分配项目'}
+                            </span>
+                          ) : null}
                         </span>
                       )
                     }
                     control={
-                      <Menu>
-                        <MenuTrigger
-                          render={
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {platform ? (
+                          <>
                             <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`${server.name}的操作`}
+                              variant="outline"
+                              size="sm"
                               disabled={busy}
-                            />
-                          }
-                        >
-                          <MoreHorizontalIcon />
-                        </MenuTrigger>
-                        <MenuPopup align="end">
-                          <MenuItem onClick={() => go({ kind: "details", server })}>
-                            查看节点
-                          </MenuItem>
-                          {!platform && data.canBind ? (
-                            <MenuItem
-                              disabled={disabled}
-                              onClick={() => go({ kind: "unbind", server })}
+                              onClick={() => go({ kind: 'details', server })}
                             >
-                              解绑节点
+                              配置节点
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={disabled || server.revoked}
+                              onClick={() => go({ kind: 'assign', server })}
+                            >
+                              分配到项目／环境
+                            </Button>
+                          </>
+                        ) : canManage && props.onManageNodes ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => props.onManageNodes?.(server.id)}
+                          >
+                            配置节点
+                          </Button>
+                        ) : null}
+                        <Menu>
+                          <MenuTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`${server.name}的操作`}
+                                disabled={busy}
+                              />
+                            }
+                          >
+                            <MoreHorizontalIcon />
+                          </MenuTrigger>
+                          <MenuPopup align="end">
+                            <MenuItem onClick={() => go({ kind: 'details', server })}>
+                              查看节点
                             </MenuItem>
-                          ) : null}
-                          {data.canAdmin ? (
-                            <>
+                            {!platform && data.canBind ? (
                               <MenuItem
-                                disabled={disabled || server.revoked}
-                                onClick={() => go({ kind: "projects", server })}
-                              >
-                                项目准入
-                              </MenuItem>
-                              <MenuItem
-                                disabled={disabled || server.revoked}
-                                onClick={() => go({ kind: "revoke", server })}
-                              >
-                                撤销节点
-                              </MenuItem>
-                              <MenuItem
-                                variant="destructive"
                                 disabled={disabled}
-                                onClick={() => go({ kind: "delete", server })}
+                                onClick={() => go({ kind: 'unbind', server })}
                               >
-                                删除节点
+                                解绑节点
                               </MenuItem>
-                            </>
-                          ) : null}
-                        </MenuPopup>
-                      </Menu>
+                            ) : null}
+                            {data.canAdmin ? (
+                              <>
+                                <MenuItem
+                                  disabled={disabled || server.revoked}
+                                  onClick={() => go({ kind: 'revoke', server })}
+                                >
+                                  撤销节点
+                                </MenuItem>
+                                <MenuItem
+                                  variant="destructive"
+                                  disabled={disabled}
+                                  onClick={() => go({ kind: 'delete', server })}
+                                >
+                                  删除节点
+                                </MenuItem>
+                              </>
+                            ) : null}
+                          </MenuPopup>
+                        </Menu>
+                      </div>
                     }
                   />
                 ))}
               </SettingsSection>
             ) : null}
           </>
-        ) : view.kind === "create" ? (
-          <Field label="节点名称">
-            {(id) => (
-              <Input
-                id={id}
-                value={name}
-                onValueChange={setName}
-                required
-                maxLength={80}
-                disabled={disabled}
-              />
-            )}
-          </Field>
-        ) : view.kind === "bind" ? (
+        ) : view.kind === 'create' ? (
+          <>
+            <NodeInstallationGuide installation={catalog?.installation} />
+            <Field label="节点名称">
+              {(id) => (
+                <Input
+                  id={id}
+                  value={name}
+                  onValueChange={setName}
+                  required
+                  maxLength={80}
+                  disabled={disabled}
+                />
+              )}
+            </Field>
+          </>
+        ) : view.kind === 'bind' ? (
           <Choice
             label="已有节点"
             value={serverId}
@@ -759,188 +1146,196 @@ function DeploymentServersScope(props: Props & { identity: string }) {
             onChange={setServerId}
             disabled={disabled}
           />
-        ) : view.kind === "projects" ? (
-          <SettingsSection title="项目准入">
-            {catalog?.projects.map((project) => {
-              const access = catalog.projectAccess.find((item) => item.projectId === project.id);
-              const allowed = access?.serverIds.includes(view.server.id) ?? false;
-              return (
-                <SettingsRow
-                  key={project.id}
-                  title={project.name}
-                  description={allowed ? "已准入" : "未准入"}
-                  control={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={disabled}
-                      aria-label={`${allowed ? "撤回" : "允许"}${project.name}使用节点`}
-                      onClick={() =>
-                        go({
-                          kind: "access",
-                          server: view.server,
-                          projectId: project.id,
-                          projectName: project.name,
-                          allowed: !allowed,
-                          expectedRevision: access?.revision ?? 1,
-                        })
-                      }
-                    >
-                      {allowed ? "撤回" : "允许"}
-                    </Button>
-                  }
-                />
-              );
-            })}
-            {!catalog?.projects.length ? <SettingsRow title="暂无项目" /> : null}
-          </SettingsSection>
-        ) : view.kind === "access" ? (
+        ) : view.kind === 'assign' && catalog && selected ? (
+          <NodeAssignmentFields
+            catalog={catalog}
+            server={selected}
+            draft={assignment}
+            onChange={setAssignment}
+            disabled={disabled}
+          />
+        ) : view.kind === 'access' ? (
           <p className="break-words text-sm">
             {view.allowed
               ? `允许“${view.projectName}”使用“${view.server.name}”。项目管理员可将其绑定到环境。`
-              : `撤回“${view.projectName}”使用“${view.server.name}”的准入。拒绝新部署与排队任务领取，已有任务结果仍按原收据核对。`}
+              : `撤回“${view.projectName}”使用“${view.server.name}”的授权。此项目绑定的全部环境将无法发起新部署，排队任务无法领取；已有任务结果继续保留。`}
           </p>
-        ) : view.kind === "details" ? (
+        ) : view.kind === 'details' && selected ? (
           <>
-            <SettingsSection title="节点信息">
-              <SettingsRow title="状态" description={status(view.server)} />
-              <SettingsRow title="最近观测" description={time(view.server.lastSeenAt)} />
-              <SettingsRow title="执行器版本" description={view.server.version ?? "未连接"} />
+            <div id="deployment-node-connection" tabIndex={-1}>
+              <SettingsSection title="连接信息">
+                <SettingsRow
+                  title="状态"
+                  description={status(selected)}
+                  control={
+                    platform && !selected.revoked ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={disabled}
+                        onClick={() => go({ kind: 'connect', server: selected })}
+                      >
+                        {selected.registeredAt ? '连接排查' : '查看接入指引'}
+                      </Button>
+                    ) : undefined
+                  }
+                />
+                <SettingsRow title="最近观测" description={time(selected.lastSeenAt)} />
+                <SettingsRow title="执行器版本" description={selected.version ?? '未连接'} />
+                <SettingsRow
+                  title="节点 ID"
+                  description={
+                    <span className="select-text break-all font-mono">{view.server.id}</span>
+                  }
+                />
+              </SettingsSection>
+            </div>
+            {platform && catalog ? (
+              <>
+                <NodeImpact
+                  catalog={catalog}
+                  serverId={selected.id}
+                  onRevoke={
+                    disabled
+                      ? undefined
+                      : (projectId, projectName, expectedRevision) =>
+                          go({
+                            kind: 'access',
+                            server: selected,
+                            projectId,
+                            projectName,
+                            expectedRevision,
+                            allowed: false,
+                          })
+                  }
+                />
+                <Button
+                  variant="outline"
+                  disabled={disabled || selected.revoked}
+                  onClick={() => go({ kind: 'assign', server: selected })}
+                >
+                  分配到项目／环境
+                </Button>
+              </>
+            ) : canManage && props.onManageNodes ? (
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => props.onManageNodes?.(selected.id)}
+              >
+                配置节点
+              </Button>
+            ) : null}
+            <NodeStorageFields
+              server={selected}
+              canEdit={!!data?.canAdmin}
+              disabled={disabled}
+              retainedVersions={retainedVersions}
+              buildCacheGiB={buildCacheGiB}
+              onVersions={(value) => {
+                setRetainedVersions(value)
+                setReducePolicy(false)
+              }}
+              onCache={(value) => {
+                setBuildCacheGiB(value)
+                setReducePolicy(false)
+              }}
+            />
+            {selected.storageStatus?.cache ? (
               <SettingsRow
-                title="节点 ID"
-                description={
-                  <span className="select-text break-all font-mono">{view.server.id}</span>
-                }
+                title="构建缓存用量"
+                description={`${bytes(selected.storageStatus.cache.bytes)} / ${bytes(selected.storageStatus.cache.limitBytes)}`}
               />
-            </SettingsSection>
-            <SettingsSection title="存储设置">
-              <SettingsRow
-                title="应用状态"
-                description={storageLabels[view.server.storageState ?? "unsupported"]}
-              />
-              {view.server.storagePolicy ? (
-                <>
-                  <Field label="保留成功版本数" inline>
-                    {(id) => (
-                      <Input
-                        id={id}
-                        type="number"
-                        min={2}
-                        max={20}
-                        step={1}
-                        value={retainedVersions}
-                        onValueChange={setRetainedVersions}
-                        disabled={disabled || !data?.canAdmin || view.server.revoked}
-                      />
-                    )}
-                  </Field>
-                  <Field label="构建缓存上限（GiB）" inline>
-                    {(id) => (
-                      <Input
-                        id={id}
-                        type="number"
-                        min={1}
-                        max={20}
-                        step={1}
-                        value={buildCacheGiB}
-                        onValueChange={setBuildCacheGiB}
-                        disabled={disabled || !data?.canAdmin || view.server.revoked}
-                      />
-                    )}
-                  </Field>
-                </>
-              ) : null}
-              {view.server.storageStatus ? (
-                <>
-                  <SettingsRow
-                    title="最近检查"
-                    description={time(view.server.storageStatus.checkedAt)}
-                  />
-                  <SettingsRow
-                    title="构建缓存"
-                    description={`${bytes(view.server.storageStatus.cache?.bytes)} / ${bytes(view.server.storageStatus.cache?.limitBytes)}`}
-                  />
-                </>
-              ) : null}
-            </SettingsSection>
+            ) : null}
+            {reducePolicy ? (
+              <Alert variant="info">
+                <AlertDescription>
+                  降低保留数量或缓存预算后，节点空闲时会清理超额的旧版本或专用缓存，影响此节点全部项目。当前运行和受保护版本仍保留。请确认后再次保存。
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </>
         ) : (
           <>
             <p className="break-words text-sm">
-              {view.kind === "unbind"
+              {view.kind === 'unbind'
                 ? `将“${view.server.name}”从当前项目环境解绑。已有部署目标引用该节点时不能解绑。`
-                : view.kind === "revoke"
+                : view.kind === 'revoke'
                   ? `撤销“${view.server.name}”后，该执行器将无法连接，其他项目使用此节点的部署也会受到影响。`
                   : `永久删除“${view.server.name}”的接入记录。关联部署位置、任务、日志和版本记录将一并删除；远端程序和文件不会被卸载。`}
             </p>
-            {catalog && (view.kind === "revoke" || view.kind === "delete") ? (
+            {catalog && (view.kind === 'revoke' || view.kind === 'delete') ? (
               <NodeImpact catalog={catalog} serverId={view.server.id} />
             ) : null}
           </>
         )}
       </Panel>
-      {view.kind !== "list" && !registration ? (
+      {view.kind !== 'list' && view.kind !== 'connect' ? (
         <Footer>
           <Button variant="outline" disabled={busy} onClick={back}>
             返回
           </Button>
-          {(view.kind !== "details" && view.kind !== "projects") ||
-          (view.kind === "details" &&
+          {view.kind !== 'details' ||
+          (view.kind === 'details' &&
             data?.canAdmin &&
             view.server.storagePolicy &&
             !view.server.revoked) ? (
             <Button type="submit" disabled={!!confirmDisabled}>
               {busy ? <Spinner size="sm" /> : null}
-              {view.kind === "details"
-                ? "保存存储设置"
-                : view.kind === "access"
-                  ? view.allowed
-                    ? "确认允许"
-                    : "确认撤回"
-                  : view.kind === "create"
-                    ? "生成安装命令"
-                    : view.kind === "bind"
-                      ? "确认绑定"
-                      : view.kind === "unbind"
-                        ? "确认解绑"
-                        : view.kind === "revoke"
-                          ? "确认撤销"
-                          : "确认删除"}
+              {view.kind === 'details'
+                ? reducePolicy
+                  ? '确认清理影响并保存'
+                  : '保存存储设置'
+                : view.kind === 'assign'
+                  ? '确认分配'
+                  : view.kind === 'access'
+                    ? view.allowed
+                      ? '确认允许'
+                      : '确认撤回'
+                    : view.kind === 'create'
+                      ? '生成安装命令'
+                      : view.kind === 'bind'
+                        ? '确认绑定'
+                        : view.kind === 'unbind'
+                          ? '确认解绑'
+                          : view.kind === 'revoke'
+                            ? '确认撤销'
+                            : '确认删除'}
             </Button>
           ) : null}
         </Footer>
       ) : null}
     </form>
-  );
-  if (props.embedded) return content;
+  )
+  if (props.embedded) return content
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setRegistration(null);
-        onOpenChange(next);
+        if (!next) setRegistration(null)
+        onOpenChange(next)
       }}
     >
       <DialogPopup className="sm:max-w-2xl" finalFocus={finalFocus}>
         {content}
       </DialogPopup>
     </Dialog>
-  );
+  )
 }
 
 function PageHeader({ children }: { children: ReactNode }) {
-  return <div className="mb-5">{children}</div>;
+  return <div className="mb-5">{children}</div>
 }
 function PageTitle({ children }: { children: ReactNode }) {
-  return <h2 className="min-w-0 break-words text-sm font-medium">{children}</h2>;
+  return <h2 className="min-w-0 break-words text-sm font-medium">{children}</h2>
 }
 function PagePanel({ children }: { children: ReactNode }) {
-  return <div className="space-y-4">{children}</div>;
+  return <div className="space-y-4">{children}</div>
 }
 function PageFooter({ children }: { children: ReactNode }) {
   return (
     <div className="sticky bottom-0 mt-6 flex justify-end gap-2 border-t bg-background py-3">
       {children}
     </div>
-  );
+  )
 }

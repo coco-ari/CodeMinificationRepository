@@ -222,6 +222,8 @@ export interface DeploymentServer {
   capabilities?: string[]
   lastSeenAt?: string | null
   registeredAt?: string | null
+  registrationState?: 'pending' | 'expired' | 'registered' | 'revoked'
+  registrationExpiresAt?: string | null
   metrics?: {
     cpuPercent: number | null
     memory: { used: number | null; total: number | null } | null
@@ -230,11 +232,13 @@ export interface DeploymentServer {
   } | null
   storagePolicy?: { revision: number; retainedVersions: number; buildCacheGiB: number } | null
   storageState?: 'unsupported' | 'waiting' | 'pending' | 'applying' | 'applied' | 'failed'
+  storageWaitingReason?: 'offline' | 'busy' | null
   storageStatus?: {
     revision: number | null
     state: 'applying' | 'applied' | 'failed'
     startedAt: string | null
     checkedAt: string | null
+    errors?: string[]
     cache: {
       bytes: number | null
       limitBytes: number | null
@@ -250,6 +254,7 @@ export interface DeploymentServerManagement {
   canBind: boolean
 }
 export interface DeploymentGlobalNodeCatalog {
+  installation?: { origin: string; ca: { url: string; sha256: string } | null }
   servers: DeploymentServer[]
   projects: Array<{ id: string; name: string; environments: Array<{ id: string; name: string }> }>
   projectAccess: Array<{ projectId: string; serverIds: string[]; revision: number }>
@@ -261,10 +266,11 @@ export type DeploymentNodePublicIntent =
   | { serverId: string; environmentId: string }
   | { serverId: string; expectedRevision: number; retainedVersions: number; buildCacheGiB: number }
   | { projectId: string; serverId: string; allowed: boolean; expectedRevision: number }
+  | { serverId: string; projectId: string; environmentIds: string[]; expectedRevision: number }
 export interface DeploymentNodeReceipt {
   state: 'completed'
   requestId: string
-  operation: 'create' | 'bind' | 'unbind' | 'revoke' | 'delete' | 'storage' | 'access'
+  operation: 'create' | 'bind' | 'unbind' | 'revoke' | 'delete' | 'storage' | 'access' | 'assign' | 'registration'
   projectId: string | null
   environmentId: string | null
   serverId: string
@@ -274,6 +280,13 @@ export interface DeploymentNodeReceipt {
     | DeploymentServer
     | { ok: true }
     | { projectId: string; serverId: string; allowed: boolean; revision: number }
+    | DeploymentNodeAssignment
+}
+export interface DeploymentNodeAssignment {
+  serverId: string
+  projectId: string
+  environmentIds: string[]
+  revision: number
 }
 export interface DeploymentServerRegistration {
   server: DeploymentServer

@@ -128,6 +128,43 @@ async function setup() {
 const base = '/autoops/deployment-servers'
 const projectNodes = '/autoops/projects/project/deployments/servers'
 
+it('一次分配在当前授权下绑定全部环境，非法环境、越权和 CSRF 失败不产生部分结果', async () => {
+  await using f = await setup()
+  f.project.environments.push({ id: 'stage', name: '预发' })
+  const created = await (await f.handle(f.request(base, { requestId: randomUUID(), name: '分配验收节点' }))).json() as { server: { id: string } }
+  const path = `${base}/${created.server.id}/assignments`
+  const input = { requestId: randomUUID(), projectId: 'project', environmentIds: ['test', 'stage'], expectedRevision: 1 }
+  expect((await f.handle(f.request(path, input, 'manager'))).status).toBe(403)
+  expect((await f.handle(f.request(path, input, 'admin', false))).status).toBe(403)
+  expect((await f.handle(f.request(path, { ...input, environmentIds: ['test', 'missing'] }))).status).toBe(403)
+  const before = await (await f.handle(f.request(base))).json() as { bindings: unknown[]; projectAccess: { serverIds: string[] }[] }
+  expect(before.bindings).toEqual([])
+  expect(before.projectAccess.every(value => value.serverIds.length === 0)).toBe(true)
+  const assigned = await f.handle(f.request(path, input))
+  expect(assigned.status).toBe(200)
+  const result = await assigned.json()
+  expect(result).toMatchObject({ environmentIds: ['test', 'stage'], revision: 2 })
+  expect(await (await f.handle(f.request(path, input))).json()).toEqual(result)
+  expect((await f.handle(f.request(path, { ...input, requestId: randomUUID() }))).status).toBe(409)
+  const catalog = await (await f.handle(f.request(base))).json() as { bindings: unknown[] }
+  expect(catalog.bindings).toHaveLength(2)
+})
+
+it('口令更新需要平台管理权限，重复请求与结果核对不返回一次性秘密', async () => {
+  await using f = await setup()
+  const created = await (await f.handle(f.request(base, { requestId: randomUUID(), name: '口令验收节点' }))).json() as { server: { id: string }; registrationToken: string }
+  const path = `${base}/${created.server.id}/registration`, input = { requestId: randomUUID() }
+  expect((await f.handle(f.request(path, input, 'manager'))).status).toBe(403)
+  expect((await f.handle(f.request(path, input, 'admin', false))).status).toBe(403)
+  const renewed = await (await f.handle(f.request(path, input))).json() as { server: { id: string }; registrationToken: string }
+  expect(renewed.server.id).toBe(created.server.id)
+  expect(renewed.registrationToken).not.toBe(created.registrationToken)
+  expect(await (await f.handle(f.request(path, input))).json()).toMatchObject({ registrationToken: null, repeated: true })
+  const receipt = await (await f.handle(f.request(`${base}/receipts/${input.requestId}`))).json()
+  expect(receipt).toMatchObject({ operation: 'registration', serverId: created.server.id })
+  expect(JSON.stringify(receipt)).not.toContain(renewed.registrationToken)
+})
+
 it('全局登记不创建项目绑定，准入后项目管理员能绑定但不能登记或改变准入', async () => {
   await using f = await setup()
   const input = { requestId: randomUUID(), name: '全局 HTTP 节点' }

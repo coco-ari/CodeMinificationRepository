@@ -6,6 +6,8 @@ import {
 } from './ModuleWorkspace'
 import { DeploymentSourceDetails, DeploymentReleaseIdentity, RepositorySetupNotice } from './deployment'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useNavigate, useSearch } from '@tanstack/react-router'
+import { environmentNodesHref, nodePageHref } from './deployment/deploymentNodeNavigation'
 import {
   FileTextIcon,
   HistoryIcon,
@@ -162,6 +164,8 @@ export function DeploymentsPanel({
   onRefreshPackages: () => void
 }) {
   const wideToolbar = useMediaQuery('sm')
+  const navigate = useNavigate()
+  const search = useSearch({ strict: false }) as { nodeEnvironmentId?: string }
   const canExecute =
     readAutoOpsHost()?.projects.find((project) => project.id === projectId)?.capabilities?.[
       'deployment.execute'
@@ -219,6 +223,12 @@ export function DeploymentsPanel({
   const environmentId = overview?.environments.some((entry) => entry.id === selection.environmentId)
     ? selection.environmentId
     : (overview?.environments[0]?.id ?? selection.environmentId)
+  useEffect(() => {
+    if (!search.nodeEnvironmentId) { setDialog(value => value === 'servers' ? null : value); return }
+    if (!projectEnvironments(projectId).some(value => value.id === search.nodeEnvironmentId)) { setError('返回的环境不存在或无权访问，请重新选择环境。'); return }
+    setSelection(value => value.environmentId === search.nodeEnvironmentId ? value : { ...value, environmentId: search.nodeEnvironmentId!, targetId: '', taskId: '' })
+    setDialog('servers')
+  }, [projectId, search.nodeEnvironmentId])
   const services = overview?.services ?? []
   const selectedTarget = overview?.targets.find((entry) => entry.id === selection.targetId)
   const service =
@@ -325,6 +335,7 @@ export function DeploymentsPanel({
     setError(null)
     setRollbackId(releaseId)
     setDialog(value)
+    if (value === 'servers') void navigate({ href: environmentNodesHref({ from: 'deployments', projectId, environmentId }) })
   }
   const perform = async (submission: PendingSubmission) => {
     if (accessDeniedRef.current || !overview || !canExecute || submitGuard.current) return
@@ -1081,9 +1092,10 @@ export function DeploymentsPanel({
       <DeploymentServers
         projectId={projectId}
         environmentId={environmentId}
+        onManageNodes={(serverId) => void navigate({ href: nodePageHref({ from: 'deployments', projectId, environmentId, ...(serverId ? { nodeId: serverId, nodeView: 'details' as const, nodeSection: 'storage' as const } : {}) }) })}
         open={dialog === 'servers'}
         onOpenChange={(open) => {
-          if (!open) setDialog(null)
+          if (!open) { setDialog(null); void navigate({ href: `/deployments?${new URLSearchParams({ projectId })}` }) }
         }}
         finalFocus={finalFocus}
         onAccessDenied={revokeAccess}
