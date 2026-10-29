@@ -131,3 +131,49 @@ test('已有库丢失或错配密钥必须拒绝，不能自动重建；宽松�
   }
   const restored = createProjectCredentialService(f.options); restored.close()
 })
+
+test('删除凭证清理所有秘密版本和历史收据，断线按原请求恢复；其他凭证保留', async (t) => {
+  const f = await fixture(t),
+    first = f.service.create('actor-a', 'project-a', input()),
+    other = f.service.create('actor-a', 'project-a', input('keep'))
+  f.service.replace('actor-a', 'project-a', first.id, { ...input('rotate'), expectedRevision: 1 })
+  let unlinked = 0
+  const command = { requestId: 'remove', expectedRevision: 2 }
+  assert.throws(
+    () =>
+      f.service.remove(
+        'actor-a',
+        'project-a',
+        first.id,
+        { ...command, expectedRevision: 1 },
+        () => unlinked++,
+      ),
+    { code: 'CREDENTIAL_REVISION_CONFLICT' },
+  )
+  const result = f.service.remove('actor-a', 'project-a', first.id, command, () => unlinked++)
+  assert.equal(result.deleted, true)
+  assert.equal(unlinked, 1)
+  assert.deepEqual(
+    f.service.remove('actor-a', 'project-a', first.id, command, () => assert.fail()),
+    result,
+  )
+  const db = new DatabaseSync(f.options.databasePath, { readOnly: true })
+  try {
+    assert.equal(
+      db.prepare('SELECT count(*) n FROM credential_versions WHERE credential_id=?').get(first.id)
+        .n,
+      0,
+    )
+    assert.equal(
+      db.prepare('SELECT count(*) n FROM credential_audit WHERE credential_id=?').get(first.id).n,
+      0,
+    )
+    assert.equal(db.prepare('SELECT count(*) n FROM credentials WHERE id=?').get(first.id).n, 0)
+    assert.deepEqual(
+      f.service.list('actor-a', 'project-a').map((value) => value.id),
+      [other.id],
+    )
+  } finally {
+    db.close()
+  }
+})

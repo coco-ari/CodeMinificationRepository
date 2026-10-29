@@ -240,6 +240,35 @@ export function ProjectConfigurationPanel({
                 >
                   编辑
                 </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-label={`移除成员 ${member.name}`}
+                  onClick={(event) =>
+                    onOpen(
+                      {
+                        kind: 'member',
+                        remove: true,
+                        name: member.name,
+                        description: '',
+                        revision: member.revision,
+                        value: {
+                          userId: member.userId,
+                          role: member.role,
+                          environmentIds: member.environmentIds,
+                          environmentRoles: member.environmentRoles,
+                          canAdjustChat: member.canAdjustChat,
+                          status: member.status,
+                        },
+                        context: { project },
+                      },
+                      event.currentTarget,
+                    )
+                  }
+                >
+                  移除
+                </Button>
               </div>
             }
           >

@@ -77,7 +77,7 @@ export function repositoriesRoutes({ access, principal }: BusinessHttpContext) {
         code: 'REPOSITORY_INPUT_INVALID',
         message: '仓库字段或格式无效；连接不选择业务分支',
       })
-      let result
+      let result: unknown
       if (operation === 'workspace') {
         const input = yield* Effect.try(() =>
           decodeContract(ConfigureRepositoryWorkspace, body),
@@ -95,8 +95,16 @@ export function repositoriesRoutes({ access, principal }: BusinessHttpContext) {
         const input = yield* Effect.try(() => decodeContract(DirectoryCommand, body)).pipe(
           Effect.mapError(inputError),
         )
+        yield* Effect.tryPromise(() => service.cancelProjectWork(project))
         result = yield* Effect.try(() =>
           service.authoring.removeRepository(project, repositoryId ?? '', input, current.id),
+        )
+        yield* Effect.tryPromise(() =>
+          service.purgeRelated(
+            project,
+            result as { removedCaptures?: string[]; removedInputs?: string[] },
+            repositoryId ?? '',
+          ),
         )
       } else {
         const input = yield* Effect.try(() => decodeContract(SaveRepository, body)).pipe(

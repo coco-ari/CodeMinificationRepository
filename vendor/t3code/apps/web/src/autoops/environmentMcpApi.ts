@@ -10,6 +10,7 @@ import type {
   EnvironmentMcpConfiguration,
   EnvironmentMcpConnection,
   EnvironmentMcpReceipt,
+  EnvironmentMcpDeletion,
   EnvironmentMcpTestResult,
 } from "../../../../../../autoops/contracts/environment-mcp.ts";
 import { randomUUID } from "~/lib/utils";
@@ -43,6 +44,7 @@ export interface PendingEnvironmentMcp {
 export type EnvironmentMcpWriteResult =
   | EnvironmentMcpConnection
   | EnvironmentMcpTestResult
+  | EnvironmentMcpDeletion
   | { saved: true; available: false };
 export const environmentMcpPath = (project: string, environment: string) =>
   `/api/v1/projects/${encodeURIComponent(project)}/environments/${encodeURIComponent(environment)}/mcp`;
@@ -193,14 +195,17 @@ function checkedResult(pending: PendingEnvironmentMcp, value: unknown): Environm
         ((pending.mutation.kind === "save" && !pending.mutation.connectionId) ||
           result.id === pending.mutation.connectionId) &&
         result.revision === pending.mutation.input.expectedRevision + 1 &&
-        typeof result.enabled === "boolean" &&
-        typeof result.removed === "boolean" &&
-        decodeContract(ConfigurationContract, result.configuration))
-    );
+        (pending.mutation.kind === 'remove'
+          ? result.removed === true
+          : typeof result.enabled === 'boolean' &&
+            typeof result.removed === 'boolean' &&
+            decodeContract(ConfigurationContract, result.configuration)))
+    )
   } catch {
     /* 异常响应只给稳定错误，不回显未知字段。 */
   }
-  if (matches) return value as EnvironmentMcpConnection | EnvironmentMcpTestResult;
+  if (matches)
+    return value as EnvironmentMcpConnection | EnvironmentMcpTestResult | EnvironmentMcpDeletion
   throw new AutoOpsRequestError(
     "连接操作响应无法确认，请核对原请求。",
     "ENVIRONMENT_MCP_RESPONSE_INVALID",

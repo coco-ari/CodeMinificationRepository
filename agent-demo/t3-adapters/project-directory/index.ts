@@ -49,6 +49,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const database = openDatabase(join(directory, 'state.sqlite'), migrations)
   const { db, transaction } = database
+  const removedAudiences = new Map<string, string[]>()
   let closed = false
   const active = (actor: string) => {
     if (closed) fail(503, 'PROJECT_DIRECTORY_CLOSED', '项目目录已停止')
@@ -221,6 +222,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       }))
     },
     removedProjectAudience(project) {
+      if (removedAudiences.has(project)) return removedAudiences.get(project)!
       const removed = db
         .prepare("SELECT id FROM directory_projects WHERE id=? AND state IN ('deleting','deleted')")
         .get(project)
@@ -249,6 +251,8 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
           project,
           operation.startsWith('member.') ? 'project.members.manage' : 'project.manage',
         )
+      if (db.prepare('SELECT 1 FROM directory_retired_requests WHERE request_id=?').get(requestId))
+        fail(404, 'PROJECT_RESOURCE_DELETED', '原请求所属资源已删除，请重新操作')
       const encoded = JSON.stringify(payload)
       if (
         db.prepare('SELECT request_id FROM directory_deletions WHERE request_id=?').get(requestId)
@@ -326,7 +330,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
         blockers.unshift({
           kind: 'environments',
           count,
-          message: '项目仍有环境，请先处理环境引用并删除环境',
+          message: '项目内的环境将一并删除',
         })
     }
     return blockers
@@ -374,7 +378,8 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
         previous.payload !== JSON.stringify(value)
       )
         fail(409, 'PROJECT_REQUEST_CONFLICT', '原删除请求已用于其他操作者、范围或修订')
-      deletionAuthority(actor, project)
+      if (previous.state === 'deleted') active(actor)
+      else deletionAuthority(actor, project)
       return { value, previous }
     }
     permitted(actor, project)
@@ -390,12 +395,10 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
     active(actor)
     decode(C.DirectoryId, requestId)
     const row = db
-      .prepare(
-        'SELECT * FROM directory_deletions WHERE request_id=? AND actor_id=? AND environment_id IS NULL',
-      )
+      .prepare('SELECT * FROM directory_deletions WHERE request_id=? AND actor_id=?')
       .get(requestId, actor)
     if (!row) return fail(404, 'PROJECT_DELETE_RECEIPT_NOT_FOUND', '没有本人的已受理项目删除请求')
-    deletionAuthority(actor, String(row.project_id))
+    if (row.state !== 'deleted') deletionAuthority(actor, String(row.project_id))
     if (row.state !== 'pending' && row.state !== 'deleted')
       return fail(409, 'PROJECT_DELETE_NOT_PENDING', '原项目删除已被阻止，不能继续执行')
     return row
@@ -454,9 +457,11 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
           ? C.CreateProjectCommand
           : operation.startsWith('environment.save:')
             ? C.SaveEnvironmentCommand
-            : operation.startsWith('member.save:')
-              ? C.SaveMemberCommand
-              : undefined
+            : operation.startsWith('member.delete:')
+              ? C.DirectoryCommand
+              : operation.startsWith('member.save:')
+                ? C.SaveMemberCommand
+                : undefined
       if (!schema) return fail(503, 'PROJECT_RECEIPT_INVALID', '原项目请求操作不可核对')
       payload = receiptValue(schema, JSON.parse(String(row.payload)))
     } catch {
@@ -524,7 +529,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       }
     }
     let canResume: boolean | undefined
-    if (deletion?.state === 'pending' && environment === null) {
+    if (deletion?.state === 'pending') {
       try {
         deletionAuthority(actor, project)
         canResume = true
@@ -560,11 +565,24 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
     requireProjectDeletionResumeAccess(actor: string, requestId: string) {
       acceptedProjectDeletion(actor, requestId)
     },
+    purgeUser(user: string) {
+      transaction.run(() => {
+        db.prepare('DELETE FROM directory_member_environments WHERE user_id=?').run(user)
+        db.prepare('DELETE FROM directory_members WHERE user_id=?').run(user)
+        db.prepare('DELETE FROM directory_retired_requests WHERE actor_id=?').run(user)
+        db.prepare('DELETE FROM directory_receipts WHERE actor_id=?').run(user)
+        db.prepare('DELETE FROM directory_audit WHERE actor_id=? OR subject_id=?').run(user, user)
+        db.prepare('DELETE FROM directory_deletions WHERE actor_id=? AND state<>?').run(
+          user,
+          'pending',
+        )
+      })
+    },
     resumeProjectDeletion(
       actor: string,
       requestId: string,
       input: unknown,
-      inspect: (project: string) => C.DeletionBlocker[],
+      inspect: (project: string, environment?: string) => C.DeletionBlocker[],
     ) {
       return transaction.run(() => {
         const row = acceptedProjectDeletion(actor, requestId)
@@ -577,20 +595,41 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
         }
         if (
           value.projectId !== row.project_id ||
+          (value.environmentId ?? null) !== row.environment_id ||
+          value.operation !==
+            (row.environment_id === null ? 'project.delete' : 'environment.delete') ||
           command.requestId !== requestId ||
           value.publicIntent.expectedRevision !== command.expectedRevision
         )
           return fail(409, 'PROJECT_REQUEST_CONFLICT', '继续删除的范围或原意图不一致')
         if (row.state === 'pending') {
-          const blockers = inspectDeletion(value.projectId, null, () => inspect(value.projectId))
-          if (blockers.length) return blocked(blockers)
+          const blockers = inspectDeletion(
+            value.projectId,
+            row.environment_id === null ? null : String(row.environment_id),
+            () => inspect(value.projectId, value.environmentId),
+          )
+          if (blockers.some((value) => value.kind === 'native-project-synchronization'))
+            return blocked(blockers)
           // 各 owner 的只读检查可能触发同步撤权；原步骤继续前重新核对当前权限。
           deletionAuthority(actor, value.projectId)
         }
-        return { projectId: value.projectId, command }
+        return {
+          projectId: value.projectId,
+          ...(value.environmentId === undefined ? {} : { environmentId: value.environmentId }),
+          command,
+        }
       })
     },
     requireDeletionAccess(actor: string, project: string) {
+      active(actor)
+      if (
+        db
+          .prepare(
+            "SELECT 1 FROM directory_deletions WHERE project_id=? AND actor_id=? AND state='deleted'",
+          )
+          .get(project, actor)
+      )
+        return
       deletionAuthority(actor, project)
     },
     deletionPreview(
@@ -612,7 +651,7 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
       const blockers = inspectDeletion(project, environment, inspect)
       return {
         revision: Number(current.revision),
-        canDelete: !blockers.length,
+        canDelete: !blockers.some((value) => value.kind === 'native-project-synchronization'),
         blockers: blockers.slice(0, 24),
         truncated: blockers.length > 24,
       }
@@ -628,7 +667,8 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
         if (previous) return publicDeletion(previous)
         revision(Number(rowFor(project).revision), value.expectedRevision)
         const blockers = inspectDeletion(project, null, inspect)
-        if (blockers.length) return blocked(blockers)
+        if (blockers.some((value) => value.kind === 'native-project-synchronization'))
+          return blocked(blockers)
         db.prepare(
           "UPDATE directory_projects SET state='deleting',revision=revision+1 WHERE id=?",
         ).run(project)
@@ -653,13 +693,31 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
         if (!previous || previous.state === 'blocked')
           return fail(409, 'PROJECT_DELETE_NOT_PENDING', '没有可继续的原删除请求')
         if (previous.state !== 'deleted') {
+          removedAudiences.set(
+            project,
+            members(project)
+              .filter((value) => value.status === 'active')
+              .map((value) => value.userId),
+          )
           db.prepare(
-            "UPDATE directory_projects SET state='deleted' WHERE id=? AND state='deleting'",
+            'INSERT OR IGNORE INTO directory_retired_requests SELECT request_id,actor_id FROM directory_receipts WHERE project_id=?',
           ).run(project)
+          for (const table of [
+            'directory_member_environments',
+            'directory_members',
+            'directory_environments',
+            'directory_receipts',
+            'directory_audit',
+          ])
+            db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(project)
+          db.prepare('DELETE FROM directory_deletions WHERE project_id=? AND request_id!=?').run(
+            project,
+            value.requestId,
+          )
+          db.prepare('DELETE FROM directory_projects WHERE id=?').run(project)
           db.prepare("UPDATE directory_deletions SET state='deleted' WHERE request_id=?").run(
             value.requestId,
           )
-          deletionAudit(actor, project, 'project.delete.completed', project)
         }
         return { deleted: true, projectId: project }
       })
@@ -683,6 +741,36 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
         deletionAudit(actor, project, 'project.delete.blocked', project)
       })
     },
+    beginEnvironmentDeletion(actor: string, project: string, environment: string, input: unknown) {
+      return transaction.run(() => {
+        const { value, previous } = deletionReceipt(actor, project, environment, input)
+        if (previous) return publicDeletion(previous)
+        const current = db
+          .prepare(
+            "SELECT revision FROM directory_environments WHERE project_id=? AND id=? AND state='active'",
+          )
+          .get(project, decode(C.DirectoryId, environment))
+        if (!current) return fail(404, 'ENVIRONMENT_NOT_FOUND', '环境不存在或不属于当前项目')
+        revision(Number(current.revision), value.expectedRevision)
+        db.prepare(
+          "UPDATE directory_environments SET state='deleting' WHERE project_id=? AND id=?",
+        ).run(project, environment)
+        db.prepare("INSERT INTO directory_deletions VALUES(?,?,?,?,?,'pending','[]',?)").run(
+          value.requestId,
+          actor,
+          project,
+          environment,
+          JSON.stringify(value),
+          DateTime.formatIso(DateTime.nowUnsafe()),
+        )
+        return {
+          state: 'pending' as const,
+          projectId: project,
+          requestId: value.requestId,
+          blockers: [],
+        }
+      })
+    },
     deleteEnvironment(
       actor: string,
       project: string,
@@ -692,16 +780,18 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
     ): C.DirectoryDeletionResult {
       return transaction.run(() => {
         const { value, previous } = deletionReceipt(actor, project, environment, input)
-        if (previous) return { deleted: true, projectId: project, environmentId: environment }
+        if (previous?.state === 'deleted')
+          return { deleted: true, projectId: project, environmentId: environment }
         const current = db
           .prepare(
-            "SELECT revision FROM directory_environments WHERE project_id=? AND id=? AND state='active'",
+            "SELECT revision FROM directory_environments WHERE project_id=? AND id=? AND state IN ('active','deleting')",
           )
           .get(project, decode(C.DirectoryId, environment))
         if (!current) return fail(404, 'ENVIRONMENT_NOT_FOUND', '环境不存在或不属于当前项目')
         revision(Number(current.revision), value.expectedRevision)
         const blockers = inspectDeletion(project, environment, inspect)
-        if (blockers.length) return blocked(blockers)
+        if (blockers.some((value) => value.kind === 'native-project-synchronization'))
+          return blocked(blockers)
         db.prepare(
           "UPDATE directory_environments SET state='deleting' WHERE project_id=? AND id=?",
         ).run(project, environment)
@@ -711,17 +801,11 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
         db.prepare(
           'DELETE FROM directory_member_environments WHERE project_id=? AND environment_id=?',
         ).run(project, environment)
-        db.prepare(
-          "UPDATE directory_environments SET state='deleted',revision=revision+1 WHERE project_id=? AND id=?",
-        ).run(project, environment)
-        db.prepare("INSERT INTO directory_deletions VALUES(?,?,?,?,?,'deleted','[]',?)").run(
-          value.requestId,
-          actor,
-          project,
-          environment,
-          JSON.stringify(value),
-          DateTime.formatIso(DateTime.nowUnsafe()),
-        )
+        db.prepare('DELETE FROM directory_environments WHERE project_id=? AND id=?').run(project, environment)
+        db.prepare("INSERT OR IGNORE INTO directory_retired_requests SELECT request_id,actor_id FROM directory_receipts WHERE project_id=? AND (operation=? OR (operation='environment.save:new' AND json_extract(result,'$.id')=?) OR EXISTS(SELECT 1 FROM json_each(payload,'$.value.environmentIds') WHERE value=?))").run(project, `environment.save:${environment}`, environment, environment)
+        db.prepare('DELETE FROM directory_receipts WHERE request_id IN (SELECT request_id FROM directory_retired_requests)').run()
+        db.prepare('DELETE FROM directory_audit WHERE project_id=? AND subject_id=?').run(project, environment)
+        db.prepare("INSERT INTO directory_deletions VALUES(?,?,?,?,?,'deleted','[]',?) ON CONFLICT(request_id) DO UPDATE SET state='deleted',blockers='[]'").run(value.requestId,actor,project,environment,JSON.stringify(value),DateTime.formatIso(DateTime.nowUnsafe()))
         deletionAudit(actor, project, 'environment.delete', environment)
         return { deleted: true, projectId: project, environmentId: environment }
       })
@@ -759,6 +843,12 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
     create(actor: string, input: unknown) {
       const user = active(actor),
         value = decode(C.CreateProjectCommand, input)
+      if (
+        db
+          .prepare('SELECT 1 FROM directory_retired_requests WHERE request_id=?')
+          .get(value.requestId)
+      )
+        fail(404, 'PROJECT_NOT_FOUND', '原创建对象已删除，请重新创建')
       if (user.kind === 'external') fail(403, 'PROJECT_CREATE_FORBIDDEN', '外部账号不能创建项目')
       if (value.expectedRevision !== 0) fail(400, 'PROJECT_INPUT_INVALID', '新项目修订必须为零')
       const previous = db
@@ -831,6 +921,37 @@ export function createProjectDirectory({ dataDir, seed, authorize, validateMembe
           return { id, name: value.value.name, revision: next }
         },
       )
+    },
+    removeMember(
+      actor: string,
+      project: string,
+      userId: string,
+      input: unknown,
+      purge: () => void,
+    ) {
+      permitted(actor, project, 'project.members.manage')
+      const value = decode(C.DirectoryCommand, input)
+      return command(actor, project, `member.delete:${userId}`, value.requestId, value, () => {
+        const member = members(project).find((row) => row.userId === userId)
+        if (!member) return fail(404, 'PROJECT_MEMBER_NOT_FOUND', '成员不存在')
+        revision(member.revision, value.expectedRevision)
+        purge()
+        db.prepare(
+          'DELETE FROM directory_member_environments WHERE project_id=? AND user_id=?',
+        ).run(project, userId)
+        db.prepare('DELETE FROM directory_members WHERE project_id=? AND user_id=?').run(
+          project,
+          userId,
+        )
+        db.prepare(
+          'DELETE FROM directory_receipts WHERE project_id=? AND (operation=? OR operation=?)',
+        ).run(project, `member.save:${userId}`, `member.delete:${userId}`)
+        db.prepare('DELETE FROM directory_audit WHERE project_id=? AND subject_id=?').run(
+          project,
+          userId,
+        )
+        return { deleted: true, userId, revision: member.revision + 1 }
+      })
     },
     saveMember(actor: string, project: string, input: unknown) {
       permitted(actor, project, 'project.members.manage')

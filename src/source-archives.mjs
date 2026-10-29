@@ -238,6 +238,20 @@ export class SourceArchives {
     }
     if (errors.length) throw new AggregateError(errors, '未登记源码临时文件清理延后');
   }
+  // 显式删除先清物理包，再提交实体删除；仍被其他对象引用的共享包保留。
+  async removeForTasks(taskIds) {
+    return this.serial(async () => {
+      const data=this.store.state.deployments, removed=new Set(taskIds);
+      const targets=new Set(data.tasks.filter(task=>removed.has(task.id)).map(task=>task.targetId));
+      const archives=task=>[task.sourceArchiveId,task.baselineSource?.archiveId];
+      const candidates=new Set([...data.tasks.filter(task=>removed.has(task.id)).flatMap(archives),...data.releases.filter(release=>targets.has(release.targetId)).map(release=>release.sourceArchiveId)]);
+      const retained=new Set([...data.tasks.filter(task=>!removed.has(task.id)).flatMap(archives),...data.releases.filter(release=>!targets.has(release.targetId)).map(release=>release.sourceArchiveId)]);
+      const records=data.sourceArchives.filter(record=>candidates.has(record.id)&&!retained.has(record.id));
+      for(const record of records) await rm(this.file(record),{force:true});
+      const ids=new Set(records.map(record=>record.id));
+      await this.store.change(state=>{state.deployments.sourceArchives=state.deployments.sourceArchives.filter(record=>!ids.has(record.id));});
+    });
+  }
   async cleanup() {
     return this.serial(async () => {
       const discarded = [];

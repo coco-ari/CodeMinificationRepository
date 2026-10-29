@@ -9,7 +9,9 @@ import { responseError } from './responses.ts'
 
 /** 接入管理只写提供者同意与预设事实，不开放跨用户运行命令。 */
 export function providedAssistantsRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'own' | 'create' | 'save' | 'share' | 'project' | 'receipt') =>
+  const handle = (
+    operation: 'own' | 'create' | 'save' | 'share' | 'project' | 'receipt' | 'delete',
+  ) =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -35,7 +37,7 @@ export function providedAssistantsRoutes({ access, principal }: BusinessHttpCont
       const id = yield* Effect.try(() => (parts[5] ? decodeURIComponent(parts[5]) : undefined))
       const check = () => {
         access.refresh(current)
-        directory.requireProviderAccess(current.id, id)
+        directory.requireProviderAccess(current.id, operation === 'delete' ? undefined : id)
       }
       yield* Effect.try(() => {
         check()
@@ -71,7 +73,9 @@ export function providedAssistantsRoutes({ access, principal }: BusinessHttpCont
       )
       yield* Effect.try(check)
       const value = yield* Effect.try(() =>
-        operation === 'share'
+        operation === 'delete'
+          ? directory.removeProvided(current.id, id!, input)
+          : operation === 'share'
           ? directory.shareProvided(current.id, id!, decodeURIComponent(parts[7] ?? ''), input)
           : directory.saveProvided(current.id, operation === 'create' ? null : id!, input),
       )
@@ -88,6 +92,7 @@ export function providedAssistantsRoutes({ access, principal }: BusinessHttpCont
     HttpRouter.add('GET', `${base}/receipts/:requestId`, handle('receipt')),
     HttpRouter.add('POST', base, handle('create')),
     HttpRouter.add('POST', `${base}/:assistantId`, handle('save')),
+    HttpRouter.add('DELETE', `${base}/:assistantId`, handle('delete')),
     HttpRouter.add('POST', `${base}/:assistantId/shares/:projectId`, handle('share')),
     HttpRouter.add('GET', '/api/v1/projects/:projectId/assistants/provided', handle('project')),
   )

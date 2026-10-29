@@ -27,6 +27,7 @@ import { Spinner } from '~/components/ui/spinner'
 import { AutoOpsRequestError, isAutoOpsAccessError } from './apiClient'
 import { readAutoOpsHost, subscribeAutoOpsHost } from './hostSnapshot'
 import {
+  removeWorkspaceUpdate,
   loadWorkspaceUpdates,
   prepareWorkspaceUpdate,
   readPendingWorkspaceUpdate,
@@ -97,6 +98,8 @@ function WorkspaceUpdateEditor({
     enableId = useId(),
     confirmId = useId(),
     errorId = useId()
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const deletionRequest = useRef<string | null>(null)
   const [overview, setOverview] = useState<WorkspaceUpdateOverview | null>(null)
   const [enabled, setEnabled] = useState(false),
     [interval, setInterval] = useState('60'),
@@ -146,6 +149,8 @@ function WorkspaceUpdateEditor({
   }
   useEffect(() => {
     if (!open) return
+    setConfirmDelete(false)
+    deletionRequest.current = null
     const controller = new AbortController()
     setOverview(null)
     setConfirmed(false)
@@ -267,6 +272,11 @@ function WorkspaceUpdateEditor({
           <DialogTitle>{scope === 'internal' ? '内部' : '外部'}更新设置</DialogTitle>
         </DialogHeader>
         <DialogPanel>
+          {confirmDelete ? (
+            <p role="alert" className="mb-3 text-sm">
+              永久删除此更新计划、规则和执行记录，停止自动更新。当前工作区文件保留。
+            </p>
+          ) : null}
           <form
             id={formId}
             aria-describedby={error ? errorId : undefined}
@@ -474,6 +484,40 @@ function WorkspaceUpdateEditor({
           </form>
         </DialogPanel>
         <DialogFooter>
+          {!pending && current && current.revision > 0 && !denied ? (
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                if (!confirmDelete) {
+                  setConfirmDelete(true)
+                  return
+                }
+                setActivity('saving')
+                setError(null)
+                deletionRequest.current ??= randomUUID()
+                void removeWorkspaceUpdate(projectId, scope, {
+                  requestId: deletionRequest.current,
+                  expectedRevision: current.revision,
+                })
+                  .then(
+                    () => {
+                      onChanged()
+                      onOpenChange(false)
+                    },
+                    (cause) => {
+                      setError(failure(cause))
+                      if (isAutoOpsAccessError(cause)) onAccessDenied(cause)
+                    },
+                  )
+                  .finally(() => setActivity(null))
+              }}
+            >
+              {confirmDelete ? '确认删除计划及执行记录' : '删除更新计划'}
+            </Button>
+          ) : null}
+
           <Button
             type="button"
             variant="outline"

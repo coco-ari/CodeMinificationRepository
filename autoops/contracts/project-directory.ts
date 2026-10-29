@@ -52,7 +52,8 @@ export const DeleteDirectoryCommand = S.Struct({
   expectedRevision: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1)),
 })
 export const ResumeProjectDeletionCommand = S.Struct({
-  operation: S.Literal('project.delete'),
+  operation: S.Literals(['project.delete', 'environment.delete']),
+  environmentId: S.optionalKey(DirectoryId),
   projectId: DirectoryId,
   publicIntent: S.Struct({ expectedRevision: DeleteDirectoryCommand.fields.expectedRevision }),
 })

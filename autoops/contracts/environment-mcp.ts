@@ -164,8 +164,15 @@ export interface EnvironmentMcpQueryResult {
   data: unknown
   truncated: boolean
 }
+export interface EnvironmentMcpDeletion {
+  id: string
+  projectId: string
+  environmentId: string
+  revision: number
+  removed: true
+}
 export interface EnvironmentMcpReceipt {
   status: 'pending' | 'completed' | 'failed'
-  result?: EnvironmentMcpConnection | EnvironmentMcpTestResult
+  result?: EnvironmentMcpConnection | EnvironmentMcpTestResult | EnvironmentMcpDeletion
   error?: { code: string; message: string }
 }

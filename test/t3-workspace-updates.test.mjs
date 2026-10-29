@@ -1119,3 +1119,33 @@ test('旧更新设置升级后保留计划，外部默认空自定义规则并�
  after.close()
  const reopened=openWorkspaceUpdateDatabase(path);reopened.close()
 })
+
+test('更新计划可删除并清理规则与执行记录；原删除重试不影响后续新建计划', async (t) => {
+  const f = await fixture(t),
+    saved = f.owner.save('project-a', 'internal', command(), 'manager')
+  const input = { requestId: randomUUID(), expectedRevision: saved.revision }
+  await assert.rejects(f.owner.remove('project-a', 'internal', input, 'outsider'), {
+    code: 'FIXTURE_FORBIDDEN',
+  })
+  await assert.rejects(
+    f.owner.remove('project-a', 'internal', { ...input, expectedRevision: 99 }, 'manager'),
+    { code: 'WORKSPACE_UPDATE_REVISION_CONFLICT' },
+  )
+  assert.deepEqual(await f.owner.remove('project-a', 'internal', input, 'manager'), {
+    deleted: true,
+  })
+  assert.equal(f.owner.overview('project-a', 'manager').internal, null)
+  const next = f.owner.save('project-a', 'internal', command(), 'manager')
+  assert.deepEqual(await f.owner.remove('project-a', 'internal', input, 'manager'), {
+    deleted: true,
+  })
+  assert.equal(f.owner.overview('project-a', 'manager').internal.revision, next.revision)
+  const db = new DatabaseSync(join(f.dataDir, 'workspace-updates', 'state.sqlite'), {
+    readOnly: true,
+  })
+  try {
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM workspace_update_runs').get().n, 0)
+  } finally {
+    db.close()
+  }
+})

@@ -1,3 +1,5 @@
+import * as SqlitePersistence from '../../persistence/Sqlite.ts'
+import * as ThreadManagement from '../../orchestration-v2/ThreadManagementService.ts'
 // @effect-diagnostics nodeBuiltinImport:off -- 隔离测试直接创建临时 SQLite 与登录夹具，不访问宿主业务数据。
 import { expect, it, vi } from 'vite-plus/test'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -39,10 +41,15 @@ function setup() {
     { id: 'actor', name: '内部账号', role: 'member' }, { id: 'reader', name: '只读成员', role: 'member' }, { id: 'outside', name: '外部账号', role: 'member', kind: 'external' },
   ], projects: [], agents: [] }, authorize: (...args) => access.requireProjectActionForActor(...args) })
   mocks.directory = directory
-  access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, catalog: directory.catalog, now: () => 1000 })
+  access = createAutoOpsAccess({
+    sessionDb: sessions,
+    bindingDb: bindings,
+    catalog: directory.catalog,
+    now: () => 1000,
+  })
   for (const id of ['actor', 'reader', 'outside']) access.recordNativeSession(access.authenticateCookie(`demo_session=${id}`), id)
-  const app = HttpRouter.toWebHandler(projectDirectoryRoutes(createBusinessHttpContext(access), () => mocks.blockers).pipe(
-    HttpRouter.provideRequest(Layer.mergeAll(NodeServices.layer, Layer.mock(ProjectService.ProjectService)({
+  const app = HttpRouter.toWebHandler(projectDirectoryRoutes(createBusinessHttpContext(access), Object.assign(() => mocks.blockers, { purge: async () => {}, threads: () => [] })).pipe(
+    HttpRouter.provideRequest(Layer.mergeAll(NodeServices.layer, SqlitePersistence.layerMemory, Layer.mock(ThreadManagement.ThreadManagementService)({ getShellSnapshot: () => Effect.succeed({ threads: [], archivedThreads: [] } as never), dispatch: () => Effect.succeed({} as never) }), Layer.mock(ProjectService.ProjectService)({
       getById: id => mocks.nativeRead(id) ?? Effect.succeed(mocks.nativeExists ? Option.some({} as never) : Option.none()),
       delete: input => mocks.nativeDelete(input) ?? Effect.succeed({} as never),
     }), Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
@@ -199,7 +206,7 @@ it('越权删除与缺 CSRF 不解析正文，引用在预检后变化仍拒绝�
     expect(request.bodyUsed).toBe(false)
   }
   expect((await f.handle(f.request(`/${project.id}/deletion-preview`))).status).toBe(200)
-  mocks.blockers = [{ kind: 'test-active', count: 1, message: '仍有活动输入' }]
+  mocks.blockers = [{ kind: 'native-project-synchronization', count: 1, message: '仍有活动输入' }]
   const response = await f.handle(
     f.request(
       `/${project.id}`,
@@ -249,7 +256,7 @@ it('原生结果未知保持 deleting，恢复同命令且删除完成后重复�
     ([value]) => value as { commandId: string; force: boolean },
   )
   expect(commands[0]?.commandId).toBe(commands[1]?.commandId)
-  expect(commands.every((value) => value.force === false)).toBe(true)
+  expect(commands.every((value) => value.force === true)).toBe(true)
   expect(
     (await f.handle(f.request(`/${project.id}`, command, 'actor', true, 'DELETE'))).status,
   ).toBe(200)
@@ -422,8 +429,8 @@ it('显式继续删除拒绝跨actor、篡改范围与意图、当前撤权和�
     expect((await f.handle(f.request(path, forged))).status).toBe(409)
   expect(
     (await f.handle(f.request(path, { ...intent, operation: 'environment.delete' }))).status,
-  ).toBe(400)
-  mocks.blockers = [{ kind: 'late-reference', count: 1, message: '新增引用' }]
+  ).toBe(409)
+  mocks.blockers = [{ kind: 'native-project-synchronization', count: 1, message: '新增引用' }]
   expect((await f.handle(f.request(path, intent))).status).toBe(409)
   expect(await (await f.handle(f.request('/receipts/' + command.requestId))).json()).toMatchObject({
     state: 'pending',

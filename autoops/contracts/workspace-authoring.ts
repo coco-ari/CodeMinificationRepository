@@ -45,6 +45,12 @@ export interface WorkspaceCredentialVersionReference {
   credentialId: string
   version: number
 }
+export interface WorkspaceCredentialDeletion {
+  deleted: true
+  id: string
+  projectId: string
+  revision: number
+}
 export interface WorkspaceCredentialMetadata {
   id: string
   projectId: string
@@ -109,6 +115,8 @@ export interface WorkspaceAuthoringOverview {
   hasUnpublishedChanges?: boolean
 }
 export interface WorkspaceAuthoringResult {
+  removedCaptures?: string[]
+  removedInputs?: string[]
   requestId: string
   revision: number
   entry?: WorkspaceMaterialEntry

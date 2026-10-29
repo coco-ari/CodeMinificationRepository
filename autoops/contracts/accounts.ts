@@ -13,7 +13,13 @@ export const RuntimeAccount = S.Struct({
   revision: AccountRevision,
 })
 export type RuntimeAccount = typeof RuntimeAccount.Type
-export const AccountOperation = S.Literals(['create', 'enable', 'resetPassword', 'changePassword'])
+export const AccountOperation = S.Literals([
+  'create',
+  'enable',
+  'delete',
+  'resetPassword',
+  'changePassword',
+])
 export type AccountOperation = typeof AccountOperation.Type
 const command = { requestId: S.String.check(S.isUUID()) }
 export const CreateAccountCommand = S.Struct({ ...command, value: CreateUser })
@@ -22,6 +28,16 @@ export const EnableAccountCommand = S.Struct({
   expectedRevision: AccountRevision,
   value: S.Struct({ enabled: S.Boolean }),
 })
+export const DeleteAccountCommand = S.Struct({
+  ...command,
+  expectedRevision: AccountRevision,
+  value: S.Struct({}),
+})
+export interface AccountDeletionResult {
+  deleted: true
+  userId: string
+  revision: number
+}
 export const ResetAccountPasswordCommand = S.Struct({
   ...command,
   expectedRevision: AccountRevision,
@@ -43,7 +59,7 @@ export interface AccountReceipt {
   requestId: string
   operation: AccountOperation
   targetId: string
-  result: RuntimeAccount | AccountPasswordResult
+  result: RuntimeAccount | AccountPasswordResult | AccountDeletionResult
   createdAt: string
 }
 export interface AccountPage {

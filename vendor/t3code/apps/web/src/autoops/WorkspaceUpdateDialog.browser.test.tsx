@@ -86,6 +86,10 @@ function setup() {
     const scope = path.split('/').at(-1)! as WorkspaceUpdateScope
     const input = JSON.parse(String(init.body)) as (typeof writes)[number]['input']
     writes.push({ scope, input })
+    if (init.method === 'DELETE') {
+      plans[scope] = null
+      return Response.json({ deleted: true, projectId: 'project', scope })
+    }
     if (options.lost === 'before') {
       options.lost = ''
       throw new TypeError('隔离请求未到达')
@@ -411,3 +415,27 @@ it.each(['light', 'dark'])(
       .toHaveFocus()
   },
 )
+
+it('删除计划先确认，取消不写入，确认后关闭且重新打开无计划', async () => {
+  const f = setup()
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(<App fixture={f} />)
+  await open()
+  await enable()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  const before = f.writes.length
+  await open()
+  await page.getByRole('button', { name: '删除更新计划', exact: true }).click()
+  expect(f.writes.length).toBe(before)
+  await userEvent.keyboard('{Escape}')
+  await open()
+  await page.getByRole('button', { name: '删除更新计划', exact: true }).click()
+  await page.getByRole('button', { name: '确认删除计划及执行记录', exact: true }).click()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  await open()
+  await expect
+    .element(page.getByRole('button', { name: '删除更新计划', exact: true }))
+    .not.toBeInTheDocument()
+  expect(f.writes.length).toBe(before + 1)
+})

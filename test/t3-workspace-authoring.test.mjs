@@ -245,7 +245,7 @@ test('上传真实原件、同名策略、摘要和幂等收据不覆盖并发�
   )
 })
 
-test('捕获保护原件与空目录，替换删除清理和重启后仍读原内容', async (t) => {
+test('删除文件级联清理捕获与原件，重启后不可再读', async (t) => {
   const f = await fixture(t),
     service = f.service
   await upload(service, 'docs/运维文档/运行.txt', '旧运行手册')
@@ -266,27 +266,13 @@ test('捕获保护原件与空目录，替换删除清理和重启后仍读原�
     'owner',
   )
   service.collectUnused('project', 'owner')
-  assert.equal(
-    service.readCapturedFile('project', captured.id, updated.input.path, 'owner').bytes.toString(),
-    '旧运行手册',
+  assert.throws(
+    () => service.readCapturedFile('project', captured.id, updated.input.path, 'owner'),
+    { code: 'WORKSPACE_CAPTURE_NOT_FOUND' },
   )
-  assert.deepEqual(service.capture('project', captured.revision, 'owner', captureRequest), captured)
   await f.reopen()
-  assert.equal(
-    f.service
-      .readCapturedFile('project', captured.id, updated.input.path, 'owner')
-      .bytes.toString(),
-    '旧运行手册',
-  )
-  assert.equal(f.service.captureByRequest('project', captureRequest, 'owner').id, captured.id)
-  f.service.releaseCapture('project', captured.id, 'owner')
-  assert.equal(f.service.collectUnused('project', 'owner').removed, 0)
+  assert.equal(f.service.captureByRequest('project', captureRequest, 'owner'), null)
   assert.deepEqual(await readdir(join(f.dataDir, 'workspace-authoring', 'originals')), [])
-  rejectsCode(
-    () => f.service.readCapturedFile('project', captured.id, updated.input.path, 'owner'),
-    'WORKSPACE_CAPTURE_RELEASED',
-  )
-  assert.equal(f.service.captureByRequest('project', captureRequest, 'owner').status, 'released')
 })
 
 test('仓库解析与凭证版本一次冻结，同标识不重新选分支', async (t) => {

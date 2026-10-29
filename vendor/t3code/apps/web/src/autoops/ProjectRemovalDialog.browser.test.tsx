@@ -230,7 +230,7 @@ it('引用阻止及修订变化都不能发送删除，刷新解除引用后取�
   await expect.element(page.getByText('仍有私有或归档会话')).toBeVisible()
   await expect.element(page.getByRole('button', { name: '确认删除', exact: true })).toBeDisabled()
   f.setPreview({ ...clearPreview(), revision: 4 })
-  await page.getByRole('button', { name: '刷新引用' }).click()
+  await page.getByRole('button', { name: '刷新范围' }).click()
   await expect.element(page.getByRole('alert')).toHaveTextContent('配置已更新，请取消并刷新后重新确认。')
   await expect.element(page.getByRole('button', { name: '确认删除', exact: true })).toBeDisabled()
   await userEvent.keyboard('{Escape}')
@@ -249,7 +249,7 @@ it('预检通过后真实 409 拒绝保留错误与刷新恢复入口，不显�
   await expect
     .element(page.getByRole('dialog').getByRole('alert'))
     .toHaveTextContent('真实引用或权限已变化')
-  await expect.element(page.getByRole('button', { name: '刷新引用' })).toBeVisible()
+  await expect.element(page.getByRole('button', { name: '刷新范围' })).toBeVisible()
   expect(readPendingProjectWrite()).toBeNull()
   expect(f.removed).not.toHaveBeenCalled()
   expect(f.requests).toHaveLength(1)

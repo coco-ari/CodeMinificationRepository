@@ -8,12 +8,35 @@ export interface BusinessAttachment { id: string; name: string; mime: string; re
 export interface BusinessArtifact { id: string; name: string; mime: string; size: number; sourceUrl: string }
 export class AutoOpsToolError extends Error { code: string }
 export function createBusinessArtifactStore(dataDir: string): {
-  create(input: { binding: BusinessBinding; actorId?:string; runId: string; name: string; mime: string; bytes: Uint8Array }): BusinessArtifact;
-  read(id: string): null | { id: string; threadId: string; runId: string; projectId: string; ownerId: string; published: boolean; name: string; mime: string; bytes: Uint8Array; createdAt: string };
-  list(threadId: string): ReadonlyArray<Record<string, unknown>>;
-  close(): void;
-};
-export function configuredBusinessArtifactStore(): ReturnType<typeof createBusinessArtifactStore> | undefined;
+  create(input: {
+    binding: BusinessBinding
+    actorId?: string
+    runId: string
+    name: string
+    mime: string
+    bytes: Uint8Array
+  }): BusinessArtifact
+  read(
+    id: string,
+  ): null | {
+    id: string
+    threadId: string
+    runId: string
+    projectId: string
+    ownerId: string
+    published: boolean
+    name: string
+    mime: string
+    bytes: Uint8Array
+    createdAt: string
+  }
+  purgeUser(ownerId: string): void
+  purgeScope(projectId: string, threadIds?: readonly string[]): void
+  list(threadId: string): ReadonlyArray<Record<string, unknown>>
+  close(): void
+}
+export function configuredBusinessArtifactStore():
+  ReturnType<typeof createBusinessArtifactStore> | undefined
 export function createAutoOpsBusinessTools(options: {
   authorizeThread(threadId: string): PromiseLike<unknown> | unknown;
   loadAttachments(binding: BusinessBinding): PromiseLike<ReadonlyArray<BusinessAttachment>> | ReadonlyArray<BusinessAttachment>;

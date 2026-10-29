@@ -813,7 +813,9 @@ function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolea
                       : editor?.kind === 'allocation'
                         ? '分配助手'
                         : editor?.kind === 'member'
-                          ? '成员权限'
+                          ? editor.remove
+                            ? '移除成员'
+                            : '成员权限'
                           : '编辑项目'}
             </DialogTitle>
           </DialogHeader>

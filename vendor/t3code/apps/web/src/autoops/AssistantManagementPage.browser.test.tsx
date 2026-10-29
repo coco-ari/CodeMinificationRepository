@@ -1359,3 +1359,28 @@ it('页面编辑离开先保留草稿，放弃后才导航且不改变项目选�
   await expect.poll(() => screen.router!.state.location.pathname).toBe('/projects')
   expect(f.writes).toHaveLength(0)
 })
+
+
+it('项目助手删除先确认，取消不写；确认后同步移出目录',async()=>{
+  const f=setup(true),original=f.fetcher.getMockImplementation()!;let deleted=false;const deletions:object[]=[];
+  f.fetcher.mockImplementation(async(request,init)=>{
+    const path=new URL(String(request),location.origin).pathname;
+    if(init?.method==='DELETE'&&path.endsWith('/assistants/project-preset')){
+      const body=JSON.parse(String(init.body));deletions.push(body);deleted=true;
+      return Response.json({deleted:true,id:'project-preset',projectId:'target-project',revision:body.expectedRevision+1});
+    }
+    const response=await original(request,init);
+    if(deleted&&path.endsWith('/assistants/settings')){
+      const body=await response.json();body.presets=body.presets.filter((value:{id:string})=>value.id!=='project-preset');return Response.json(body);
+    }
+    return response;
+  });
+  using _fetch=stubGlobal('fetch',f.fetcher);
+  await using screen=await render(<App/>,{router:'/assistants?projectId=target-project&assistantView=project'});
+  await page.getByRole('button',{name:'删除项目助手 项目预设',exact:true}).click();
+  await page.getByRole('button',{name:'取消',exact:true}).click();expect(deletions).toHaveLength(0);
+  await page.getByRole('button',{name:'删除项目助手 项目预设',exact:true}).click();
+  await page.getByRole('button',{name:'删除助手',exact:true}).click();
+  await expect.element(page.getByRole('button',{name:'删除项目助手 项目预设',exact:true})).not.toBeInTheDocument();
+  expect(deletions).toHaveLength(1);
+});

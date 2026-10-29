@@ -10,6 +10,7 @@ import type {
   WorkspaceAuthoringOverview,
   WorkspaceAuthoringResult,
   WorkspaceCredentialMetadata,
+  WorkspaceCredentialDeletion,
   WorkspaceMaterialContent,
   WorkspaceRepositoryUsageInput,
   WorkspaceUploadInput,
@@ -21,15 +22,15 @@ export type AuthoringCommand =
   | { kind: "source"; action: "save"; source: WorkspaceRepositoryUsageInput }
   | { kind: "source"; action: "remove"; id: string }
   | {
-      kind: "credential";
-      action: "save";
-      id?: string;
-      name: string;
-      username: string;
-      secret: string;
-      expectedCredentialRevision?: number;
+      kind: 'credential'
+      action: 'save'
+      id?: string
+      name: string
+      username: string
+      secret: string
+      expectedCredentialRevision?: number
     }
-  | { kind: "credential"; action: "revoke"; id: string; expectedCredentialRevision: number }
+  | { kind: "credential"; action: "revoke" | "remove"; id: string; expectedCredentialRevision: number }
   | { kind: "document"; action: "mkdir"; path: string }
   | {
       kind: "document";
@@ -59,7 +60,7 @@ export type AuthoringCommand =
 export type AuthoringReceipt =
   | WorkspaceAuthoringResult
   | { requestId: string; task: WorkspaceTask }
-  | { requestId: string; credential: WorkspaceCredentialMetadata };
+  | { requestId: string; credential: WorkspaceCredentialMetadata | WorkspaceCredentialDeletion }
 export type AuthoringSubmission = {
   requestId: string;
   expectedRevision: number;
@@ -141,13 +142,10 @@ export async function inspectAuthoringRequest(
   signal?: AbortSignal,
 ): Promise<AuthoringReceipt | null> {
   if (credential) {
-    const { result } = await request<{ result: WorkspaceCredentialMetadata | null }>(
-      projectId,
-      `/credentials/requests/${encodeURIComponent(requestId)}`,
-      undefined,
-      signal,
-    );
-    return result ? { requestId, credential: result } : null;
+    const { result } = await request<{
+      result: WorkspaceCredentialMetadata | WorkspaceCredentialDeletion | null
+    }>(projectId, `/credentials/requests/${encodeURIComponent(requestId)}`, undefined, signal)
+    return result ? { requestId, credential: result } : null
   }
   const { result, task, capture } = await request<{
     result: WorkspaceAuthoringResult | null;
@@ -182,7 +180,7 @@ export async function submitAuthoring(
   }
   if (command.kind === "credential") {
     const input =
-      command.action === "revoke"
+      command.action !== 'save'
         ? { id: command.id, requestId, expectedRevision: command.expectedCredentialRevision }
         : {
             ...(command.id
@@ -193,10 +191,13 @@ export async function submitAuthoring(
             username: command.username,
             password: command.secret,
           };
-    const credential = await request<WorkspaceCredentialMetadata>(
+    const credential = await request<WorkspaceCredentialMetadata | WorkspaceCredentialDeletion>(
       projectId,
-      "/credentials",
-      { action: command.action === "revoke" ? "revoke" : command.id ? "replace" : "create", input },
+      '/credentials',
+      {
+        action: command.action !== 'save' ? command.action : command.id ? 'replace' : 'create',
+        input,
+      },
       signal,
     );
     return { requestId, credential };

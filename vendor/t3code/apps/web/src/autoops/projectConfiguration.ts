@@ -58,6 +58,7 @@ export type ProjectConfigurationEditor =
     }
   | {
       kind: 'member'
+      remove?: boolean
       name: string
       description: string
       revision: number
@@ -90,6 +91,11 @@ export function configurationMutation(project: string, editor: ProjectConfigurat
     return {
       path: `${base}/assistants${editor.id ? '/' + encodeURIComponent(editor.id) : ''}`,
       payload: { value: { ...editor.value, name: editor.name, description: editor.description } },
+    }
+  if (editor.kind === 'member' && editor.remove)
+    return {
+      path: `${base}/members/${encodeURIComponent(editor.value.userId)}/remove`,
+      payload: {},
     }
   if (editor.kind === 'member') return { path: `${base}/members`, payload: { value: editor.value } }
   return {

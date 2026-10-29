@@ -29,6 +29,7 @@ import {
   DialogPopup,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogPanel,
   DialogFooter,
 } from "~/components/ui/dialog";
@@ -130,8 +131,9 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
       ReturnType<typeof loadAssistantManagement>
     > | null>(null),
     [error, setError] = useState<string | null>(null),
-    [attempt, setAttempt] = useState(0);
-  const [fresh, setFresh] = useState(false);
+    [attempt, setAttempt] = useState(0)
+  const [fresh, setFresh] = useState(false)
+  const [removing, setRemoving] = useState<AssistantPreset | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null),
     [pending, setPending] = useState<PendingProjectWrite | null>(null),
     [otherPending, setOtherPending] = useState<"delete" | "unknown" | null>(null),
@@ -217,16 +219,20 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
         if (checking || !(cause instanceof AutoOpsRequestError) || !cause.uncertain) throw cause;
         await recoverProjectWrite(original);
       }
-      if (!alive.current) return;
-      savedFocus.current = true;
-      setFresh(false);
-      setPending(null);
-      setEditor(null);
-      setAttempt((value) => value + 1);
+      if (!alive.current) return
+      savedFocus.current = true
+      setFresh(false)
+      setPending(null)
+      setEditor(null)
+      setRemoving(null)
+      setAttempt((value) => value + 1)
       void refreshProjectHost().catch((cause) => {
-        if (alive.current) setError(message(cause));
-      });
-      toastManager.add({ type: "success", title: "项目助手已保存" });
+        if (alive.current) setError(message(cause))
+      })
+      toastManager.add({
+        type: 'success',
+        title: original.method === 'DELETE' ? '助手及分配已删除' : '项目助手已保存',
+      })
     } catch (cause) {
       if (!alive.current) return;
       const targetScopeError =
@@ -528,6 +534,19 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
                         >
                           编辑
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`删除项目助手 ${preset.name}`}
+                          disabled={busy || !!pending || !!otherPending || !fresh}
+                          onClick={(event) => {
+                            trigger.current = event.currentTarget
+                            setError(null)
+                            setRemoving(preset)
+                          }}
+                        >
+                          删除
+                        </Button>
                         <AssistantEnabledControl
                           name={preset.name}
                           enabled={preset.enabled}
@@ -559,6 +578,50 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
           </SettingsGroup>
         </SettingsSection>
       </div>
+      {removing ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) setRemoving(null)
+          }}
+        >
+          <DialogPopup finalFocus={() => trigger.current} showCloseButton={!busy}>
+            <DialogHeader>
+              <DialogTitle>删除助手</DialogTitle>
+              <DialogDescription>
+                永久删除“{removing.name}
+                ”及其配置版本、成员分配、共享和skill分配。已有会话将不能再使用此助手，删除后无法恢复。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogPanel>{error ? <p role="alert">{error}</p> : null}</DialogPanel>
+            <DialogFooter>
+              <Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={busy || !!pending}
+                onClick={() => {
+                  try {
+                    void submit(
+                      prepareProjectMutation(
+                        `/api/v1/projects/${encodeURIComponent(projectId)}/assistants/${encodeURIComponent(removing.id)}`,
+                        removing.revision,
+                        {},
+                        'DELETE',
+                      ),
+                    )
+                  } catch (cause) {
+                    setError(message(cause))
+                  }
+                }}
+              >
+                {busy ? '正在删除…' : '删除助手'}
+              </Button>
+            </DialogFooter>
+          </DialogPopup>
+        </Dialog>
+      ) : null}
       {editor?.kind === "assistant" ? (
         <AssistantEditorPage
           title={editor.id ? "编辑项目助手" : "添加项目助手"}

@@ -19,6 +19,14 @@ import {
   SettingsIcon,
 } from 'lucide-react'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '~/components/ui/alert'
+import {
+  Dialog,
+  DialogPopup,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '~/components/ui/menu'
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from '~/components/ui/popover'
@@ -32,6 +40,7 @@ import { readAutoOpsHost } from './hostConfig'
 import type { WorkspaceRelease } from './workspaces'
 import type { ProjectRepositoryConnection } from './workspaceAuthoring'
 import {
+  removeDeploymentConfiguration,
   createDeploymentTarget,
   saveDeploymentService,
   saveDeploymentServiceSource,
@@ -69,6 +78,12 @@ import {
 } from './deployment'
 
 type PendingSubmission =
+  | {
+      kind: 'delete'
+      entityKind: 'service' | 'target'
+      id: string
+      input: { requestId: string; configKey: string; environmentId?: string }
+    }
   | {
       kind: 'task'
       input: DeploymentSubmission
@@ -166,6 +181,8 @@ export function DeploymentsPanel({
   const [detailTab, setDetailTab] = useState<DetailTab>('logs')
   const [dialog, setDialog] = useState<
     | 'service'
+    | 'service-delete'
+    | 'target-delete'
     | 'service-edit'
     | 'source'
     | 'servers'
@@ -374,6 +391,20 @@ export function DeploymentsPanel({
               }
             : previous,
         )
+      } else if (submission.kind === 'delete') {
+        await removeDeploymentConfiguration(
+          projectId,
+          submission.entityKind,
+          submission.id,
+          submission.input,
+        )
+        if (accessDeniedRef.current) return
+        setSelection({
+          environmentId,
+          serviceId: submission.entityKind === 'service' ? '' : (service?.id ?? ''),
+          targetId: '',
+          taskId: '',
+        })
       } else if (submission.kind === 'service') {
         const result = await saveDeploymentService(projectId, submission.input)
         if (accessDeniedRef.current) return
@@ -627,6 +658,20 @@ export function DeploymentsPanel({
                   >
                     <SettingsIcon />
                     编辑服务
+                  </MenuItem>
+                  <MenuItem
+                    variant="destructive"
+                    disabled={accessDenied || !canExecute || busy || !!pending}
+                    onClick={() => openDialog('service-delete')}
+                  >
+                    删除服务
+                  </MenuItem>
+                  <MenuItem
+                    variant="destructive"
+                    disabled={accessDenied || !canExecute || busy || !!pending || !target}
+                    onClick={() => openDialog('target-delete')}
+                  >
+                    删除当前部署位置
                   </MenuItem>
                   <MenuItem
                     disabled={
@@ -1044,6 +1089,52 @@ export function DeploymentsPanel({
         onAccessDenied={revokeAccess}
         onChanged={reload}
       />
+      <Dialog
+        open={dialog === 'service-delete' || dialog === 'target-delete'}
+        onOpenChange={(open) => {
+          if (!open && !busy) setDialog(null)
+        }}
+      >
+        <DialogPopup finalFocus={finalFocus}>
+          <DialogHeader>
+            <DialogTitle>{dialog === 'service-delete' ? '删除服务' : '删除部署位置'}</DialogTitle>
+            <DialogDescription>
+              永久删除{dialog === 'service-delete' ? service?.name : '当前部署位置'}
+              及所属部署配置、任务、日志和版本记录。此操作不会卸载远端机器上已运行的程序。
+            </DialogDescription>
+          </DialogHeader>
+          {error ? (
+            <p role="alert" className="px-6 text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" disabled={busy} onClick={() => setDialog(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busy || !!pending}
+              onClick={() => {
+                const entity = dialog === 'service-delete' ? service : target
+                if (entity)
+                  void perform({
+                    kind: 'delete',
+                    entityKind: dialog === 'service-delete' ? 'service' : 'target',
+                    id: entity.id,
+                    input: {
+                      requestId: randomUUID(),
+                      configKey: entity.configKey,
+                      ...(dialog === 'target-delete' ? { environmentId } : {}),
+                    },
+                  })
+              }}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
       {overview ? (
         <ServiceDialog
           key={`service:${dialog}:${service?.id ?? ''}`}

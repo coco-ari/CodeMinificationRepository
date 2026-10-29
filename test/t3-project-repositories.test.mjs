@@ -17,8 +17,16 @@ function fixture(t, validateRepository) {
   t.after(() => { service.close(); rmSync(dataDir, {recursive:true,force:true}) })
   return {get service() {return service}, reopen() {service.close(); service=createWorkspaceAuthoring({dataDir,authorize})}}
 }
-const connection = {name:'项目代码',url:'https://github.com/example/project.git',credentialId:'credential-one'}
-const request = (requestId, expectedRevision, value) => ({requestId,expectedRevision,...(value ? {value} : {})})
+const connection = {
+  name: '项目代码',
+  url: 'https://github.com/example/project.git',
+  credentialId: 'credential-one',
+}
+const request = (requestId, expectedRevision, value) => ({
+  requestId,
+  expectedRevision,
+  ...(value ? { value } : {}),
+})
 
 test('项目连接不含分支或挂载，工作区引用独立，固定捕获不随连接更新漂移', t => {
   const f=fixture(t), service=f.service
@@ -38,12 +46,10 @@ test('项目连接不含分支或挂载，工作区引用独立，固定捕获�
   assert.equal(service.captureByRequest('project','active-input','admin').sources[0].url,connection.url)
   assert.deepEqual(service.saveRepository('project',null,request('create-repo',0,connection),'admin'),created)
   assert.throws(()=>service.saveRepository('project',repoId,request('create-repo',3,connection),'admin'),{code:'WORKSPACE_REQUEST_CONFLICT'})
-  assert.throws(()=>service.removeRepository('project',repoId,request('remove-used',3),'admin'),{code:'REPOSITORY_IN_USE'})
-  service.removeSource('project',repoId,request('remove-work-source',3),'admin')
-  assert.equal(service.repositories('project','admin').items.length,1)
-  service.removeRepository('project',repoId,request('remove-unused',4),'admin')
+  service.removeRepository('project',repoId,request('remove-used',3),'admin')
   assert.equal(service.repositories('project','admin').items.length,0)
-  assert.equal(service.captureByRequest('project','active-input','admin').sources[0].ref,'workbench')
+  assert.equal(service.overview('project','admin').sources.length,0)
+  assert.equal(service.captureByRequest('project','active-input','admin'),null)
   assert.equal(configured.source.id,repoId)
   f.reopen()
   assert.equal(f.service.repositories('project','admin').items.length,0)

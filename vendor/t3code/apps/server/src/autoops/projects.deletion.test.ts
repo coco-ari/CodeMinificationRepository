@@ -1,5 +1,7 @@
+import * as ThreadManagement from '../orchestration-v2/ThreadManagementService.ts'
 // @effect-diagnostics nodeBuiltinImport:off -- 使用隔离目录与真实原生持久事件验证项目删除协作。
 import { assert, it } from '@effect/vitest'
+import * as TestClock from 'effect/testing/TestClock'
 import { vi } from 'vite-plus/test'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import {
@@ -74,6 +76,12 @@ const testLayer = RuntimeLayer.layerProjectService.pipe(
   Layer.provideMerge(ServerSettings.layerTest()),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: 'autoops-project-delete-' })),
   Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(
+    Layer.mock(ThreadManagement.ThreadManagementService)({
+      getShellSnapshot: () => Effect.succeed({ threads: [], archivedThreads: [] } as never),
+      dispatch: () => Effect.succeed({} as never),
+    }),
+  ),
 )
 const resource = Effect.acquireRelease(
   Effect.sync(() => {
@@ -120,7 +128,7 @@ const resource = Effect.acquireRelease(
 )
 
 it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
-  it.effect('真实原生项目与业务墓碑同请求恢复，只保存一次 project.deleted 事件', () =>
+  it.effect('项目与原生事件彻底清除，删除重试不重建项目', () =>
     Effect.gen(function* () {
       const f = yield* resource
       const projects = yield* ProjectService.ProjectService
@@ -137,7 +145,7 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
         projectId: f.project.id,
         command: { requestId: 'delete-original', expectedRevision: 1 },
         directory: f.directory,
-        inspect: () => [],
+        inspect: Object.assign(() => [], { purge: async () => {}, threads: () => [] }),
       }
       assert.deepEqual(yield* deleteBusinessProject(input), {
         deleted: true,
@@ -147,21 +155,18 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
         deleted: true,
         projectId: f.project.id,
       })
-      const native = Option.getOrThrow(yield* projects.getById(id, { includeDeleted: true }))
-      assert.isNotNull(native.deletedAt)
+      assert.isTrue(Option.isNone(yield* projects.getById(id, { includeDeleted: true })))
       assert.deepEqual(f.directory.catalog.projects, [])
       const sql = yield* SqlClient.SqlClient
       const events = yield* sql<{
         n: number
       }>`SELECT COUNT(*) AS n FROM orchestration_events WHERE stream_id=${id} AND event_type='project.deleted'`
-      assert.equal(events[0]?.n, 1)
+      assert.equal(events[0]?.n, 0)
       yield* synchronizeProject(f.project)
-      assert.isNotNull(
-        Option.getOrThrow(yield* projects.getById(id, { includeDeleted: true })).deletedAt,
-      )
+      assert.isTrue(Option.isNone(yield* projects.getById(id, { includeDeleted: true })))
     }),
   )
-  it.effect('原请求受理后新增真实原生归档会话，显式续办仍拒绝级联删除并恢复管理', () =>
+  it.effect('项目级联删除归档会话，资源清理未结束时保留待办，完成后清除正文', () =>
     Effect.gen(function* () {
       const f = yield* resource
       const projects = yield* ProjectService.ProjectService
@@ -219,32 +224,34 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
         projectId: f.project.id,
         command,
         directory: f.directory,
-        inspect: () => [],
+        inspect: Object.assign(() => [], { purge: async () => {}, threads: () => [] }),
       }
-      const failure = yield* resumeBusinessProjectDeletion({
-        actorId: 'actor',
-        requestId: command.requestId,
-        intent: {
-          operation: 'project.delete',
-          projectId: f.project.id,
-          publicIntent: { expectedRevision: command.expectedRevision },
-        },
-        directory: f.directory,
-        inspect: input.inspect,
-      }).pipe(Effect.flip)
-      assert.equal((failure as { code: string }).code, 'PROJECT_DELETE_BLOCKED')
-      assert.equal(f.directory.settings('actor', f.project.id).project.revision, 3)
+      const pending = yield* deleteBusinessProject(input).pipe(Effect.flip, Effect.forkChild)
+      yield* TestClock.adjust('20 seconds')
+      const failure = yield* Fiber.join(pending)
+      assert.equal((failure as { code: string }).code, 'PROJECT_DELETE_PENDING')
       const projection = yield* ProjectionStore.ProjectionStoreV2
       const thread = yield* projection.getThreadRecords(threadId, [])
-      assert.isNull(thread.thread.deletedAt)
-      const sql = yield* SqlClient.SqlClient
-      const events = yield* sql<{
-        n: number
-      }>`SELECT COUNT(*) AS n FROM orchestration_events WHERE (event_type='project.deleted' AND stream_id=${id}) OR (event_type='thread.deleted' AND stream_id=${threadId})`
-      assert.equal(events[0]?.n, 0)
+      assert.isNotNull(thread.thread.deletedAt)
       assert.equal(
-        f.directory.beginProjectDeletion('actor', f.project.id, input.command, () => []).state,
-        'blocked',
+        f.directory.beginProjectDeletion('actor', f.project.id, command, () => []).state,
+        'pending',
+      )
+      const sql = yield* SqlClient.SqlClient
+      const queued = yield* sql<{
+        effect_type: string
+      }>`SELECT effect_type FROM orchestration_v2_effect_outbox WHERE thread_id=${threadId}`
+      assert.isTrue(queued.some((row) => row.effect_type === 'thread-data.cleanup'))
+      // 此夹具无资源工作器；单独结算队列以验证项目协调器的续办，资源删除另有 owner 测试。
+      yield* sql`UPDATE orchestration_v2_effect_outbox SET status='succeeded' WHERE thread_id=${threadId}`
+      assert.deepEqual(yield* deleteBusinessProject(input), {
+        deleted: true,
+        projectId: f.project.id,
+      })
+      assert.equal(
+        (yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id=${threadId}`)
+          .length,
+        0,
       )
     }),
   )
@@ -290,7 +297,7 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
       )
     }),
   )
-  it.effect('原生删除事件已提交而业务审计失败时保留原请求，恢复只记录一次删除事件', () =>
+  it.effect('原生数据已清理而业务收据失败时，原请求重试收口且不复活', () =>
     Effect.gen(function* () {
       const f = yield* resource
       const projects = yield* ProjectService.ProjectService
@@ -307,20 +314,18 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
         projectId: f.project.id,
         command: { requestId: 'delete-after-native-commit', expectedRevision: 1 },
         directory: f.directory,
-        inspect: () => [],
+        inspect: Object.assign(() => [], { purge: async () => {}, threads: () => [] }),
       }
       const db = yield* Effect.acquireRelease(
         Effect.sync(() => new DatabaseSync(join(f.dataDir, 'project-directory', 'state.sqlite'))),
         (db) => Effect.sync(() => db.close()),
       )
       db.exec(
-        "CREATE TRIGGER reject_completion BEFORE INSERT ON directory_audit WHEN NEW.operation='project.delete.completed' BEGIN SELECT RAISE(ABORT,'隔离最终审计失败'); END",
+        "CREATE TRIGGER reject_completion BEFORE UPDATE ON directory_deletions WHEN NEW.state='deleted' BEGIN SELECT RAISE(ABORT,'隔离最终收据失败'); END",
       )
       const failure = yield* deleteBusinessProject(input).pipe(Effect.flip)
       assert.equal((failure as { code: string }).code, 'PROJECT_DELETE_PENDING')
-      assert.isNotNull(
-        Option.getOrThrow(yield* projects.getById(id, { includeDeleted: true })).deletedAt,
-      )
+      assert.isTrue(Option.isNone(yield* projects.getById(id, { includeDeleted: true })))
       assert.equal(
         f.directory.beginProjectDeletion('actor', f.project.id, input.command, () => []).state,
         'pending',
@@ -337,7 +342,7 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
           publicIntent: { expectedRevision: 1 },
         },
         directory: f.directory,
-        inspect: () => [],
+        inspect: Object.assign(() => [], { purge: async () => {}, threads: () => [] }),
       }
       assert.deepEqual(yield* resumeBusinessProjectDeletion(resume), {
         deleted: true,
@@ -352,7 +357,7 @@ it.layer(testLayer)('业务项目删除复用原生服务', (it) => {
       const events = yield* sql<{
         n: number
       }>`SELECT COUNT(*) AS n FROM orchestration_events WHERE stream_id=${id} AND event_type='project.deleted'`
-      assert.equal(events[0]?.n, 1)
+      assert.equal(events[0]?.n, 0)
     }),
   )
 })

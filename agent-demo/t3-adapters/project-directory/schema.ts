@@ -52,4 +52,9 @@ export const migrations: readonly Migration[] = [
       CREATE UNIQUE INDEX directory_project_deletion_pending ON directory_deletions(project_id) WHERE environment_id IS NULL AND state='pending';
     `,
   },
+  {
+    version: 3,
+    name: '已删除对象请求防重放',
+    sql: `CREATE TABLE directory_retired_requests(request_id TEXT PRIMARY KEY,actor_id TEXT NOT NULL) STRICT;`,
+  },
 ]

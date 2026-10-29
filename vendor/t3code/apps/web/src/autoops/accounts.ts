@@ -5,6 +5,7 @@ import {
   type AccountOperation,
   type AccountPage,
   type AccountPasswordResult,
+  type AccountDeletionResult,
   type AccountReceipt,
   type AccountSavedUnavailable,
 } from "../../../../../../autoops/contracts/accounts.ts";
@@ -14,13 +15,15 @@ import { autoOpsStorage, readAutoOpsHost } from "./hostSnapshot";
 export type {
   RuntimeAccount,
   AccountPasswordResult,
+  AccountDeletionResult,
 } from "../../../../../../autoops/contracts/accounts.ts";
 export interface PendingAccountWrite {
-  actorId: string;
-  requestId: string;
-  operation: AccountOperation;
-  targetId: string | null;
-  submitted?: true;
+  actorId: string
+  requestId: string
+  operation: AccountOperation
+  targetId: string | null
+  submitted?: true
+  expectedRevision?: number
 }
 export type AccountWriteValue =
   | {
@@ -33,21 +36,24 @@ export type AccountWriteValue =
         platformAdmin: boolean;
       };
     }
-  | { operation: "enable"; expectedRevision: number; value: { enabled: boolean } }
-  | { operation: "resetPassword"; expectedRevision: number; value: { newPassword: string } }
+  | { operation: 'delete'; expectedRevision: number; value: Record<string, never> }
+  | { operation: 'enable'; expectedRevision: number; value: { enabled: boolean } }
+  | { operation: 'resetPassword'; expectedRevision: number; value: { newPassword: string } }
   | {
-      operation: "changePassword";
-      expectedRevision: number;
-      value: { currentPassword: string; newPassword: string };
-    };
-export type AccountWriteResult = RuntimeAccount | AccountPasswordResult | AccountSavedUnavailable;
-const key = "account-write-receipt";
+      operation: 'changePassword'
+      expectedRevision: number
+      value: { currentPassword: string; newPassword: string }
+    }
+export type AccountWriteResult =
+  RuntimeAccount | AccountPasswordResult | AccountDeletionResult | AccountSavedUnavailable
+const key = 'account-write-receipt'
 const operations = new Set<AccountOperation>([
-  "create",
-  "enable",
-  "resetPassword",
-  "changePassword",
-]);
+  'create',
+  'enable',
+  'delete',
+  'resetPassword',
+  'changePassword',
+])
 const invalid = () =>
   new AutoOpsRequestError(
     "账号操作返回结果无法确认，请核对原结果。",
@@ -81,7 +87,10 @@ export function readPendingAccountWrite(): PendingAccountWrite | null {
       operation: value.operation!,
       targetId: value.targetId,
       ...(value.submitted ? { submitted: true } : {}),
-    };
+      ...(value.operation === 'delete' && Number.isSafeInteger(value.expectedRevision)
+        ? { expectedRevision: value.expectedRevision! }
+        : {}),
+    }
   } catch {
     return null;
   }
@@ -111,8 +120,19 @@ function requireOriginal(pending: PendingAccountWrite) {
 function resultFor(
   pending: PendingAccountWrite,
   raw: unknown,
-): RuntimeAccount | AccountPasswordResult {
+): RuntimeAccount | AccountPasswordResult | AccountDeletionResult {
   try {
+    if (pending.operation === 'delete') {
+      const value = raw as AccountDeletionResult
+      if (
+        !value ||
+        value.deleted !== true ||
+        value.userId !== pending.targetId ||
+        !Number.isSafeInteger(value.revision)
+      )
+        throw invalid()
+      return value
+    }
     if (pending.operation === "create" || pending.operation === "enable") {
       const result = decodeContract(RuntimeAccount, raw);
       if (pending.targetId !== null && result.id !== pending.targetId) throw invalid();
@@ -163,11 +183,12 @@ export async function submitAccountWrite(
   pending: PendingAccountWrite,
   input: AccountWriteValue,
 ): Promise<AccountWriteResult> {
-  requireOriginal(pending);
-  if (input.operation !== pending.operation) throw new Error("账号操作与原请求不一致。");
-  if (pending.submitted) throw new Error("该账号请求已发送，请核对原结果，不能再次提交。");
-  pending.submitted = true;
-  autoOpsStorage(window.sessionStorage).setItem(key, JSON.stringify(pending));
+  requireOriginal(pending)
+  if (input.operation !== pending.operation) throw new Error('账号操作与原请求不一致。')
+  if (pending.submitted) throw new Error('该账号请求已发送，请核对原结果，不能再次提交。')
+  pending.submitted = true
+  if (input.operation === 'delete') pending.expectedRevision = input.expectedRevision
+  autoOpsStorage(window.sessionStorage).setItem(key, JSON.stringify(pending))
   const path =
     input.operation === "create"
       ? "/api/v1/accounts"
@@ -176,8 +197,9 @@ export async function submitAccountWrite(
         : `/api/v1/accounts/${encodeURIComponent(pending.targetId!)}${input.operation === "resetPassword" ? "/password" : ""}`;
   try {
     const raw = await autoOpsRequest<unknown>(path, {
-      label: "账号操作",
-      method: input.operation === "create" ? "POST" : "PUT",
+      label: '账号操作',
+      method:
+        input.operation === 'create' ? 'POST' : input.operation === 'delete' ? 'DELETE' : 'PUT',
       body: {
         requestId: pending.requestId,
         ...("expectedRevision" in input ? { expectedRevision: input.expectedRevision } : {}),
@@ -227,9 +249,31 @@ export async function recoverAccountWrite(
   return result;
 }
 
+export async function resumeAccountDeletion(
+  pending: PendingAccountWrite,
+): Promise<AccountWriteResult> {
+  const result = await recoverAccountWrite(pending)
+  if (result) return result
+  requireOriginal(pending)
+  if (pending.operation !== 'delete' || !pending.expectedRevision)
+    throw new Error('删除参数不可用，请刷新账号目录后重新确认')
+  const raw = await autoOpsRequest<unknown>(
+    `/api/v1/accounts/${encodeURIComponent(pending.targetId!)}`,
+    {
+      label: '继续删除账号',
+      method: 'DELETE',
+      body: { requestId: pending.requestId, expectedRevision: pending.expectedRevision, value: {} },
+    },
+  )
+  const deleted = resultFor(pending, raw)
+  clear(pending)
+  return deleted
+}
+
 export function accountResultRequiresLogin(result: AccountWriteResult, actorId: string): boolean {
-  if ("saved" in result) return false;
-  return "sessionsRevoked" in result
+  if ('saved' in result) return false
+  if ('deleted' in result) return result.userId === actorId
+  return 'sessionsRevoked' in result
     ? result.userId === actorId
     : result.id === actorId && !result.enabled;
 }

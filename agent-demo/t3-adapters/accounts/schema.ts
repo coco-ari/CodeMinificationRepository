@@ -28,3 +28,11 @@ export const migration = {
     ) STRICT;
   `,
 }
+
+export const deletionMigration = {
+  version: 2,
+  name: '账号删除及关联清理',
+  sql: `
+CREATE TABLE runtime_account_deletions(target_id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,request_id TEXT NOT NULL,expected_revision INTEGER NOT NULL,created_at TEXT NOT NULL) STRICT;
+`,
+}

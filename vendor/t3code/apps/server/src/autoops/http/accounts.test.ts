@@ -1,3 +1,5 @@
+import * as SqlitePersistence from '../../persistence/Sqlite.ts'
+import * as ThreadManagement from '../../orchestration-v2/ThreadManagementService.ts'
 // @effect-diagnostics nodeBuiltinImport:off -- 使用真实隔离 SQLite 与原生 HTTP，测试身份只替换认证传输。
 import { expect, it } from 'vite-plus/test'
 import { DatabaseSync } from 'node:sqlite'
@@ -72,6 +74,11 @@ async function setup(wrap: (owner: RuntimeAccounts) => RuntimeAccounts = (owner)
     accountsRoutes(createBusinessHttpContext(access), () => facade).pipe(
       HttpRouter.provideRequest(
         Layer.mergeAll(
+          SqlitePersistence.layerMemory,
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getShellSnapshot: () => Effect.succeed({ threads: [], archivedThreads: [] } as never),
+            dispatch: () => Effect.succeed({} as never),
+          }),
           NodeServices.layer,
           Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
             authenticateHttpRequest: (request: { headers: Record<string, string> }) =>

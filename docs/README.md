@@ -17,6 +17,7 @@
 | [后端规范](../examples/backend-standard.md) | 数据归属、分层、授权、事务、任务、配置及运维 |
 | [T3 UI 规范](../examples/t3-ui-standard.md) | 外壳、呈现、原生组件、密度、交互和可视验收 |
 | [工作台导航与配置体验](../examples/workbench-navigation-design.md) | 五个活跃开源项目调研、全局工作台与项目导航分层、助手整页编辑；[本批验证](validation/workbench-navigation.md) |
+| [创建与删除闭环](../examples/resource-deletion-design.md) | 删除入口、级联归属、共享资源与失败恢复；[本批验证](validation/resource-deletion.md) |
 | [当前业务需求](../examples/workbench-v2-requirements.md) | 产品要实现什么、谁可以操作什么 |
 | [工作台设计](../examples/project-workbench-design.md) | [创建项目与功能启用总图](../examples/project-workbench-design.md#项目建立与功能启用总图)、[已确认权限设计](../examples/project-workbench-design.md#项目权限设计)、[统一助手与用户运行来源](../examples/project-workbench-design.md#统一助手与用户提供的运行来源)、[方案一致性审查](../examples/project-workbench-design.md#方案一致性审查2026-10-26)，以及工作区、交付物、会话与扩展的业务关系；新增设计与实现状态分开 |
 | [部署核心适配方案（已确认）](../examples/deployment-core-adaptation-plan.md) | 固定 main 提交的完整部署能力、当前接入缺口、数据归属与分批实施范围；旧 Jenkins／脚本源码下载明确退役 |

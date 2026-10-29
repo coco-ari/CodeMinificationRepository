@@ -1,5 +1,8 @@
-import { decodeContract } from "../../../../../../autoops/contracts/index.ts";
-import { DirectoryId } from "../../../../../../autoops/contracts/project-directory.ts";
+import { decodeContract } from '../../../../../../autoops/contracts/index.ts'
+import {
+  DirectoryCommand,
+  DirectoryId,
+} from '../../../../../../autoops/contracts/project-directory.ts'
 import {
   SaveAssistantCommand,
   ShareProvidedAssistantCommand,
@@ -24,6 +27,7 @@ export type {
 };
 export type ProvidedAssistantWriteResult =
   | AssistantPreset
+  | { deleted: true; id: string; projectId: string; revision: number }
   | ProvidedAssistantShare
   | { saved: true; available: false };
 const base = "/api/v1/assistants/provided";
@@ -43,6 +47,12 @@ export type PendingProvidedAssistant = { version: 1; actorId: string } & (
       assistantId: string | null;
       sourceProjectId: string;
       input: { requestId: string; expectedRevision: number; value: AssistantDetails };
+    }
+  | {
+      kind: "delete";
+      assistantId: string;
+      sourceProjectId: string;
+      input: { requestId: string; expectedRevision: number };
     }
   | {
       kind: "share";
@@ -81,10 +91,21 @@ function validate(value: unknown): PendingProvidedAssistant {
   if (entry.version !== 1 || entry.actorId !== actor()) throw invalid();
   if (entry.assistantId !== null) decodeContract(DirectoryId, entry.assistantId);
   const allowed =
-    entry.kind === "save"
-      ? ["version", "actorId", "kind", "assistantId", "sourceProjectId", "input"]
-      : ["version", "actorId", "kind", "assistantId", "projectId", "input"];
-  if (Object.keys(entry).some((key) => !allowed.includes(key))) throw invalid();
+    entry.kind === 'save' || entry.kind === 'delete'
+      ? ['version', 'actorId', 'kind', 'assistantId', 'sourceProjectId', 'input']
+      : ['version', 'actorId', 'kind', 'assistantId', 'projectId', 'input']
+  if (Object.keys(entry).some((key) => !allowed.includes(key))) throw invalid()
+  if (entry.kind === 'delete' && typeof entry.assistantId === 'string') {
+    decodeContract(DirectoryId, entry.sourceProjectId)
+    return {
+      version: 1,
+      actorId: entry.actorId as string,
+      kind: "delete",
+      assistantId: entry.assistantId,
+      sourceProjectId: entry.sourceProjectId as string,
+      input: decodeContract(DirectoryCommand, entry.input),
+    };
+  }
   if (entry.kind === "save") {
     decodeContract(DirectoryId, entry.sourceProjectId);
     const input = decodeContract(SaveAssistantCommand, entry.input);
@@ -149,6 +170,14 @@ export function prepareProvidedSave(
     input: { requestId: randomUUID(), expectedRevision, value },
   });
 }
+export function prepareProvidedDelete(preset: AssistantPreset) {
+  return prepare({
+    kind: 'delete',
+    assistantId: preset.id,
+    sourceProjectId: preset.projectId,
+    input: { requestId: randomUUID(), expectedRevision: preset.revision },
+  })
+}
 export function prepareProvidedShare(
   assistantId: string,
   projectId: string,
@@ -168,9 +197,9 @@ export function clearPendingProvidedAssistant(pending: PendingProvidedAssistant)
     sessionStorage.removeItem(key());
 }
 function checked(pending: PendingProvidedAssistant, value: unknown): ProvidedAssistantWriteResult {
-  const result = object(value);
-  if (result.saved === true && result.available === false) return { saved: true, available: false };
-  if (result.revision !== pending.input.expectedRevision + 1) throw invalid();
+  const result = object(value)
+  if (result.saved === true && result.available === false) return { saved: true, available: false }
+  if (result.revision !== pending.input.expectedRevision + 1) throw invalid()
   if (
     pending.kind === "share" &&
     result.assistantId === pending.assistantId &&
@@ -204,6 +233,7 @@ export async function submitProvidedAssistant(
       await autoOpsRequest<unknown>(base + suffix, {
         label: "助手配置",
         body: fixed.input,
+        ...(fixed.kind === 'delete' ? { method: 'DELETE' as const } : {}),
         ...(signal ? { signal } : {}),
       }),
     );
@@ -226,9 +256,11 @@ export async function recoverProvidedAssistant(
       { label: "助手原请求收据", ...(signal ? { signal } : {}) },
     );
     const operation =
-      fixed.kind === "share"
-        ? `provider.share:${fixed.assistantId}`
-        : `provider.preset.save:${fixed.assistantId ?? "new"}`;
+      fixed.kind === 'delete'
+        ? `provider.preset.delete:${fixed.assistantId}`
+        : fixed.kind === 'share'
+          ? `provider.share:${fixed.assistantId}`
+          : `provider.preset.save:${fixed.assistantId ?? 'new'}`
     if (
       receipt.requestId !== fixed.input.requestId ||
       receipt.operation !== operation ||
@@ -238,9 +270,11 @@ export async function recoverProvidedAssistant(
     let payload: unknown;
     try {
       payload =
-        fixed.kind === "share"
-          ? decodeContract(ShareProvidedAssistantCommand, receipt.payload)
-          : decodeContract(SaveAssistantCommand, receipt.payload);
+        fixed.kind === 'delete'
+          ? decodeContract(DirectoryCommand, receipt.payload)
+          : fixed.kind === 'share'
+            ? decodeContract(ShareProvidedAssistantCommand, receipt.payload)
+            : decodeContract(SaveAssistantCommand, receipt.payload)
     } catch {
       throw invalid();
     }

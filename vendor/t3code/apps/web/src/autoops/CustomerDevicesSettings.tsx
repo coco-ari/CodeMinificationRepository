@@ -410,7 +410,7 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
                     >
                       详情
                     </Button>
-                    {device.status !== "revoked" ? (
+                    {
                       <Menu>
                         <MenuTrigger
                           render={
@@ -430,6 +430,7 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
                         </MenuTrigger>
                         <MenuPopup align="end">
                           <MenuItem
+                            disabled={device.status === 'revoked'}
                             onClick={() =>
                               void action(() =>
                                 customerRequest(`devices/${device.id}/status`, {
@@ -450,11 +451,11 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
                               setRevoke(device);
                             }}
                           >
-                            断开绑定
+                            删除电脑
                           </MenuItem>
                         </MenuPopup>
                       </Menu>
-                    ) : null}
+                    }
                   </div>
                 </li>
               ))}
@@ -595,6 +596,15 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
           </DialogHeader>
           {details ? (
             <CustomerDeviceDetailsPanel
+              onRemove={(entry) =>
+                action(() =>
+                  customerRequest('workspaces/delete', {
+                    deviceId: entry.deviceId,
+                    workspaceId: entry.registeredWorkspaceId,
+                  }),
+                )
+              }
+              busy={busy}
               device={details}
               workspaces={workspaces}
               projects={host.projects}
@@ -628,12 +638,12 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
           <DialogHeader>
             <DialogTitle
               className="truncate pr-6 leading-6"
-              title={`断开 ${revoke?.label ?? ""} 的绑定？`}
+              title={`删除 ${revoke?.label ?? ''}？`}
             >
-              断开 {revoke?.label} 的绑定？
+              删除 {revoke?.label}？
             </DialogTitle>
             <DialogDescription>
-              设备凭据将失效，已有对话仍可查看。正在执行的任务请先在本机核实或停止；再次接入需要重新配对。
+              删除电脑登记、接入凭据、登记目录和该电脑提供的助手。电脑上的原始文件不会删除；再次接入需要重新配对。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -645,12 +655,12 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
               disabled={busy}
               onClick={() =>
                 void action(async () => {
-                  if (revoke) await customerRequest(`devices/${revoke.id}/revoke`, {});
-                  setRevoke(null);
+                  if (revoke) await customerRequest(`devices/${revoke.id}/delete`, {})
+                  setRevoke(null)
                 })
               }
             >
-              断开绑定
+              删除电脑
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -667,14 +677,19 @@ export function CustomerDeviceDetailsPanel({
   projects,
   workspaceLoading = false,
   workspaceError = null,
+  onRemove,
+  busy = false,
 }: {
-  workspaceLoading?: boolean;
-  workspaceError?: string | null;
-  device: CustomerDevice;
-  workspaces: readonly CustomerWorkspace[];
-  projects: readonly { id: string; name: string }[];
+  onRemove?: (entry: CustomerWorkspace) => Promise<void>
+  busy?: boolean
+  workspaceLoading?: boolean
+  workspaceError?: string | null
+  device: CustomerDevice
+  workspaces: readonly CustomerWorkspace[]
+  projects: readonly { id: string; name: string }[]
 }) {
-  const registered = workspaces.filter((entry) => entry.deviceId === device.id);
+  const [removing, setRemoving] = useState<string | null>(null)
+  const registered = workspaces.filter((entry) => entry.deviceId === device.id)
   return (
     <ScrollArea contentSizing="viewport" scrollFade className="min-w-0 max-w-full">
       <div data-slot="dialog-panel" className="w-full min-w-0 max-w-full space-y-3 p-6 pt-1">
@@ -688,6 +703,14 @@ export function CustomerDeviceDetailsPanel({
             {device.connectorVersion ?? "未上报"}
           </dd>
         </dl>
+        {removing ? (
+          <p role="alert" className="text-sm">
+            确认删除此登记目录及关联助手？电脑上的文件不会删除。
+            <Button size="sm" variant="ghost" onClick={() => setRemoving(null)}>
+              取消
+            </Button>
+          </p>
+        ) : null}
         <div className="w-full min-w-0 max-w-full divide-y border-t" aria-label="已登记工作区">
           {workspaceError ? (
             <p className="py-3 text-sm text-destructive" role="alert">
@@ -724,6 +747,23 @@ export function CustomerDeviceDetailsPanel({
                     {projectName} · {entry.runtimeId}
                   </p>
                 </div>
+                {onRemove ? (
+                  <Button
+                    size="sm"
+                    variant={removing === entry.registeredWorkspaceId ? 'destructive' : 'ghost'}
+                    disabled={busy}
+                    aria-label={`${removing === entry.registeredWorkspaceId ? '确认删除' : '删除登记目录'} ${entry.label}`}
+                    onClick={() => {
+                      if (removing !== entry.registeredWorkspaceId) {
+                        setRemoving(entry.registeredWorkspaceId)
+                        return
+                      }
+                      void onRemove(entry).then(() => setRemoving(null))
+                    }}
+                  >
+                    {removing === entry.registeredWorkspaceId ? '确认删除' : '删除'}
+                  </Button>
+                ) : null}
                 <span className="shrink-0 text-xs text-muted-foreground">
                   {entry.status === "active" ? "已登记" : "已撤销"}
                 </span>

@@ -19,6 +19,7 @@ import {
   DialogPopup,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogPanel,
   DialogFooter,
 } from "~/components/ui/dialog";
@@ -44,6 +45,7 @@ import {
   prepareProvidedSave,
   prepareProvidedShare,
   submitProvidedAssistant,
+  prepareProvidedDelete,
   recoverProvidedAssistant,
   type AssistantDetails,
   type AssistantPreset,
@@ -130,10 +132,11 @@ export function ProviderAssistantPanel() {
     [invalid, setInvalid] = useState(false);
   const alive = useRef(true),
     write = useRef<AbortController | null>(null),
-    trigger = useRef<HTMLButtonElement | null>(null);
-  const savedFocus = useRef(false);
-  const menuTriggers = useRef(new Map<string, HTMLButtonElement>());
-  const disabled = busy || !!pending || invalid || !fresh;
+    trigger = useRef<HTMLButtonElement | null>(null)
+  const savedFocus = useRef(false)
+  const [removing, setRemoving] = useState<AssistantPreset | null>(null)
+  const menuTriggers = useRef(new Map<string, HTMLButtonElement>())
+  const disabled = busy || !!pending || invalid || !fresh
   function denied(cause: unknown) {
     savedFocus.current = false;
     try {
@@ -157,13 +160,17 @@ export function ProviderAssistantPanel() {
       );
       return;
     }
-    savedFocus.current = true;
-    setFresh(false);
-    setPending(null);
-    setEditor(null);
-    setError(null);
-    setAttempt((value) => value + 1);
-    toastManager.add({ type: "success", title: "助手配置已保存" });
+    savedFocus.current = true
+    setFresh(false)
+    setPending(null)
+    setEditor(null)
+    setRemoving(null)
+    setError(null)
+    setAttempt((value) => value + 1)
+    toastManager.add({
+      type: 'success',
+      title: 'deleted' in result ? '助手及分配已删除' : '助手配置已保存',
+    })
   }
   function failed(cause: unknown) {
     if (isAutoOpsAccessError(cause)) {
@@ -589,6 +596,43 @@ export function ProviderAssistantPanel() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
+      {removing ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) setRemoving(null)
+          }}
+        >
+          <DialogPopup finalFocus={() => trigger.current} showCloseButton={!busy}>
+            <DialogHeader>
+              <DialogTitle>删除个人助手</DialogTitle>
+              <DialogDescription>
+                永久删除“{removing.name}
+                ”及其配置版本、项目共享、成员分配和skill分配。相关会话将不能再使用此助手。已登记的电脑和目录保持不变。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogPanel>{error ? <p role="alert">{error}</p> : null}</DialogPanel>
+            <DialogFooter>
+              <Button variant="ghost" disabled={busy} onClick={() => setRemoving(null)}>
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={disabled}
+                onClick={() => {
+                  try {
+                    void execute(prepareProvidedDelete(removing))
+                  } catch (cause) {
+                    failed(cause)
+                  }
+                }}
+              >
+                {busy ? '正在删除…' : '删除助手'}
+              </Button>
+            </DialogFooter>
+          </DialogPopup>
+        </Dialog>
+      ) : null}
       {pending ? (
         <Alert variant="info">
           <AlertDescription>
@@ -713,6 +757,15 @@ export function ProviderAssistantPanel() {
                           }}
                         >
                           共享到项目
+                        </MenuItem>
+                        <MenuItem
+                          onClick={() => {
+                            trigger.current = menuTriggers.current.get(preset.id) ?? null
+                            setRemoving(preset)
+                            setError(null)
+                          }}
+                        >
+                          删除助手
                         </MenuItem>
                       </MenuPopup>
                     </Menu>

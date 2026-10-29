@@ -871,7 +871,7 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                 ? `将“${view.server.name}”从当前项目环境解绑。已有部署目标引用该节点时不能解绑。`
                 : view.kind === "revoke"
                   ? `撤销“${view.server.name}”后，该执行器将无法连接，其他项目使用此节点的部署也会受到影响。`
-                  : `永久删除“${view.server.name}”的接入记录。有部署目标或活动任务时不能删除。`}
+                  : `永久删除“${view.server.name}”的接入记录。关联部署位置、任务、日志和版本记录将一并删除；远端程序和文件不会被卸载。`}
             </p>
             {catalog && (view.kind === "revoke" || view.kind === "delete") ? (
               <NodeImpact catalog={catalog} serverId={view.server.id} />

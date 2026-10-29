@@ -4,7 +4,11 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, open
 import { dirname, resolve } from 'node:path'
 import { openDatabase } from '../../autoops/server/platform/database.ts'
 import { decrypt, encrypt } from '../../src/security.mjs'
-import type { WorkspaceCredentialMetadata, WorkspaceCredentialVersionReference } from '../../autoops/contracts/workspace-authoring.ts'
+import type {
+  WorkspaceCredentialDeletion,
+  WorkspaceCredentialMetadata,
+  WorkspaceCredentialVersionReference,
+} from '../../autoops/contracts/workspace-authoring.ts'
 
 export type CredentialAction = 'credential.manage' | 'credential.use'
 export interface GitCredential { username: string; password: string }
@@ -138,7 +142,14 @@ export function createProjectCredentialService(options: ProjectCredentialOptions
     if (record.revoked) fail(409, 'CREDENTIAL_REVOKED', '凭证已撤销，请选择可用凭证')
     return record
   }
-  function mutation(actorId: string, projectId: string, requestId: string, input: unknown, action: string, operation: () => WorkspaceCredentialMetadata) {
+  function mutation<T extends WorkspaceCredentialMetadata | WorkspaceCredentialDeletion>(
+    actorId: string,
+    projectId: string,
+    requestId: string,
+    input: unknown,
+    action: string,
+    operation: () => T,
+  ) {
     authorize(actorId, projectId, 'credential.manage')
     text(requestId, '请求标识', 160)
     const fingerprint = createHmac('sha256', key).update(JSON.stringify([action, input])).digest('hex')
@@ -146,12 +157,23 @@ export function createProjectCredentialService(options: ProjectCredentialOptions
       const previous = db.prepare('SELECT fingerprint,result_json FROM credential_requests WHERE project_id=? AND actor_id=? AND request_id=?').get(projectId, actorId, requestId)
       if (previous) {
         if (previous.fingerprint !== fingerprint) return fail(409, 'CREDENTIAL_REQUEST_CONFLICT', '该请求标识已用于不同的凭证操作，请核对原结果')
-        return JSON.parse(String(previous.result_json)) as WorkspaceCredentialMetadata
+        return JSON.parse(String(previous.result_json)) as T
       }
       const result = operation()
       db.prepare('INSERT INTO credential_requests VALUES(?,?,?,?,?)').run(projectId, actorId, requestId, fingerprint, JSON.stringify(result))
       // 操作事实与凭证变更同事务，只保存允许字段，绝不保存请求体或秘密。
-      db.prepare('INSERT INTO credential_audit VALUES(?,?,?,?,?,?,?,?,?)').run(randomUUID(), projectId, actorId, action, result.id, result.version, result.revision, requestId, result.updatedAt)
+      if (!('deleted' in result))
+        db.prepare('INSERT INTO credential_audit VALUES(?,?,?,?,?,?,?,?,?)').run(
+          randomUUID(),
+          projectId,
+          actorId,
+          action,
+          result.id,
+          result.version,
+          result.revision,
+          requestId,
+          result.updatedAt,
+        )
       return result
     })
   }
@@ -160,7 +182,11 @@ export function createProjectCredentialService(options: ProjectCredentialOptions
     db.prepare('INSERT INTO credential_versions VALUES(?,?,?,?)').run(record.id, record.version, encrypted, record.updatedAt)
   }
   const service = {
-    receipt(actorId: string, projectId: string, requestId: string): WorkspaceCredentialMetadata | null {
+    receipt(
+      actorId: string,
+      projectId: string,
+      requestId: string,
+    ): WorkspaceCredentialMetadata | WorkspaceCredentialDeletion | null {
       authorize(actorId, projectId, 'credential.manage')
       text(requestId, '请求标识', 160)
       const row = db.prepare('SELECT result_json FROM credential_requests WHERE project_id=? AND actor_id=? AND request_id=?').get(projectId, actorId, requestId)
@@ -169,6 +195,44 @@ export function createProjectCredentialService(options: ProjectCredentialOptions
     list(actorId: string, projectId: string): WorkspaceCredentialMetadata[] {
       authorize(actorId, projectId, 'credential.use')
       return db.prepare('SELECT * FROM credentials WHERE project_id=? ORDER BY created_at,id').all(projectId).map(metadata)
+    },
+    remove(
+      actorId: string,
+      projectId: string,
+      id: string,
+      input: CredentialRevoke,
+      unlink: () => void,
+    ): WorkspaceCredentialDeletion {
+      const expected = revision(input.expectedRevision)
+      return mutation(
+        actorId,
+        projectId,
+        input.requestId,
+        { id, expected },
+        'credential.delete',
+        () => {
+          const current = find(projectId, id)
+          if (current.revision !== expected)
+            fail(409, 'CREDENTIAL_REVISION_CONFLICT', '凭证已变化，请刷新后重新确认')
+          unlink()
+          db.prepare('DELETE FROM credential_versions WHERE credential_id=?').run(id)
+          db.prepare('DELETE FROM credential_audit WHERE credential_id=?').run(id)
+          db.prepare(
+            "DELETE FROM credential_requests WHERE project_id=? AND json_extract(result_json,'$.id')=?",
+          ).run(projectId, id)
+          db.prepare('DELETE FROM credentials WHERE id=? AND project_id=?').run(id, projectId)
+          return { deleted: true as const, id, projectId, revision: expected + 1 }
+        },
+      )
+    },
+    purgeProject(projectId: string) {
+      transaction.run(() => {
+        db.prepare(
+          'DELETE FROM credential_versions WHERE credential_id IN (SELECT id FROM credentials WHERE project_id=?)',
+        ).run(projectId)
+        for (const table of ['credential_audit', 'credential_requests', 'credentials'])
+          db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(projectId)
+      })
     },
     deletionReferences(projectId: string, environmentId?: string) {
       if (environmentId !== undefined) return []

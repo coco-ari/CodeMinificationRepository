@@ -67,7 +67,7 @@ async function request<T>(
   suffix: string,
   body?: object,
   signal?: AbortSignal,
-  method?: 'POST' | 'PUT' | 'PATCH',
+  method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
 ): Promise<T> {
   try {
     return await autoOpsRequest<T>(
@@ -231,3 +231,17 @@ const stageLabels: Record<string, string> = {
 }
 export const deploymentStatusLabel = (status: string) => statusLabels[status] ?? status
 export const deploymentStageLabel = (stage: string) => stageLabels[stage] ?? stage
+
+export const removeDeploymentConfiguration = (
+  projectId: string,
+  kind: 'service' | 'target',
+  id: string,
+  input: { requestId: string; configKey: string; environmentId?: string },
+) =>
+  request<{ deleted: true; id: string }>(
+    projectId,
+    `/${kind === 'service' ? 'services' : 'targets'}/${encodeURIComponent(id)}`,
+    input,
+    undefined,
+    'DELETE',
+  )

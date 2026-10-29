@@ -56,6 +56,16 @@ export function deploymentsRoutes({ access, principal }: BusinessHttpContext) {
     })
   }).pipe(Effect.catch((error) => Effect.succeed(responseError(error))))
   return Layer.mergeAll(
+    HttpRouter.add(
+      'DELETE',
+      '/autoops/projects/:projectId/deployments/services/:serviceId',
+      deploymentRequest,
+    ),
+    HttpRouter.add(
+      'DELETE',
+      '/autoops/projects/:projectId/deployments/targets/:targetId',
+      deploymentRequest,
+    ),
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments', deploymentRequest),
     HttpRouter.add('POST', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),
     HttpRouter.add('GET', '/autoops/projects/:projectId/deployments/servers', deploymentRequest),

@@ -41,6 +41,19 @@ export function createBusinessArtifactStore(dataDir) {
       const row = db.prepare('SELECT * FROM business_artifacts WHERE id=?').get(id)
       return row ? { id: row.id, threadId: row.thread_id, runId: row.run_id, projectId: row.project_id, ownerId: row.owner_id, published: Boolean(row.published), name: row.name, mime: row.mime, bytes: row.data, createdAt: row.created_at } : null
     },
+    purgeUser(ownerId) {
+      db.prepare('DELETE FROM business_artifacts WHERE owner_id=?').run(ownerId)
+    },
+    purgeScope(projectId, threadIds) {
+      if (threadIds === undefined)
+        db.prepare('DELETE FROM business_artifacts WHERE project_id=?').run(projectId)
+      else
+        for (const id of threadIds)
+          db.prepare('DELETE FROM business_artifacts WHERE project_id=? AND thread_id=?').run(
+            projectId,
+            id,
+          )
+    },
     list(threadId) {
       return db.prepare('SELECT id,name,mime,length(data) AS size,created_at FROM business_artifacts WHERE thread_id=? ORDER BY created_at,id').all(threadId)
     },

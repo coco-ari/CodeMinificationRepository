@@ -14,7 +14,7 @@ export function workspaceUpdatesRoutes(
   { access, principal }: BusinessHttpContext,
   service?: WorkspaceUpdates,
 ) {
-  const handle = (operation: 'overview' | 'save' | 'receipt') =>
+  const handle = (operation: 'overview' | 'save' | 'remove' | 'receipt') =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -27,7 +27,8 @@ export function workspaceUpdatesRoutes(
       }
       yield* Effect.try(() => {
         check()
-        if (operation === 'save') access.requireCsrf(current, request.headers['x-demo-csrf'])
+        if (operation === 'save' || operation === 'remove')
+          access.requireCsrf(current, request.headers['x-demo-csrf'])
       })
       const owner = yield* Effect.try(() => service ?? configuredWorkspaceUpdates(access))
       let result: unknown
@@ -77,7 +78,10 @@ export function workspaceUpdatesRoutes(
           })),
         )
         yield* Effect.try(check)
-        result = yield* Effect.try(() => owner.save(project, scope, input, current.id))
+        result =
+          operation === 'remove'
+            ? yield* Effect.tryPromise(() => owner.remove(project, scope, input, current.id))
+            : yield* Effect.try(() => owner.save(project, scope, input, current.id))
       }
       const available = yield* Effect.try(check).pipe(
         Effect.as(true),
@@ -95,6 +99,7 @@ export function workspaceUpdatesRoutes(
   const base = '/api/v1/projects/:projectId/workspace/updates'
   return Layer.mergeAll(
     HttpRouter.add('GET', base, handle('overview')),
+    HttpRouter.add('DELETE', `${base}/:scope`, handle('remove')),
     HttpRouter.add('POST', `${base}/:scope`, handle('save')),
     HttpRouter.add('GET', `${base}/requests/:requestId`, handle('receipt')),
   )

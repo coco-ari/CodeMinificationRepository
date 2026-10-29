@@ -103,21 +103,32 @@ function revokeServerRecord(state, id) {
   return { ok: true };
 }
 function deleteServerRecord(state, id) {
-  const data = state.deployments, server = find(data.servers, id, '服务器');
-  if (!server.revoked) throw new HttpError(409, '请先撤销服务器接入，再删除记录');
-  if (data.targets.some(item => item.serverId === id)) throw new HttpError(409, '服务器仍有关联的部署目标，不能删除');
-  if (data.tasks.some(item => item.serverId === id) || data.releases.some(item => item.serverId === id)) throw new HttpError(409, '服务器存在发布历史，需保留记录供追溯，不能删除');
-  data.serverBindings = data.serverBindings.filter(item => item.serverId !== id);
-  data.servers = data.servers.filter(item => item.id !== id);
+  const data = state.deployments,
+    server = find(data.servers, id, '服务器')
+  const targetIds = new Set(data.targets.filter((row) => row.serverId === id).map((row) => row.id))
+  data.targets = data.targets.filter((row) => row.serverId !== id)
+  data.tasks = data.tasks.filter((row) => row.serverId !== id && !targetIds.has(row.targetId))
+  data.releases = data.releases.filter((row) => row.serverId !== id && !targetIds.has(row.targetId))
+  state.events = state.events.filter((row) => row.serverId !== id && !targetIds.has(row.targetId))
+  data.serverBindings = data.serverBindings.filter((item) => item.serverId !== id)
+  data.servers = data.servers.filter((item) => item.id !== id)
+  const requests=state.autoopsDeploymentBindings?.nodeMutationRequests;
+  if(requests)requests.splice(0,requests.length,...requests.filter(row=>!JSON.stringify(row).includes(id)));
+
   for (const map of state.autoopsDeploymentBindings?.projects || []) {
-    map.servers = map.servers.filter(item => item.serverId !== id);
+    map.targetRequests = map.targetRequests.filter((row) => !targetIds.has(row.targetId))
+    for (const key of ['serverRequests', 'mutationRequests'])
+      map[key] = (map[key] || []).filter(
+        (row) =>
+          !JSON.stringify(row).includes(id) &&
+          ![...targetIds].some((target) => JSON.stringify(row).includes(target)),
+      )
+    map.servers = map.servers.filter((item) => item.serverId !== id)
     if (Array.isArray(map.allowedServerIds) && map.allowedServerIds.includes(id)) {
       map.allowedServerIds = map.allowedServerIds.filter(serverId => serverId !== id);
       map.nodeAccessRevision++;
     }
   }
-  state.events.unshift({ id: randomUUID(), projectId: null, action: 'server-delete', serverId: id, at: now(), message: `删除已撤销的服务器记录：${server.name}；未操作服务器上的容器或文件` });
-  state.events = state.events.slice(0, 100);
   return { ok: true };
 }
 function saveStoragePolicyRecord(state, serverId, input) {
@@ -283,20 +294,74 @@ function sameTaskRequest(task, requestFingerprint, submission) {
 }
 
 export class DeploymentService extends EventEmitter {
-  constructor(repository, { publicOrigin = '', authorizeTask, authorizeProjectMutation, resolveWorkspaceSource, maintainWorkspacePackages } = {}) {
-    super();
-    if (authorizeTask !== undefined && typeof authorizeTask !== 'function') throw new TypeError('任务授权端口必须是函数');
-    if (resolveWorkspaceSource !== undefined && typeof resolveWorkspaceSource !== 'function') throw new TypeError('工作区源码解析端口必须是函数');
-    if (authorizeProjectMutation !== undefined && typeof authorizeProjectMutation !== 'function') throw new TypeError('部署写入授权端口必须是函数');
-    this.authorizeTask = authorizeTask; this.authorizeProjectMutation = authorizeProjectMutation; this.resolveWorkspaceSource = resolveWorkspaceSource;
-    this.maintainWorkspacePackages = maintainWorkspacePackages;
-    this.repository = repository; this.store = repository.store; this.publicOrigin = publicOrigin;
-    this.root = path.join(repository.directory, 'deployments'); this.preparations = new Map(); this.sourceCleanups = new Set();
-    this.archives = new SourceArchives(this);
-    this.projects = createProjectDeployments({ store: this.store, validateConfig, saveEntity: saveEntityRecord, configKey: targetConfigKey, publicServer: server => structuredClone(safeServer(server)),
-      revokeServer: revokeServerRecord, deleteServer: deleteServerRecord, saveStoragePolicy: saveStoragePolicyRecord,
+  constructor(
+    repository,
+    {
+      publicOrigin = '',
+      authorizeTask,
+      authorizeProjectMutation,
+      resolveWorkspaceSource,
+      maintainWorkspacePackages,
+    } = {},
+  ) {
+    super()
+    if (authorizeTask !== undefined && typeof authorizeTask !== 'function')
+      throw new TypeError('任务授权端口必须是函数')
+    if (resolveWorkspaceSource !== undefined && typeof resolveWorkspaceSource !== 'function')
+      throw new TypeError('工作区源码解析端口必须是函数')
+    if (authorizeProjectMutation !== undefined && typeof authorizeProjectMutation !== 'function')
+      throw new TypeError('部署写入授权端口必须是函数')
+    this.authorizeTask = authorizeTask
+    this.authorizeProjectMutation = authorizeProjectMutation
+    this.resolveWorkspaceSource = resolveWorkspaceSource
+    this.maintainWorkspacePackages = maintainWorkspacePackages
+    this.repository = repository
+    this.store = repository.store
+    this.publicOrigin = publicOrigin
+    this.root = path.join(repository.directory, 'deployments')
+    this.preparations = new Map()
+    this.sourceCleanups = new Set()
+    this.archives = new SourceArchives(this)
+    this.projects = createProjectDeployments({
+      store: this.store,
+      validateConfig,
+      saveEntity: saveEntityRecord,
+      configKey: targetConfigKey,
+      publicServer: (server) => structuredClone(safeServer(server)),
+      revokeServer: revokeServerRecord,
+      deleteServer: deleteServerRecord,
+      saveStoragePolicy: saveStoragePolicyRecord,
       authorizeMutation: authorizeProjectMutation,
-      insertServer: (data, input) => insertServer(data, input, this.publicOrigin), changed: (type, id) => this.changed(type, id) });
+      cleanupTasks: (ids) => this.cleanupDeletedTasks(ids),
+      insertServer: (data, input) => insertServer(data, input, this.publicOrigin),
+      changed: (type, id) => this.changed(type, id),
+    })
+  }
+  async cleanupDeletedTasks(taskIds) {
+    const ids = new Set(taskIds)
+    await this.store.change((state) => {
+      for (const task of state.deployments.tasks)
+        if (ids.has(task.id) && ['queued', 'preparing'].includes(task.status)) {
+          transition(task, 'interrupted', true)
+          Object.assign(task, {
+            status: 'interrupted',
+            stage: 'interrupted',
+            finishedAt: now(),
+            error: '所属对象正在删除',
+          })
+        }
+    })
+    await Promise.allSettled(taskIds.map((id) => this.preparations.get(id)).filter(Boolean))
+    // 已领取的远端操作仍需回传最终结果；不提前撤销身份或释放任务锁。
+    if (this.data.tasks.some((task) => ids.has(task.id) && task.status === 'running'))
+      throw new HttpError(409, '部署任务仍在执行，结束后可继续原删除')
+    await this.archives.removeForTasks(taskIds);
+    for (const id of taskIds)
+      await rm(path.join(this.root, 'tasks', id), { recursive: true, force: true })
+  }
+  async purgeScope(projectId, environmentId) {
+    await this.cleanupDeletedTasks(this.projects.scopeTaskIds(projectId, environmentId))
+    await this.projects.purgeScope(projectId, environmentId)
   }
   get data() { return this.store.state.deployments; }
   changed(type, id, applicationId) { this.emit('update', { type, id, applicationId, at: now() }); }
@@ -373,8 +438,14 @@ export class DeploymentService extends EventEmitter {
     this.changed('server', id);
   }
   async deleteServer(id) {
-    await this.store.change(state => deleteServerRecord(state, id));
-    this.changed('server', id);
+    await this.store.change((state) => {
+      find(state.deployments.servers, id, '服务器').deleting = true
+    })
+    await this.cleanupDeletedTasks(
+      this.data.tasks.filter((task) => task.serverId === id).map((task) => task.id),
+    )
+    await this.store.change((state) => deleteServerRecord(state, id))
+    this.changed('server', id)
   }
   async register(input) {
     if (typeof input.registrationToken !== 'string') throw new HttpError(401, '接入口令无效');
@@ -430,11 +501,15 @@ export class DeploymentService extends EventEmitter {
     const result = await this.store.change(state => saveEntityRecord(state, kind, input, id, options));
     this.changed(kind, result.id); return result;
   }
-  ensureManaged(data, targetId) {
-    const target = find(data.targets, targetId, '部署目标'); const server = find(data.servers, target.serverId, '服务器');
-    if (target.retiredAt || target.mode !== 'managed' || server.mode !== 'managed') throw new HttpError(403, '目标不属于平台，禁止发布、重启和回退');
-    if (server.revoked) throw new HttpError(409, '服务器已撤销');
-    return target;
+  ensureManaged(data, targetId, allowDeleting = false) {
+    const target = find(data.targets, targetId, '部署目标')
+    const server = find(data.servers, target.serverId, '服务器')
+    if (!allowDeleting && (target.deleting || server.deleting))
+      throw new HttpError(409, '部署位置正在删除，请继续原删除')
+    if (target.retiredAt || target.mode !== 'managed' || server.mode !== 'managed')
+      throw new HttpError(403, '目标不属于平台，禁止发布、重启和回退')
+    if (server.revoked) throw new HttpError(409, '服务器已撤销')
+    return target
   }
   configKey(targetId) { return targetConfigKey(this.data, targetId); }
   // 读取下次任务使用的配置，不回写目标草稿或历史版本快照。
@@ -708,14 +783,19 @@ export class DeploymentService extends EventEmitter {
     }
   }
   async claim(serverId) {
-    if (this.closing) return null;
-    let interruptedId;
-    const task = await this.store.change(state => {
-      if (this.closing) return null;
-      const data = state.deployments; const server = find(data.servers, serverId);
-      if (server.revoked) throw new HttpError(401, 'Agent 已撤销'); if (server.mode !== 'managed') return null;
-      const active = data.tasks.find(task => task.serverId === serverId && task.status === 'running');
-      if (active) return structuredClone(active);
+    if (this.closing) return null
+    let interruptedId
+    const task = await this.store.change((state) => {
+      if (this.closing) return null
+      const data = state.deployments
+      const server = find(data.servers, serverId)
+      if (server.revoked) throw new HttpError(401, 'Agent 已撤销')
+      if (server.mode !== 'managed') return null
+      const active = data.tasks.find(
+        (task) => task.serverId === serverId && task.status === 'running',
+      )
+      if (active) return structuredClone(active)
+      if (server.deleting) return null
       // 准备源码也占据队列位置，防止后提交的重启越过前面的发布。
       const next = data.tasks.find(task => task.serverId === serverId && ['preparing', 'queued'].includes(task.status));
       if (!next || next.status !== 'queued') return null;
@@ -773,9 +853,10 @@ export class DeploymentService extends EventEmitter {
     return signal?.aborted ? null : this.claim(serverId);
   }
   ownedTask(serverId, taskId) {
-    const task = find(this.data.tasks, taskId, '任务');
-    if (task.serverId !== serverId || !task.startedAt) throw new HttpError(403, '无权访问此任务');
-    this.ensureManaged(this.data, task.targetId); return task;
+    const task = find(this.data.tasks, taskId, '任务')
+    if (task.serverId !== serverId || !task.startedAt) throw new HttpError(403, '无权访问此任务')
+    this.ensureManaged(this.data, task.targetId, true)
+    return task
   }
   source(serverId, taskId, role = 'selected') {
     const task = this.ownedTask(serverId, taskId);
@@ -788,22 +869,45 @@ export class DeploymentService extends EventEmitter {
     return { ...task.source, file: path.join(this.root, 'tasks', taskId, 'source.zip') };
   }
   async events(serverId, taskId, input) {
-    this.ownedTask(serverId, taskId);
-    const seq = integer(input.seq, undefined, 1, Number.MAX_SAFE_INTEGER, '日志序号');
-    if (!stages.has(input.stage)) fail('任务阶段无效');
-    if (input.message !== undefined && (typeof input.message !== 'string' || input.message.length > 32768)) fail('日志内容过长');
-    const status = input.status || (terminal.has(input.stage) ? input.stage : 'running');
-    if (!['running', ...terminal].includes(status)) fail('任务状态无效');
-    if (input.timestamp !== undefined && (typeof input.timestamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(input.timestamp) || !Number.isFinite(Date.parse(input.timestamp)))) fail('事件 timestamp 必须是有效的 ISO 8601 时间');
-    const result = input.result;
-    if (result !== undefined && (!result || typeof result !== 'object' || Array.isArray(result) || JSON.stringify(result).length > 65536)) fail('任务结果格式错误');
-    const ack = await this.store.change(async state => {
-      const data = state.deployments; const task = find(data.tasks, taskId); const target = this.ensureManaged(data, task.targetId);
-      if (task.serverId !== serverId) throw new HttpError(403, '无权更新此任务');
-      if (seq <= task.lastSeq) return task.lastSeq;
-      if (seq !== task.lastSeq + 1) throw new HttpError(409, `日志序号不连续，下一序号为 ${task.lastSeq + 1}`);
-      if (terminal.has(task.status)) throw new HttpError(409, '任务已完成');
-      const baseline = result?.baseline || (status === 'rolled_back' ? result?.rollback?.release : null);
+    this.ownedTask(serverId, taskId)
+    const seq = integer(input.seq, undefined, 1, Number.MAX_SAFE_INTEGER, '日志序号')
+    if (!stages.has(input.stage)) fail('任务阶段无效')
+    if (
+      input.message !== undefined &&
+      (typeof input.message !== 'string' || input.message.length > 32768)
+    )
+      fail('日志内容过长')
+    const status = input.status || (terminal.has(input.stage) ? input.stage : 'running')
+    if (!['running', ...terminal].includes(status)) fail('任务状态无效')
+    if (
+      input.timestamp !== undefined &&
+      (typeof input.timestamp !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+          input.timestamp,
+        ) ||
+        !Number.isFinite(Date.parse(input.timestamp)))
+    )
+      fail('事件 timestamp 必须是有效的 ISO 8601 时间')
+    const result = input.result
+    if (
+      result !== undefined &&
+      (!result ||
+        typeof result !== 'object' ||
+        Array.isArray(result) ||
+        JSON.stringify(result).length > 65536)
+    )
+      fail('任务结果格式错误')
+    const ack = await this.store.change(async (state) => {
+      const data = state.deployments
+      const task = find(data.tasks, taskId)
+      const target = this.ensureManaged(data, task.targetId, true)
+      if (task.serverId !== serverId) throw new HttpError(403, '无权更新此任务')
+      if (seq <= task.lastSeq) return task.lastSeq
+      if (seq !== task.lastSeq + 1)
+        throw new HttpError(409, `日志序号不连续，下一序号为 ${task.lastSeq + 1}`)
+      if (terminal.has(task.status)) throw new HttpError(409, '任务已完成')
+      const baseline =
+        result?.baseline || (status === 'rolled_back' ? result?.rollback?.release : null)
       if (baseline?.id === task.baselineReleaseId && baseline) {
         const prior = task.previousRelease;
         const valid = task.recoveryAllowed && task.baselineSource && prior && baseline.restoredFromReleaseId === prior.id && baseline.revision === prior.revision

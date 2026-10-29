@@ -1,3 +1,6 @@
+import { purgeAccountRelations } from '../accountDeletion.ts'
+import * as ThreadManagement from '../../orchestration-v2/ThreadManagementService.ts'
+import * as SqlClient from 'effect/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'
@@ -19,7 +22,14 @@ export function accountsRoutes(
 ) {
   const handle = (
     operation:
-      'own' | 'list' | 'receipt' | 'create' | 'enable' | 'resetPassword' | 'changePassword',
+      | 'own'
+      | 'list'
+      | 'receipt'
+      | 'create'
+      | 'delete'
+      | 'enable'
+      | 'resetPassword'
+      | 'changePassword',
   ) =>
     Effect.gen(function* () {
       const current = yield* principal
@@ -84,19 +94,33 @@ export function accountsRoutes(
         })),
       )
       yield* Effect.try(check)
+      const runtime = yield* Effect.context<
+        ThreadManagement.ThreadManagementService | SqlClient.SqlClient
+      >()
       const result =
-        operation === 'enable'
-          ? yield* Effect.try(() => owner.setEnabled(current.id, target, input, check))
-          : yield* Effect.tryPromise(async (): Promise<RuntimeAccount | AccountPasswordResult> =>
-              operation === 'create'
-                ? owner.create(current.id, input, check)
-                : operation === 'resetPassword'
-                  ? owner.resetPassword(current.id, target, input, check)
-                  : owner.changePassword(current.id, input, check),
+        operation === 'delete'
+          ? yield* Effect.tryPromise(() =>
+              owner.remove(
+                current.id,
+                target,
+                input,
+                (user) => Effect.runPromiseWith(runtime)(purgeAccountRelations(access, user)),
+                check,
+              ),
             )
+          : operation === 'enable'
+            ? yield* Effect.try(() => owner.setEnabled(current.id, target, input, check))
+            : yield* Effect.tryPromise(async (): Promise<RuntimeAccount | AccountPasswordResult> =>
+                operation === 'create'
+                  ? owner.create(current.id, input, check)
+                  : operation === 'resetPassword'
+                    ? owner.resetPassword(current.id, target, input, check)
+                    : owner.changePassword(current.id, input, check),
+              )
       // 本人改密或停用已同事务撤销会话，仍准确返回刚提交的事实。
       const selfRevoked =
         operation === 'changePassword' ||
+        (operation === 'delete' && target === current.id) ||
         ((operation === 'resetPassword' || operation === 'enable') && target === current.id)
       if (!selfRevoked) {
         const available = yield* Effect.try(check).pipe(
@@ -116,6 +140,7 @@ export function accountsRoutes(
     HttpRouter.add('GET', '/api/v1/accounts', handle('list')),
     HttpRouter.add('GET', '/api/v1/accounts/receipts/:requestId', handle('receipt')),
     HttpRouter.add('POST', '/api/v1/accounts', handle('create')),
+    HttpRouter.add('DELETE', '/api/v1/accounts/:accountId', handle('delete')),
     HttpRouter.add('PUT', '/api/v1/accounts/:accountId', handle('enable')),
     HttpRouter.add('PUT', '/api/v1/accounts/:accountId/password', handle('resetPassword')),
     HttpRouter.add('PUT', '/api/v1/account/password', handle('changePassword')),

@@ -264,3 +264,62 @@ test('平台对话的原生目录和调用统一继承三级范围，不再受�
   const empty = { ...binding, threadId: 'no-skills', question: { ...binding.question, configuration: { ...configuration, skillIds: [] } } }
   assert.deepEqual(prepareScopedBusinessSkills(f.dataDir, empty).skills.map(skill => skill.id).sort(), skills.map(skill => skill.id).sort())
 })
+
+test('删除助手清除版本、分配与原配置收据，并可核对同一删除请求', (t) => {
+  const f = fixture(t),
+    preset = f.assistants.save('admin', 'project', null, save('remove-create'))
+  const other = f.assistants.save(
+    'admin',
+    'project',
+    null,
+    save('keep-create', details({ name: '保留助手' })),
+  )
+  f.assistants.assign(
+    'admin',
+    'project',
+    allocate('remove-allocation', [preset.id, other.id], preset.id),
+  )
+  const input = { requestId: 'remove-assistant', expectedRevision: preset.revision }
+  assert.throws(() => f.assistants.remove('reader', 'project', preset.id, input), {
+    code: 'PROJECT_ACTION_FORBIDDEN',
+  })
+  assert.throws(
+    () => f.assistants.remove('admin', 'project', preset.id, { ...input, expectedRevision: 0 }),
+    { code: 'ASSISTANT_REVISION_CONFLICT' },
+  )
+  const result = f.assistants.remove('admin', 'project', preset.id, input)
+  assert.deepEqual(f.assistants.remove('admin', 'project', preset.id, input), result)
+  assert.equal(
+    f.assistants.projectReceipt('admin', 'project', input.requestId).result.deleted,
+    true,
+  )
+  const settings = f.assistants.settings('admin', 'project')
+  assert.deepEqual(
+    settings.presets.map((item) => item.id),
+    [other.id],
+  )
+  assert.deepEqual(settings.allocations[0].assistantIds, [other.id])
+  assert.equal(settings.allocations[0].defaultAssistantId, null)
+  const db = new DatabaseSync(join(f.dataDir, 'assistants/state.sqlite'), { readOnly: true })
+  try {
+    for (const table of [
+      'assistant_versions',
+      'assistant_provider_shares',
+      'assistant_allocation_sources',
+    ])
+      assert.equal(
+        db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE assistant_id=?`).get(preset.id).n,
+        0,
+      )
+    assert.equal(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM assistant_receipts WHERE operation='preset.save:new' AND json_extract(result,'$.id')=?",
+        )
+        .get(preset.id).n,
+      0,
+    )
+  } finally {
+    db.close()
+  }
+})

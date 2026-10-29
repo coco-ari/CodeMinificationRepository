@@ -85,7 +85,7 @@ const receipt = (pending: PendingProvidedAssistant, result: unknown) => ({
     pending.kind === "save"
       ? `provider.preset.save:${pending.assistantId ?? "new"}`
       : `provider.share:${pending.assistantId}`,
-  projectId: pending.kind === "save" ? pending.sourceProjectId : pending.projectId,
+  projectId: pending.kind !== 'share' ? pending.sourceProjectId : pending.projectId,
   payload: pending.input,
   result,
 });

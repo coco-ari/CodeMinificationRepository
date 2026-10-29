@@ -603,3 +603,24 @@ test('项目节点GET原收据在重开owner后仍固定原请求，跨环境拒
   assert.equal(original.result.id, created.server.id)
   assert(!JSON.stringify(original).includes(created.registrationToken))
 })
+
+test('删除服务级联部署位置、任务和产物，重复请求可恢复且不删除独立节点', async (t) => {
+  const f = await fixture(t),
+    r = await records(f)
+  const overview = f.store.overview(projects[0], ['env-one']),
+    service = overview.services.find((value) => value.id === r.target.serviceId)
+  const input = { requestId: randomUUID(), configKey: service.configKey }
+  await assert.rejects(
+    f.request(`/services/${service.id}`, 'DELETE', { ...input, configKey: 'stale' }),
+    { status: 409 },
+  )
+  const result = await f.request(`/services/${service.id}`, 'DELETE', input)
+  assert.equal(result.body.deleted, true)
+  assert.deepEqual((await f.request(`/services/${service.id}`, 'DELETE', input)).body, result.body)
+  const data = readState(f.dataDir).deployments
+  assert(!data.services.some((value) => value.id === service.id))
+  assert(!data.targets.some((value) => value.serviceId === service.id))
+  assert(!data.tasks.some((value) => value.targetId === r.target.id))
+  assert(!data.releases.some((value) => value.targetId === r.target.id))
+  assert(data.servers.some((value) => value.id === r.server.server.id))
+})

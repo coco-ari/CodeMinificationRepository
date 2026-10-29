@@ -435,6 +435,71 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
 
   return {
     ensureProject,
+    async purgeRelated(id, removal, sourceId) {
+      await this.cancelProjectWork(id)
+      const state = load(id),
+        captures = new Set(removal.removedCaptures ?? []),
+        inputs = new Set(removal.removedInputs ?? [])
+      const removed = new Set(
+        state.versions
+          .filter(
+            (v) =>
+              captures.has(v.source.captureId) ||
+              inputs.has(v.source.inputId) ||
+              (sourceId && v.source.repositories?.some((r) => r.sourceId === sourceId)),
+          )
+          .map((v) => v.id),
+      )
+      for (let changed = true; changed;) {
+        changed = false
+        for (const v of state.versions)
+          if (removed.has(v.sourceVersionId) && !removed.has(v.id)) {
+            removed.add(v.id)
+            changed = true
+          }
+      }
+      const releases = state.releases.filter((r) => removed.has(r.sourceVersionId))
+      for (const version of removed)
+        rmSync(join(projectRoot(id), 'versions', safeId(version)), { recursive: true, force: true })
+      for (const release of releases)
+        rmSync(join(projectRoot(id), 'packages', safeId(release.id)), {
+          recursive: true,
+          force: true,
+        })
+      state.versions = state.versions.filter((v) => !removed.has(v.id))
+      state.releases = state.releases.filter((r) => !removed.has(r.sourceVersionId))
+      state.tasks = state.tasks.filter(
+        (t) =>
+          !removed.has(t.sourceVersionId) &&
+          !removed.has(t.versionId) &&
+          !captures.has(t.captureId) &&
+          !releases.some((r) => r.id === t.releaseId),
+      )
+      state.protectedReferences = Object.fromEntries(
+        Object.entries(state.protectedReferences ?? {}).filter(
+          ([, version]) => !removed.has(version),
+        ),
+      )
+      state.retiredWorkspaceVersions = (state.retiredWorkspaceVersions ?? []).filter(
+        (v) => !removed.has(v.id),
+      )
+      save(id, state)
+    },
+    async cancelProjectWork(id) {
+      safeId(id)
+      await initializing.get(id)
+      if (existsSync(stateFile(id))) await jobs.cancelAndWait(load(id).tasks.map((task) => task.id))
+    },
+    async purgeProject(id) {
+      safeId(id)
+      await initializing.get(id)
+      if (existsSync(stateFile(id))) {
+        const state = load(id)
+        await jobs.cancelAndWait(state.tasks.map((task) => task.id))
+      }
+      rmSync(projectRoot(id), { recursive: true, force: true })
+      rmSync(join(dataDir, 't3', 'workspaces', safeId(id)), { recursive: true, force: true })
+    },
     deletionReferences(id, environmentId) {
       if (environmentId !== undefined) return []
       const values = []

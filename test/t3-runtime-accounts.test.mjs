@@ -292,3 +292,95 @@ test('改密原收据同时复核原密码与新密码，后续改密不把最�
   await assert.rejects(owner.changePassword('u-lin', { ...command, value: { ...command.value, newPassword: nextPassword + '-later' } }), { code: 'ACCOUNT_REQUEST_CONFLICT' })
   assert.equal(owner.own('u-lin').account.revision, 3)
 })
+
+test('账号删除清除密码、会话和原配置收据，清理失败可重启后继续且不影响其他账号', async (t) => {
+  const f = fixture(t),
+    account = await create(f.owner)
+  const command = { requestId: randomUUID(), expectedRevision: account.revision, value: {} }
+  const login = await f.owner.login({ username: account.username, password: nextPassword })
+  let calls = 0
+  await assert.rejects(
+    f.owner.remove('u-lin', account.id, command, async () => {
+      calls++
+    }),
+    { code: 'ACCOUNT_FORBIDDEN' },
+  )
+  await assert.rejects(
+    f.owner.remove('u-admin', account.id, { ...command, expectedRevision: 99 }, async () => {
+      calls++
+    }),
+    { code: 'ACCOUNT_REVISION_CONFLICT' },
+  )
+  assert.equal(calls, 0)
+  await assert.rejects(
+    f.owner.remove('u-admin', account.id, command, async () => {
+      calls++
+      throw new Error('模拟关联清理失败')
+    }),
+    { code: 'ACCOUNT_DELETE_PENDING' },
+  )
+  assert.throws(() => f.owner.session(hash(login.token)), { code: 'UNAUTHENTICATED' })
+  await assert.rejects(f.owner.login({ username: account.username, password: nextPassword }), {
+    code: 'BAD_CREDENTIALS',
+  })
+  await f.reopen()
+  const result = await f.owner.remove('u-admin', account.id, command, async () => {
+    calls++
+  })
+  assert.equal(result.deleted, true)
+  assert.equal(calls, 2)
+  assert.deepEqual(
+    await f.owner.remove('u-admin', account.id, command, async () => {
+      throw Error('不应重复清理')
+    }),
+    result,
+  )
+  assert.equal(f.owner.receipt('u-admin', command.requestId).result.deleted, true)
+  const db = new DatabaseSync(f.path, { readOnly: true })
+  for (const [table, field] of [
+    ['runtime_accounts', 'id'],
+    ['runtime_account_audit', 'target_id'],
+    ['sessions', 'uid'],
+    ['runtime_account_deletions', 'target_id'],
+  ])
+    assert.equal(
+      db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${field}=?`).get(account.id).n,
+      0,
+    )
+  const receipts = db
+    .prepare(
+      'SELECT operation,result_json,password_proof FROM runtime_account_requests WHERE target_id=?',
+    )
+    .all(account.id)
+  assert.equal(receipts.length, 1)
+  assert.equal(receipts[0].operation, 'delete')
+  assert.equal(receipts[0].password_proof, '')
+  db.close()
+  assert.equal(f.owner.active('u-admin').enabled, true)
+})
+
+test('最后一个有效管理员保留可用入口，创建第二个管理员后可删除', async (t) => {
+  const f = fixture(t),
+    command = { requestId: randomUUID(), expectedRevision: 1, value: {} }
+  await assert.rejects(
+    f.owner.remove('u-admin', 'u-admin', command, async () => {}),
+    { code: 'ACCOUNT_LAST_ADMIN' },
+  )
+  const other = await create(f.owner, { username: 'another.admin', platformAdmin: true })
+  const result = await f.owner.remove(other.id, 'u-admin', command, async () => {})
+  assert.equal(result.deleted, true)
+  assert.throws(() => f.owner.active('u-admin'), { code: 'UNAUTHENTICATED' })
+})
+
+test('并发确认同一账号删除后，各原请求仍能核对最小结果', async t => {
+  const f = fixture(t), account = await create(f.owner)
+  const commands = [0, 1].map(() => ({requestId: randomUUID(), expectedRevision: account.revision, value: {}}))
+  let finish, started = 0
+  const gate = new Promise(resolve => { finish = resolve })
+  const purge = async () => { if (++started === 2) finish(); await gate }
+  const results = await Promise.all(commands.map(command => f.owner.remove('u-admin', account.id, command, purge)))
+  for (const [index, command] of commands.entries()) {
+    assert.deepEqual(f.owner.receipt('u-admin', command.requestId)?.result, results[index])
+    assert.deepEqual(await f.owner.remove('u-admin', account.id, command, async () => assert.fail('不重复删除')), results[index])
+  }
+})

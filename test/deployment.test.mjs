@@ -302,38 +302,53 @@ test('一次性 Agent 注册、过期、撤销与凭据隔离', async t => {
   await f.deployment.revokeServer(agent.serverId); assert.throws(() => f.deployment.authenticate(agent.token), { status: 401 });
 });
 
-test('删除已撤销服务器会清理空绑定并留审计，不删除关联资源和发布历史', async t => {
-  const f = await fixture(t);
-  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
-  const application = await f.deployment.saveEntity('applications', { name: '临时验收项目' });
-  const created = await f.deployment.createServer({ name: '临时验收服务器', applicationId: application.id });
-  const agent = await f.deployment.register({ registrationToken: created.registrationToken, version: 'test' });
-  const other = await f.deployment.createServer({ name: '保留服务器' });
-  const otherAgent = await f.deployment.register({ registrationToken: other.registrationToken, version: 'test' });
-  await assert.rejects(f.deployment.deleteServer(agent.serverId), { status: 409 });
-  await f.deployment.revokeServer(agent.serverId);
-  for (const collection of ['targets', 'tasks', 'releases']) {
-    await f.repository.store.change(state => { state.deployments[collection].push({ id: randomUUID(), serverId: agent.serverId, status: 'succeeded' }); });
-    const before = structuredClone(f.repository.store.state);
-    await assert.rejects(f.deployment.deleteServer(agent.serverId), { status: 409 });
-    assert.deepEqual(f.repository.store.state, before);
-    await f.repository.store.change(state => { state.deployments[collection] = []; });
-  }
-  const updates = []; f.deployment.on('update', value => updates.push(value));
-  await f.deployment.deleteServer(agent.serverId);
-  assert.ok(!f.deployment.data.servers.some(s => s.id === agent.serverId));
-  assert.ok(!f.deployment.data.serverBindings.some(b => b.serverId === agent.serverId));
-  assert.equal(f.deployment.data.applications[0].id, application.id);
-  assert.equal(f.deployment.authenticate(otherAgent.token), otherAgent.serverId);
-  assert.throws(() => f.deployment.authenticate(agent.token), { status: 401 });
-  await assert.rejects(f.deployment.register({ registrationToken: created.registrationToken }), { status: 401 });
-  assert.equal(f.repository.store.state.events.filter(e => e.action === 'server-delete' && e.serverId === agent.serverId).length, 1);
-  assert.ok(updates.some(e => e.type === 'server' && e.id === agent.serverId));
-  await assert.rejects(f.deployment.deleteServer(agent.serverId), { status: 404 });
-  await f.repository.store.close();
-  await f.repository.store.open();
-  assert.ok(!f.deployment.data.servers.some(s => s.id === agent.serverId));
-});
+test('删除服务器清理所属绑定、任务及发布历史，保留其他服务器', async (t) => {
+  const f = await fixture(t)
+  t.after(async () => {
+    await f.deployment.close()
+    await f.repository.store.close()
+  })
+  const application = await f.deployment.saveEntity('applications', { name: '临时验收项目' })
+  const created = await f.deployment.createServer({
+    name: '临时验收服务器',
+    applicationId: application.id,
+  })
+  const agent = await f.deployment.register({
+    registrationToken: created.registrationToken,
+    version: 'test',
+  })
+  const other = await f.deployment.createServer({ name: '保留服务器' })
+  const otherAgent = await f.deployment.register({
+    registrationToken: other.registrationToken,
+    version: 'test',
+  })
+  for (const collection of ['targets', 'tasks', 'releases'])
+    await f.repository.store.change((state) => {
+      state.deployments[collection].push({
+        id: randomUUID(),
+        serverId: agent.serverId,
+        status: 'succeeded',
+      })
+    })
+  const updates = []
+  f.deployment.on('update', (value) => updates.push(value))
+  await f.deployment.deleteServer(agent.serverId)
+  assert.ok(!f.deployment.data.servers.some((s) => s.id === agent.serverId))
+  assert.ok(!f.deployment.data.serverBindings.some((b) => b.serverId === agent.serverId))
+  assert.equal(f.deployment.data.applications[0].id, application.id)
+  assert.equal(f.deployment.authenticate(otherAgent.token), otherAgent.serverId)
+  assert.throws(() => f.deployment.authenticate(agent.token), { status: 401 })
+  await assert.rejects(f.deployment.register({ registrationToken: created.registrationToken }), {
+    status: 401,
+  })
+  for (const collection of ['targets', 'tasks', 'releases'])
+    assert(!f.deployment.data[collection].some((value) => value.serverId === agent.serverId))
+  assert.ok(updates.some((e) => e.type === 'server' && e.id === agent.serverId))
+  await assert.rejects(f.deployment.deleteServer(agent.serverId), { status: 404 })
+  await f.repository.store.close()
+  await f.repository.store.open()
+  assert.ok(!f.deployment.data.servers.some((s) => s.id === agent.serverId))
+})
 
 test('保留身份升级 Agent 后心跳更新版本，旧客户端省略版本时保持现值', async t => {
   const f = await fixture(t); const created = await f.deployment.createServer({ name: '版本验证' });
@@ -542,35 +557,111 @@ test('Agent 源码大小限制提前报错，不破坏仓库内部源码同步',
   assert.equal(repository.overview().projects[0].status, 'ready');
 });
 
-test('HTTP 管理接口沿用登录与 CSRF，Agent 来源文件严格隔离', async t => {
-  const root = await directory(t); const app = await createApplication({ directory: root, builder: builder(root), secureCookies: false });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => { app.server.close(resolve); app.server.closeAllConnections(); }));
-  const base = `http://127.0.0.1:${app.server.address().port}`;
-  const request = (route, method = 'GET', value, headers = {}) => fetch(base + route, { method, headers: { ...(value ? { 'Content-Type': 'application/json' } : {}), ...headers }, ...(value ? { body: JSON.stringify(value) } : {}) });
-  assert.equal((await request('/api/deploy/overview')).status, 401);
-  const response = await request('/api/setup', 'POST', { bootstrapToken: app.service.bootstrapToken, username: 'admin', password: 'isolated-admin-test' });
-  const auth = { Cookie: response.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': (await response.json()).csrf };
-  assert.equal((await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, { Cookie: auth.Cookie })).status, 403);
-  assert.equal((await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, auth)).status, 201);
-  const temporary = await app.deployment.createServer({ name: '可删除服务器' });
-  const removePath = `/api/deploy/servers/${temporary.server.id}`;
-  assert.equal((await request(removePath, 'DELETE')).status, 401);
-  assert.equal((await request(removePath, 'DELETE', null, { Cookie: auth.Cookie })).status, 403);
-  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 409);
-  await app.deployment.revokeServer(temporary.server.id);
-  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 200);
-  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 404);
-  const f = { repository: app.service, deployment: app.deployment }; const first = await targetFixture(f); const other = await targetFixture(f); const task = await ready(f, first.target.id); await app.deployment.claim(first.agent.serverId);
-  const observer = await targetFixture(f);
-  assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, { Cookie: auth.Cookie })).status, 403);
-  assert.equal((await request(`/api/deploy/servers/${observer.agent.serverId}/mode`, 'PUT', { mode: 'managed' }, auth)).status, 404);
-  assert.equal(app.deployment.data.targets.find(item => item.id === observer.target.id).mode, 'managed');
-  const own = await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, { Authorization: `Bearer ${first.agent.token}` }); assert.equal(own.status, 200); assert.equal(await own.text(), '测试源码第一版');
-  assert.equal((await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, { Authorization: `Bearer ${other.agent.token}` })).status, 403);
-  assert.equal((await request('/api/deploy/overview', 'GET', null, { Authorization: `Bearer ${first.agent.token}` })).status, 401);
-  assert.equal((await request('/api/agent/v1/heartbeat', 'POST', { metrics: {} }, auth)).status, 401);
-});
+test('HTTP 管理接口沿用登录与 CSRF，Agent 来源文件严格隔离', async (t) => {
+  const root = await directory(t)
+  const app = await createApplication({
+    directory: root,
+    builder: builder(root),
+    secureCookies: false,
+  })
+  await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve))
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        app.server.close(resolve)
+        app.server.closeAllConnections()
+      }),
+  )
+  const base = `http://127.0.0.1:${app.server.address().port}`
+  const request = (route, method = 'GET', value, headers = {}) =>
+    fetch(base + route, {
+      method,
+      headers: { ...(value ? { 'Content-Type': 'application/json' } : {}), ...headers },
+      ...(value ? { body: JSON.stringify(value) } : {}),
+    })
+  assert.equal((await request('/api/deploy/overview')).status, 401)
+  const response = await request('/api/setup', 'POST', {
+    bootstrapToken: app.service.bootstrapToken,
+    username: 'admin',
+    password: 'isolated-admin-test',
+  })
+  const auth = {
+    Cookie: response.headers.get('set-cookie').split(';')[0],
+    'X-CSRF-Token': (await response.json()).csrf,
+  }
+  assert.equal(
+    (await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, { Cookie: auth.Cookie }))
+      .status,
+    403,
+  )
+  assert.equal(
+    (await request('/api/deploy/servers', 'POST', { name: '测试服务器' }, auth)).status,
+    201,
+  )
+  const temporary = await app.deployment.createServer({ name: '可删除服务器' })
+  const removePath = `/api/deploy/servers/${temporary.server.id}`
+  assert.equal((await request(removePath, 'DELETE')).status, 401)
+  assert.equal((await request(removePath, 'DELETE', null, { Cookie: auth.Cookie })).status, 403)
+  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 200)
+  assert.equal((await request(removePath, 'DELETE', null, auth)).status, 404)
+  const f = { repository: app.service, deployment: app.deployment }
+  const first = await targetFixture(f)
+  const other = await targetFixture(f)
+  const task = await ready(f, first.target.id)
+  await app.deployment.claim(first.agent.serverId)
+  const observer = await targetFixture(f)
+  assert.equal(
+    (
+      await request(
+        `/api/deploy/servers/${observer.agent.serverId}/mode`,
+        'PUT',
+        { mode: 'managed' },
+        { Cookie: auth.Cookie },
+      )
+    ).status,
+    403,
+  )
+  assert.equal(
+    (
+      await request(
+        `/api/deploy/servers/${observer.agent.serverId}/mode`,
+        'PUT',
+        { mode: 'managed' },
+        auth,
+      )
+    ).status,
+    404,
+  )
+  assert.equal(
+    app.deployment.data.targets.find((item) => item.id === observer.target.id).mode,
+    'managed',
+  )
+  const own = await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, {
+    Authorization: `Bearer ${first.agent.token}`,
+  })
+  assert.equal(own.status, 200)
+  assert.equal(await own.text(), '测试源码第一版')
+  assert.equal(
+    (
+      await request(`/api/agent/v1/tasks/${task.id}/source`, 'GET', null, {
+        Authorization: `Bearer ${other.agent.token}`,
+      })
+    ).status,
+    403,
+  )
+  assert.equal(
+    (
+      await request('/api/deploy/overview', 'GET', null, {
+        Authorization: `Bearer ${first.agent.token}`,
+      })
+    ).status,
+    401,
+  )
+  assert.equal(
+    (await request('/api/agent/v1/heartbeat', 'POST', { metrics: {} }, auth)).status,
+    401,
+  )
+})
 
 test('固定别名独立于历史配置，唯一且不可变，任务下发需要 Agent 支持', async t => {
   const f = await fixture(t), a = await targetFixture(f);
@@ -601,3 +692,34 @@ test('固定别名独立于历史配置，唯一且不可变，任务下发需�
   assert.deepEqual(rollback.networkIdentity, binding);
   assert.deepEqual(rollback.config, first.config);
 });
+
+test('删除期间允许已领取部署回传结果，收口后清理任务目录与原包', async (t) => {
+  const f = await fixture(t)
+  t.after(() => f.deployment.close())
+  const records = await targetFixture(f),
+    task = await ready(f, records.target.id)
+  const archive = f.deployment.archives.resolve(task.source)
+  await f.deployment.claim(records.agent.serverId)
+  await f.repository.store.change((state) => {
+    state.deployments.targets.find((value) => value.id === records.target.id).deleting = true
+  })
+  await assert.rejects(f.deployment.cleanupDeletedTasks([task.id]), /仍在执行/)
+  await assert.rejects(
+    f.deployment.createTask({ targetId: records.target.id, action: 'restart' }),
+    /正在删除/,
+  )
+  await f.deployment.events(records.agent.serverId, task.id, {
+    seq: 1,
+    stage: 'verifying',
+    status: 'succeeded',
+    result: { release: release(task) },
+  })
+  await f.deployment.cleanupDeletedTasks([task.id])
+  await assert.rejects(readdir(path.join(f.deployment.root, 'tasks', task.id)), { code: 'ENOENT' })
+  await f.repository.store.change((state) => {
+    state.deployments.tasks = []
+    state.deployments.releases = []
+  })
+  await assert.rejects(readFile(archive.file), { code: 'ENOENT' })
+  assert.equal(f.deployment.data.sourceArchives.length, 0)
+})

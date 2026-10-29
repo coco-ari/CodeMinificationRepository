@@ -26,8 +26,31 @@ function identifier(value: unknown): string {
   if (typeof value !== 'string' || !value || value.length > 160) fail(400, 'WORKSPACE_REQUEST_INVALID', '工作区请求缺少有效标识')
   return value
 }
-export async function handleWorkspaceAuthoringRequest({ access, principal, url, method, input, bytes, service: provided, store: supplied, updates, deployments, environmentMcp }: {
-  access: AutoOpsAccess; principal: AutoOpsPrincipal; url: URL; method: string; input?: unknown; bytes?: Uint8Array; service?: WorkspaceManagement; store?: WorkspaceStore; updates?: WorkspaceUpdates; deployments?: Pick<DeploymentStore, 'ensureProject' | 'overview'>; environmentMcp?: Pick<EnvironmentMcp, 'list'>
+export async function handleWorkspaceAuthoringRequest({
+  access,
+  principal,
+  url,
+  method,
+  input,
+  bytes,
+  service: provided,
+  store: supplied,
+  updates,
+  deployments,
+  environmentMcp,
+}: {
+  access: AutoOpsAccess
+  principal: AutoOpsPrincipal
+  url: URL
+  method: string
+  input?: unknown
+  bytes?: Uint8Array
+  service?: WorkspaceManagement
+  store?: WorkspaceStore
+  updates?: WorkspaceUpdates
+  deployments?: Pick<DeploymentStore, 'ensureProject' | 'overview'>
+  environmentMcp?: Pick<EnvironmentMcp, 'list'> &
+    Partial<Pick<EnvironmentMcp, 'removeCredentialConnections'>>
 }): Promise<WorkspaceAuthoringHttpResult> {
   const match = /^\/api\/v1\/projects\/([^/]+)\/workspace\/(.+)$/.exec(url.pathname)
   if (!match) fail(404, 'WORKSPACE_ROUTE_NOT_FOUND', '此资料操作不存在')
@@ -87,22 +110,96 @@ export async function handleWorkspaceAuthoringRequest({ access, principal, url, 
       }
       if (body.action === 'remove') {
         const sourceId = identifier(command.id)
-        const result = service.authoring.removeSource(projectId, sourceId, command as unknown as WorkspaceAuthoringMutation, actor)
-        store.releaseVersion(projectId, `current:${sourceId}`)
+        await service.cancelProjectWork(projectId)
+        const result = service.authoring.removeSource(
+          projectId,
+          sourceId,
+          command as unknown as WorkspaceAuthoringMutation,
+          actor,
+        )
+        await store.purgeRelated(projectId, result, sourceId)
         return ok(result)
       }
     }
     if (action === 'credentials') {
-      if (body.action === 'create') return ok(service.credentials.create(actor, projectId, command as unknown as CredentialCreate))
-      if (body.action === 'replace') return ok(service.credentials.replace(actor, projectId, identifier(command.id), command as unknown as CredentialReplace))
-      if (body.action === 'revoke') return ok(service.credentials.revoke(actor, projectId, identifier(command.id), command as unknown as CredentialRevoke))
+      if (body.action === 'create')
+        return ok(
+          service.credentials.create(actor, projectId, command as unknown as CredentialCreate),
+        )
+      if (body.action === 'replace')
+        return ok(
+          service.credentials.replace(
+            actor,
+            projectId,
+            identifier(command.id),
+            command as unknown as CredentialReplace,
+          ),
+        )
+      if (body.action === 'remove')
+        return ok(
+          service.credentials.remove(
+            actor,
+            projectId,
+            identifier(command.id),
+            command as unknown as CredentialRevoke,
+            () => {
+              service.authoring.unlinkCredential(projectId, identifier(command.id))
+              ;(environmentMcp?.removeCredentialConnections
+                ? environmentMcp
+                : configuredEnvironmentMcp(access)
+              ).removeCredentialConnections!(projectId, identifier(command.id))
+            },
+          ),
+        )
+      if (body.action === 'revoke')
+        return ok(
+          service.credentials.revoke(
+            actor,
+            projectId,
+            identifier(command.id),
+            command as unknown as CredentialRevoke,
+          ),
+        )
     }
     if (action === 'documents') {
-      if (body.action === 'directory') return ok(service.authoring.createDirectory(projectId, command as unknown as WorkspaceAuthoringMutation & { path: string }, actor))
-      if (body.action === 'save') return ok(service.authoring.saveText(projectId, command as unknown as WorkspaceTextSaveInput, actor))
-      if (body.action === 'move') return ok(service.authoring.move(projectId, command as unknown as WorkspaceMoveInput, actor))
-      if (body.action === 'delete') return ok(service.authoring.remove(projectId, command as unknown as WorkspaceDeleteInput, actor))
-      if (body.action === 'extract') return ok(await service.authoring.retryExtraction(projectId, command as unknown as WorkspaceExtractionRetryInput, actor))
+      if (body.action === 'directory')
+        return ok(
+          service.authoring.createDirectory(
+            projectId,
+            command as unknown as WorkspaceAuthoringMutation & { path: string },
+            actor,
+          ),
+        )
+      if (body.action === 'save')
+        return ok(
+          service.authoring.saveText(
+            projectId,
+            command as unknown as WorkspaceTextSaveInput,
+            actor,
+          ),
+        )
+      if (body.action === 'move')
+        return ok(
+          service.authoring.move(projectId, command as unknown as WorkspaceMoveInput, actor),
+        )
+      if (body.action === 'delete') {
+        await service.cancelProjectWork(projectId)
+        const result = service.authoring.remove(
+          projectId,
+          command as unknown as WorkspaceDeleteInput,
+          actor,
+        )
+        await store.purgeRelated(projectId, result)
+        return ok(result)
+      }
+      if (body.action === 'extract')
+        return ok(
+          await service.authoring.retryExtraction(
+            projectId,
+            command as unknown as WorkspaceExtractionRetryInput,
+            actor,
+          ),
+        )
     }
   }
   return fail(404, 'WORKSPACE_ROUTE_NOT_FOUND', '此资料操作不存在')

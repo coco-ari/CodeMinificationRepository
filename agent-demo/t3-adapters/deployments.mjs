@@ -199,6 +199,10 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
         if (remaining) projectInitializations.set(project.id,remaining); else projectInitializations.delete(project.id)
       }
     },
+    async purgeScope(projectId, environmentId) {
+      await store.initialize()
+      await deployment.purgeScope(projectId, environmentId)
+    },
     deletionReferences(projectId, environmentId) {
       const pending = projectInitializations.get(projectId) ?? 0
       return [...(pending ? [{kind:'deployment-initializing',count:pending,message:'部署目录正在初始化'}] : []),...deployment.projects.deletionReferences(projectId,environmentId)]
@@ -240,6 +244,9 @@ export function createDeploymentStore({dataDir, workspaceStore, workspaceManagem
         const id = await deployment.projects.createTarget(projectId, input)
         return {target:targetDto(projectId, id)}
       })
+    },
+    removeConfiguration(projectId, kind, id, input) {
+      return accept(() => deployment.projects.removeConfiguration(projectId, kind, id, input))
     },
     async saveService(projectId, input) {
       return accept(async () => ({service:pick(await deployment.projects.saveService(projectId, input), ['id', 'name', 'kind', 'module', 'configKey'])}))

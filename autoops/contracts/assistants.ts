@@ -97,7 +97,10 @@ export interface ProvidedAssistantReceipt {
   projectId: string
   /** 客户端核对原意图，不能把同 ID 的其他参数误认成当前请求成功。 */
   payload: unknown
-  result: AssistantPreset | ProvidedAssistantShare
+  result:
+    | AssistantPreset
+    | ProvidedAssistantShare
+    | { deleted: true; id: string; projectId: string; revision: number }
 }
 export interface ProjectProvidedAssistants {
   items: Array<

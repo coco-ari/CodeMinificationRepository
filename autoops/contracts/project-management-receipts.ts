@@ -61,14 +61,22 @@ export const ProjectAssistantAllocation = S.Struct({
   defaultAssistantId: AssignAssistantCommand.fields.defaultAssistantId,
   revision: Revision,
 })
+export const ProjectAssistantDeletion = S.Struct({
+  deleted: S.Literal(true),
+  id: DirectoryId,
+  projectId: DirectoryId,
+  revision: Revision,
+})
 export const ProjectAssistantRequestReceipt = S.Struct({
   ...ReceiptFields,
   operation: S.String.check(
     S.isPattern(
-      /^(?:preset\.save:[A-Za-z0-9][A-Za-z0-9_-]{0,127}|allocation\.save:(?:member|role):[A-Za-z0-9][A-Za-z0-9_-]{0,127})$/,
+      /^(?:preset\.(?:save|delete):[A-Za-z0-9][A-Za-z0-9_-]{0,127}|allocation\.save:(?:member|role):[A-Za-z0-9][A-Za-z0-9_-]{0,127})$/,
     ),
   ),
-  result: S.optionalKey(S.Union([ProjectAssistantPreset, ProjectAssistantAllocation])),
+  result: S.optionalKey(
+    S.Union([ProjectAssistantPreset, ProjectAssistantAllocation, ProjectAssistantDeletion]),
+  ),
 })
 export type ProjectAssistantRequestReceipt = typeof ProjectAssistantRequestReceipt.Type
 
@@ -109,7 +117,9 @@ export function repositoryReceiptIntent(
 
 /** 助手 owner 的原始命令已按键排序持久化，读取仅公开其摘要。 */
 export function projectAssistantReceiptIntent(operation: string, input: unknown): string {
-  const value = operation.startsWith('preset.save:')
+  const value = operation.startsWith('preset.delete:')
+    ? S.decodeUnknownSync(DirectoryCommand, { onExcessProperty: 'error' })(input)
+    : operation.startsWith('preset.save:')
     ? S.decodeUnknownSync(SaveAssistantCommand, { onExcessProperty: 'error' })(input)
     : S.decodeUnknownSync(AssignAssistantCommand, { onExcessProperty: 'error' })(input)
   return JSON.stringify(value, (_key, item) =>

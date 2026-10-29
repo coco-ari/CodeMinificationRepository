@@ -30,8 +30,13 @@ export function createWorkspaceManagement({ access, store, authoring, credential
   const preparations = new Map<string, { revision: number; work: Promise<WorkspaceTask>; controller: AbortController }>()
   const previews = new Set<ReturnType<typeof extractBusinessAttachment>>()
   const captureReleases = new Set<Promise<void>>()
-  const repositoryQueries = new Set<{ controller: AbortController; work: Promise<unknown> }>()
-  const permitRead = (projectId: string, actorId: string) => access.requireWorkspaceReader(actorId, projectId)
+  const repositoryQueries = new Set<{
+    projectId: string
+    controller: AbortController
+    work: Promise<unknown>
+  }>()
+  const permitRead = (projectId: string, actorId: string) =>
+    access.requireWorkspaceReader(actorId, projectId)
   const permitWrite = (projectId: string, actorId: string) => {
     if (!accepting) fail(503, 'WORKSPACE_STOPPING', '工作区正在停止接单，请稍后重试')
     return access.requireWorkspaceActor(actorId, projectId)
@@ -63,8 +68,13 @@ export function createWorkspaceManagement({ access, store, authoring, credential
       check()
       return result
     })
-    const query = { controller, work }; repositoryQueries.add(query)
-    try { return await work } finally { repositoryQueries.delete(query) }
+    const query = { projectId, controller, work }
+    repositoryQueries.add(query)
+    try {
+      return await work
+    } finally {
+      repositoryQueries.delete(query)
+    }
   }
   function repositoryRefs(projectId: string, sourceId: string, actorId: string) {
     return repositoryQuery(projectId, sourceId, actorId, (source, secret, signal, check) => git.repositoryRefs(source, secret, signal, check))
@@ -261,8 +271,24 @@ export function createWorkspaceManagement({ access, store, authoring, credential
     return work
   }
   return {
-    ...currentWorkspace, authoring, credentials, overview, currentFile, currentContent, receipt, generate, repositoryRefs, repositoryHistory,
-    validateSource(source: WorkspaceRepositorySource) { return git.validateRepositorySource(source) },
+    ...currentWorkspace,
+    authoring,
+    credentials,
+    overview,
+    currentFile,
+    currentContent,
+    receipt,
+    generate,
+    repositoryRefs,
+    repositoryHistory,
+    purgeRelated: (
+      project: string,
+      removal: { removedCaptures?: string[]; removedInputs?: string[] },
+      sourceId?: string,
+    ) => store.purgeRelated(project, removal, sourceId),
+    validateSource(source: WorkspaceRepositorySource) {
+      return git.validateRepositorySource(source)
+    },
     tree(projectId: string, directory: string, actorId: string) {
       const prefix = directory ? directory + '/' : ''
       const entries = currentEntries(projectId, actorId).filter(entry => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'))
@@ -272,6 +298,21 @@ export function createWorkspaceManagement({ access, store, authoring, credential
       if (query.length > 256 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) fail(400, 'WORKSPACE_SEARCH_INVALID', '搜索条件无效')
       const entries = currentEntries(projectId, actorId).filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
       return { entries: entries.slice(0, limit), truncated: entries.length > limit }
+    },
+    async cancelProjectWork(project: string) {
+      const pending: Array<{ controller: AbortController; work: Promise<unknown> }> = [
+        ...preparations.entries(),
+      ]
+        .filter(([key]) => JSON.parse(key)[0] === project)
+        .map(([, job]) => job)
+      pending.push(...[...repositoryQueries].filter((job) => job.projectId === project))
+      for (const job of pending) job.controller.abort()
+      await store.cancelProjectWork(project)
+      await Promise.allSettled([
+        currentWorkspace.cancelProjectWork(project),
+        ...pending.map((job) => job.work),
+      ])
+      await authoring.drainExtractions()
     },
     stopAccepting() { accepting = false; currentWorkspace.stopAccepting(); for (const preparation of preparations.values()) preparation.controller.abort(); for (const query of repositoryQueries) query.controller.abort() },
     close(): Promise<void> {

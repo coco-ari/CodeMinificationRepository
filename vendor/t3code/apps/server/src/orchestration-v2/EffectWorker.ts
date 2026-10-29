@@ -462,8 +462,21 @@ export const layerExecutor: Layer.Layer<
                       cause,
                     }),
                 ),
-              );
-          case "scheduled-tasks.cleanup":
+              )
+          case 'thread-data.cleanup':
+            return (
+              resourceCleanup.cleanupDeletedData?.(effect.threadId, effect.id) ?? Effect.void
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: effect.request.type,
+                    cause,
+                  }),
+              ),
+            )
+          case 'scheduled-tasks.cleanup':
             return resourceCleanup.cleanupScheduledTasks(effect.threadId).pipe(
               Effect.mapError(
                 (cause) =>

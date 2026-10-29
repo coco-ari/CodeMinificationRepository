@@ -1,8 +1,10 @@
-import { CommandId, ProjectId, ProviderInstanceId } from '@t3tools/contracts'
+import { CommandId, ThreadId, ProjectId, ProviderInstanceId } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as ProjectService from '../project/ProjectService.ts'
+import { purgeDeletedData } from '../orchestration-v2/DeletedDataCleanup.ts'
+import * as ThreadManagement from '../orchestration-v2/ThreadManagementService.ts'
 import type { ProjectDirectory } from '../../../../../../agent-demo/t3-adapters/project-directory/index.ts'
 import type { ProjectDeletionInspection } from '../../../../../../agent-demo/t3-adapters/project-deletion.ts'
 import type { DeletionBlocker } from '../../../../../../autoops/contracts/project-directory.ts'
@@ -148,7 +150,7 @@ export const deleteBusinessProject = Effect.fn('AutoOps.deleteBusinessProject')(
       .delete({
         projectId: nativeId,
         commandId: CommandId.make(`autoops:project:delete:${projectId}:${receipt.requestId}`),
-        force: false,
+        force: true,
       })
       .pipe(
         Effect.as(true),
@@ -178,6 +180,28 @@ export const deleteBusinessProject = Effect.fn('AutoOps.deleteBusinessProject')(
         message: '原生项目仍有会话，尚未删除；未删除任何会话',
       })
   }
+  if (!inspect.purge)
+    return yield* Effect.fail({
+      status: 503,
+      code: 'PROJECT_DELETE_PENDING',
+      message: '关联清理尚未装配，请继续原删除',
+    })
+  yield* purgeDeletedData({ projectId }).pipe(
+    Effect.mapError((cause) => ({
+      status: 503,
+      code: 'PROJECT_DELETE_PENDING',
+      message: cause.message,
+      cause,
+    })),
+  )
+  yield* Effect.tryPromise(() => inspect.purge!(projectId)).pipe(
+    Effect.mapError((cause) => ({
+      status: 503,
+      code: 'PROJECT_DELETE_PENDING',
+      message: '关联数据删除尚未完成，请继续原删除',
+      cause,
+    })),
+  )
   return yield* Effect.try(() =>
     directory.completeProjectDeletion(actorId, projectId, command),
   ).pipe(
@@ -189,6 +213,61 @@ export const deleteBusinessProject = Effect.fn('AutoOps.deleteBusinessProject')(
     })),
   )
 })
+
+export const deleteBusinessEnvironment = Effect.fn('AutoOps.deleteBusinessEnvironment')(
+  function* (input: {
+    actorId: string
+    projectId: string
+    environmentId: string
+    command: unknown
+    directory: ProjectDirectory
+    inspect: ProjectDeletionInspection
+  }) {
+    const { actorId, projectId, environmentId, command, directory, inspect } = input
+    if (!inspect.purge || !inspect.threads)
+      return yield* Effect.fail({
+        status: 503,
+        code: 'PROJECT_DELETE_PENDING',
+        message: '关联清理尚未装配',
+      })
+    const receipt = yield* Effect.try(() =>
+      directory.beginEnvironmentDeletion(actorId, projectId, environmentId, command),
+    )
+    if (receipt.state === 'deleted') return { deleted: true as const, projectId, environmentId }
+    const threads = yield* ThreadManagement.ThreadManagementService
+    const snapshot = yield* threads.getShellSnapshot()
+    const active = new Set(
+      [...snapshot.threads, ...snapshot.archivedThreads].map((value) => String(value.id)),
+    )
+    for (const id of inspect.threads(projectId, environmentId))
+      if (active.has(id)) {
+        yield* threads.dispatch({
+          type: 'thread.delete',
+          threadId: ThreadId.make(id),
+          commandId: CommandId.make(`autoops:environment:delete:${receipt.requestId}:${id}`),
+        })
+      }
+    yield* purgeDeletedData({ threadIds: inspect.threads(projectId, environmentId) }).pipe(
+      Effect.mapError((cause) => ({
+        status: 503,
+        code: 'PROJECT_DELETE_PENDING',
+        message: cause.message,
+        cause,
+      })),
+    )
+    yield* Effect.tryPromise(() => inspect.purge!(projectId, environmentId)).pipe(
+      Effect.mapError((cause) => ({
+        status: 503,
+        code: 'PROJECT_DELETE_PENDING',
+        message: '关联数据删除未完成，请继续原删除',
+        cause,
+      })),
+    )
+    return yield* Effect.try(() =>
+      directory.deleteEnvironment(actorId, projectId, environmentId, command, () => []),
+    )
+  },
+)
 
 /** 显式继续已受理的原删除；引用、身份和命令仍由原 owner 与原生服务裁决。 */
 export const resumeBusinessProjectDeletion = Effect.fn('AutoOps.resumeBusinessProjectDeletion')(
@@ -204,9 +283,19 @@ export const resumeBusinessProjectDeletion = Effect.fn('AutoOps.resumeBusinessPr
         input.actorId,
         input.requestId,
         input.intent,
-        (project) => [...input.inspect(project), ...projectSynchronizationReferences(project)],
+        (project, environment) => [
+          ...input.inspect(project, environment),
+          ...projectSynchronizationReferences(project),
+        ],
       ),
     )
+    if (accepted.environmentId)
+      return yield* deleteBusinessEnvironment({
+        ...input,
+        projectId: accepted.projectId,
+        environmentId: accepted.environmentId,
+        command: accepted.command,
+      })
     return yield* deleteBusinessProject({
       actorId: input.actorId,
       projectId: accepted.projectId,

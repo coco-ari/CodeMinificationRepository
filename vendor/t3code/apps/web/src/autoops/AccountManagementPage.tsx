@@ -38,6 +38,7 @@ import {
   submitAccountWrite,
   readPendingAccountWrite,
   recoverAccountWrite,
+  resumeAccountDeletion,
   accountResultRequiresLogin,
   returnToAccountLogin,
   type RuntimeAccount,
@@ -47,26 +48,28 @@ import {
 } from "./accounts";
 
 type Editor = {
-  operation: AccountWriteValue["operation"];
-  target: RuntimeAccount | null;
-  username: string;
-  name: string;
-  kind: "internal" | "external";
-  platformAdmin: boolean;
-  currentPassword: string;
-  newPassword: string;
-  confirmPassword: string;
-};
-const titleFor = (operation: Editor["operation"], target?: RuntimeAccount | null) =>
-  operation === "create"
-    ? "创建账号"
-    : operation === "changePassword"
-      ? "修改本人密码"
-      : operation === "resetPassword"
-        ? "重置账号密码"
-        : target?.enabled
-          ? "停用账号"
-          : "启用账号";
+  operation: AccountWriteValue['operation']
+  target: RuntimeAccount | null
+  username: string
+  name: string
+  kind: 'internal' | 'external'
+  platformAdmin: boolean
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
+}
+const titleFor = (operation: Editor['operation'], target?: RuntimeAccount | null) =>
+  operation === 'delete'
+    ? '删除账号'
+    : operation === 'create'
+      ? '创建账号'
+      : operation === 'changePassword'
+        ? '修改本人密码'
+        : operation === 'resetPassword'
+          ? '重置账号密码'
+          : target?.enabled
+            ? '停用账号'
+            : '启用账号'
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : "账号操作未完成，请重试。";
 
@@ -277,13 +280,18 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
       !fresh ||
       (editor.operation !== "changePassword" && !manage)
     )
-      return;
-    if (editor.operation !== "enable" && editor.newPassword !== editor.confirmPassword) {
-      setError("两次输入的新密码不一致。");
-      return;
+      return
+    if (
+      !['enable', 'delete'].includes(editor.operation) &&
+      editor.newPassword !== editor.confirmPassword
+    ) {
+      setError('两次输入的新密码不一致。')
+      return
     }
     const input: AccountWriteValue =
-      editor.operation === "create"
+      editor.operation === "delete"
+        ? { operation: "delete", expectedRevision: editor.target!.revision, value: {} }
+        : editor.operation === "create"
         ? {
             operation: "create",
             value: {
@@ -352,10 +360,12 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await recoverAccountWrite(pending);
-      if (!alive.current) return;
-      if (result) completed(result);
-      else setNotice("尚未找到原请求收据。请稍后核对；不要重新提交。");
+      const result = await (pending.operation === 'delete'
+        ? resumeAccountDeletion(pending)
+        : recoverAccountWrite(pending))
+      if (!alive.current) return
+      if (result) completed(result)
+      else setNotice('尚未找到原请求收据。请稍后核对；不要重新提交。')
     } catch (cause) {
       if (alive.current) setError(message(cause));
     } finally {
@@ -391,7 +401,7 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
             账号操作结果尚未确认。重新登录后仍可核对原结果。
             <div className="mt-2 flex flex-wrap gap-2">
               <Button size="sm" variant="outline" disabled={busy} onClick={() => void recover()}>
-                核对原结果
+                {pending.operation === 'delete' ? '继续删除' : '核对原结果'}
               </Button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={returnToAccountLogin}>
                 前往登录
@@ -482,6 +492,15 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
                       >
                         {item.enabled ? "停用" : "启用"}
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!editable}
+                        aria-label={`删除账号 ${item.username}`}
+                        onClick={(event) => open('delete', item, event.currentTarget)}
+                      >
+                        删除
+                      </Button>
                     </div>
                   }
                 />
@@ -527,11 +546,13 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
                 {editor ? titleFor(editor.operation, editor.target) : "账号操作"}
               </DialogTitle>
               <DialogDescription>
-                {editor?.operation === "create"
-                  ? "新账号的项目和环境权限需另行分配。"
-                  : editor?.operation === "enable"
-                    ? `${editor.target?.name}（${editor.target?.username}）${editor.target?.enabled ? "停用后将撤销登录会话。" : "将恢复登录能力。"}`
-                    : `${editor?.target?.name}（${editor?.target?.username}）修改后将退出该账号的全部登录会话。`}
+                {editor?.operation === 'delete'
+                  ? `将永久删除 ${editor.target?.name} 的账号、会话、成果、提供的助手、电脑接入记录及项目成员关系。项目和其他账号的独立资源不受影响。此操作无法撤销。`
+                  : editor?.operation === 'create'
+                    ? '新账号的项目和环境权限需另行分配。'
+                    : editor?.operation === 'enable'
+                      ? `${editor.target?.name}（${editor.target?.username}）${editor.target?.enabled ? '停用后将撤销登录会话。' : '将恢复登录能力。'}`
+                      : `${editor?.target?.name}（${editor?.target?.username}）修改后将退出该账号的全部登录会话。`}
               </DialogDescription>
             </DialogHeader>
             <DialogPanel>
@@ -616,7 +637,7 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
                       />
                     </div>
                   ) : null}
-                  {editor.operation !== "enable" ? (
+                  {!['enable', 'delete'].includes(editor.operation) ? (
                     <>
                       <div className="space-y-2">
                         <Label htmlFor="account-new-password">新密码</Label>
@@ -661,7 +682,13 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
               <Button type="button" variant="ghost" onClick={() => setEditor(null)}>
                 取消
               </Button>
-              <Button type="submit">{editor?.operation === "enable" ? "确认" : "保存"}</Button>
+              <Button type="submit">
+                {editor?.operation === 'delete'
+                  ? '确认删除'
+                  : editor?.operation === 'enable'
+                    ? '确认'
+                    : '保存'}
+              </Button>
             </DialogFooter>
           </form>
         </DialogPopup>

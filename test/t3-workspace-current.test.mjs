@@ -191,7 +191,11 @@ test('历史Git定位沿成功current来源，允许凭据分支与挂载更新�
   await f.syncCurrent()
   assert.throws(() => f.service.resolveInputFileReference(projectId, original.id, 'apps/web/README.md', 'reader'), { code: 'WORKSPACE_REFERENCE_SOURCE_CHANGED' })
   f.authoring.removeSource(projectId, source.id, f.mutation(), owner)
-  assert.throws(() => f.service.resolveInputFileReference(projectId, original.id, 'apps/web/README.md', 'reader'), { code: 'WORKSPACE_REFERENCE_SOURCE_REMOVED' })
+  assert.throws(
+    () =>
+      f.service.resolveInputFileReference(projectId, original.id, 'apps/web/README.md', 'reader'),
+    { code: 'WORKSPACE_INPUT_NOT_FOUND' },
+  )
 })
 
 test('上传历史文件按稳定id允许改名，删除重建不按同名替代，Git改名明确缺失', async t => {
@@ -717,9 +721,27 @@ test('待更新分支及同步失败保留真实旧当前来源，成功后才�
   f.authoring.removeSource(projectId, source.id, f.mutation(), owner)
   const removed = await f.service.captureAgentInput(projectId, {requestId: 'after-source-removal', workspaceType: 'internal'}, 'reader')
   assert.deepEqual(removed.repositories, [])
-  assert.match(f.service.readInputFile(projectId, original.id, 'apps/web/README.md', 'reader').bytes.toString(), /固定源码/u)
-  f.authoring.configureSource(projectId, {...f.mutation(), id: source.id, role: source.role, refKind: source.refKind, ref: source.ref, mountPath: source.mountPath}, owner)
-  const readded = await f.service.captureAgentInput(projectId, {requestId: 'explicitly-readded-source', workspaceType: 'internal'}, 'reader')
+  assert.throws(
+    () => f.service.readInputFile(projectId, original.id, 'apps/web/README.md', 'reader'),
+    { code: 'WORKSPACE_INPUT_NOT_FOUND' },
+  )
+  f.authoring.configureSource(
+    projectId,
+    {
+      ...f.mutation(),
+      id: source.id,
+      role: source.role,
+      refKind: source.refKind,
+      ref: source.ref,
+      mountPath: source.mountPath,
+    },
+    owner,
+  )
+  const readded = await f.service.captureAgentInput(
+    projectId,
+    { requestId: 'explicitly-readded-source', workspaceType: 'internal' },
+    'reader',
+  )
   assert.deepEqual(readded.repositories, [])
   assert.equal(readded.sourceErrors[0].code, 'WORKSPACE_SOURCE_UNSYNCED')
 })
@@ -1912,7 +1934,7 @@ test('跟踪分支新提交经显式更新后才影响下一轮，原轮和原�
   )
 })
 
-test('源码已写入而输入收据失败时任务保护仍有效，原请求恢复后显式释放才能清理', async (t) => {
+test('显式删除来源同时清理未完成输入、版本与保护记录，再次读取不会复活旧内容', async (t) => {
   const f = await fixture(t)
   const source = await f.source('frontend')
   const synced = await f.syncCurrent()
@@ -1935,24 +1957,20 @@ test('源码已写入而输入收据失败时任务保护仍有效，原请求�
     method: 'POST',
     input: { action: 'remove', input: { ...f.mutation(), id: source.id } },
   })
-  assert.deepEqual(f.service.planCleanupVersions(projectId, [task.versionId], owner).protected, [
-    task.versionId,
-  ])
+  assert.deepEqual(f.service.planCleanupVersions(projectId, [task.versionId], owner).protected, [])
+  assert.equal(
+    f.authoring.preparedInputByRequest(projectId, 'unknown-input', owner, 'internal'),
+    null,
+  )
+  assert.throws(() => f.store.getVersion(projectId, task.versionId))
   f.authoring.saveInput = save
   const recovered = await f.service.captureAgentInput(
     projectId,
     { requestId: 'unknown-input', workspaceType: 'internal' },
     owner,
   )
-  assert.equal(recovered.repositories[0].versionId, task.versionId)
+  assert.deepEqual(recovered.repositories, [])
   assert.equal(f.calls.fetch.length, 1)
-  f.service.releaseInput(projectId, recovered.id, owner)
-  assert.deepEqual(f.service.planCleanupVersions(projectId, [task.versionId], owner).removable, [
-    task.versionId,
-  ])
-  assert.deepEqual(f.service.cleanupVersions(projectId, [task.versionId], owner).removed, [
-    task.versionId,
-  ])
 })
 
 test('Git解析超时先持久失败再释放捕获，原请求保持超时错误且不重新联网', async (t) => {

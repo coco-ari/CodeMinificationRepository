@@ -191,6 +191,16 @@ function isDirectoryDeletion(pending: PendingProjectWrite) {
   return pending.method === 'DELETE' && requestScope(pending) !== null
 }
 function requestScope(pending: PendingProjectWrite) {
+  const memberRemoval = /^\/api\/v1\/projects\/([^/]+)\/members\/([^/]+)\/remove$/.exec(
+    pending.path,
+  )
+  if (memberRemoval)
+    return {
+      projectId: decodeURIComponent(memberRemoval[1]!),
+      environmentId: null,
+      operation: `member.delete:${decodeURIComponent(memberRemoval[2]!)}`,
+    }
+
   const match =
     /^\/api\/v1\/projects(?:\/([^/]+)(?:\/(settings|environments|members)(?:\/([^/]+))?)?)?$/.exec(
       pending.path,
@@ -252,9 +262,8 @@ function sameIntent(actual: unknown, expected: unknown): boolean {
   );
 }
 function configurationScope(pending: PendingProjectWrite) {
-  if (pending.method) return null
   const repository = /^\/api\/v1\/projects\/([^/]+)\/repositories(?:\/([^/]+)(\/remove)?)?$/.exec(pending.path)
-  if (repository) {
+  if (repository && !pending.method) {
     const projectId = decodeURIComponent(repository[1]!), repositoryId = repository[2] ? decodeURIComponent(repository[2]) : null
     if (repository[3] && !repositoryId) return null
     return { family: 'repository' as const, projectId, targetId: repositoryId, operation: repository[3] ? 'remove-repository' as const : 'save-repository' as const }
@@ -262,12 +271,18 @@ function configurationScope(pending: PendingProjectWrite) {
   const assistant = /^\/api\/v1\/projects\/([^/]+)\/(assistants(?:\/([^/]+))?|assistant-allocations)$/.exec(pending.path)
   if (!assistant) return null
   const projectId = decodeURIComponent(assistant[1]!), targetId = assistant[3] ? decodeURIComponent(assistant[3]) : null
+  if (pending.method && (!targetId || assistant[2] === 'assistant-allocations')) return null
   if (assistant[2] === 'assistant-allocations') {
     const target = pending.body.target
     if (!target || typeof target !== 'object' || !('kind' in target) || !('id' in target)) return null
     return { family: 'assistant' as const, projectId, targetId: null, operation: `allocation.save:${String(target.kind)}:${String(target.id)}` }
   }
-  return { family: 'assistant' as const, projectId, targetId, operation: `preset.save:${targetId ?? 'new'}` }
+  return {
+    family: 'assistant' as const,
+    projectId,
+    targetId,
+    operation: `preset.${pending.method === 'DELETE' ? 'delete' : 'save'}:${targetId ?? 'new'}`,
+  }
 }
 async function recoverConfigurationWrite(pending: PendingProjectWrite, signal?: AbortSignal): Promise<Record<string, unknown>> {
   let scope: ReturnType<typeof configurationScope>, digest: string
@@ -303,6 +318,13 @@ async function recoverConfigurationWrite(pending: PendingProjectWrite, signal?: 
       if (!repository || typeof repository !== 'object' || !('id' in repository) || (scope.targetId !== null && repository.id !== scope.targetId))
         throw uncertain('原仓库对象不一致。', 'PROJECT_RECEIPT_MISMATCH')
     }
+  } else if (scope.operation.startsWith('preset.delete:')) {
+    if (
+      result.deleted !== true ||
+      result.id !== scope.targetId ||
+      result.projectId !== scope.projectId
+    )
+      throw uncertain('原助手删除对象不一致。', 'PROJECT_RECEIPT_MISMATCH')
   } else if (scope.operation.startsWith('preset.save:')) {
     if (result.projectId !== scope.projectId || typeof result.id !== 'string' || (scope.targetId !== null && result.id !== scope.targetId))
       throw uncertain('原助手对象不一致。', 'PROJECT_RECEIPT_MISMATCH')
@@ -370,15 +392,22 @@ function recoveredDirectoryResult(
       ? !["current-verified", "unverified"].includes(receipt.nativeSynchronization)
       : receipt.nativeSynchronization !== "not-required"
   )
-    throw uncertain("原收据运行入口状态无法确认。", "PROJECT_RECEIPT_MISMATCH");
-  if (receipt.state !== "completed" && pending.method !== "DELETE")
-    throw uncertain("原收据状态与操作不一致。", "PROJECT_RECEIPT_MISMATCH");
-  if (receipt.canResume === true && (receipt.state !== 'pending' || scope.operation !== 'project.delete'))
-    throw uncertain('原收据恢复范围无法确认。', 'PROJECT_RECEIPT_MISMATCH');
-  if (receipt.state === "pending")
-    throw new PendingProjectDeletion(receipt.canResume === true, { projectId: receipt.projectId, revision: pending.body.expectedRevision });
-  if (receipt.state === "blocked") {
-    clear(pending);
+    throw uncertain('原收据运行入口状态无法确认。', 'PROJECT_RECEIPT_MISMATCH')
+  if (receipt.state !== 'completed' && pending.method !== 'DELETE')
+    throw uncertain('原收据状态与操作不一致。', 'PROJECT_RECEIPT_MISMATCH')
+  if (
+    receipt.canResume === true &&
+    (receipt.state !== 'pending' ||
+      !['project.delete', 'environment.delete'].includes(scope.operation))
+  )
+    throw uncertain('原收据恢复范围无法确认。', 'PROJECT_RECEIPT_MISMATCH')
+  if (receipt.state === 'pending')
+    throw new PendingProjectDeletion(receipt.canResume === true, {
+      projectId: receipt.projectId,
+      revision: pending.body.expectedRevision,
+    })
+  if (receipt.state === 'blocked') {
+    clear(pending)
     throw new AutoOpsRequestError(
       "原删除已确认未执行，请刷新引用后重新确认。",
       "PROJECT_DELETE_BLOCKED",
@@ -422,9 +451,14 @@ function recoveredDirectoryResult(
     scope.operation.startsWith("member.save:") &&
     result.userId !== (pending.body.value as { userId: string }).userId
   )
-    throw uncertain("原成员与当前请求不一致。", "PROJECT_RECEIPT_MISMATCH");
-  clear(pending);
-  return { ...result, nativeSynchronization: receipt.nativeSynchronization };
+    throw uncertain('原成员与当前请求不一致。', 'PROJECT_RECEIPT_MISMATCH')
+  if (
+    scope.operation.startsWith('member.delete:') &&
+    (result.deleted !== true || result.userId !== scope.operation.slice('member.delete:'.length))
+  )
+    throw uncertain('成员删除结果不一致。', 'PROJECT_RECEIPT_MISMATCH')
+  clear(pending)
+  return { ...result, nativeSynchronization: receipt.nativeSynchronization }
 }
 export async function resumeProjectDeletion(pending: PendingProjectWrite) {
   // 用户明确继续前再读原事实；未知、缺失或失权均不能授权恢复写入。
@@ -432,15 +466,29 @@ export async function resumeProjectDeletion(pending: PendingProjectWrite) {
   catch (cause) {
     if (!(cause instanceof PendingProjectDeletion) || !cause.canResume) throw cause;
   }
-  requireOriginal(pending);
-  const scope = requestScope(pending);
-  if (pending.method !== 'DELETE' || scope?.operation !== 'project.delete' || !scope.projectId)
-    throw uncertain('原删除范围无法确认。', 'PROJECT_RECEIPT_MISMATCH');
-  const { requestId: _requestId, ...publicIntent } = pending.body;
-  const raw = await autoOpsRequest<unknown>(`/api/v1/projects/receipts/${encodeURIComponent(pending.body.requestId)}/resume`, {
-    label: '继续删除', body: { operation: 'project.delete', projectId: scope.projectId, publicIntent },
-  });
-  return recoveredDirectoryResult(pending, scope, raw);
+  requireOriginal(pending)
+  const scope = requestScope(pending)
+  if (
+    pending.method !== 'DELETE' ||
+    !scope ||
+    !['project.delete', 'environment.delete'].includes(scope.operation) ||
+    !scope.projectId
+  )
+    throw uncertain('原删除范围无法确认。', 'PROJECT_RECEIPT_MISMATCH')
+  const { requestId: _requestId, ...publicIntent } = pending.body
+  const raw = await autoOpsRequest<unknown>(
+    `/api/v1/projects/receipts/${encodeURIComponent(pending.body.requestId)}/resume`,
+    {
+      label: '继续删除',
+      body: {
+        operation: scope.operation,
+        projectId: scope.projectId,
+        ...(scope.environmentId ? { environmentId: scope.environmentId } : {}),
+        publicIntent,
+      },
+    },
+  )
+  return recoveredDirectoryResult(pending, scope, raw)
 }
 export async function submitProjectWrite(pending: PendingProjectWrite) {
   const key = requireOriginal(pending);

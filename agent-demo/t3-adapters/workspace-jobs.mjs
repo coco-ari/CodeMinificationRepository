@@ -15,9 +15,16 @@ export function createWorkspaceJobs({ maxConcurrent = 2, maxQueued = 8, onFailur
     while (running < maxConcurrent && queue.length) {
       const job = queue.shift()
       running++
-      void Promise.resolve().then(() => job.run(job.controller.signal)).catch(() => report(job.id)).finally(() => {
-        running--; jobs.delete(job.id); drain(); notifyIdle()
-      })
+      void Promise.resolve()
+        .then(() => job.run(job.controller.signal))
+        .catch(() => report(job.id))
+        .finally(() => {
+          running--
+          jobs.delete(job.id)
+          job.finished()
+          drain()
+          notifyIdle()
+        })
     }
   }
   function assertCapacity() {
@@ -31,7 +38,11 @@ export function createWorkspaceJobs({ maxConcurrent = 2, maxQueued = 8, onFailur
     stopAccepting() { closed = true },
     submit(id, run) {
       assertCapacity()
-      const job = { id, run, controller: new AbortController() }
+      let finished
+      const done = new Promise((resolve) => {
+        finished = resolve
+      })
+      const job = { id, run, controller: new AbortController(), done, finished }
       jobs.set(id, job); queue.push(job); drain()
     },
     cancel(id) {
@@ -39,8 +50,18 @@ export function createWorkspaceJobs({ maxConcurrent = 2, maxQueued = 8, onFailur
       if (!job) return false
       job.controller.abort()
       const queued = queue.indexOf(job)
-      if (queued >= 0) { queue.splice(queued, 1); jobs.delete(id); notifyIdle() }
+      if (queued >= 0) {
+        queue.splice(queued, 1)
+        jobs.delete(id)
+        job.finished()
+        notifyIdle()
+      }
       return true
+    },
+    async cancelAndWait(ids) {
+      const selected = ids.map((id) => jobs.get(id)).filter(Boolean)
+      for (const job of selected) this.cancel(job.id)
+      await Promise.all(selected.map((job) => job.done))
     },
     whenIdle,
     async close({ force = false } = {}) { closed = true; if (force) for (const job of jobs.values()) job.controller.abort(); await whenIdle() },

@@ -360,7 +360,7 @@ const layerProjectDeletionTest = Layer.mergeAll(
   Layer.provideMerge(layerResourceCleanupTest),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provide(McpProviderSessions.layer),
-  Layer.provide(SqlitePersistence.layerMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provide(layerCheckpointStoreTest),
   Layer.provide(layerServerConfig),
   Layer.provide(ServerSettings.layerTest()),
@@ -464,6 +464,11 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
           });
         }
         yield* worker.drain();
+        const sql = yield* SqlClient.SqlClient;
+        // 原生清理队列完成后正文、投影和事件均物理移除。
+        assert.lengthOf(yield* sql`SELECT 1 FROM orchestration_v2_projection_threads WHERE thread_id=${threadId}`, 0);
+        assert.lengthOf(yield* sql`SELECT 1 FROM orchestration_v2_events WHERE thread_id=${threadId}`, 0);
+        assert.lengthOf(yield* sql`SELECT 1 FROM orchestration_events WHERE aggregate_kind='thread' AND stream_id=${threadId}`, 0);
         const remainingIds = (yield* tasks.list()).tasks.map((task) => task.id);
         assert.notInclude(remainingIds, bound.id);
         assert.notInclude(remainingIds, webhook.id);

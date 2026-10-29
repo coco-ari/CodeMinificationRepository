@@ -118,23 +118,47 @@ export interface AutoOpsAccess {
   inputResourceCandidates(threadId:string):Array<{projectId:string;inputId:string;inputOwnerId:string}>;
   withInputResourceSnapshot(snapshot:InputResourceSnapshot,operation:()=>boolean):boolean;
   /** 子任务仍继承原父轮时保留环境输入，不能凭父轮终态推断子任务已结束。 */
-  nativeSubagentRunReferenced(threadId: string, runId: string): boolean;
-  workspaceVersionReferences(projectId: string): string[];
-  retainInputReference(threadId: string, inputId: string, actorId: string, callerId?:string,claim?:InputReferenceClaim): void;
-  inputReferences(threadId: string): Array<{inputId:string;actorId:string}>;
-  requireRunInput(threadId: string, inputId: string, runId?: string): ThreadInputBinding;
-  nativeSubagentParent(threadId: string): string | undefined;
-  canSeeThread(principal: AutoOpsPrincipal, threadId: string, includeDeleted?: boolean): boolean;
-  visibleThreadIds(principal: AutoOpsPrincipal): string[];
-  requireThread(principal: AutoOpsPrincipal, threadId: string): ThreadBinding;
-  markThreadDeleted(threadId: string): void;
-  bindThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding;
-  reserveThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding;
-  updateThreadVisibility(principal: AutoOpsPrincipal, threadId: string, input: import('../../autoops/contracts/assistants.ts').ThreadVisibilityRequest): ThreadBinding;
-  subscribeVisibilityChanges(listener: () => void): () => void;
-  beginThreadSubmission(principal: AutoOpsPrincipal, threadId: string, commandId: string): ThreadBinding;
-  finishThreadSubmission(threadId: string, commandId: string, accepted: boolean): ThreadBinding | undefined;
-  markThreadAccepted(threadId: string): ThreadBinding | undefined;
+  nativeSubagentRunReferenced(threadId: string, runId: string): boolean
+  workspaceVersionReferences(projectId: string): string[]
+  retainInputReference(
+    threadId: string,
+    inputId: string,
+    actorId: string,
+    callerId?: string,
+    claim?: InputReferenceClaim,
+  ): void
+  inputReferences(threadId: string): Array<{ inputId: string; actorId: string }>
+  requireRunInput(threadId: string, inputId: string, runId?: string): ThreadInputBinding
+  nativeSubagentParent(threadId: string): string | undefined
+  canSeeThread(principal: AutoOpsPrincipal, threadId: string, includeDeleted?: boolean): boolean
+  visibleThreadIds(principal: AutoOpsPrincipal): string[]
+  requireThread(principal: AutoOpsPrincipal, threadId: string): ThreadBinding
+  ownerThreads(ownerId: string): Array<{ id: string; nativeId: string; projectId: string }>
+  ownedInputIdsForDeletion(threadId: string): string[]
+  purgeThread(threadId: string): void
+  purgeUser(ownerId: string): void
+  scopeThreads(projectId: string, environmentId?: string): Array<{ id: string; nativeId: string }>
+  purgeScope(projectId: string, environmentId?: string): void
+  markThreadDeleted(threadId: string): void
+  bindThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding
+  reserveThread(principal: AutoOpsPrincipal, input: ThreadBindingInput): ThreadBinding
+  updateThreadVisibility(
+    principal: AutoOpsPrincipal,
+    threadId: string,
+    input: import('../../autoops/contracts/assistants.ts').ThreadVisibilityRequest,
+  ): ThreadBinding
+  subscribeVisibilityChanges(listener: () => void): () => void
+  beginThreadSubmission(
+    principal: AutoOpsPrincipal,
+    threadId: string,
+    commandId: string,
+  ): ThreadBinding
+  finishThreadSubmission(
+    threadId: string,
+    commandId: string,
+    accepted: boolean,
+  ): ThreadBinding | undefined
+  markThreadAccepted(threadId: string): ThreadBinding | undefined
   /** Invoke only after native execution is known to have ended or been lost. */
   reconcileThreadSubmission(threadId: string, accepted: boolean): ThreadBinding | undefined;
   requireCustomerAttachment(ownerId:string, threadId:string, attachmentId:string): {id:string;name?:string;mimeType?:string;sizeBytes?:number};

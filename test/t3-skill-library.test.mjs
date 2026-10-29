@@ -103,19 +103,31 @@ test('更新生成不可变版本，分配固定旧版本，更新分配后切�
   assert.equal(unchanged.versions.length,2)
 })
 
-test('停用拦截新使用、重新启用恢复，移除有引用保护且保留历史版本',t=>{
-  const f=fixture(t,[]),skill=add(f.library)
-  assign(f.library,skill)
-  f.library.setEnabled({revision:f.library.catalog().revision,skillId:skill.id,enabled:false})
-  assert.deepEqual(resolveSkillLibrary(f.data,f.scope),[])
-  assert.match(readSkillLibraryVersion(f.data,skill.id,skill.latestVersionId).instructions,/阅读资料/)
-  f.library.setEnabled({revision:f.library.catalog().revision,skillId:skill.id,enabled:true})
-  assert.equal(resolveSkillLibrary(f.data,f.scope).length,1)
-  assert.throws(()=>f.library.remove({revision:f.library.catalog().revision,skillId:skill.id}),e=>e.code==='SKILL_STILL_ASSIGNED')
-  f.library.unassign({revision:f.library.catalog().revision,assignmentId:f.library.catalog().assignments[0].id})
-  f.library.remove({revision:f.library.catalog().revision,skillId:skill.id})
-  assert.equal(f.library.catalog().skills.length,0)
-  assert.ok(readSkillLibraryVersion(f.data,skill.id,skill.latestVersionId))
+test('停用可恢复，删除同时清理分配和所有版本文件', (t) => {
+  const f = fixture(t, []),
+    skill = add(f.library)
+  assign(f.library, skill)
+  f.library.setEnabled({
+    revision: f.library.catalog().revision,
+    skillId: skill.id,
+    enabled: false,
+  })
+  assert.deepEqual(resolveSkillLibrary(f.data, f.scope), [])
+  assert.match(
+    readSkillLibraryVersion(f.data, skill.id, skill.latestVersionId).instructions,
+    /阅读资料/,
+  )
+  f.library.setEnabled({ revision: f.library.catalog().revision, skillId: skill.id, enabled: true })
+  assert.equal(resolveSkillLibrary(f.data, f.scope).length, 1)
+  const packagePath = readSkillLibraryVersion(f.data, skill.id, skill.latestVersionId).packageRoot
+  f.library.remove({ revision: f.library.catalog().revision, skillId: skill.id })
+  assert.equal(f.library.catalog().skills.length, 0)
+  assert.equal(f.library.catalog().assignments.length, 0)
+  assert.equal(readSkillLibrary(f.data).skills.length, 0)
+  assert.equal(existsSync(packagePath), false)
+  assert.throws(() => readSkillLibraryVersion(f.data, skill.id, skill.latestVersionId), {
+    code: 'SKILL_NOT_FOUND',
+  })
 })
 
 test('过期 revision、重复名字与畸形包均不覆盖索引或版本',t=>{

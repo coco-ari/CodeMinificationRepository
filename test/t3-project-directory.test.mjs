@@ -226,3 +226,27 @@ test('损坏或注入的原参数/结果拒绝恢复，不返回秘密或以空�
     assert.equal(f.directory.receipt('admin', command.requestId), null)
   } finally { db.close() }
 })
+
+test('移除成员清理环境授权并调用助手关系清理，重复请求不再执行清理', (t) => {
+  const f = fixture(t),
+    member = f.directory
+      .settings('creator', 'existing')
+      .members.find((value) => value.userId === 'member')
+  let cleaned = 0
+  const input = { requestId: 'remove-member-case', expectedRevision: member.revision }
+  const result = f.directory.removeMember('creator', 'existing', 'member', input, () => {
+    cleaned++
+  })
+  assert.equal(result.deleted, true)
+  assert(
+    !f.directory.settings('creator', 'existing').members.some((value) => value.userId === 'member'),
+  )
+  assert.throws(() => f.access.requireProjectActionForActor('member', 'existing', 'chat.use'))
+  assert.deepEqual(
+    f.directory.removeMember('creator', 'existing', 'member', input, () => {
+      cleaned++
+    }),
+    result,
+  )
+  assert.equal(cleaned, 1)
+})

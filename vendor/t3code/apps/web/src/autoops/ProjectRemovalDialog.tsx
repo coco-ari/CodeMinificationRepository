@@ -127,34 +127,103 @@ export function ProjectRemovalDialog({ target, finalFocus, initialCanResume = fa
       if (alive.current) setBusy(false)
     }
   }
-  const close = () => confirmed ? onRemoved() : onClose()
-  return <Dialog open onOpenChange={(value) => { if (!value && !busy && !pending) close() }}>
-    <DialogPopup finalFocus={finalFocus} showCloseButton={!busy && !pending}>
-      <DialogHeader><DialogTitle>{target.environmentId ? '删除环境' : '删除项目'}</DialogTitle></DialogHeader>
-      <DialogPanel>
-        <p className="break-words text-sm">删除“{target.name}”？</p>
-        {loading ? <p role="status" className="flex items-center gap-2 text-sm"><Spinner size="sm" />检查引用…</p> : null}
-        {preview?.blockers.length ? <SettingsSection title="请先处理下列引用">
-          {preview.blockers.map((blocker) => <SettingsRow key={blocker.kind} title={blocker.message} control={<span>{blocker.count}</span>} />)}
-          {preview.truncated ? <SettingsRow title="还有其他引用，请处理后刷新核对" /> : null}
-        </SettingsSection> : null}
-        {changed ? <p role="alert" className="text-sm">配置已更新，请取消并刷新后重新确认。</p> : null}
-        {error ? <p role="alert" className="break-words text-sm">{error}</p> : null}
-        {pending ? <p role="status" className="text-sm">{canResume ? '原删除尚未完成，请继续原删除。' : '删除结果尚待确认，请核对原请求。'}</p> : null}
-        {!loading && !pending && !confirmed ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAttempt((value) => value + 1)}>刷新引用</Button> : null}
-        {confirmed ? <Button variant="outline" disabled={busy} onClick={() => {
-          setBusy(true)
-          void refreshProjectHost().then(() => { if (alive.current) callbacks.current.onRemoved() })
-            .catch((cause: unknown) => { if (alive.current) setError(cause instanceof Error ? cause.message : '目录刷新未完成') })
-            .finally(() => { if (alive.current) setBusy(false) })
-        }}>重试刷新目录</Button> : null}
-      </DialogPanel>
-      <DialogFooter>
-        <Button variant="outline" disabled={busy || !!pending} onClick={close}>{confirmed ? '关闭' : '取消'}</Button>
-        <Button variant="destructive" disabled={busy || confirmed || (!pending && !canRemove)} onClick={() => void remove()}>
-          {busy ? <Spinner size="sm" /> : null}{pending ? (canResume ? '继续删除' : '核对原请求') : '确认删除'}
-        </Button>
-      </DialogFooter>
-    </DialogPopup>
-  </Dialog>
+  const close = () => (confirmed ? onRemoved() : onClose())
+  return (
+    <Dialog
+      open
+      onOpenChange={(value) => {
+        if (!value && !busy && !pending) close()
+      }}
+    >
+      <DialogPopup finalFocus={finalFocus} showCloseButton={!busy && !pending}>
+        <DialogHeader>
+          <DialogTitle>{target.environmentId ? '删除环境' : '删除项目'}</DialogTitle>
+        </DialogHeader>
+        <DialogPanel>
+          <p className="break-words text-sm">
+            永久删除“{target.name}
+            ”及其会话、资料、助手配置、连接、部署记录和从属数据？此操作无法恢复。
+          </p>
+          {loading ? (
+            <p role="status" className="flex items-center gap-2 text-sm">
+              <Spinner size="sm" />
+              读取删除范围…
+            </p>
+          ) : null}
+          {preview?.blockers.length ? (
+            <SettingsSection title="将一并清理">
+              {preview.blockers.map((blocker) => (
+                <SettingsRow
+                  key={blocker.kind}
+                  title={blocker.message}
+                  control={<span>{blocker.count}</span>}
+                />
+              ))}
+              {preview.truncated ? <SettingsRow title="还包含其他从属记录" /> : null}
+            </SettingsSection>
+          ) : null}
+          {changed ? (
+            <p role="alert" className="text-sm">
+              配置已更新，请取消并刷新后重新确认。
+            </p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="break-words text-sm">
+              {error}
+            </p>
+          ) : null}
+          {pending ? (
+            <p role="status" className="text-sm">
+              {canResume ? '原删除尚未完成，请继续原删除。' : '删除结果尚待确认，请核对原请求。'}
+            </p>
+          ) : null}
+          {!loading && !pending && !confirmed ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              刷新范围
+            </Button>
+          ) : null}
+          {confirmed ? (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true)
+                void refreshProjectHost()
+                  .then(() => {
+                    if (alive.current) callbacks.current.onRemoved()
+                  })
+                  .catch((cause: unknown) => {
+                    if (alive.current)
+                      setError(cause instanceof Error ? cause.message : '目录刷新未完成')
+                  })
+                  .finally(() => {
+                    if (alive.current) setBusy(false)
+                  })
+              }}
+            >
+              重试刷新目录
+            </Button>
+          ) : null}
+        </DialogPanel>
+        <DialogFooter>
+          <Button variant="outline" disabled={busy || !!pending} onClick={close}>
+            {confirmed ? '关闭' : '取消'}
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={busy || confirmed || (!pending && !canRemove)}
+            onClick={() => void remove()}
+          >
+            {busy ? <Spinner size="sm" /> : null}
+            {pending ? (canResume ? '继续删除' : '核对原请求') : '确认删除'}
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  )
 }

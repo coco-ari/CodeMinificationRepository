@@ -364,19 +364,87 @@ export function createSkillLibrary(dataDirectory) {
         return importPrepared(input, scanDirectory(source), { type: 'git', url, commit, subdirectory })
       } finally { rmSync(staging, { recursive: true, force: true }) }
     },
-    setEnabled(input) { return mutate(input, state => { const skill = state.skills.find(entry => entry.id === input.skillId && !entry.deletedAt); if (!skill) missing(); if (typeof input.enabled !== 'boolean') fail(400, 'SKILL_INPUT_INVALID', '启用状态无效'); skill.enabled = input.enabled }) },
-    assign(input) { return mutate(input, state => {
-      const { skill, version } = getVersion(state, input.skillId, input.versionId)
-      if (skill.deletedAt) missing()
-      if (version.readiness !== 'ready') fail(409, 'SKILL_NOT_READY', '此版本运行条件尚未就绪，当前不能分配或调用')
-      if (!['global', 'project', 'assistant'].includes(input.targetType) || typeof input.targetId !== 'string' || !input.targetId || input.targetId.length > 120 || (input.targetType === 'global' && input.targetId !== GLOBAL_SKILL_TARGET) || (input.targetType === 'assistant' && (typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 120)) || (input.enabled !== undefined && typeof input.enabled !== 'boolean')) fail(400, 'SKILL_ASSIGNMENT_INVALID', '请选择有效的启用范围与版本')
-      const projectId = input.targetType === 'assistant' ? input.projectId : undefined
-      const previous = state.assignments.find(entry => entry.skillId === input.skillId && entry.targetType === input.targetType && entry.targetId === input.targetId && entry.projectId === projectId)
-      const value = { id: previous?.id || randomUUID(), skillId: input.skillId, versionId: input.versionId, targetType: input.targetType, targetId: input.targetId, ...(projectId ? { projectId } : {}), enabled: input.enabled !== false, createdAt: previous?.createdAt || now(), updatedAt: now() }
-      if (previous) Object.assign(previous, value); else state.assignments.push(value)
-    }) },
-    unassign(input) { return mutate(input, state => { const assignment = state.assignments.find(entry => entry.id === input.assignmentId); if (!assignment) missing(); state.assignments = state.assignments.filter(entry => entry.id !== input.assignmentId) }) },
-    remove(input) { return mutate(input, state => { const skill = state.skills.find(entry => entry.id === input.skillId && !entry.deletedAt); if (!skill) missing(); if (state.assignments.some(entry => entry.skillId === input.skillId)) fail(409, 'SKILL_STILL_ASSIGNED', '请先移除所有范围分配，再从技能仓库移除'); skill.enabled = false; skill.deletedAt = now() }) },
+    setEnabled(input) {
+      return mutate(input, (state) => {
+        const skill = state.skills.find((entry) => entry.id === input.skillId && !entry.deletedAt)
+        if (!skill) missing()
+        if (typeof input.enabled !== 'boolean') fail(400, 'SKILL_INPUT_INVALID', '启用状态无效')
+        skill.enabled = input.enabled
+      })
+    },
+    assign(input) {
+      return mutate(input, (state) => {
+        const { skill, version } = getVersion(state, input.skillId, input.versionId)
+        if (skill.deletedAt) missing()
+        if (version.readiness !== 'ready')
+          fail(409, 'SKILL_NOT_READY', '此版本运行条件尚未就绪，当前不能分配或调用')
+        if (
+          !['global', 'project', 'assistant'].includes(input.targetType) ||
+          typeof input.targetId !== 'string' ||
+          !input.targetId ||
+          input.targetId.length > 120 ||
+          (input.targetType === 'global' && input.targetId !== GLOBAL_SKILL_TARGET) ||
+          (input.targetType === 'assistant' &&
+            (typeof input.projectId !== 'string' ||
+              !input.projectId ||
+              input.projectId.length > 120)) ||
+          (input.enabled !== undefined && typeof input.enabled !== 'boolean')
+        )
+          fail(400, 'SKILL_ASSIGNMENT_INVALID', '请选择有效的启用范围与版本')
+        const projectId = input.targetType === 'assistant' ? input.projectId : undefined
+        const previous = state.assignments.find(
+          (entry) =>
+            entry.skillId === input.skillId &&
+            entry.targetType === input.targetType &&
+            entry.targetId === input.targetId &&
+            entry.projectId === projectId,
+        )
+        const value = {
+          id: previous?.id || randomUUID(),
+          skillId: input.skillId,
+          versionId: input.versionId,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          ...(projectId ? { projectId } : {}),
+          enabled: input.enabled !== false,
+          createdAt: previous?.createdAt || now(),
+          updatedAt: now(),
+        }
+        if (previous) Object.assign(previous, value)
+        else state.assignments.push(value)
+      })
+    },
+    unassign(input) {
+      return mutate(input, (state) => {
+        const assignment = state.assignments.find((entry) => entry.id === input.assignmentId)
+        if (!assignment) missing()
+        state.assignments = state.assignments.filter((entry) => entry.id !== input.assignmentId)
+      })
+    },
+    remove(input) {
+      return mutate(input, (state) => {
+        const id = safeId(input.skillId)
+        if (!state.skills.some((entry) => entry.id === id)) missing()
+        // 文件清理失败时保留目录记录，原删除可以重试，不能只隐藏记录后冒称删除成功。
+        rmSync(join(root, 'versions', id), { recursive: true, force: true })
+        state.assignments = state.assignments.filter((entry) => entry.skillId !== id)
+        state.skills = state.skills.filter((entry) => entry.id !== id)
+      })
+    },
+    removeAssignments(scope) {
+      return withLock(root, () => {
+        const state = loadState(root)
+        state.assignments = state.assignments.filter((entry) =>
+          scope.assistantId
+            ? !(entry.targetType === 'assistant' && entry.targetId === scope.assistantId)
+            : !(
+                (entry.targetType === 'project' && entry.targetId === scope.projectId) ||
+                entry.projectId === scope.projectId
+              ),
+        )
+        atom(join(root, 'index.json'), state)
+      })
+    },
     verify(input) { return mutate(input, state => {
       const { skill, version } = getVersion(state, input.skillId, input.versionId)
       const actual = prepareFiles(scanDirectory(join(root, 'versions', skill.id, version.id)))

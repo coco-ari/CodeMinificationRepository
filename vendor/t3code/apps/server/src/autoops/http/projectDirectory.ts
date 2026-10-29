@@ -1,3 +1,4 @@
+import { configuredAutoOpsAssistantDirectory } from '../../../../../../../agent-demo/t3-adapters/access.mjs'
 import * as ByteSize from 'effect/ByteSize'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -9,6 +10,7 @@ import { configuredAutoOpsProjectDirectory } from '../../../../../../../agent-de
 import {
   synchronizeProject,
   deleteBusinessProject,
+  deleteBusinessEnvironment,
   projectSynchronizationReferences,
   inspectProjectSynchronization,
   resumeBusinessProjectDeletion,
@@ -21,7 +23,7 @@ export function projectDirectoryRoutes(
   { access, principal }: BusinessHttpContext,
   inspection?: ProjectDeletionInspection,
 ) {
-  const inspect = (project: string, environment?: string) => {
+  const inspect: ProjectDeletionInspection = (project: string, environment?: string) => {
     if (!inspection)
       throw Object.assign(new Error('引用检查尚未完整装配，尚未删除'), {
         status: 503,
@@ -29,6 +31,8 @@ export function projectDirectoryRoutes(
       })
     return inspection(project, environment)
   }
+  inspect.purge = inspection?.purge
+  inspect.threads = inspection?.threads
   const handle = (
     operation:
       | 'list'
@@ -38,6 +42,7 @@ export function projectDirectoryRoutes(
       | 'create'
       | 'save'
       | 'environment'
+      | 'member-delete'
       | 'member'
       | 'delete-project'
       | 'delete-environment'
@@ -65,7 +70,7 @@ export function projectDirectoryRoutes(
             access.requireProjectAction(
               current,
               project,
-              operation === 'member' ? 'project.members.manage' : 'project.manage',
+              operation.startsWith('member') ? 'project.members.manage' : 'project.manage',
             )
         })
       if (operation === 'list')
@@ -189,17 +194,32 @@ export function projectDirectoryRoutes(
       if (operation === 'delete-environment') {
         const environment = decodeURIComponent(parts[6] ?? '')
         return HttpServerResponse.jsonUnsafe(
-          yield* Effect.try(() =>
-            directory.deleteEnvironment(current.id, project, environment, input, () =>
-              inspect(project, environment),
-            ),
-          ),
+          yield* deleteBusinessEnvironment({
+            actorId: current.id,
+            projectId: project,
+            environmentId: environment,
+            command: input,
+            directory,
+            inspect,
+          }),
           { headers: { 'cache-control': 'private, no-store' } },
         )
       }
       const value = yield* Effect.try(() => {
         if (operation === 'create') return directory.create(current.id, input)
         if (operation === 'save') return directory.saveProject(current.id, project, input)
+        if (operation === 'member-delete')
+          return directory.removeMember(
+            current.id,
+            project,
+            decodeURIComponent(parts[6] ?? ''),
+            input,
+            () =>
+              configuredAutoOpsAssistantDirectory().purgeMember(
+                project,
+                decodeURIComponent(parts[6] ?? ''),
+              ),
+          )
         if (operation === 'member') return directory.saveMember(current.id, project, input)
         return directory.saveEnvironment(
           current.id,
@@ -239,6 +259,7 @@ export function projectDirectoryRoutes(
     HttpRouter.add('POST', `${base}/:projectId/settings`, handle('save')),
     HttpRouter.add('POST', `${base}/:projectId/environments`, handle('environment')),
     HttpRouter.add('POST', `${base}/:projectId/environments/:environmentId`, handle('environment')),
+    HttpRouter.add('POST', `${base}/:projectId/members/:userId/remove`, handle('member-delete')),
     HttpRouter.add('POST', `${base}/:projectId/members`, handle('member')),
     HttpRouter.add('GET', `${base}/:projectId/deletion-preview`, handle('preview-project')),
     HttpRouter.add(

@@ -135,3 +135,37 @@ test('feature rollback retains metadata and recovery credentials but blocks fres
   assert.throws(()=>registry.createPairing('owner'),{code:'CUSTOMER_AGENTS_DISABLED'})
   assert.throws(()=>registry.registerWorkspace(entry.principal,{registeredWorkspaceId:'new',projectId:'project',label:'x',workspaceBindingRevision:1,runtimeId:'codex'}),{code:'CUSTOMER_AGENTS_DISABLED'})
 })
+
+test('删除登记目录和电脑清除关联能力，拒绝跨所有者并保留其他电脑', (t) => {
+  const { db, registry, register } = fixture(t),
+    first = register(),
+    second = register()
+  assert.throws(() => registry.removeDevice('other', first.device.id))
+  assert.throws(() => registry.removeWorkspace('other', first.device.id, 'workspace-1'))
+  registry.removeWorkspace('owner', first.device.id, 'workspace-1')
+  assert.equal(
+    db
+      .prepare('SELECT count(*) AS n FROM customer_workspaces WHERE device_id=?')
+      .get(first.device.id).n,
+    0,
+  )
+  assert.equal(registry.listDevices('owner').length, 2)
+  registry.removeDevice('owner', first.device.id)
+  assert.throws(() => registry.authenticateToken(first.deviceToken))
+  assert.deepEqual(
+    registry.listDevices('owner').map((value) => value.id),
+    [second.device.id],
+  )
+  assert.deepEqual(registry.removeDevice('owner', first.device.id), {
+    deleted: true,
+    id: first.device.id,
+  })
+  registry.purgeUser('owner')
+  for (const table of [
+    'customer_devices',
+    'customer_workspaces',
+    'customer_capabilities',
+    'customer_pairings',
+  ])
+    assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n, 0, table)
+})

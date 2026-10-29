@@ -384,7 +384,7 @@ test('无环境轮次持久为空，不自动选环境，真实调用者及轮�
   assert.equal(f.calls.execute.length, 0)
 })
 
-test('停用、撤销凭证及移除拒绝旧轮新调用，原管理收据仍可核对', async (t) => {
+test('停用、撤销凭证及移除拒绝旧轮新调用；删除清理历史配置', async (t) => {
   const f = await fixture(t),
     value = await f.ready(),
     scope = f.scope(),
@@ -413,11 +413,28 @@ test('停用、撤销凭证及移除拒绝旧轮新调用，原管理收据仍�
     actor,
   )
   assert.equal(removed.removed, true)
-  await assert.rejects(f.service.invoke(scope, operation), { code: 'ENVIRONMENT_MCP_REMOVED' })
-  assert.deepEqual(
-    f.service.setEnabled(project, environment, value.id, disabledCommand, actor),
-    disabled,
-  )
+  await assert.rejects(f.service.invoke(scope, operation), {
+    code: 'ENVIRONMENT_MCP_CONNECTION_FORBIDDEN',
+  })
+  assert.throws(() => f.service.setEnabled(project, environment, value.id, disabledCommand, actor))
+  const db = new DatabaseSync(join(f.dataDir, 'environment-mcp', 'state.sqlite'), {
+    readOnly: true,
+  })
+  try {
+    for (const table of [
+      'mcp_connections',
+      'mcp_connection_versions',
+      'mcp_connection_tests',
+      'mcp_audit',
+    ])
+      assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n, 0, table)
+    const receipts = db.prepare('SELECT result FROM mcp_receipts').all()
+    assert.equal(receipts.length, 1)
+    assert.deepEqual(JSON.parse(receipts[0].result), removed)
+    assert.equal(JSON.stringify(receipts).includes('mysql.fixture.invalid'), false)
+  } finally {
+    db.close()
+  }
   assert.equal(f.calls.execute.length, 0)
 })
 
@@ -876,4 +893,21 @@ test('必要审计失败时配置与原请求收据一起回滚，异步授权�
     { code: 'ENVIRONMENT_MCP_AUTHORIZATION_INVALID' },
   )
   await new Promise((resolve) => setImmediate(resolve))
+})
+
+
+test('连接测试期间删除后，迟到结果不能重建测试或配置记录', async (t) => {
+  const f = await fixture(t)
+  const value = f.service.save(project, environment, { ...f.request(0), value: f.config() }, actor)
+  const entered = deferred(), gate = deferred()
+  f.control.test = () => { entered.resolve(); return gate.promise }
+  const testing = f.service.testConnection(project, environment, value.id, f.request(1), actor)
+  const rejected = assert.rejects(testing)
+  await entered.promise
+  f.service.remove(project, environment, value.id, f.request(1), actor)
+  gate.resolve()
+  await rejected
+  await f.service.drain()
+  assert.deepEqual(f.service.list(project, environment, actor), [])
+  assert.deepEqual(f.service.deletionReferences(project, environment), [])
 })

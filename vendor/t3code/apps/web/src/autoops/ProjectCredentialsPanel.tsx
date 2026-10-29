@@ -20,7 +20,7 @@ import {
 
 type Editor =
   | { kind: 'save'; credential?: WorkspaceCredentialMetadata }
-  | { kind: 'revoke'; credential: WorkspaceCredentialMetadata }
+  | { kind: 'revoke' | 'remove'; credential: WorkspaceCredentialMetadata }
   | { kind: 'usage'; credential: WorkspaceCredentialMetadata }
 export function ProjectCredentialsPanel({
   projectId,
@@ -192,6 +192,14 @@ export function ProjectCredentialsPanel({
                   >
                     撤回凭证
                   </MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      const button = buttons.current[credential.id]
+                      if (button) open({ kind: 'remove', credential }, button)
+                    }}
+                  >
+                    删除凭证
+                  </MenuItem>
                 </MenuPopup>
               </Menu>
             }
@@ -210,22 +218,26 @@ export function ProjectCredentialsPanel({
           onClose={() => setEditor(null)}
         />
       ) : null}
-      {editor?.kind === 'revoke' ? (
+      {editor?.kind === 'revoke' || editor?.kind === 'remove' ? (
         <WorkspaceAuthoringConfirm
-          title="撤回项目凭证"
+          title={editor.kind === 'remove' ? '删除项目凭证' : '撤回项目凭证'}
           controller={controller}
-          disabled={!usageReady}
+          disabled={editor.kind !== 'remove' && !usageReady}
           onClose={() => setEditor(null)}
           onConfirm={() =>
             controller.submit({
               kind: 'credential',
-              action: 'revoke',
+              action: editor.kind,
               id: editor.credential.id,
               expectedCredentialRevision: editor.credential.revision,
             })
           }
         >
-          <p>撤回「{editor.credential.name}」后，使用此凭证的新获取操作将被拒绝。</p>
+          <p>
+            {editor.kind === 'remove'
+              ? `将永久删除「${editor.credential.name}」的全部秘密版本和历史配置，清除仓库的凭证关联及使用它的 MCP 连接。此操作无法撤销。`
+              : `撤回「${editor.credential.name}」后，使用此凭证的新获取操作将被拒绝。`}
+          </p>
           {usage}
         </WorkspaceAuthoringConfirm>
       ) : null}

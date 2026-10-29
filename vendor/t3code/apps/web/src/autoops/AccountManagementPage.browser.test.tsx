@@ -106,18 +106,24 @@ function setup({ manager = true } = {}) {
       const target =
         path === "/api/v1/account/password"
           ? own
-          : items.find((item) => path.includes(`/${item.id}`));
+          : items.find((item) => path.includes(`/${item.id}`))
       const operation =
-        path === "/api/v1/accounts"
-          ? "create"
-          : path === "/api/v1/account/password"
-            ? "changePassword"
-            : path.endsWith("/password")
-              ? "resetPassword"
-              : "enable";
-      let result: object;
-      let targetId: string;
-      if (operation === "create") {
+        init?.method === 'DELETE'
+          ? 'delete'
+          : path === '/api/v1/accounts'
+            ? 'create'
+            : path === '/api/v1/account/password'
+              ? 'changePassword'
+              : path.endsWith('/password')
+                ? 'resetPassword'
+                : 'enable'
+      let result: object
+      let targetId: string
+      if (operation === 'delete') {
+        targetId = target!.id
+        items.splice(items.indexOf(target!), 1)
+        result = { deleted: true, userId: targetId, revision: target!.revision + 1 }
+      } else if (operation === 'create') {
         const next: MutableAccount = {
           id: `created-${items.length}`,
           username: String(body.value.username),
@@ -398,3 +404,19 @@ it("窄短窗口的完整64字符用户名在账号元数据内换行，状态�
     await page.viewport(previousSize.width, previousSize.height);
   }
 });
+
+it('删除账号先确认，取消不提交；确认后清除列表且保留其他账号', async () => {
+  const fixture = setup()
+  using _fetch = stubGlobal('fetch', fixture.fetcher)
+  await using screen = await render(<App />, { router: '/accounts' })
+  await screen.getByRole('button', { name: '删除账号 case_member' }).click()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  expect(fixture.writes).toHaveLength(0)
+  await screen.getByRole('button', { name: '删除账号 case_member' }).click()
+  await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await expect
+    .element(screen.getByRole('button', { name: '删除账号 case_member' }))
+    .not.toBeInTheDocument()
+  expect(fixture.writes[0]?.method).toBe('DELETE')
+  expect(fixture.items.map((item) => item.id)).toEqual(['accounts-ui-user'])
+})

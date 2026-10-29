@@ -356,6 +356,47 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       // 清理不能把已持久成功的写入误报为失败，残留原件由下一次维护机会重试。
     }
   }
+  function purgeCaptures(project: string, selector: { sourceId?: string; path?: string }) {
+    const captures = selector.sourceId
+      ? db
+          .prepare(
+            'SELECT DISTINCT c.id FROM authoring_captures c JOIN authoring_capture_sources s ON s.capture_id=c.id WHERE c.project_id=? AND s.source_id=?',
+          )
+          .all(project, selector.sourceId)
+      : db
+          .prepare(
+            'SELECT DISTINCT c.id FROM authoring_captures c JOIN authoring_capture_files f ON f.capture_id=c.id WHERE c.project_id=? AND (f.path=? OR substr(f.path,1,?)=?)',
+          )
+          .all(project, selector.path!, selector.path!.length + 1, selector.path! + '/')
+    const removedCaptures = captures.map((row) => String(row.id)),
+      removedInputs: string[] = []
+    for (const capture of removedCaptures) {
+      removedInputs.push(
+        ...db
+          .prepare(
+            "SELECT id FROM authoring_inputs WHERE project_id=? AND json_extract(value,'$.captureId')=?",
+          )
+          .all(project, capture)
+          .map((row) => String(row.id)),
+      )
+      for (const table of [
+        'authoring_inputs',
+        'authoring_input_preparations',
+        'authoring_deployment_inputs',
+      ])
+        db.prepare(
+          `DELETE FROM ${table} WHERE project_id=? AND json_extract(value,'$.captureId')=?`,
+        ).run(project, capture)
+      for (const table of [
+        'authoring_capture_sources',
+        'authoring_capture_files',
+        'authoring_capture_directories',
+      ])
+        db.prepare(`DELETE FROM ${table} WHERE capture_id=?`).run(capture)
+      db.prepare('DELETE FROM authoring_captures WHERE project_id=? AND id=?').run(project, capture)
+    }
+    return { removedCaptures, removedInputs }
+  }
   function mutation(
     projectId: string,
     actorId: string,
@@ -405,7 +446,9 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       )
       return result
     })
-    collectUnusedQuietly()
+    if (['remove', 'remove-source', 'remove-repository'].includes(operation))
+      collectUnusedOriginals()
+    else collectUnusedQuietly()
     return result
   }
   function queueExtraction(
@@ -873,6 +916,107 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         return { revision: advance(projectId), repository: saved }
       })
     },
+    unlinkCredential(projectId: string, credentialId: string) {
+      transaction.run(() => {
+        const changed = db
+          .prepare(
+            'UPDATE authoring_repositories SET credential_id=NULL WHERE project_id=? AND credential_id=?',
+          )
+          .run(projectId, credentialId)
+        db.prepare(
+          'UPDATE authoring_capture_sources SET credential_id=NULL WHERE credential_id=? AND capture_id IN (SELECT id FROM authoring_captures WHERE project_id=?)',
+        ).run(credentialId, projectId)
+        if (changed.changes) advance(projectId)
+      })
+    },
+    async drainExtractions() {
+      await Promise.allSettled([...processing.values()])
+      return collectUnusedOriginals()
+    },
+    purgeUser(actorId: string) {
+      transaction.run(() => {
+        const ids = db
+          .prepare('SELECT id FROM authoring_captures WHERE actor_id=?')
+          .all(actorId)
+          .map((row) => String(row.id))
+        for (const capture of ids) {
+          for (const table of [
+            'authoring_capture_sources',
+            'authoring_capture_files',
+            'authoring_capture_directories',
+          ])
+            db.prepare(`DELETE FROM ${table} WHERE capture_id=?`).run(capture)
+        }
+        for (const table of [
+          'authoring_captures',
+          'authoring_inputs',
+          'authoring_input_preparations',
+          'authoring_deployment_inputs',
+          'authoring_receipts',
+        ])
+          db.prepare(`DELETE FROM ${table} WHERE actor_id=?`).run(actorId)
+      })
+      return collectUnusedOriginals()
+    },
+    purgeInputs(projectId: string, inputIds: readonly string[]) {
+      transaction.run(() => {
+        for (const inputId of inputIds) {
+          const row = db
+            .prepare('SELECT value FROM authoring_inputs WHERE project_id=? AND id=?')
+            .get(projectId, inputId)
+          if (!row) continue
+          const value = JSON.parse(String(row.value)) as WorkspaceInputCapture
+          if (value.captureId) {
+            for (const table of [
+              'authoring_capture_sources',
+              'authoring_capture_files',
+              'authoring_capture_directories',
+            ])
+              db.prepare(`DELETE FROM ${table} WHERE capture_id=?`).run(value.captureId)
+            db.prepare('DELETE FROM authoring_captures WHERE project_id=? AND id=?').run(
+              projectId,
+              value.captureId,
+            )
+          }
+          db.prepare('DELETE FROM authoring_inputs WHERE project_id=? AND id=?').run(
+            projectId,
+            inputId,
+          )
+          db.prepare(
+            "DELETE FROM authoring_input_preparations WHERE project_id=? AND json_extract(value,'$.id')=?",
+          ).run(projectId, inputId)
+        }
+      })
+      return collectUnusedOriginals()
+    },
+    purgeProject(projectId: string) {
+      id(projectId)
+      transaction.run(() => {
+        for (const table of [
+          'authoring_capture_sources',
+          'authoring_capture_files',
+          'authoring_capture_directories',
+        ])
+          db.prepare(
+            `DELETE FROM ${table} WHERE capture_id IN (SELECT id FROM authoring_captures WHERE project_id=?)`,
+          ).run(projectId)
+        for (const table of [
+          'authoring_captures',
+          'authoring_inputs',
+          'authoring_source_sync',
+          'authoring_deployment_inputs',
+          'authoring_input_preparations',
+          'authoring_current_adoptions',
+          'authoring_sources',
+          'authoring_repositories',
+          'authoring_entries',
+          'authoring_receipts',
+          'authoring_projects',
+        ])
+          db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(projectId)
+      })
+      return collectUnusedOriginals()
+    },
     removeRepository(
       projectId: string,
       repositoryId: string,
@@ -882,17 +1026,23 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       id(repositoryId)
       return mutation(projectId, actorId, 'remove-repository', input, { repositoryId }, () => {
         repository(projectId, repositoryId)
-        if (sources(projectId).some((value) => value.id === repositoryId))
-          fail(
-            409,
-            'REPOSITORY_IN_USE',
-            '请先移除工作区使用配置，再删除仓库连接；已固定任务仍保留原来源',
-          )
+        const removed = purgeCaptures(projectId, { sourceId: repositoryId })
+        db.prepare('DELETE FROM authoring_sources WHERE project_id=? AND id=?').run(
+          projectId,
+          repositoryId,
+        )
+        db.prepare('DELETE FROM authoring_source_sync WHERE project_id=? AND source_id=?').run(
+          projectId,
+          repositoryId,
+        )
+        db.prepare(
+          'DELETE FROM authoring_current_adoptions WHERE project_id=? AND source_id=?',
+        ).run(projectId, repositoryId)
         db.prepare('DELETE FROM authoring_repositories WHERE project_id=? AND id=?').run(
           projectId,
           repositoryId,
         )
-        return { revision: advance(projectId) }
+        return { revision: advance(projectId), ...removed }
       })
     },
     configureSource(projectId: string, input: WorkspaceRepositoryUsage, actorId: string) {
@@ -977,7 +1127,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
       return mutation(projectId, actorId, 'remove-source', input, { sourceId }, () => {
         if (!sources(projectId).some((source) => source.id === sourceId))
           fail(404, 'WORKSPACE_SOURCE_NOT_FOUND', '仓库来源不存在')
-        // 已接受输入保留独立来源定义和提交，移除当前配置不改变任何历史输入。
+        const removed = purgeCaptures(projectId, { sourceId })
         db.prepare('DELETE FROM authoring_sources WHERE project_id=? AND id=?').run(
           projectId,
           sourceId,
@@ -991,7 +1141,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
           projectId,
           sourceId,
         )
-        return { revision: advance(projectId) }
+        return { revision: advance(projectId), ...removed }
       })
     },
     createDirectory(
@@ -1105,6 +1255,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
         () => {
           assertWritable(projectId, target)
           currentEntry(projectId, target, input.expectedContentRevision)
+          const removed = purgeCaptures(projectId, { path: target })
           for (const entry of rows(projectId).filter(
             (entry) => entry.path === target || text(entry, 'path').startsWith(target + '/'),
           ))
@@ -1112,7 +1263,7 @@ export function createWorkspaceAuthoring(options: WorkspaceAuthoringOptions) {
               projectId,
               text(entry, 'path'),
             )
-          return { revision: advance(projectId) }
+          return { revision: advance(projectId), ...removed }
         },
       )
     },

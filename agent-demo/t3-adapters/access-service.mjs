@@ -720,6 +720,81 @@ export function createAccessService({ sessionDb, bindingDb, catalog: sourceCatal
         .map((row) => row.thread_id).filter((id) => canSeeThread(principal, id))
     },
     requireThread,
+    scopeThreads(projectId, environmentId) {
+      return bindingDb
+        .prepare(
+          `SELECT thread_id,native_thread_id FROM t3_thread_bindings WHERE project_id=?${environmentId === undefined ? '' : ' AND environment_id=?'}`,
+        )
+        .all(...(environmentId === undefined ? [projectId] : [projectId, environmentId]))
+        .map((row) => ({ id: row.thread_id, nativeId: row.native_thread_id || row.thread_id }))
+    },
+    ownerThreads(ownerId) {
+      return bindingDb
+        .prepare(
+          'SELECT thread_id,native_thread_id,project_id FROM t3_thread_bindings WHERE owner_id=?',
+        )
+        .all(ownerId)
+        .map((row) => ({
+          id: row.thread_id,
+          nativeId: row.native_thread_id || row.thread_id,
+          projectId: row.project_id,
+        }))
+    },
+    ownedInputIdsForDeletion(threadId) {
+      const ids = new Set(
+        [...this.listThreadInputs(threadId), ...this.inputReferences(threadId)].map(
+          (value) => value.inputId,
+        ),
+      )
+      return [...ids].filter(
+        (id) =>
+          !bindingDb
+            .prepare(
+              'SELECT 1 FROM t3_thread_inputs WHERE input_id=? AND thread_id!=? UNION ALL SELECT 1 FROM t3_thread_input_references WHERE input_id=? AND thread_id!=? LIMIT 1',
+            )
+            .get(id, threadId, id, threadId),
+      )
+    },
+    purgeThread(threadId) {
+      for (const table of [
+        't3_thread_visibility_changes',
+        't3_attachment_access',
+        't3_thread_inputs',
+        't3_request_actors',
+        't3_customer_run_actors',
+        't3_message_actors',
+        't3_thread_input_references',
+        't3_input_reference_claims',
+        't3_run_input_requests',
+        't3_native_input_turns',
+        't3_workspace_version_resource_releases',
+      ])
+        bindingDb.prepare(`DELETE FROM ${table} WHERE thread_id=?`).run(threadId)
+      bindingDb
+        .prepare(
+          'DELETE FROM t3_native_subagent_bindings WHERE child_thread_id=? OR parent_thread_id=?',
+        )
+        .run(threadId, threadId)
+      bindingDb.prepare('DELETE FROM t3_thread_bindings WHERE thread_id=?').run(threadId)
+    },
+    purgeUser(ownerId) {
+      for (const thread of this.ownerThreads(ownerId)) this.purgeThread(thread.id)
+      bindingDb.prepare('DELETE FROM t3_attachment_access WHERE owner_id=?').run(ownerId)
+      for (const row of bindingDb
+        .prepare('SELECT native_session_id,autoops_session_hash FROM t3_native_auth_sessions')
+        .all())
+        if (
+          !sessionDb.prepare('SELECT 1 FROM sessions WHERE token=?').get(row.autoops_session_hash)
+        )
+          bindingDb
+            .prepare('DELETE FROM t3_native_auth_sessions WHERE native_session_id=?')
+            .run(row.native_session_id)
+      customerRegistry?.purgeUser(ownerId)
+    },
+    purgeScope(projectId, environmentId) {
+      for (const { id } of this.scopeThreads(projectId, environmentId)) this.purgeThread(id)
+      if (environmentId === undefined) customerRegistry?.purgeProject(projectId)
+    },
     markThreadDeleted(threadId) {
       bindingDb.prepare('UPDATE t3_thread_bindings SET revoked_at=COALESCE(revoked_at,?) WHERE thread_id=?').run(new Date(now()).toISOString(), identifier(threadId, '会话ID'))
     },

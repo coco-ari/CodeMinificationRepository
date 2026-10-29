@@ -108,6 +108,23 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
   }
   const listeners = new Set()
   const registry = {
+    purgeUser(ownerId) {
+      db.prepare(
+        'DELETE FROM customer_capabilities WHERE device_id IN (SELECT id FROM customer_devices WHERE owner_id=?)',
+      ).run(ownerId)
+      for (const table of ['customer_pairings', 'customer_workspaces', 'customer_devices'])
+        db.prepare(`DELETE FROM ${table} WHERE owner_id=?`).run(ownerId)
+    },
+    purgeProject(projectId) {
+      for (const row of db
+        .prepare('SELECT device_id,id FROM customer_workspaces WHERE project_id=?')
+        .all(projectId))
+        db.prepare('DELETE FROM customer_capabilities WHERE device_id=? AND workspace_id=?').run(
+          row.device_id,
+          row.id,
+        )
+      db.prepare('DELETE FROM customer_workspaces WHERE project_id=?').run(projectId)
+    },
     createPairing(ownerId, input = {}) {
       requireEnabled()
       owner(ownerId); object(input, ['label'])
@@ -264,6 +281,27 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
       db.prepare('UPDATE customer_devices SET status=? WHERE id=?').run(status,deviceId)
       return publicDevice(deviceRow(deviceId))
     },
+    removeDevice(ownerId, deviceId) {
+      const current = deviceRow(id(deviceId, '设备ID'))
+      if (!current) return { deleted: true, id: deviceId }
+      ownedDevice(ownerId, deviceId)
+      db.prepare('DELETE FROM customer_capabilities WHERE device_id=?').run(deviceId)
+      db.prepare('DELETE FROM customer_workspaces WHERE device_id=?').run(deviceId)
+      db.prepare('DELETE FROM customer_devices WHERE id=?').run(deviceId)
+      return { deleted: true, id: deviceId }
+    },
+    removeWorkspace(ownerId, deviceId, workspaceId) {
+      ownedDevice(ownerId, deviceId)
+      db.prepare('DELETE FROM customer_capabilities WHERE device_id=? AND workspace_id=?').run(
+        deviceId,
+        workspaceId,
+      )
+      db.prepare('DELETE FROM customer_workspaces WHERE device_id=? AND id=?').run(
+        deviceId,
+        workspaceId,
+      )
+      return { deleted: true, id: workspaceId }
+    },
     revokeCredential(ownerId, deviceId) {
       ownedDevice(ownerId,deviceId)
       db.prepare("UPDATE customer_devices SET status='revoked',connected=0 WHERE id=?").run(deviceId)
@@ -300,9 +338,26 @@ export function createCustomerRegistry({ db, requireOwner, requireProjectForUser
     },
     subscribeChanges(listener) { listeners.add(listener); return () => listeners.delete(listener) },
   }
-  for (const name of ['consumePairing','registerWorkspace','updateCapabilities','setDeviceStatus','revokeCredential','revokeWorkspace','markConnected','markDisconnected']) {
-    const operation=registry[name]
-    registry[name]=function (...args) { const result=operation.apply(this,args); for(const listener of listeners)listener(); return result }
+  for (const name of [
+    'removeDevice',
+    'removeWorkspace',
+    'purgeUser',
+    'purgeProject',
+    'consumePairing',
+    'registerWorkspace',
+    'updateCapabilities',
+    'setDeviceStatus',
+    'revokeCredential',
+    'revokeWorkspace',
+    'markConnected',
+    'markDisconnected',
+  ]) {
+    const operation = registry[name]
+    registry[name] = function (...args) {
+      const result = operation.apply(this, args)
+      for (const listener of listeners) listener()
+      return result
+    }
   }
   return registry
 }

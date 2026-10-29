@@ -1675,6 +1675,11 @@ export function createCurrentWorkspace({
         protectedCurrentVersions(project, actor),
       )
     },
+    async cancelProjectWork(project: string) {
+      const pending = [...works.entries()].filter(([key]) => JSON.parse(key)[0] === project)
+      for (const [, job] of pending) job.controller.abort()
+      await Promise.allSettled(pending.map(([, job]) => job.work))
+    },
     stopAccepting() {
       stopping = true
       for (const value of works.values()) value.controller.abort()

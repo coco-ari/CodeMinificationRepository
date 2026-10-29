@@ -168,7 +168,7 @@ export function createEnvironmentMcp(options: Options) {
   >()
   const tests = new Map<
     string,
-    { fingerprint: string; work: Promise<C.EnvironmentMcpTestResult> }
+    { fingerprint: string; connectionId: string; work: Promise<C.EnvironmentMcpTestResult> }
   >()
   // 只读测试的未知结果不自治重放；原请求明确核对中断状态，重测使用新的请求标识。
   db.prepare("UPDATE mcp_receipts SET status='failed',error=? WHERE status='pending'").run(
@@ -267,7 +267,7 @@ export function createEnvironmentMcp(options: Options) {
       ...(row.result
         ? {
             result: JSON.parse(String(row.result)) as
-              C.EnvironmentMcpConnection | C.EnvironmentMcpTestResult,
+              C.EnvironmentMcpConnection | C.EnvironmentMcpTestResult | C.EnvironmentMcpDeletion,
           }
         : {}),
       ...(row.error
@@ -284,7 +284,7 @@ export function createEnvironmentMcp(options: Options) {
       fail(409, 'ENVIRONMENT_MCP_TEST_PENDING', '原连接测试仍在执行，请核对原请求')
     return receipt.result!
   }
-  function mutation(
+  function mutation<T extends C.EnvironmentMcpConnection | C.EnvironmentMcpDeletion>(
     project: string,
     environment: string,
     actor: string,
@@ -292,13 +292,13 @@ export function createEnvironmentMcp(options: Options) {
     operation: string,
     id: string | null,
     input: unknown,
-    run: () => C.EnvironmentMcpConnection,
+    run: () => T,
   ) {
     manage(project, environment, actor)
     const fingerprint = digest({ operation, id, input })
     return transaction.run(() => {
       const existing = receiptRow(project, environment, actor, command.requestId)
-      if (existing) return original(existing, fingerprint) as C.EnvironmentMcpConnection
+      if (existing) return original(existing, fingerprint) as T
       const result = run()
       db.prepare("INSERT INTO mcp_receipts VALUES(?,?,?,?,?,?,'completed',?,NULL)").run(
         project,
@@ -309,18 +309,19 @@ export function createEnvironmentMcp(options: Options) {
         operation,
         JSON.stringify(result),
       )
-      db.prepare(
-        'INSERT INTO mcp_audit(project_id,environment_id,actor_id,request_id,operation,connection_id,revision,created_at) VALUES(?,?,?,?,?,?,?,?)',
-      ).run(
-        project,
-        environment,
-        actor,
-        command.requestId,
-        operation,
-        result.id,
-        result.revision,
-        now(),
-      )
+      if (operation !== 'remove')
+        db.prepare(
+          'INSERT INTO mcp_audit(project_id,environment_id,actor_id,request_id,operation,connection_id,revision,created_at) VALUES(?,?,?,?,?,?,?,?)',
+        ).run(
+          project,
+          environment,
+          actor,
+          command.requestId,
+          operation,
+          result.id,
+          result.revision,
+          now(),
+        )
       return result
     })
   }
@@ -479,7 +480,51 @@ export function createEnvironmentMcp(options: Options) {
         frozen.credentialVersion.credentialId,
       )
   }
+  function purgeConnection(id: string) {
+    for (const [key, running] of tests) {
+      if (running.connectionId !== id) continue
+      const [project, environment, actor, requestId] = JSON.parse(key) as string[]
+      db.prepare('DELETE FROM mcp_receipts WHERE project_id=? AND environment_id=? AND actor_id=? AND request_id=?').run(project!, environment!, actor!, requestId!)
+    }
+    for (const table of ['mcp_connection_tests', 'mcp_connection_versions'])
+      db.prepare(`DELETE FROM ${table} WHERE connection_id=?`).run(id)
+    db.prepare('DELETE FROM mcp_audit WHERE connection_id=?').run(id)
+    db.prepare(
+      "DELETE FROM mcp_receipts WHERE json_extract(result,'$.id')=? OR json_extract(result,'$.connectionId')=?",
+    ).run(id, id)
+    for (const row of db.prepare('SELECT thread_id,run_id,connections FROM mcp_runs').all()) {
+      const connections = JSON.parse(String(row.connections)) as FrozenConnection[]
+      if (connections.some((value) => value.id === id))
+        db.prepare('UPDATE mcp_runs SET connections=? WHERE thread_id=? AND run_id=?').run(
+          JSON.stringify(connections.filter((value) => value.id !== id)),
+          row.thread_id!,
+          row.run_id!,
+        )
+    }
+    db.prepare('DELETE FROM mcp_connections WHERE id=?').run(id)
+  }
   const api = {
+    removeCredentialConnections(project: string, credentialId: string) {
+      transaction.run(() => {
+        const rows = db
+          .prepare(
+            "SELECT c.id FROM mcp_connections c JOIN mcp_connection_versions v ON v.connection_id=c.id AND v.revision=c.revision WHERE c.project_id=? AND json_extract(v.configuration,'$.credentialId')=?",
+          )
+          .all(project, credentialId)
+        for (const row of rows) purgeConnection(String(row.id))
+      })
+    },
+    purgeScope(project: string, environment?: string) {
+      transaction.run(() => {
+        const where =
+          environment === undefined ? 'project_id=?' : 'project_id=? AND environment_id=?'
+        const args = environment === undefined ? [project] : [project, environment]
+        for (const row of db.prepare(`SELECT id FROM mcp_connections WHERE ${where}`).all(...args))
+          purgeConnection(String(row.id))
+        for (const table of ['mcp_runs', 'mcp_receipts', 'mcp_audit'])
+          db.prepare(`DELETE FROM ${table} WHERE ${where}`).run(...args)
+      })
+    },
     list(project: string, environment: string, actor: string) {
       manage(project, environment, actor)
       return db
@@ -548,7 +593,15 @@ export function createEnvironmentMcp(options: Options) {
       return mutation(project, environment, actor, command, 'remove', id, command, () => {
         const current = activeRow(project, environment, id)
         checkRevision(current, command.expectedRevision)
-        return nextVersion(current, configurationOf(current), actor, false, true)
+        const result: C.EnvironmentMcpDeletion = {
+          id,
+          projectId: project,
+          environmentId: environment,
+          revision: Number(current.revision) + 1,
+          removed: true,
+        }
+        purgeConnection(id)
+        return result
       })
     },
     async testConnection(
@@ -653,6 +706,10 @@ export function createEnvironmentMcp(options: Options) {
             error: safe,
           }
           transaction.run(() => {
+            if (!db.prepare('SELECT 1 FROM mcp_connections WHERE id=?').get(id)) {
+              db.prepare('DELETE FROM mcp_receipts WHERE project_id=? AND environment_id=? AND actor_id=? AND request_id=?').run(project, environment, actor, command.requestId)
+              return
+            }
             const latest = connectionRow(project, environment, id)
             if (latest.revision === current.revision)
               db.prepare(
@@ -677,7 +734,7 @@ export function createEnvironmentMcp(options: Options) {
           throw error
         }
       })()
-      tests.set(key, { fingerprint, work })
+      tests.set(key, { fingerprint, connectionId: id, work })
       void work.finally(() => tests.delete(key)).catch(() => {})
       return work
     },

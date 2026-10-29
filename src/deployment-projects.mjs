@@ -58,7 +58,20 @@ export function normalizeDeploymentSourceSelection(input, selected, validateConf
 
 // 项目映射与部署实体同属部署存储，在一个事务内建立归属和幂等记录。
 // 业务适配器只调用这些用例，不再持有引擎集合或向存储写入任意回调。
-export function createProjectDeployments({ store, validateConfig, saveEntity, configKey, insertServer, publicServer, revokeServer, deleteServer, saveStoragePolicy, authorizeMutation, changed }) {
+export function createProjectDeployments({
+  store,
+  validateConfig,
+  saveEntity,
+  configKey,
+  insertServer,
+  publicServer,
+  revokeServer,
+  deleteServer,
+  saveStoragePolicy,
+  authorizeMutation,
+  changed,
+  cleanupTasks = async () => {},
+}) {
   const maps = (state = store.state) => state.autoopsDeploymentBindings.projects
   function mapping(projectId, state = store.state) {
     const map = maps(state).find((entry) => entry.projectId === projectId)
@@ -73,7 +86,13 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
   function service(projectId, id, state = store.state) {
     const map = mapping(projectId, state), selected = state.deployments.services.find(entry => entry.id === id && entry.applicationId === map.applicationId)
     if (!selected) fail(404, 'DEPLOYMENT_SERVICE_NOT_FOUND', '当前项目中不存在此服务')
-    return { ...copy(selected), configKey: digest(JSON.stringify([selected.id, selected.name, selected.kind, selected.module])) }
+    if (selected.deleting) fail(409, 'DEPLOYMENT_DELETE_PENDING', '服务正在删除，请继续原删除')
+    return {
+      ...copy(selected),
+      configKey: digest(
+        JSON.stringify([selected.id, selected.name, selected.kind, selected.module]),
+      ),
+    }
   }
   function server(projectId, id, state = store.state) {
     const map = mapping(projectId, state), selected = state.deployments.servers.find(entry => entry.id === id && map.servers.some(bound => bound.serverId === id))
@@ -90,6 +109,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
     if (!mapping(projectId, state).allowedServerIds.includes(serverId)) fail(403, 'DEPLOYMENT_SERVER_ACCESS_REVOKED', '此项目未获准使用该节点，或准入已撤回')
     const selected = globalServer(serverId, state)
     if (selected.revoked) fail(409, 'DEPLOYMENT_SERVER_REVOKED', '节点接入已撤销')
+    if (selected.deleting) fail(409,'DEPLOYMENT_SERVER_DELETING','节点正在删除，请继续原删除')
     return selected
   }
   function expected(key, current, message) {
@@ -219,6 +239,90 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
         }
       })
     },
+    scopeTaskIds(projectId, environmentId) {
+      const map = maps().find((value) => value.projectId === projectId)
+      if (!map) return []
+      const env = map.environments.find(
+        (value) => value.environmentId === environmentId,
+      )?.legacyEnvironmentId
+      const targets = new Set(
+        store.state.deployments.targets
+          .filter(
+            (value) =>
+              value.applicationId === map.applicationId &&
+              (environmentId === undefined || value.environmentId === env),
+          )
+          .map((value) => value.id),
+      )
+      return store.state.deployments.tasks
+        .filter(
+          (value) =>
+            value.applicationId === map.applicationId &&
+            (environmentId === undefined || targets.has(value.targetId)),
+        )
+        .map((value) => value.id)
+    },
+    async purgeScope(projectId, environmentId) {
+      await store.change((state) => {
+        const map = maps(state).find((value) => value.projectId === projectId)
+        if (!map) return
+        const data = state.deployments
+        const env = map.environments.find(
+          (value) => value.environmentId === environmentId,
+        )?.legacyEnvironmentId
+        const targets = new Set(
+          data.targets
+            .filter(
+              (value) =>
+                value.applicationId === map.applicationId &&
+                (environmentId === undefined || value.environmentId === env),
+            )
+            .map((value) => value.id),
+        )
+        data.tasks = data.tasks.filter(
+          (value) =>
+            !(
+              value.applicationId === map.applicationId &&
+              (environmentId === undefined || targets.has(value.targetId))
+            ),
+        )
+        data.releases = data.releases.filter((value) => !targets.has(value.targetId))
+        data.targets = data.targets.filter((value) => !targets.has(value.id))
+        data.environments = data.environments.filter(
+          (value) =>
+            !(
+              value.applicationId === map.applicationId &&
+              (environmentId === undefined || value.id === env)
+            ),
+        )
+        state.events = state.events.filter((value) =>
+          environmentId === undefined
+            ? value.projectId !== projectId && value.applicationId !== map.applicationId
+            : !targets.has(value.targetId),
+        )
+        if (environmentId === undefined) {
+          data.services = data.services.filter((value) => value.applicationId !== map.applicationId)
+          data.applications = data.applications.filter((value) => value.id !== map.applicationId)
+          state.autoopsDeploymentBindings.projects = maps(state).filter((value) => value !== map)
+        } else {
+          map.environments = map.environments.filter(
+            (value) => value.environmentId !== environmentId,
+          )
+          map.servers = map.servers.filter((value) => value.environmentId !== environmentId)
+          map.serviceSources = (map.serviceSources ?? []).filter(
+            (value) => value.environmentId !== environmentId,
+          )
+          for (const key of ['targetRequests', 'serverRequests', 'mutationRequests'])
+            map[key] = (map[key] ?? []).filter(
+              (value) =>
+                value.environmentId !== environmentId &&
+                !targets.has(value.targetId) &&
+                value.result?.environmentId !== environmentId &&
+                !targets.has(value.result?.id),
+            )
+        }
+      })
+    },
     target, service, server, serviceSource,
     deletionReferences(projectId, environmentId) { return projectDeploymentReferences(store.state,projectId,environmentId) },
     serviceSourceRequest(projectId, input) {
@@ -260,8 +364,27 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
       changed('server', result.server.id); return result
     },
     async mutateGlobalServer(serverId, operation, input) {
-      if (!['revoke', 'delete', 'storage'].includes(operation)) fail(400, 'DEPLOYMENT_SERVER_OPERATION_INVALID', '全局节点操作无效')
-      if (operation === 'storage' && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)) fail(400, 'DEPLOYMENT_POLICY_REVISION_REQUIRED', '缺少有效的存储策略版本')
+      if (!['revoke', 'delete', 'storage'].includes(operation))
+        fail(400, 'DEPLOYMENT_SERVER_OPERATION_INVALID', '全局节点操作无效')
+      if (
+        operation === 'storage' &&
+        (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)
+      )
+        fail(400, 'DEPLOYMENT_POLICY_REVISION_REQUIRED', '缺少有效的存储策略版本')
+      if (operation === 'delete') {
+        authorize(null, 'server.admin', input)
+        const server = store.state.deployments.servers.find((row) => row.id === serverId)
+        if (server) {
+          await store.change((state) => {
+            globalServer(serverId, state).deleting = true
+          })
+          await cleanupTasks(
+            store.state.deployments.tasks
+              .filter((row) => row.serverId === serverId)
+              .map((row) => row.id),
+          )
+        }
+      }
       const result = await store.change(state => {
         authorize(null, 'server.admin', input)
         const fields = operation === 'storage' ? [serverId, input.expectedRevision, input.retainedVersions, input.buildCacheGiB] : [serverId]
@@ -275,7 +398,8 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
           return saveStoragePolicy(state, serverId, input)
         })
       })
-      changed('server', serverId); return result
+      changed('server', serverId)
+      return result
     },
     async setServerAccess(projectId, input) {
       if (typeof input.allowed !== 'boolean') fail(400, 'DEPLOYMENT_SERVER_ACCESS_INVALID', '请选择准许或撤回节点准入')
@@ -367,6 +491,99 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
         return receipt(map, name, input, fields, retired)
       })
     },
+    async removeConfiguration(projectId, kind, entityId, input) {
+      if (!['service', 'target'].includes(kind))
+        fail(400, 'DEPLOYMENT_INPUT_INVALID', '删除对象无效')
+      const operation = `delete-${kind}`,
+        fields = {
+          id: entityId,
+          configKey: input.configKey,
+          environmentId: input.environmentId ?? null,
+        }
+      const plan = await store.change((state) => {
+        const map = mapping(projectId, state),
+          data = state.deployments
+        authorize(
+          projectId,
+          kind === 'service' ? 'service.configure' : 'configure',
+          input,
+          kind === 'target' ? input.environmentId : undefined,
+        )
+        const repeated = replayReceipt(map, operation, input, fields)
+        if (repeated !== undefined) return { result: repeated }
+        const selected = data[kind === 'service' ? 'services' : 'targets'].find(
+          (row) => row.id === entityId && row.applicationId === map.applicationId,
+        )
+        if (!selected) fail(404, 'DEPLOYMENT_NOT_FOUND', '删除对象不存在')
+        if (
+          kind === 'target' &&
+          environment(map, input.environmentId).legacyEnvironmentId !== selected.environmentId
+        )
+          fail(404, 'DEPLOYMENT_TARGET_NOT_FOUND', '该环境中不存在此部署位置')
+        const current =
+          kind === 'service'
+            ? digest(JSON.stringify([selected.id, selected.name, selected.kind, selected.module]))
+            : configKey(data, entityId)
+        expected(input.configKey, current, '配置已变化，请刷新后重新确认删除')
+        selected.deleting = true
+        const targets = data.targets.filter((row) =>
+          kind === 'target' ? row.id === entityId : row.serviceId === entityId,
+        )
+        for (const target of targets) target.deleting = true
+        const ids = new Set(targets.map((row) => row.id))
+        return {
+          taskIds: data.tasks.filter((row) => ids.has(row.targetId)).map((row) => row.id),
+          targetIds: [...ids],
+        }
+      })
+      if (plan.result) {
+        return plan.result
+      }
+      await cleanupTasks(plan.taskIds)
+      const result = await store.change((state) => {
+        const map = mapping(projectId, state),
+          data = state.deployments,
+          ids = new Set(plan.targetIds)
+        authorize(
+          projectId,
+          kind === 'service' ? 'service.configure' : 'configure',
+          input,
+          kind === 'target' ? input.environmentId : undefined,
+        )
+        return receipt(
+          map,
+          operation,
+          input,
+          fields,
+          () => {
+            data.tasks = data.tasks.filter((row) => !ids.has(row.targetId))
+            data.releases = data.releases.filter((row) => !ids.has(row.targetId))
+            data.targets = data.targets.filter((row) => !ids.has(row.id))
+            state.events = state.events.filter(
+              (row) => !ids.has(row.targetId) && row.serviceId !== entityId,
+            )
+            map.targetRequests = map.targetRequests.filter((row) => !ids.has(row.targetId))
+            map.mutationRequests = map.mutationRequests.filter(
+              (row) =>
+                !plan.targetIds
+                  .concat(entityId)
+                  .some((id) => JSON.stringify(row.result).includes(id)),
+            )
+            if (kind === 'service') {
+              data.environmentSources = data.environmentSources.filter(
+                (row) => row.serviceId !== entityId,
+              )
+              data.services = data.services.filter((row) => row.id !== entityId)
+              map.serviceSources = map.serviceSources.filter((row) => row.serviceId !== entityId)
+            }
+            return { deleted: true, id: entityId }
+          },
+          fields,
+        )
+      })
+      changed(kind === 'service' ? 'services' : 'targets', entityId)
+      return result
+    },
     async saveService(projectId, input) {
       const fields = { name: input.name, kind: input.kind, module: input.module || '.', id: input.id || null, configKey: input.configKey || null }
       const result = await store.change(state => {
@@ -433,6 +650,7 @@ export function createProjectDeployments({ store, validateConfig, saveEntity, co
         const map = mapping(projectId, state), data = state.deployments
         const selected = data.targets.find(entry => entry.id === targetId && entry.applicationId === map.applicationId && !entry.retiredAt)
         if (!selected) fail(404, 'DEPLOYMENT_TARGET_NOT_FOUND', '当前项目中不存在此部署位置')
+        if (selected.deleting) fail(409, 'DEPLOYMENT_DELETING', '部署位置正在删除，请继续原删除')
         const env = map.environments.find(entry => entry.legacyEnvironmentId === selected.environmentId)
         if (!env) fail(404, 'DEPLOYMENT_ENVIRONMENT_NOT_FOUND', '部署环境不存在')
         authorize(projectId, 'configure', input, env.environmentId)

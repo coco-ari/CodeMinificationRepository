@@ -188,3 +188,13 @@ export async function recoverWorkspaceUpdate(
     throw cause
   }
 }
+
+export const removeWorkspaceUpdate = (
+  projectId: string,
+  scope: WorkspaceUpdateScope,
+  input: { requestId: string; expectedRevision: number },
+) =>
+  autoOpsRequest<{ deleted: true }>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/workspace/updates/${scope}`,
+    { method: 'DELETE', body: input, label: '更新计划' },
+  )

@@ -5,16 +5,24 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import { resolveAttachmentPathById } from "../attachmentStore.ts";
-import * as ServerConfig from "../config.ts";
-import * as PreviewManager from "../preview/Manager.ts";
-import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
-import * as TerminalManager from "../terminal/Manager.ts";
+import { resolveAttachmentPathById } from '../attachmentStore.ts'
+import { purgeDeletedData, DeletedThreadDataHooks } from './DeletedDataCleanup.ts'
+import * as SqlClient from 'effect/sql/SqlClient'
+import * as ServerConfig from '../config.ts'
+import * as PreviewManager from '../preview/Manager.ts'
+import * as ScheduledTaskService from '../scheduledTasks/ScheduledTaskService.ts'
+import * as TerminalManager from '../terminal/Manager.ts'
 
 export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupError>()(
   "ResourceCleanupError",
   {
-    operation: Schema.Literals(["terminal", "preview", "attachment", "scheduled-tasks"]),
+    operation: Schema.Literals([
+      'terminal',
+      'preview',
+      'attachment',
+      'scheduled-tasks',
+      'thread-data',
+    ]),
     threadId: Schema.optional(Schema.String),
     attachmentId: Schema.optional(Schema.String),
     cause: Schema.Defect(),
@@ -22,9 +30,13 @@ export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupErro
 ) {}
 
 export class ResourceCleanupService extends Context.Reference<{
-  readonly cleanupScheduledTasks: (threadId: ThreadId) => Effect.Effect<void, ResourceCleanupError>;
-  readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
-  readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
+  readonly cleanupDeletedData?: (
+    threadId: string,
+    effectId: string,
+  ) => Effect.Effect<void, ResourceCleanupError>
+  readonly cleanupScheduledTasks: (threadId: ThreadId) => Effect.Effect<void, ResourceCleanupError>
+  readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>
+  readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
   ) => Effect.Effect<void, ResourceCleanupError>;
@@ -40,12 +52,25 @@ export class ResourceCleanupService extends Context.Reference<{
 export const layer = Layer.effect(
   ResourceCleanupService,
   Effect.gen(function* () {
-    const terminals = yield* TerminalManager.TerminalManager;
-    const previews = yield* PreviewManager.PreviewManager;
-    const fileSystem = yield* FileSystem.FileSystem;
-    const config = yield* ServerConfig.ServerConfig;
-    const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+    const hooks = yield* DeletedThreadDataHooks
+    const sql = yield* SqlClient.SqlClient
+    const terminals = yield* TerminalManager.TerminalManager
+    const previews = yield* PreviewManager.PreviewManager
+    const fileSystem = yield* FileSystem.FileSystem
+    const config = yield* ServerConfig.ServerConfig
+    const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService
     return {
+      cleanupDeletedData: (threadId: string, effectId: string) =>
+        purgeDeletedData({
+          threadIds: [threadId],
+          cleanupEffectId: effectId,
+          beforePurge: () => hooks.cleanup(threadId),
+        }).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.mapError(
+            (cause) => new ResourceCleanupError({ operation: 'thread-data', threadId, cause }),
+          ),
+        ),
       cleanupScheduledTasks: (threadId: ThreadId) =>
         scheduledTasks
           .deleteForThread(threadId)

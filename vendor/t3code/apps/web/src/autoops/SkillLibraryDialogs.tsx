@@ -672,10 +672,10 @@ export function SkillDeleteDialog({
         <DialogHeader>
           <DialogTitle>删除skill</DialogTitle>
           <DialogDescription>
-            将“{skill.displayName}”从skills移除。
+            永久删除“{skill.displayName}”及所有版本文件。
             {assignedCount
-              ? `该skill有 ${assignedCount} 项分配，请先撤销分配后删除。`
-              : '历史轮次保留其固定执行版本，后续不能再分配或调用此skill。'}
+              ? `同时删除 ${assignedCount} 项范围分配，相关会话不能再调用此skill。`
+              : '删除后无法恢复。'}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -687,7 +687,7 @@ export function SkillDeleteDialog({
           </Button>
           <Button
             variant="destructive"
-            disabled={busy || assignedCount > 0}
+            disabled={busy}
             onClick={async () => {
               if (await mutate({ action: 'delete', skillId: skill.id }, 'skill已从中央库移除。'))
                 onClose()

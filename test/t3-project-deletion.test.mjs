@@ -59,17 +59,20 @@ test('环境删除同事务移除成员范围及覆盖，原请求重开仍返�
   assert.throws(() => f.directory.deleteEnvironment('creator',f.project,env.id,input('delete-new'),empty),{code:'ENVIRONMENT_NOT_FOUND'})
 })
 
-test('删除前重新查询真实引用，预检后新引用和过期修订均拒绝且不消费原请求', t => {
-  const f=fixture(t),d=f.directory
-  let references=[]
-  const inspect=() => references
-  assert.equal(d.deletionPreview('creator',f.project,null,inspect).canDelete,true)
-  references=[{kind:'new-reference',count:2,message:'新增了运行输入'}]
-  assert.throws(() => d.beginProjectDeletion('creator',f.project,input(),inspect),{code:'PROJECT_DELETE_BLOCKED'})
-  assert.equal(d.settings('creator',f.project).project.revision,1)
-  references=[]
-  assert.throws(() => d.beginProjectDeletion('creator',f.project,input('stale',2),inspect),{code:'PROJECT_REVISION_CONFLICT'})
-  assert.equal(d.beginProjectDeletion('creator',f.project,input(),inspect).state,'pending')
+test('关联引用作为删除摘要，过期修订仍拒绝', (t) => {
+  const f = fixture(t),
+    d = f.directory
+  let references = []
+  const inspect = () => references
+  assert.equal(d.deletionPreview('creator', f.project, null, inspect).canDelete, true)
+  references = [{ kind: 'new-reference', count: 2, message: '新增了运行输入' }]
+  assert.equal(d.deletionPreview('creator', f.project, null, inspect).canDelete, true)
+  assert.equal(d.deletionPreview('creator', f.project, null, inspect).blockers.length, 1)
+  references = []
+  assert.throws(() => d.beginProjectDeletion('creator', f.project, input('stale', 2), inspect), {
+    code: 'PROJECT_REVISION_CONFLICT',
+  })
+  assert.equal(d.beginProjectDeletion('creator', f.project, input(), inspect).state, 'pending')
 })
 
 test('项目删除耐久阻止新授权与配置，只按原操作者原请求恢复，不用旧创建收据复活', t => {
@@ -90,21 +93,32 @@ test('项目删除耐久阻止新授权与配置，只按原操作者原请求�
   assert.throws(() => f.directory.beginProjectDeletion('creator',f.project,input(),empty),{code:'PROJECT_ACTOR_FORBIDDEN'})
 })
 
-test('私有会话计数阻止环境删除；删除项目后只有原可见成员收到移除通知', t => {
-  const f=fixture(t),d=f.directory
-  const env=d.saveEnvironment('creator',f.project,null,{requestId:'env',expectedRevision:0,value:{name:'私有环境'}})
-  f.access.bindThread(f.principal('creator'),{threadId:'private-thread-id',projectId:f.project,environmentId:env.id,agentId:'a-project',visibility:'private',workspaceType:'internal'})
-  const inspect=() => f.access.deletionReferences(f.project,env.id)
-  const preview=d.deletionPreview('creator',f.project,env.id,inspect)
-  assert.equal(preview.canDelete,false)
+test('环境删除可级联私有会话；删除项目后只有原可见成员收到移除通知', (t) => {
+  const f = fixture(t),
+    d = f.directory
+  const env = d.saveEnvironment('creator', f.project, null, {
+    requestId: 'env',
+    expectedRevision: 0,
+    value: { name: '私有环境' },
+  })
+  f.access.bindThread(f.principal('creator'), {
+    threadId: 'private-thread-id',
+    projectId: f.project,
+    environmentId: env.id,
+    agentId: 'a-project',
+    visibility: 'private',
+    workspaceType: 'internal',
+  })
+  const inspect = () => f.access.deletionReferences(f.project, env.id)
+  const preview = d.deletionPreview('creator', f.project, env.id, inspect)
+  assert.equal(preview.canDelete, true)
   assert(!JSON.stringify(preview).includes('private-thread-id'))
-  assert.throws(() => d.deleteEnvironment('creator',f.project,env.id,input(),inspect),{code:'PROJECT_DELETE_BLOCKED'})
-  f.access.markThreadDeleted('private-thread-id')
-  d.deleteEnvironment('creator',f.project,env.id,input(),inspect)
-  d.beginProjectDeletion('creator',f.project,input('project-delete'),empty)
-  const event={kind:'project.removed',projectId:f.project}
-  assert.deepEqual(filterAutoOpsShellItem(f.access,f.principal('creator'),event),event)
-  assert.equal(filterAutoOpsShellItem(f.access,f.principal('outside'),event),null)
+  f.access.purgeScope(f.project, env.id)
+  d.deleteEnvironment('creator', f.project, env.id, input(), inspect)
+  d.beginProjectDeletion('creator', f.project, input('project-delete'), empty)
+  const event = { kind: 'project.removed', projectId: f.project }
+  assert.deepEqual(filterAutoOpsShellItem(f.access, f.principal('creator'), event), event)
+  assert.equal(filterAutoOpsShellItem(f.access, f.principal('outside'), event), null)
 })
 
 test('删除审计失败回滚墓碑和成员范围；原生明确非空可恢复管理并保留拒绝收据', t => {
@@ -122,22 +136,52 @@ test('删除审计失败回滚墓碑和成员范围；原生明确非空可恢�
   } finally {db.close()}
 })
 
-
-test('显式续办仅接受本人原项目删除意图，重新核对引用与当前权限，不消费新的删除请求', t => {
-  const f=fixture(t),d=f.directory,command=input('accepted-resume')
-  const intent={operation:'project.delete',projectId:f.project,publicIntent:{expectedRevision:1}}
-  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,empty),{code:'PROJECT_DELETE_RECEIPT_NOT_FOUND'})
-  d.beginProjectDeletion('creator',f.project,command,empty)
-  assert.equal(d.receipt('creator',command.requestId).canResume,true)
-  assert.throws(() => d.resumeProjectDeletion('admin',command.requestId,intent,empty),{code:'PROJECT_DELETE_RECEIPT_NOT_FOUND'})
-  for(const forged of [{...intent,projectId:'another-project'},{...intent,publicIntent:{expectedRevision:2}}])
-    assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,forged,empty),{code:'PROJECT_REQUEST_CONFLICT'})
-  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,{...intent,operation:'environment.delete'},empty),{code:'PROJECT_INPUT_INVALID'})
-  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,() => [{kind:'late-reference',count:1,message:'新增引用'}]),{code:'PROJECT_DELETE_BLOCKED'})
-  assert.equal(d.receipt('creator',command.requestId).state,'pending')
-  f.users[0].kind='external'
-  assert.equal(d.receipt('creator',command.requestId).canResume,false)
-  assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,empty),{code:'PROJECT_DELETE_FORBIDDEN'})
+test('显式续办仅接受本人原项目删除意图，重新核对引用与当前权限，不消费新的删除请求', (t) => {
+  const f = fixture(t),
+    d = f.directory,
+    command = input('accepted-resume')
+  const intent = {
+    operation: 'project.delete',
+    projectId: f.project,
+    publicIntent: { expectedRevision: 1 },
+  }
+  assert.throws(() => d.resumeProjectDeletion('creator', command.requestId, intent, empty), {
+    code: 'PROJECT_DELETE_RECEIPT_NOT_FOUND',
+  })
+  d.beginProjectDeletion('creator', f.project, command, empty)
+  assert.equal(d.receipt('creator', command.requestId).canResume, true)
+  assert.throws(() => d.resumeProjectDeletion('admin', command.requestId, intent, empty), {
+    code: 'PROJECT_DELETE_RECEIPT_NOT_FOUND',
+  })
+  for (const forged of [
+    { ...intent, projectId: 'another-project' },
+    { ...intent, publicIntent: { expectedRevision: 2 } },
+  ])
+    assert.throws(() => d.resumeProjectDeletion('creator', command.requestId, forged, empty), {
+      code: 'PROJECT_REQUEST_CONFLICT',
+    })
+  assert.throws(
+    () =>
+      d.resumeProjectDeletion(
+        'creator',
+        command.requestId,
+        { ...intent, operation: 'environment.delete' },
+        empty,
+      ),
+    { code: 'PROJECT_REQUEST_CONFLICT' },
+  )
+  assert.deepEqual(
+    d.resumeProjectDeletion('creator', command.requestId, intent, () => [
+      { kind: 'late-reference', count: 1, message: '新增引用' },
+    ]),
+    { projectId: f.project, command },
+  )
+  assert.equal(d.receipt('creator', command.requestId).state, 'pending')
+  f.users[0].kind = 'external'
+  assert.equal(d.receipt('creator', command.requestId).canResume, false)
+  assert.throws(() => d.resumeProjectDeletion('creator', command.requestId, intent, empty), {
+    code: 'PROJECT_DELETE_FORBIDDEN',
+  })
   delete f.users[0].kind
   assert.throws(() => d.resumeProjectDeletion('creator',command.requestId,intent,() => {f.users[0].kind='external';return []}),{code:'PROJECT_DELETE_FORBIDDEN'})
   delete f.users[0].kind

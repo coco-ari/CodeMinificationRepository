@@ -1,3 +1,4 @@
+import { DirectoryCommand } from '../../../autoops/contracts/project-directory.ts'
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off -- 独立 Node 资料所有者管理 SQLite 收据和可释放的到期唤醒，不依赖 T3 Effect 宿主。
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
@@ -130,7 +131,10 @@ export function createWorkspaceUpdates({
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const database = openWorkspaceUpdateDatabase(join(directory, 'state.sqlite'))
   const { db, transaction } = database
-  const works = new Map<string, { controller: AbortController; work: Promise<WorkspaceTask> }>()
+  const works = new Map<
+    string,
+    { controller: AbortController; scope: WorkspaceUpdateScope; work: Promise<WorkspaceTask> }
+  >()
   let stopping = false
   let closed = false
   let ticking: Promise<void> | undefined
@@ -513,7 +517,7 @@ export function createWorkspaceUpdates({
           ).run('WORKSPACE_UPDATE_UNKNOWN', project, input.requestId)
         throw error
       })
-    works.set(key, { controller, work })
+    works.set(key, { controller, scope, work })
     void work.finally(() => works.delete(key)).catch(() => {})
     return work
   }
@@ -602,6 +606,72 @@ export function createWorkspaceUpdates({
     timer.unref()
   }
   const api = {
+    async remove(
+      project: string,
+      scope: WorkspaceUpdateScope,
+      unknownInput: unknown,
+      actor: string,
+    ) {
+      ensureAccepting()
+      requireAccess(project, actor, scope, 'manage')
+      const input = decodeContract(DirectoryCommand, unknownInput),
+        fingerprint = digest({ operation: 'remove', scope, input })
+      const prior = db
+        .prepare('SELECT * FROM workspace_update_receipts WHERE project_id=? AND request_id=?')
+        .get(project, input.requestId)
+      if (prior) {
+        if (prior.actor_id !== actor || prior.fingerprint !== fingerprint)
+          fail(409, 'WORKSPACE_UPDATE_REQUEST_CONFLICT', '请求已用于其他操作')
+        return JSON.parse(String(prior.result)) as { deleted: true }
+      }
+      const old = planRow(project, scope)
+      if (Number(old?.revision ?? 0) !== input.expectedRevision)
+        fail(409, 'WORKSPACE_UPDATE_REVISION_CONFLICT', '更新设置已变化，请刷新后重试')
+      db.prepare(
+        'UPDATE workspace_update_plans SET enabled=0,next_run_at=NULL WHERE project_id=? AND scope=?',
+      ).run(project, scope)
+      const jobs = [...works.entries()].filter(
+        ([key, job]) => JSON.parse(key)[0] === project && job.scope === scope,
+      )
+      for (const [, job] of jobs) job.controller.abort()
+      await Promise.allSettled(jobs.map(([, job]) => job.work))
+      return transaction.run(() => {
+        requireAccess(project, actor, scope, 'manage')
+        if (Number(planRow(project, scope)?.revision ?? 0) !== input.expectedRevision)
+          fail(409, 'WORKSPACE_UPDATE_REVISION_CONFLICT', '更新设置已变化，请刷新后重试')
+        for (const table of [
+          'workspace_update_runs',
+          'workspace_update_receipts',
+          'workspace_update_audit',
+          'workspace_update_plans',
+        ])
+          db.prepare(`DELETE FROM ${table} WHERE project_id=? AND scope=?`).run(project, scope)
+        const result = { deleted: true as const }
+        db.prepare('INSERT INTO workspace_update_receipts VALUES(?,?,?,?,?,?)').run(
+          project,
+          input.requestId,
+          actor,
+          scope,
+          fingerprint,
+          JSON.stringify(result),
+        )
+        return result
+      })
+    },
+    async purgeProject(project: string) {
+      const jobs = [...works.entries()].filter(([key]) => JSON.parse(key)[0] === project)
+      for (const [, job] of jobs) job.controller.abort()
+      await Promise.allSettled(jobs.map(([, job]) => job.work))
+      transaction.run(() => {
+        for (const table of [
+          'workspace_update_runs',
+          'workspace_update_receipts',
+          'workspace_update_audit',
+          'workspace_update_plans',
+        ])
+          db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(project)
+      })
+    },
     deletionReferences(project: string, environmentId?: string) {
       if (environmentId !== undefined) return []
       const row = db

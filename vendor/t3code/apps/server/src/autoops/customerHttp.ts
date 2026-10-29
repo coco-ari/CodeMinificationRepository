@@ -1,11 +1,14 @@
 // Owner-facing registration and device-only metadata transport. No chat/run state lives here.
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Serve a fixed administrator-configured build artifact; never accept a client path.
-import { readFile } from "node:fs/promises";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
-import { configuredAutoOpsAccess } from "../../../../../../agent-demo/t3-adapters/access.mjs";
+import { readFile } from 'node:fs/promises'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
+import * as EnvironmentAuth from '../auth/EnvironmentAuth.ts'
+import {
+  configuredAutoOpsAccess,
+  configuredAutoOpsAssistantDirectory,
+} from '../../../../../../agent-demo/t3-adapters/access.mjs'
 import {
   normalizeExecutionBinding,
   type CustomerCapabilityInput,

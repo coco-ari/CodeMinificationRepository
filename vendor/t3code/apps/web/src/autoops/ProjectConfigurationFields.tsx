@@ -156,6 +156,12 @@ export function ProjectConfigurationFields({
       </div>
     )
   }
+  if (editor.kind === 'member' && editor.remove)
+    return (
+      <p>
+        确认移除“{editor.name}”？该成员的项目权限、环境授权和专属助手分配将一并删除；账号本身保留。
+      </p>
+    )
   if (editor.kind === 'member') {
     const value = editor.value,
       project = editor.context.project

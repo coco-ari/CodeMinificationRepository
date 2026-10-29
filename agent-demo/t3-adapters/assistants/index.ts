@@ -6,11 +6,12 @@ import * as S from 'effect/Schema'
 import * as DateTime from 'effect/DateTime'
 import * as C from '../../../autoops/contracts/assistants.ts'
 import * as R from '../../../autoops/contracts/project-management-receipts.ts'
-import { DirectoryId } from '../../../autoops/contracts/project-directory.ts'
+import { DirectoryCommand, DirectoryId } from '../../../autoops/contracts/project-directory.ts'
 import type { ProjectMembership } from '../../../autoops/contracts/runtime.ts'
 import type { CustomerRegistry } from '../customer-registry.mjs'
 import { openDatabase } from '../../../autoops/server/platform/database.ts'
 import { migrations } from './schema.ts'
+import { createSkillLibrary } from '../skill-library.mjs'
 import { SharedExecutionScope } from '../../../autoops/contracts/shared-execution.ts'
 import type { SharedProfileVerifier } from '../shared-profile-approvals.ts'
 import { validateRoleDefault, validateSharedAllocationConfiguration } from './allocation-policy.ts'
@@ -361,8 +362,156 @@ export function createAssistantDirectory(options: Options) {
       )
       .all(id)
       .map((row) => shareFor(id, String(row.project_id))!)
+  const purgePreset = (id: string) => {
+    createSkillLibrary(options.dataDir).removeAssignments({ assistantId: id })
+    for (const row of db.prepare('SELECT * FROM assistant_allocations').all()) {
+      const ids = JSON.parse(String(row.assistant_ids_json)) as string[]
+      if (!ids.includes(id) && row.default_assistant_id !== id) continue
+      db.prepare(
+        'UPDATE assistant_allocations SET assistant_ids_json=?,default_assistant_id=?,revision=revision+1 WHERE project_id=? AND target_kind=? AND target_id=?',
+      ).run(
+        JSON.stringify(ids.filter((value) => value !== id)),
+        row.default_assistant_id === id ? null : (row.default_assistant_id ?? null),
+        row.project_id!,
+        row.target_kind!,
+        row.target_id!,
+      )
+    }
+    db.prepare(
+      "DELETE FROM assistant_execution_grants WHERE json_extract(value_json,'$.assistantId')=?",
+    ).run(id)
+    db.prepare('DELETE FROM assistant_allocation_sources WHERE assistant_id=?').run(id)
+    db.prepare('DELETE FROM assistant_provider_shares WHERE assistant_id=?').run(id)
+    db.prepare('DELETE FROM assistant_versions WHERE assistant_id=?').run(id)
+    // 清除带有旧配置内容的历史收据，删除本身只留下最小结果供断线恢复。
+    db.prepare(
+      "DELETE FROM assistant_receipts WHERE json_extract(result,'$.id')=? OR json_extract(result,'$.assistantId')=? OR EXISTS (SELECT 1 FROM json_each(result,'$.assistantIds') WHERE value=?)",
+    ).run(id, id, id)
+    db.prepare('DELETE FROM assistant_audit WHERE subject_id=?').run(id)
+    db.prepare('DELETE FROM assistant_presets WHERE id=?').run(id)
+  }
   return {
     catalog,
+    remove(actor: string, project: string, id: string, input: unknown) {
+      const value = decode(DirectoryCommand, input)
+      return command(
+        actor,
+        project,
+        `preset.delete:${decode(DirectoryId, id)}`,
+        value.requestId,
+        value,
+        id,
+        () => {
+          const item = preset(project, id)
+          if (item.projectId !== project || item.providedBy)
+            fail(403, 'ASSISTANT_PROVIDER_MANAGEMENT_REQUIRED', '请由提供者在我的助手中删除')
+          checkRevision(item.revision, value.expectedRevision)
+          purgePreset(id)
+          return {
+            deleted: true as const,
+            id,
+            projectId: project,
+            revision: value.expectedRevision + 1,
+          }
+        },
+      )
+    },
+    removeProvided(actor: string, id: string, input: unknown) {
+      requireProvider(actor)
+      const value = decode(DirectoryCommand, input)
+      const receipt = db
+        .prepare(
+          'SELECT project_id FROM assistant_receipts WHERE request_id=? AND actor_id=? AND operation=?',
+        )
+        .get(value.requestId, actor, `provider.preset.delete:${id}`)
+      const project = receipt ? String(receipt.project_id) : ownedPreset(actor, id).projectId
+      return command(
+        actor,
+        project,
+        `provider.preset.delete:${id}`,
+        value.requestId,
+        value,
+        id,
+        () => {
+          const item = ownedPreset(actor, id)
+          checkRevision(item.revision, value.expectedRevision)
+          purgePreset(id)
+          return {
+            deleted: true as const,
+            id,
+            projectId: project,
+            revision: value.expectedRevision + 1,
+          }
+        },
+        () => requireProvider(actor),
+      )
+    },
+    purgeDevice(ownerId: string, deviceId: string, workspaceId?: string) {
+      transaction.run(() => {
+        for (const row of db
+          .prepare('SELECT id,value_json FROM assistant_presets WHERE provider_id=?')
+          .all(ownerId)) {
+          const details = JSON.parse(String(row.value_json)) as C.AssistantDetails
+          const binding = details.configuration.executionBinding
+          if (
+            binding?.kind === 'customer' &&
+            binding.deviceId === deviceId &&
+            (workspaceId === undefined || binding.registeredWorkspaceId === workspaceId)
+          )
+            purgePreset(String(row.id))
+        }
+      })
+    },
+    purgeMember(project: string, user: string) {
+      transaction.run(() => {
+        db.prepare(
+          "DELETE FROM assistant_allocations WHERE project_id=? AND target_kind='member' AND target_id=?",
+        ).run(project, user)
+        db.prepare(
+          "DELETE FROM assistant_allocation_sources WHERE project_id=? AND target_kind='member' AND target_id=?",
+        ).run(project, user)
+      })
+    },
+    purgeUser(user: string) {
+      transaction.run(() => {
+        for (const row of db
+          .prepare('SELECT id FROM assistant_presets WHERE provider_id=?')
+          .all(user))
+          purgePreset(String(row.id))
+        db.prepare(
+          "DELETE FROM assistant_allocations WHERE target_kind='member' AND target_id=?",
+        ).run(user)
+        db.prepare('DELETE FROM assistant_receipts WHERE actor_id=?').run(user)
+        db.prepare('DELETE FROM assistant_audit WHERE actor_id=?').run(user)
+        db.prepare(
+          "DELETE FROM assistant_execution_grants WHERE json_extract(value_json,'$.actorId')=? OR json_extract(value_json,'$.providerId')=?",
+        ).run(user, user)
+      })
+    },
+    purgeScope(project: string, environment?: string) {
+      return transaction.run(() => {
+        for (const row of db
+          .prepare('SELECT id,value_json FROM assistant_presets WHERE project_id=?')
+          .all(project)) {
+          const details = JSON.parse(String(row.value_json)) as C.AssistantDetails
+          if (environment === undefined || details.configuration.environmentId === environment)
+            purgePreset(String(row.id))
+        }
+        if (environment === undefined) {
+          for (const table of [
+            'assistant_allocation_sources',
+            'assistant_provider_shares',
+            'assistant_allocations',
+            'assistant_receipts',
+            'assistant_audit',
+          ])
+            db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(project)
+          db.prepare(
+            "DELETE FROM assistant_execution_grants WHERE json_extract(value_json,'$.projectId')=?",
+          ).run(project)
+        }
+      })
+    },
     executionGrant(threadId: string, runId: string): SharedExecutionScope | undefined {
       const row = db.prepare('SELECT value_json FROM assistant_execution_grants WHERE thread_id=? AND run_id=?').get(threadId,runId)
       return row ? this.requireExecutionScope(decode(SharedExecutionScope,JSON.parse(String(row.value_json)))) : undefined
@@ -471,7 +620,8 @@ export function createAssistantDirectory(options: Options) {
           'SELECT * FROM assistant_receipts WHERE request_id=? AND actor_id=? AND project_id=?',
         )
         .get(requestId, actor, project)
-      if (!row || !/^(?:preset\.save:|allocation\.save:)/.test(String(row.operation))) return null
+      if (!row || !/^(?:preset\.(?:save|delete):|allocation\.save:)/.test(String(row.operation)))
+        return null
       let available = true
       try {
         manage(actor, project)
@@ -489,8 +639,11 @@ export function createAssistantDirectory(options: Options) {
           R.projectAssistantReceiptIntent(operation, payload) !== encoded
         )
           throw new Error('invalid intent')
+        const isDeletion = operation.startsWith('preset.delete:')
         const isPreset = operation.startsWith('preset.save:')
-        const result = isPreset
+        const result = isDeletion
+          ? S.decodeUnknownSync(R.ProjectAssistantDeletion)(JSON.parse(String(row.result)))
+          : isPreset
           ? S.decodeUnknownSync(R.ProjectAssistantPreset, { onExcessProperty: 'error' })(
               JSON.parse(String(row.result)),
             )
@@ -508,6 +661,9 @@ export function createAssistantDirectory(options: Options) {
             (operation !== 'preset.save:new' && preset.id !== operation.slice('preset.save:'.length))
           )
             throw new Error('invalid preset')
+        } else if (isDeletion) {
+          if (!('id' in result) || result.id !== operation.slice('preset.delete:'.length))
+            throw new Error('invalid deletion')
         } else if (operation !== `allocation.save:${payload.target.kind}:${payload.target.id}`)
           throw new Error('invalid target')
         return S.decodeUnknownSync(R.ProjectAssistantRequestReceipt, { onExcessProperty: 'error' })({

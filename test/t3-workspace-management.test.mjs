@@ -282,7 +282,7 @@ async function fixture(t) {
   }
 }
 
-test('多仓与产品运维资料固定为真实版本，显式服务上下文打包及二进制外发复核保持隔离', async (t) => {
+test('多仓与产品运维资料固定为真实版本，显式服务上下文打包及自动外发保持隔离', async (t) => {
   const f = await fixture(t)
   const credential = f.credentials.create(owner, projectId, {
     requestId: randomUUID(),
@@ -454,12 +454,12 @@ test('多仓与产品运维资料固定为真实版本，显式服务上下文�
   const review = f.store
     .overview(projectId)
     .externalVersions.find((entry) => entry.id === external.versionId)
-  assert.equal(review.status, 'pending_review')
+  assert.equal(review.status, 'published')
   assert.equal(
-    review.report.pendingFiles.some((entry) => entry.path === 'docs/运维/运行.pdf'),
+    review.report.excludedFiles.includes('docs/运维/运行.pdf'),
     true,
   )
-  assert.throws(() => f.store.getVersion(projectId, review.id))
+  assert.equal(f.store.getVersion(projectId, review.id).id,review.id)
   assert.equal(
     Buffer.compare(
       Buffer.from(f.store.versionFile(projectId, version.id, 'docs/运维/运行.pdf').bytes),

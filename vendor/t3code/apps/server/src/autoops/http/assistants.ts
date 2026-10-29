@@ -8,7 +8,10 @@ import type { BusinessHttpContext } from './context.ts'
 import { responseError } from './responses.ts'
 
 export function assistantsRoutes({ access, principal }: BusinessHttpContext) {
-  const handle = (operation: 'list' | 'settings' | 'create' | 'save' | 'assign' | 'choices' | 'receipt') =>
+  const handle = (
+    operation:
+      'list' | 'settings' | 'create' | 'save' | 'assign' | 'choices' | 'receipt' | 'delete',
+  ) =>
     Effect.gen(function* () {
       const current = yield* principal
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -54,7 +57,9 @@ export function assistantsRoutes({ access, principal }: BusinessHttpContext) {
         })),
       )
       const value = yield* Effect.try(() =>
-        operation === 'assign'
+        operation === 'delete'
+          ? directory.remove(current.id, project, decodeURIComponent(parts[6] ?? ''), input)
+          : operation === 'assign'
           ? directory.assign(current.id, project, input)
           : directory.save(
               current.id,
@@ -84,6 +89,7 @@ export function assistantsRoutes({ access, principal }: BusinessHttpContext) {
     HttpRouter.add('GET', `${base}/assistants/choices`, handle('choices')),
     HttpRouter.add('POST', `${base}/assistants`, handle('create')),
     HttpRouter.add('POST', `${base}/assistants/:assistantId`, handle('save')),
+    HttpRouter.add('DELETE', `${base}/assistants/:assistantId`, handle('delete')),
     HttpRouter.add('POST', `${base}/assistant-allocations`, handle('assign')),
   )
 }

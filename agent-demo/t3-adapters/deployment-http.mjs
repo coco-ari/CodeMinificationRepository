@@ -138,6 +138,18 @@ async function routeDeploymentRequest({ access, store, principal, url, method, i
           )),
     }
   }
+  if (method === 'DELETE' && parts.length === 2 && ['services', 'targets'].includes(parts[0])) {
+    const kind = parts[0] === 'services' ? 'service' : 'target'
+    if (kind === 'target') requireEnvironment(body.environmentId)
+    authorize(
+      kind === 'service' ? 'service.configure' : 'configure',
+      kind === 'target' ? body.environmentId : undefined,
+    )
+    return {
+      status: 200,
+      body: await store.removeConfiguration(projectId, kind, parts[1], { ...body, actor }),
+    }
+  }
   if (method === 'POST' && parts.length === 1 && parts[0] === 'services') {
     authorize('service.configure')
     return { status: 200, body: await store.saveService(projectId, { ...body, actor }) }

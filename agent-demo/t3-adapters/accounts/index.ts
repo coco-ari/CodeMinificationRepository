@@ -11,7 +11,7 @@ import {
   identitySecrets,
   hashImportedPassword,
 } from '../../../autoops/server/modules/identity/index.ts'
-import { migration } from './schema.ts'
+import { migration, deletionMigration } from './schema.ts'
 
 type LegacyUser = {
   id: string
@@ -131,6 +131,8 @@ export function createRuntimeAccounts({
   const revision = (id: string, expected: number) => {
     const row = rowFor(id)
     if (!row) return fail(404, 'ACCOUNT_NOT_FOUND', '账号不存在')
+    if (db.prepare('SELECT 1 FROM runtime_account_deletions WHERE target_id=?').get(id))
+      fail(409, 'ACCOUNT_DELETING', '账号正在删除，请继续原删除')
     if (row.revision !== expected)
       fail(409, 'ACCOUNT_REVISION_CONFLICT', '账号已变化，请刷新后重新确认')
     return row
@@ -161,25 +163,30 @@ export function createRuntimeAccounts({
       const applied = db
         .prepare('SELECT * FROM runtime_account_schema_migrations ORDER BY version')
         .all()
+      const migrations = [migration, deletionMigration]
       if (
-        applied.length > 1 ||
         applied.some(
           (row) =>
-            row.version !== migration.version ||
-            row.name !== migration.name ||
-            row.checksum !== digest(migration.sql),
+            !migrations.some(
+              (value) =>
+                value.version === row.version &&
+                value.name === row.name &&
+                digest(value.sql) === row.checksum,
+            ),
         )
       )
         fail(503, 'ACCOUNT_SCHEMA_INVALID', '账号升级版本未知或校验失败')
-      if (!applied.length) {
-        db.exec(migration.sql)
-        db.prepare('INSERT INTO runtime_account_schema_migrations VALUES(?,?,?)').run(
-          migration.version,
-          migration.name,
-          digest(migration.sql),
-        )
-        db.prepare('INSERT INTO runtime_account_metadata VALUES(1,0,?)').run(Number(existing))
-      }
+      for (const change of migrations)
+        if (!applied.some((row) => row.version === change.version)) {
+          db.exec(change.sql)
+          db.prepare('INSERT INTO runtime_account_schema_migrations VALUES(?,?,?)').run(
+            change.version,
+            change.name,
+            digest(change.sql),
+          )
+          if (change.version === 1)
+            db.prepare('INSERT INTO runtime_account_metadata VALUES(1,0,?)').run(Number(existing))
+        }
       db.exec(
         'CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,uid TEXT NOT NULL,csrf TEXT NOT NULL,expires INTEGER NOT NULL)',
       )
@@ -531,6 +538,101 @@ export function createRuntimeAccounts({
               assertCurrent,
             )) as C.RuntimeAccount)
           : outcome.result
+      })
+    },
+    remove(
+      actor: string,
+      target: string,
+      input: unknown,
+      purge: (target: string) => Promise<void>,
+      assertCurrent?: () => void,
+    ): Promise<C.AccountDeletionResult> {
+      return run(async () => {
+        admin(actor)
+        decode(DirectoryId, target)
+        const command = decode(C.DeleteAccountCommand, input)
+        const existing = transaction(() => {
+          assertCurrent?.()
+          admin(actor)
+          const original = prior(actor, command.requestId, 'delete', target, command)
+          if (original) return JSON.parse(String(original.result_json)) as C.AccountDeletionResult
+          const row = rowFor(target)
+          if (!row) return fail(404, 'ACCOUNT_NOT_FOUND', '账号不存在')
+          if (row.revision !== command.expectedRevision)
+            fail(409, 'ACCOUNT_REVISION_CONFLICT', '账号已变化，请刷新后重新确认')
+          if (
+            row.platform_admin === 1 &&
+            row.enabled === 1 &&
+            Number(
+              db
+                .prepare(
+                  'SELECT count(*) AS n FROM runtime_accounts WHERE enabled=1 AND platform_admin=1',
+                )
+                .get()!.n,
+            ) < 2
+          )
+            fail(409, 'ACCOUNT_LAST_ADMIN', '请先创建另一个有效平台管理员，再删除此账号')
+          db.prepare('INSERT OR IGNORE INTO runtime_account_deletions VALUES(?,?,?,?,?)').run(
+            target,
+            actor,
+            command.requestId,
+            command.expectedRevision,
+            new Date(now()).toISOString(),
+          )
+          db.prepare('UPDATE runtime_accounts SET enabled=0 WHERE id=?').run(target)
+          db.prepare('DELETE FROM sessions WHERE uid=?').run(target)
+          return undefined
+        })
+        if (existing) return existing
+        try {
+          await purge(target)
+        } catch (cause) {
+          throw Object.assign(
+            new AccountError(
+              503,
+              'ACCOUNT_DELETE_PENDING',
+              '账号已停用，关联清理未完成，请继续删除',
+            ),
+            { cause },
+          )
+        }
+        return transaction(() => {
+          if (actor !== target) {
+            assertCurrent?.()
+            admin(actor)
+          }
+          const priorResult = prior(actor, command.requestId, 'delete', target, command)
+          if (priorResult) return JSON.parse(String(priorResult.result_json)) as C.AccountDeletionResult
+          const result: C.AccountDeletionResult = {
+            deleted: true,
+            userId: target,
+            revision: command.expectedRevision + 1,
+          }
+          db.prepare("DELETE FROM runtime_account_requests WHERE actor_id=? OR (target_id=? AND operation!='delete')").run(
+            target,
+            target,
+          )
+          db.prepare('DELETE FROM runtime_account_audit WHERE actor_id=? OR target_id=?').run(
+            target,
+            target,
+          )
+          db.prepare('DELETE FROM sessions WHERE uid=?').run(target)
+          db.prepare('DELETE FROM runtime_accounts WHERE id=?').run(target)
+          db.prepare('DELETE FROM runtime_account_deletions WHERE target_id=?').run(target)
+          if (actor !== target)
+            db.prepare('INSERT INTO runtime_account_requests VALUES(?,?,?,?,?,?,?,?,?)').run(
+              actor,
+              command.requestId,
+              fingerprint('delete', target, command),
+              'delete',
+              target,
+              JSON.stringify(result),
+              new Date(now()).toISOString(),
+              '',
+              '',
+            )
+          return result
+        })
       })
     },
     setEnabled(
