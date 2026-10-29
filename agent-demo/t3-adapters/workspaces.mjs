@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, statfsSync, readdirSync } from 'node:fs'
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve, dirname, extname } from 'node:path'
 import { WorkspaceError, MAX_FILES, MAX_BYTES, sha, safePath, textOf, checkedFile, checkImportFiles, scan } from './workspace-files.mjs'
 import { createWorkspaceJobs } from './workspace-jobs.mjs'
 import { buildWorkspacePackages } from './workspace-packages.mjs'
@@ -11,7 +11,9 @@ import { validateBranch } from '../../src/archive.mjs'
 
 // 输入均以不可变版本保存；目录仅是存储布局，授权仍由网关与资料适配器完成。
 const SCHEMA_VERSION = 1
-const RULES_VERSION = 'autoops-secrets-v1'
+const RULES_VERSION = 'autoops-secrets-yml-v2'
+// 脱敏后缀集中维护；当前只处理 .yml，后续按确认范围扩展。
+const REDACTION_EXTENSIONS = new Set(['.yml'])
 const PROCESS_INSTANCE_ID = randomUUID()
 const MAX_READ_BYTES = 64 * 1024
 const STORAGE_RESERVE = 32 * 1024 * 1024
@@ -655,16 +657,20 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         progress('remove_git', '正在移除全部 Git 元数据')
         let replacements = 0
         const excludedFiles = []
-        progress('redacting', '正在脱敏源码、文档和原型')
+        progress('redacting', '正在脱敏 .yml 文件并复制其他文本资料')
         for (const file of sourceIndex.files) {
           if (signal.aborted) throw new Error('cancelled')
-          if (redact(file.path, rules).text !== file.path) fail(422, 'WORKSPACE_SENSITIVE_PATH', '来源文件名包含需要脱敏的文字，请先调整文件名再更新外部工作区')
+          const shouldRedact = REDACTION_EXTENSIONS.has(extname(file.path).toLowerCase())
+          if (shouldRedact && redact(file.path, rules).text !== file.path) fail(422, 'WORKSPACE_SENSITIVE_PATH', '来源文件名包含需要脱敏的文字，请先调整文件名再更新外部工作区')
           const bytes = readFileSync(checkedFile(sourceRoot, file.path))
           const text = file.mime.startsWith('text/') || ['application/json', 'application/xml', 'image/svg+xml'].includes(file.mime) ? textOf(bytes) : null
           // 文本规则不能处理二进制；直接排除，不保存待复核副本。
           if (text === null) { excludedFiles.push(file.path); continue }
-          const result = redact(text, rules); replacements += result.replacements
-          const output = Buffer.from(result.text)
+          let output = bytes
+          if (shouldRedact) {
+            const result = redact(text, rules); replacements += result.replacements
+            output = Buffer.from(result.text)
+          }
           await mkdir(dirname(join(root, file.path)), { recursive: true, mode: 0o700 }); await writeFile(join(root, file.path), output, { mode: file.executable ? 0o700 : 0o600 })
         }
         progress('checking', '正在校验脱敏结果与版本身份')

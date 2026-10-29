@@ -121,7 +121,7 @@ test('内部来源是真实持久化的独立 Git，固定提交与资料身份�
   assert.match(reopened.read('p-test', version.id, 'docs/设计.md').contents, /固定项目资料/)
 })
 
-test('脱敏移除全部Git并覆盖资料/源码，自动排除二进制后直接生效', async (t) => {
+test('外部更新移除全部Git并保留非yml文本，自动排除二进制后直接生效', async (t) => {
   const { store, version } = await fixture(t)
   const input = { sourceVersionId: version.id, rules: [{ find: 'INTERNAL-DEMO', replace: '公开项目' }], requestId: 'external-1' }
   const started = store.startExternal('p-test', input)
@@ -134,7 +134,7 @@ test('脱敏移除全部Git并覆盖资料/源码，自动排除二进制后直�
   assert.equal(external.status, 'published')
   assert.equal(external.name, '外部工作区')
   assert.equal(external.report.removedGitEntries, 2)
-  assert.ok(external.report.replacements >= 4)
+  assert.equal(external.report.replacements, 0)
   assert.deepEqual(external.report.pendingFiles, [])
   assert.deepEqual(external.report.excludedFiles, ['prototypes/示例图片.png'])
   assert.deepEqual(store.managementSearch('p-test', external.id, '示例图片', 20).entries, [])
@@ -142,11 +142,37 @@ test('脱敏移除全部Git并覆盖资料/源码，自动排除二进制后直�
   assert.ok(!store.files('p-test', external.id).some((file) => file.path.split('/').includes('.git')))
   assert.ok(store.files('p-test', external.id).some((file) => file.path === 'frontend/.gitignore'))
   const contents = store.read('p-test', external.id, 'backend/.env.example').contents
-  assert.match(contents, /\[已脱敏\]/)
-  assert.doesNotMatch(contents, /sk-example|example-password|192\.168\.99\.10/)
-  assert.match(store.read('p-test', external.id, 'docs/设计.md').contents, /公开项目/)
+  assert.equal(contents, store.read('p-test', version.id, 'backend/.env.example').contents)
+  assert.equal(store.read('p-test', external.id, 'docs/设计.md').contents, store.read('p-test', version.id, 'docs/设计.md').contents)
   assert.doesNotMatch(JSON.stringify(external), /sk-example|example-password|INTERNAL-DEMO|\/Users\//)
   assert.throws(() => store.readBytes('p-test', external.id, 'prototypes/示例图片.png'), {status:404})
+})
+
+test('仅yml后缀应用默认和自定义脱敏，其他文本逐字节保留且内部不变', async (t) => {
+  const { store } = await fixture(t)
+  const original = Buffer.from('\ufeffpassword: fictional-password\r\nname: INTERNAL-DEMO\r\nhost: 192.168.99.10\r\n')
+  const paths = ['app.yml', 'upper.YML', 'app.yaml', 'App.java', '设计.md', '.env', 'app.yml.txt']
+  const snapshot = await finish(store, store.startSnapshot('p-test', {
+    requestId: 'yml-scope-input', captureId: 'yml-scope-capture', source: { repositories: [] },
+  }, async ({ root }) => {
+    for (const path of paths) writeFileSync(join(root, path), original)
+  }, 'fixture-actor'))
+  assert.equal(snapshot.status, 'completed')
+  const task = await finish(store, store.startExternal('p-test', {
+    sourceVersionId: snapshot.versionId, requestId: 'yml-scope-external',
+    rules: [{ find: 'INTERNAL-DEMO', replace: '公开项目' }],
+  }, 'fixture-actor'))
+  assert.equal(task.status, 'completed')
+  for (const path of paths) {
+    assert.deepEqual(store.readBytes('p-test', snapshot.versionId, path), original)
+    const output = store.readBytes('p-test', task.versionId, path)
+    if (path === 'app.yml' || path === 'upper.YML') {
+      assert.match(output.toString(), /公开项目/)
+      assert.match(output.toString(), /\[已脱敏\]/)
+      assert.doesNotMatch(output.toString(), /fictional-password|INTERNAL-DEMO|192\.168\.99\.10/)
+    } else assert.deepEqual(output, original)
+  }
+  assert.equal(store.getVersion('p-test', task.versionId).report.rulesVersion, 'autoops-secrets-yml-v2')
 })
 
 test('自动排除二进制，不修改内部原件', async (t) => {

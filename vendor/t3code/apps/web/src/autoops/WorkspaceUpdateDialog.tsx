@@ -385,7 +385,7 @@ function WorkspaceUpdateEditor({
                   <fieldset className="space-y-3">
                     <legend className="text-sm font-medium">脱敏规则</legend>
                     <p className="text-xs text-muted-foreground">
-                      手动和自动更新共用以下规则；成功后整体替换外部资料。默认过滤凭证和私钥，排除不能按文本处理的文件。
+                      手动和自动更新共用以下规则，仅对 .yml 文件过滤凭证、私钥并执行替换；其他文本文件原样保留，不能按文本处理的文件仍排除。成功后整体替换外部资料。
                     </p>
                     {rules.map((rule, index) => (
                       <div key={rule.id} className="flex items-start gap-2">
