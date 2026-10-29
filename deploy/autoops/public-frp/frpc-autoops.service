@@ -1,0 +1,29 @@
+[Unit]
+Description=AutoOps 内网 frp 客户端
+After=network-online.target docker.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=autoops-frp
+Group=autoops-frp
+WorkingDirectory=/opt/autoops/frp
+ExecStart=/opt/autoops/frp/releases/frp_0.71.1_linux_amd64/frpc -c /opt/autoops/frp/frpc.toml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=256M
+TasksMax=128
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

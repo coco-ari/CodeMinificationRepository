@@ -1,0 +1,13 @@
+# 宝塔负责外部 WSS；此端口只接收本机反向代理。
+bindAddr = "127.0.0.1"
+bindPort = 17001
+proxyBindAddr = "127.0.0.1"
+allowPorts = [{ single = 18081 }]
+maxPortsPerClient = 1
+auth.method = "token"
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/opt/frp/autoops/secrets/token"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+log.to = "console"
+log.level = "info"
+log.disablePrintColor = true

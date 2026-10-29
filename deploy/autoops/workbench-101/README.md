@@ -18,15 +18,17 @@
 
 ## 节点接入 HTTPS 与内部 CA
 
-浏览器原 HTTP 入口保留，另开放 `https://autops.abroad.besiter.com.cn`（宿主机 443 → Nginx 8443）。`.env` 必须设置 `DEPLOYMENT_PUBLIC_ORIGIN=https://autops.abroad.besiter.com.cn`，只用于节点安装命令与部署 Agent 接口，不改变原 `PUBLIC_ORIGIN` 和模型配置。
+当前公网入口为 `https://auto.996788.xyz`，由公网宝塔 Nginx 经 frp WSS 隧道转发到本机；配置、路径及回退见[公网 frp 运维说明](../public-frp/README.md)。新节点安装来源 `DEPLOYMENT_PUBLIC_ORIGIN=https://auto.996788.xyz`，使用公网可信证书，因此 `DEPLOYMENT_CA_PATH`、`DEPLOYMENT_CA_SHA256` 均留空。已有 appSphere 继续使用原内网 HTTPS 和已登记身份。
+
+浏览器原 HTTP 入口及 `https://autops.abroad.besiter.com.cn`（宿主机 443 → Nginx 8443）继续提供内网访问，以下内部 CA 说明用于内网 HTTPS。模型、镜像、精简模式保持不变。
 
 `/opt/autoops/pki` 保存内部 CA 私钥与签发材料，目录 0700、私钥 0600；`/opt/autoops/tls` 保存服务证书、私钥及公开 CA，私钥 0640、组 101，仅代理只读挂载。服务证书有效期一年，CA 十年；续期后检查 `docker compose exec -T proxy nginx -t` 并 reload。完整备份已纳入这两个目录；不得把私钥提交 Git。
 
 公开 CA 下载地址为 `/autoops-internal-ca.crt`，SHA256 指纹 `AC:4E:A0:21:AE:2C:15:C5:FE:A8:C1:72:E3:C2:4C:C8:AA:26:D6:6F:81:DF:0E:56:48:58:09:8B:9E:AF:F2:5A`。在其他电脑首次信任前通过此独立记录核对指纹；浏览器使用 HTTPS 需将 CA 导入可信根证书。appSphere 已安装到系统信任库，Agent 使用 `NODE_EXTRA_CA_CERTS`，没有关闭 TLS 校验。
 
-`.env` 设置 `DEPLOYMENT_CA_PATH=/autoops-internal-ca.crt` 和 `DEPLOYMENT_CA_SHA256=上述指纹`，Compose 共享环境传入 `AUTOOPS_DEPLOYMENT_CA_PATH` 与 `AUTOOPS_DEPLOYMENT_CA_SHA256`，用于网页展示公开证书下载和信任步骤。二者必须同时配置，路径限制为本站公开相对路径；更新 CA 后同时维护此公开指纹。证书私钥不会下发给节点页面。
+如果以后将新节点接入来源切回内网 HTTPS，再同时设置 `DEPLOYMENT_CA_PATH=/autoops-internal-ca.crt` 和 `DEPLOYMENT_CA_SHA256=上述指纹`。Compose 共享环境传入对应变量，供网页展示证书和信任步骤；当前公网来源不需要内部 CA 指引。二者必须同时配置，路径限制为本站公开相对路径；内部 CA 更新时同步维护此指纹，私钥不下发给节点页面。
 
-Linux 节点先安装 Docker 和 Compose，并信任中心 CA，再执行平台生成的安装命令。安装器默认沿用 `/etc/ssl/certs/ca-certificates.crt`，也可传 `--ca-file /绝对路径/ca.crt`；证书复制到 Agent 数据目录供容器使用。Shell 文件强制 LF，复制按钮复用共享 HTTP 兼容实现。发布证据和配置备份在 `/opt/autoops/releases/node-onboarding-20261029/`，构建目录同名。1 项复制浏览器测试、实际 HTTP 页面复制、Bash 语法、发行清单、HTTPS 和真实节点心跳已验证；备份脚本只做语法检查，没有额外停机全量备份。
+Linux 节点先安装 Docker 和 Compose，再执行平台生成的安装命令；只有使用内部 CA 地址时需要额外安装信任。安装器默认沿用 `/etc/ssl/certs/ca-certificates.crt`，也可传 `--ca-file /绝对路径/ca.crt`；证书复制到 Agent 数据目录供容器使用。Shell 文件强制 LF，复制按钮复用共享 HTTP 兼容实现。首次内部 CA 接入的历史证据和配置备份在 `/opt/autoops/releases/node-onboarding-20261029/`，构建目录同名；该批复制、Bash 语法、发行清单、HTTPS 和真实节点心跳通过。
 
 已接入节点见 [appSphere（102）运维说明](../appsphere-102/README.md)。
 
@@ -100,7 +102,7 @@ Git 源码同步取消旧演示额度，以下配置通过 `/opt/autoops/.env` �
 
 ## 访问与目录
 
-内网域名入口：<http://autops.abroad.besiter.com.cn/>，自动跳转工作台。域名 A 记录为 `10.2.2.115`；应用 `PUBLIC_ORIGIN` 已同步为该 HTTP 域名。运维电脑 `C:\Users\taotao\.ssh\config` 已配置 `ssh workbench`（ubuntu、22 端口、原 SSH 密码），实际登录返回主机名 `workbench`。
+公网入口：<https://auto.996788.xyz/>，使用内网工作台现有账号。内网入口 <http://autops.abroad.besiter.com.cn/> 保留，域名 A 记录为 `10.2.2.115`。`.env` 的公开入口记录和节点安装来源已改为公网 HTTPS；内网 HTTP 继续使用原 Cookie 设置，公网 Nginx 强制登录 Cookie 为 Secure。运维电脑 `C:\Users\taotao\.ssh\config` 已配置 `ssh workbench`（ubuntu、22 端口、原 SSH 密码），实际登录返回主机名 `workbench`。
 
 配置期间服务器一度不可达，用户重启后恢复。重启后 SSH 主机密钥发生变化，用户明确要求接受当前主机并继续连接；旧记录已备份，新 ED25519 指纹固定为 `SHA256:/6gW+ZCmtpu5PmMBtJXM1Xo22agcea56jhRZf1d9B0o`，保存在运维电脑 `.ssh/workbench_known_hosts`。仍启用严格主机密钥检查，未禁用校验。
 
@@ -114,6 +116,7 @@ Git 源码同步取消旧演示额度，以下配置通过 `/opt/autoops/.env` �
 | `/opt/autoops/releases/<提交>/` | 固定发行、构建与验收记录 |
 | `/opt/autoops/build/<提交>/` | 固定源码、Dockerfile、官方原生包及许可证缓存 |
 | `/opt/autoops/scripts/` | 备份等维护脚本 |
+| `/opt/autoops/frp/` | 公网隧道客户端、固定发行、独立配置及受限口令 |
 | `/srv/autoops/data/` | SQLite、附件、原生状态，持久化绑定挂载 |
 | `/srv/autoops/backups/` | 完整停写备份及校验文件，目录 0700 |
 | `/srv/autoops/logs/` | 安装、构建及维护日志 |
@@ -130,7 +133,7 @@ Worker 的 `/tmp` 显式使用 `exec`：Git 的 ASKPASS 辅助脚本由应用写
 
 CPA 使用 `https://x.996788.xyz/v1` 和 `grok-4.6`，仅 Worker 挂载 `/opt/autoops/secrets/cpa-api-key`。用户已明确授权本服务器使用现有客户端密钥。
 
-当前域名同时提供原内网 HTTP 和内部 CA 签发的 HTTPS；节点使用 HTTPS。服务器使用 DHCP，因此端口映射没有绑定某个固定主机地址。建议在 DHCP 服务端为本机 MAC `bc:24:11:cf:54:c8` 保留地址；本次不修改网络配置。地址变化时更新域名 A 记录，域名不变则无需修改应用 `PUBLIC_ORIGIN`。Worker 共用网关网络命名空间，维护时统一通过 Compose 处理服务。
+内网域名同时提供 HTTP 和内部 CA 签发的 HTTPS；新节点默认通过公网可信 HTTPS 接入。服务器使用 DHCP，因此端口映射没有绑定固定主机地址；frpc 使用本机回环连接网关，DHCP 变化不影响公网隧道。建议在 DHCP 服务端为本机 MAC `bc:24:11:cf:54:c8` 保留地址；本次不修改网络配置。地址变化时更新内网 DNS A 记录。Worker 共用网关网络命名空间，维护时统一通过 Compose 处理服务。
 
 ## 常用操作
 

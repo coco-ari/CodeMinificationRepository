@@ -1,0 +1,4 @@
+# Linux 服务与代理配置保持 LF，避免 Windows 检出改变运行文件格式。
+*.toml text eol=lf
+*.service text eol=lf
+*.conf text eol=lf

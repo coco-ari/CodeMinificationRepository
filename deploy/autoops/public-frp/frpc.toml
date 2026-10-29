@@ -1,0 +1,23 @@
+serverAddr = "auto.996788.xyz"
+serverPort = 443
+user = "workbench101"
+loginFailExit = false
+auth.method = "token"
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/opt/autoops/frp/secrets/token"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+transport.protocol = "wss"
+transport.tls.enable = true
+# 显式校验证书及域名，避免 frp 默认的跳过证书校验。
+transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
+transport.tls.serverName = "auto.996788.xyz"
+log.to = "console"
+log.level = "info"
+log.disablePrintColor = true
+
+[[proxies]]
+name = "autoops-web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 28887
+remotePort = 18081
