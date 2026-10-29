@@ -91,6 +91,9 @@ export function autoOpsCommandAllowed(value: string): boolean {
 }
 
 const excludedSettings = new Set([
+  // 上游 T3 的下载和政策入口不属于 AutoOps，完整模式也不恢复。
+  'mobile-app',
+  'privacy-policy',
   'projects-and-threads',
   'text-generation',
   'provider-update-checks',

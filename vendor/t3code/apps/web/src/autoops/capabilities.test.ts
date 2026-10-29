@@ -19,6 +19,22 @@ function bootstrap(lite: boolean) {
 }
 
 describe('AutoOps product profiles', () => {
+  it.each([true, false])('所有 AutoOps 配置都移除上游移动应用与隐私政策入口（精简：%s）', (lite) => {
+    using read = vi.spyOn(host, 'readAutoOpsHost').mockReturnValue(bootstrap(lite))
+    for (const [id, query] of [['mobile-app', '移动应用'], ['privacy-policy', '隐私政策']] as const) {
+      expect(autoOpsSettingAllowed(id)).toBe(false)
+      expect(searchSettings(query)).toEqual([])
+      expect(getSettingsSearchTargetScope(id)).toBeNull()
+    }
+    expect(autoOpsSettingAllowed('app-version')).toBe(true)
+    expect(autoOpsSettingAllowed('open-source-licenses')).toBe(true)
+
+    const { productProfile: _, ...legacyHost } = bootstrap(lite)
+    read.mockReturnValue(legacyHost)
+    expect(searchSettings('移动应用')).toEqual([])
+    expect(searchSettings('隐私政策')).toEqual([])
+  })
+
   it('restores native model and reasoning shortcuts only for catalog-backed hosts', () => {
     using read = vi.spyOn(host, 'readAutoOpsHost').mockReturnValue(bootstrap(true))
     for (const command of ['modelPicker.toggle', 'composer.effort', 'composer.increaseEffort', 'composer.decreaseEffort']) {
