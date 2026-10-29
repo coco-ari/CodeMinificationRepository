@@ -16,7 +16,7 @@ docker compose images --format json > "$destination/images.json"
 docker compose stop -t 90 gateway
 trap 'docker compose up -d' EXIT
 docker compose stop -t 90 worker
-tar -czf "$destination/data-and-config.tar.gz" -C / srv/autoops/data opt/autoops/compose.yaml opt/autoops/.env opt/autoops/secrets opt/autoops/nginx opt/autoops/scripts opt/autoops/README.md
+tar -czf "$destination/data-and-config.tar.gz" -C / srv/autoops/data opt/autoops/compose.yaml opt/autoops/.env opt/autoops/secrets opt/autoops/nginx opt/autoops/tls opt/autoops/pki opt/autoops/scripts opt/autoops/README.md
 tar -tzf "$destination/data-and-config.tar.gz" >/dev/null
 (cd "$destination" && sha256sum data-and-config.tar.gz > SHA256SUMS && sha256sum -c SHA256SUMS)
 printf '备份已完成：%s\n' "$destination"

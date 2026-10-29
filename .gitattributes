@@ -1,2 +1,4 @@
 # PDF 夹具按二进制保存，避免文本差异检查或合并改写文件结构。
 *.pdf binary
+# Linux 安装脚本统一使用 LF，避免 Windows 检出产生无效的 Bash 选项。
+*.sh text eol=lf

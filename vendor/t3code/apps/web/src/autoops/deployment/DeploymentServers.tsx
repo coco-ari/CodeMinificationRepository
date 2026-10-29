@@ -9,6 +9,7 @@ import {
   ServerIcon,
 } from "lucide-react";
 import { useStableCallback } from "~/hooks/useStableCallback";
+import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { SettingsRow, SettingsSection } from "~/components/settings/settingsLayout";
 import { Alert, AlertAction, AlertDescription } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
@@ -575,8 +576,7 @@ function DeploymentServersScope(props: Props & { identity: string }) {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    void navigator.clipboard
-                      .writeText(registration.installCommand!)
+                    void writeTextToClipboard(registration.installCommand!, "节点安装命令")
                       .catch(() => setError("复制失败，请手动选择安装命令复制。"));
                   }}
                 >

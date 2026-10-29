@@ -125,6 +125,18 @@ describe("部署节点管理", () => {
     expect(JSON.stringify(sessionStorage)).not.toContain("isolated-registration-token");
     expect(JSON.stringify(sessionStorage)).not.toContain("isolated-install-command");
     expect(props.onChanged).toHaveBeenCalledOnce();
+    // 模拟内网 HTTP 没有 Clipboard API，仍通过共享兼容实现复制纯文本。
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    const copy = vi.spyOn(document, "execCommand").mockReturnValue(true);
+    try {
+      await page.getByRole("button", { name: "复制安装命令", exact: true }).click();
+      expect(copy).toHaveBeenCalledWith("copy");
+    } finally {
+      copy.mockRestore();
+      if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   it("未知创建结果关闭再打开后只GET原收据，不能另建重复节点", async () => {

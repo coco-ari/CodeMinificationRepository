@@ -34,7 +34,7 @@ x-environment: &environment
   AUTOOPS_CUSTOMER_AGENTS: "1"
   AUTOOPS_DEPLOYMENT_ENABLED: "1"
   AUTOOPS_DEPLOYMENT_AGENT_PORT: "8789"
-  AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?请配置访问入口}
+  AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN: ${DEPLOYMENT_PUBLIC_ORIGIN:?请配置节点接入 HTTPS 地址}
   COOKIE_SECURE: ${COOKIE_SECURE:-0}
   AUTOOPS_WORKSPACE_MAX_BYTES: ${AUTOOPS_WORKSPACE_MAX_BYTES:-1073741824}
   AUTOOPS_WORKSPACE_MAX_FILES: ${AUTOOPS_WORKSPACE_MAX_FILES:-100000}
@@ -58,8 +58,10 @@ services:
       - /tmp:rw,nosuid,nodev,size=64m,uid=101,gid=101
     ports:
       - "80:8080"
+      - "443:8443"
     volumes:
       - /opt/autoops/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /opt/autoops/tls:/etc/nginx/tls:ro
     depends_on:
       gateway:
         condition: service_started

@@ -4,7 +4,21 @@
 
 ## 当前发行与产品模式
 
-当前应用镜像为 `autoops:949f1038`，代码提交 `949f103864b92d401c155ec5e17a2d529ba452e7`；包含源码容量、分支选择、助手简化与上游设置入口修复。本次产品模式修复只调整运行配置，不重建镜像、不回退代码、不清空数据，也不修改模型配置。
+当前应用镜像为 `autoops:node-onboarding-20261029-final`，ID `sha256:708c7c0cdbe0def02a0117e9f6d8b5283da8e3957edd75a4e1642b76e6cb080f`。基于 `autoops:949f1038` 更新前端复制按钮及部署 Agent 安装包，业务后端保持该镜像版本；未包含本地尚未部署的删除回执修复。保留源码容量、分支选择、助手简化和精简产品模式。
+
+## 节点接入 HTTPS 与内部 CA
+
+浏览器原 HTTP 入口保留，另开放 `https://autops.abroad.besiter.com.cn`（宿主机 443 → Nginx 8443）。`.env` 必须设置 `DEPLOYMENT_PUBLIC_ORIGIN=https://autops.abroad.besiter.com.cn`，只用于节点安装命令与部署 Agent 接口，不改变原 `PUBLIC_ORIGIN` 和模型配置。
+
+`/opt/autoops/pki` 保存内部 CA 私钥与签发材料，目录 0700、私钥 0600；`/opt/autoops/tls` 保存服务证书、私钥及公开 CA，私钥 0640、组 101，仅代理只读挂载。服务证书有效期一年，CA 十年；续期后检查 `docker compose exec -T proxy nginx -t` 并 reload。完整备份已纳入这两个目录；不得把私钥提交 Git。
+
+公开 CA 下载地址为 `/autoops-internal-ca.crt`，SHA256 指纹 `AC:4E:A0:21:AE:2C:15:C5:FE:A8:C1:72:E3:C2:4C:C8:AA:26:D6:6F:81:DF:0E:56:48:58:09:8B:9E:AF:F2:5A`。在其他电脑首次信任前通过此独立记录核对指纹；浏览器使用 HTTPS 需将 CA 导入可信根证书。appSphere 已安装到系统信任库，Agent 使用 `NODE_EXTRA_CA_CERTS`，没有关闭 TLS 校验。
+
+Linux 节点先安装 Docker 和 Compose，并信任中心 CA，再执行平台生成的安装命令。安装器默认沿用 `/etc/ssl/certs/ca-certificates.crt`，也可传 `--ca-file /绝对路径/ca.crt`；证书复制到 Agent 数据目录供容器使用。Shell 文件强制 LF，复制按钮复用共享 HTTP 兼容实现。发布证据和配置备份在 `/opt/autoops/releases/node-onboarding-20261029/`，构建目录同名。1 项复制浏览器测试、实际 HTTP 页面复制、Bash 语法、发行清单、HTTPS 和真实节点心跳已验证；备份脚本只做语法检查，没有额外停机全量备份。
+
+已接入节点见 [appSphere（102）运维说明](../appsphere-102/README.md)。
+
+## 产品模式维护
 
 本服务器必须在 `/opt/autoops/.env` 显式设置 `AUTOOPS_DEMO_PROFILE=project-assistant-lite-v1`。Compose 共享环境变量块使用 `${AUTOOPS_DEMO_PROFILE:?请明确指定产品模式}`，网关与 Worker 均继承；遗漏或空值时配置校验直接失败，不能依赖应用未配置时的完整模式默认值。能力范围见[精简产品规范](../../../examples/agent-demo-lite-profile.md)。
 
@@ -104,7 +118,7 @@ Worker 的 `/tmp` 显式使用 `exec`：Git 的 ASKPASS 辅助脚本由应用写
 
 CPA 使用 `https://x.996788.xyz/v1` 和 `grok-4.6`，仅 Worker 挂载 `/opt/autoops/secrets/cpa-api-key`。用户已明确授权本服务器使用现有客户端密钥。
 
-当前域名使用内网 HTTP，未配置 TLS。服务器使用 DHCP，因此端口映射没有绑定某个固定主机地址。建议在 DHCP 服务端为本机 MAC `bc:24:11:cf:54:c8` 保留地址；本次不修改网络配置。地址变化时更新域名 A 记录，域名不变则无需修改应用 `PUBLIC_ORIGIN`。Worker 共用网关网络命名空间，维护时统一通过 Compose 处理服务。
+当前域名同时提供原内网 HTTP 和内部 CA 签发的 HTTPS；节点使用 HTTPS。服务器使用 DHCP，因此端口映射没有绑定某个固定主机地址。建议在 DHCP 服务端为本机 MAC `bc:24:11:cf:54:c8` 保留地址；本次不修改网络配置。地址变化时更新域名 A 记录，域名不变则无需修改应用 `PUBLIC_ORIGIN`。Worker 共用网关网络命名空间，维护时统一通过 Compose 处理服务。
 
 ## 常用操作
 
