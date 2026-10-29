@@ -6,7 +6,7 @@
 
 | 服务器 | 当前部署记录 |
 | --- | --- |
-| workbench（101），`10.2.2.115` | [7839eedf 与本地修改部署说明](workbench-101/README.md) |
+| workbench（101），`10.2.2.115` | [bb068dbe 源码容量修复及运维说明](workbench-101/README.md) |
 | `119.136.18.187:2207`，内网 `10.1.16.7` | [d6dfaa76 升级记录](deployment-20261028-d6dfaa76.md)，[初始部署记录](deployment-20261028.md) |
 
 ## 目录与身份
