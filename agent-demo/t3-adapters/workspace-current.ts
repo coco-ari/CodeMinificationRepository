@@ -1177,14 +1177,33 @@ export function createCurrentWorkspace({
           authoringRevision: captured.revision,
         },
       },
-      async ({ root, signal, checkBudget }) => {
-        for (const file of inputFiles(project, captured.id, actor)) {
+      async ({ root, signal, progress, checkBudget }) => {
+        const files = inputFiles(project, captured.id, actor)
+        const uploaded = new Set(captured.files.map(file => file.path))
+        const readers = new Map<string, ReturnType<WorkspaceStore['openVersionReader']>>()
+        let copied = 0
+        progress('preparing', `正在固定内部资料：0 / ${files.length}`)
+        for (const file of files) {
           signal.throwIfAborted()
-          readPermission(project, actor)
-          const original = readInputFile(project, captured.id, file.path, actor)
+          // 每次读取仍核对输入存活与当前权限；目录和版本索引仅在本任务内复用。
+          readInput(project, captured.id, actor)
+          let original: { bytes: Uint8Array }
+          if (uploaded.has(file.path) && captured.captureId) {
+            original = authoring.readCapturedFile(project, captured.captureId, file.path, actor)
+          } else {
+            let reader = readers.get(file.revision)
+            if (!reader) {
+              reader = store.openVersionReader(project, file.revision)
+              readers.set(file.revision, reader)
+            }
+            original = reader(file.path)
+          }
+          checkBudget({ path: file.path, bytes: original.bytes.byteLength })
           await mkdir(dirname(join(root, file.path)), { recursive: true, mode: 0o700 })
           await writeFile(join(root, file.path), original.bytes, { mode: 0o600, flag: 'wx' })
-          checkBudget()
+          copied++
+          if (copied % 128 === 0 || copied === files.length)
+            progress('preparing', `正在固定内部资料：${copied} / ${files.length}`)
         }
       },
       actor,

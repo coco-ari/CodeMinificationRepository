@@ -103,10 +103,12 @@ export interface WorkspaceStore {
   readBytes(projectId: string, versionId: string, path: string): Uint8Array;
   /** Management-only preview, including pending binary review. Never use for Agent resources. */
   versionFile(projectId: string, versionId: string, path: string): { bytes: Uint8Array; name: string; mime: string };
+  /** 在本次固定输入复制中复用版本索引；调用方逐次检查当前权限，读取仍校验路径与正文。 */
+  openVersionReader(projectId: string, versionId: string): (path: string) => { bytes: Uint8Array; name: string; mime: string };
   startExternal(projectId: string, input: { sourceVersionId: string; rules?: Array<{ find: string; replace: string }>; requestId: string }, actorId?: string): WorkspaceTask;
   startPackages(projectId: string, input: { sourceVersionId: string; services: Array<'frontend' | 'backend'>; requestId: string; contexts?: WorkspaceBuildContext[] }, actorId?: string): WorkspaceTask;
   startSourcePackages(projectId: string, input: unknown, prepare: (context: { signal: AbortSignal; progress: (stage: string, message: string) => void; materializeCache: (input: { cacheKey: string; source: Omit<WorkspaceSource, 'contentHash'> }, materialize: (input: { root: string; signal: AbortSignal; progress: (stage: string, message: string) => void; checkBudget: () => void }) => Promise<void>) => Promise<WorkspaceVersion> }) => Promise<{ sourceVersionId: string; contexts: WorkspaceBuildContext[] }>, actorId: string): WorkspaceTask;
-  startSnapshot(projectId: string, input: { requestId: string; captureId: string; taskType?: 'sync' | 'input' | 'snapshot'; cacheKey?: string; cachePurpose?: 'source' | 'deployment' | 'external-input'; source: Omit<WorkspaceSource, 'contentHash'> }, materialize: (input: { root: string; signal: AbortSignal; progress: (stage: string, message: string) => void; checkBudget: () => void }) => Promise<void>, actorId: string): WorkspaceTask;
+  startSnapshot(projectId: string, input: { requestId: string; captureId: string; taskType?: 'sync' | 'input' | 'snapshot'; cacheKey?: string; cachePurpose?: 'source' | 'deployment' | 'external-input'; source: Omit<WorkspaceSource, 'contentHash'> }, materialize: (input: { root: string; signal: AbortSignal; progress: (stage: string, message: string) => void; checkBudget: (file?: { path: string; bytes: number }) => void }) => Promise<void>, actorId: string): WorkspaceTask;
   packageFile(projectId: string, releaseId: string, service: string): { bytes: Uint8Array; name: string; mime: string };
   startImport(projectId: string, input: { repositoryUrl: string; branch?: string; requestId: string }, actorId?: string): WorkspaceTask;
   cancelTask(projectId: string, taskId: string): WorkspaceTask;

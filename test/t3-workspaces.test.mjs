@@ -27,6 +27,20 @@ async function finish(store, task) {
 }
 
 
+test('固定版本批量读取复用索引但仍拒绝路径越界、正文篡改和已删除原件', async t => {
+  const { store, version, dataDir } = await fixture(t)
+  const read = store.openVersionReader('p-test', version.id)
+  const path = 'docs/设计.md'
+  assert.match(read(path).bytes.toString(), /固定项目资料/)
+  assert.throws(() => read('../state.json'), { code: 'WORKSPACE_PATH_INVALID' })
+  assert.throws(() => read('missing.txt'), { status: 404 })
+  const absolute = join(dataDir, 'project-workspaces', 'p-test', 'versions', version.id, 'files', path)
+  writeFileSync(absolute, '被修改的原件')
+  assert.throws(() => read(path), { code: 'WORKSPACE_CONTENT_CHANGED' })
+  unlinkSync(absolute)
+  assert.throws(() => read(path), { status: 404 })
+})
+
 test('工作区任务限制并发和排队容量，重复提交不占容量，取消排队任务不生成发布物', async (t) => {
   const { store, version } = await fixture(t, { taskLimits: { maxConcurrent: 1, maxQueued: 1 } })
   const firstInput = { sourceVersionId: version.id, services: ['frontend'], requestId: 'bounded-first' }

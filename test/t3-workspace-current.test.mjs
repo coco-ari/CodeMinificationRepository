@@ -2580,6 +2580,54 @@ test('真实外部资料终态归还内部捕获和任务pin，释放来源副�
  assert.equal(f.calls.resolve.length,0)
 })
 
+test('批量生成外部资料复用固定清单，按实际文件检查容量且不再逐文件枚举目录', async t => {
+  const f = await fixture(t)
+  await f.source('frontend')
+  const repo = await f.repository('frontend')
+  for (let index = 0; index < 256; index++)
+    await writeFile(join(repo.directory, `source-${index}.txt`), `固定文件 ${index}\n`)
+  const source = await f.syncCurrent()
+  const sourceFiles = f.store.files(projectId, source.versionId)
+  await f.upload('docs/current.yml', 'password: fixture-only-secret\n')
+  const files = t.mock.method(f.store, 'files')
+  const readers = t.mock.method(f.store, 'openVersionReader')
+  const copiedSizes = []
+  const startSnapshot = f.store.startSnapshot.bind(f.store)
+  t.mock.method(f.store, 'startSnapshot', (project, input, materialize, actor) => startSnapshot(project, input, context => materialize({
+    ...context,
+    checkBudget: file => { copiedSizes.push(file.bytes); context.checkBudget(file) },
+  }), actor))
+  const done = await f.finish(await f.service.generateCurrentExternal(projectId, { requestId: 'batch-external' }, owner))
+  assert.equal(done.status, 'completed')
+  assert.equal(readers.mock.callCount(), 1)
+  assert.ok(files.mock.callCount() <= 3, '目录枚举次数不能随复制文件数增长')
+  assert.equal(copiedSizes.length, sourceFiles.length + 1)
+  assert.ok(copiedSizes.every(size => Number.isSafeInteger(size) && size >= 0))
+  assert.equal(f.store.getVersion(projectId, done.versionId).fileCount, 261)
+  assert.equal(f.store.read(projectId, done.versionId, 'apps/web/source-255.txt').contents, '固定文件 255\n')
+  assert.doesNotMatch(f.store.read(projectId, done.versionId, 'docs/current.yml').contents, /fixture-only-secret/)
+  assert.equal(f.calls.fetch.length, 1)
+})
+
+test('固定清单批量复制遇到撤权立即停止，不生成外部结果', async t => {
+  const f = await fixture(t)
+  await f.source('frontend')
+  await f.syncCurrent()
+  const open = f.store.openVersionReader.bind(f.store)
+  let reads = 0
+  t.mock.method(f.store, 'openVersionReader', (...args) => {
+    const read = open(...args)
+    return path => {
+      const result = read(path)
+      if (++reads === 1) f.memberships.find(value => value.userId === owner).status = 'disabled'
+      return result
+    }
+  })
+  await assert.rejects(f.service.generateCurrentExternal(projectId, { requestId: 'batch-revoked' }, owner), { status: 404 })
+  assert.equal(reads, 1)
+  assert.equal(f.store.overview(projectId).externalVersions.length, 0)
+})
+
 test('外部更新直接替换唯一当前资料，移除旧文件和历史读取入口，不再复核发布',async t=>{
  const f=await fixture(t)
  await f.upload('docs/current.md','第一份资料')

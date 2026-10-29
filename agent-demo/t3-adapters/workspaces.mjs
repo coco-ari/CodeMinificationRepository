@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, statfsSync, readdirSync } from 'node:fs'
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
 import { join, resolve, dirname, extname } from 'node:path'
-import { WorkspaceError, MAX_FILES, MAX_BYTES, sha, safePath, textOf, checkedFile, checkImportFiles, scan } from './workspace-files.mjs'
+import { WorkspaceError, MAX_FILES, MAX_BYTES, sha, safePath, textOf, checkedFile, checkImportFiles, createWorkspaceCopyBudget, scan } from './workspace-files.mjs'
 import { createWorkspaceJobs } from './workspace-jobs.mjs'
 import { buildWorkspacePackages } from './workspace-packages.mjs'
 export { WorkspaceError } from './workspace-files.mjs'
@@ -260,6 +260,10 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
   function readVersionFile(id, versionId, path, allowPending) {
     safePath(path)
     const version = versionRecord(id, versionId, allowPending), file = version.files.find((entry) => entry.path === path)
+    return readIndexedFile(id, version, file, path)
+  }
+  function readIndexedFile(id, version, file, path) {
+    safePath(path)
     if (!file) missing()
     let bytes
     try { bytes = readFileSync(checkedFile(versionRoot(id, version), path)) } catch (error) { if (error instanceof WorkspaceError) throw error; missing() }
@@ -647,6 +651,11 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
     managementRead(id, versionId, path) { return versionText(id, versionId, path, true) },
     readBytes(id, versionId, path) { return readVersionFile(id, versionId, path, false).bytes },
     versionFile(id, versionId, path) { return readVersionFile(id, versionId, path, true) },
+    openVersionReader(id, versionId) {
+      // 只在调用方持有的固定输入任务内复用不可变索引；实际文件仍逐次校验，不缓存正文或权限。
+      const version = versionRecord(id, versionId), files = new Map(version.files.map(file => [file.path, file]))
+      return path => readIndexedFile(id, version, files.get(path), path)
+    },
     startExternal(id, input, actorId) {
       const rules = validateRules(input.rules),request=requestTask(id,'external',{...input,rules},actorId)
       if(request.previous) return publicTask(request.previous)
@@ -742,7 +751,14 @@ export function createWorkspaceStore({ dataDir, taskLimits, onTaskDiagnostic, au
         }
         const root = join(temporary, 'version', 'files')
         await mkdir(root, { recursive: true, mode: 0o700 })
-        await materialize({ root, signal, progress, checkBudget: () => checkImportBudget(temporary) })
+        const copyBudget = createWorkspaceCopyBudget()
+        await materialize({ root, signal, progress, checkBudget: (file) => {
+          if (file === undefined) { checkImportBudget(temporary); return }
+          // 已固定文件在写入前累计预算，避免每次复制都重新遍历已写目录。
+          copyBudget(file)
+          checkFree(temporary, file.bytes + STORAGE_RESERVE)
+        } })
+        checkImportBudget(temporary)
         checkCompleteSource(root)
         progress('publishing', '正在校验源码和资料并保存固定版本')
         const count = load(id).versions.filter((entry) => entry.type === 'internal').length + 1

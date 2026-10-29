@@ -28,6 +28,23 @@ function assertCapacity(scope, bytes, count, maxBytes, maxFiles) {
   if (bytes > maxBytes) fail(413, 'WORKSPACE_TOO_LARGE', `${scope}总大小超限：已扫描 ${volume(bytes)}，上限 ${volume(maxBytes)}`)
   if (count > maxFiles) fail(413, 'WORKSPACE_TOO_LARGE', `${scope}文件数超限：已扫描 ${count.toLocaleString('zh-CN')} 个，上限 ${maxFiles.toLocaleString('zh-CN')} 个`)
 }
+function createWorkspaceCopyBudget() {
+  let bytes = 0, count = 0, sourceBytes = 0, sourceFiles = 0
+  return ({ path, bytes: fileBytes }) => {
+    safePath(path)
+    if (!Number.isSafeInteger(fileBytes) || fileBytes < 0)
+      fail(400, 'WORKSPACE_SIZE_INVALID', '复制文件大小无效')
+    bytes += fileBytes; count++
+    assertCapacity('Git 快照（含历史）', bytes, count, MAX_IMPORT_BYTES, MAX_IMPORT_FILES)
+    // 与发布扫描保持同一额度语义，Git 对象不挤占检出源码预算。
+    if (!path.split('/').includes('.git')) {
+      if (fileBytes > MAX_FILE_BYTES)
+        fail(413, 'WORKSPACE_TOO_LARGE', `源码单文件大小超限：${volume(fileBytes)}，上限 ${volume(MAX_FILE_BYTES)}`)
+      sourceBytes += fileBytes; sourceFiles++
+      assertCapacity('工作区源码', sourceBytes, sourceFiles, MAX_BYTES, MAX_FILES)
+    }
+  }
+}
 function safePath(value, allowEmpty = false) {
   if (allowEmpty && value === '') return value
   if (typeof value !== 'string' || value.length > 800 || /[\\\x00-\x1f:\x7f]/.test(value) || value.startsWith('/') || value.split('/').some((part) => !part || part === '.' || part === '..'))
@@ -135,4 +152,4 @@ function scan(root, { skipGit = false, skipCaches = false } = {}) {
   return { files, removedGitEntries, contentHash: sha(JSON.stringify(files.map(({ path, sha256 }) => [path, sha256]))), byteLength: size }
 }
 
-export { MAX_FILES, MAX_BYTES, MAX_FILE_BYTES, MAX_IMPORT_BYTES, MAX_IMPORT_FILES, sha, safePath, textOf, checkedFile, checkImportFiles, scan }
+export { MAX_FILES, MAX_BYTES, MAX_FILE_BYTES, MAX_IMPORT_BYTES, MAX_IMPORT_FILES, sha, safePath, textOf, checkedFile, checkImportFiles, createWorkspaceCopyBudget, scan }

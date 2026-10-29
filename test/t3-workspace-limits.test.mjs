@@ -52,6 +52,20 @@ test('导入临时对象仍受磁盘使用量和文件数量预算保护', t => 
   const count = check(t, Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`.git/${i}`, ''])), 'm.checkImportFiles(root)')
   assert.match(count.message, /已扫描 9 个，上限 8 个/)
 })
+test('固定输入复制的累计预算保留总量、文件数和单文件边界', t => {
+  const expression = entries => `(() => { const budget = m.createWorkspaceCopyBudget(); for (const [path, bytes] of ${JSON.stringify(entries)}) budget({path, bytes}); return true })()`
+  assert.equal(check(t, {}, expression([['a.ts', 8], ['b.ts', 8], ['nested/.git/objects/pack/a.pack', 64]])), true)
+  for (const [entries, overrides, message] of [
+    [[['a', 8], ['b', 8], ['c', 1]], { AUTOOPS_WORKSPACE_MAX_FILES: '3' }, /工作区源码总大小超限/],
+    [[['a', 1], ['b', 1], ['c', 1]], {}, /文件数超限/],
+    [[['a', 9]], {}, /源码单文件大小超限/],
+    [[['nested/.git/objects/a.pack', 129]], {}, /Git 快照.*总大小超限/],
+  ]) {
+    const result = check(t, {}, expression(entries), overrides)
+    assert.equal(result.code, 'WORKSPACE_TOO_LARGE')
+    assert.match(result.message, message)
+  }
+})
 test('非法或相互矛盾的启动配置明确拒绝', t => {
   for (const value of ['0', '-1', 'bad', '', '1.5', '9007199254740992'])
     assert.match(check(t, {}, 'm.MAX_BYTES', { AUTOOPS_WORKSPACE_MAX_BYTES: value }).message, /必须配置为正整数/)
