@@ -464,7 +464,7 @@ function projectPresetSave(f: ReturnType<typeof setup>, loseReply: boolean) {
   };
 }
 
-it("管理员修复受限公共预设的失效skill，不取得额外问答参数权限", async () => {
+it("管理员页面编辑项目助手，中央skill配置不再混入助手参数", async () => {
   const f = setup(true);
   Object.assign(f.platform.configuration, { skillIds: ["removed-skill"] });
   projectPresetSave(f, false);
@@ -475,11 +475,12 @@ it("管理员修复受限公共预设的失效skill，不取得额外问答参�
   const edit = page.getByRole("button", { name: "编辑项目助手 项目预设", exact: true });
   await expect.element(edit).toBeEnabled();
   await edit.click();
-  await page.getByRole("checkbox", { name: "removed-skill · 已不可用", exact: true }).click();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  await page.getByRole("textbox", { name: "名称", exact: true }).fill("修改项目预设");
   await page.getByRole("button", { name: "保存助手配置", exact: true }).click();
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
   expect(f.writes).toHaveLength(1);
-  expect(f.writes[0]?.body.value).toMatchObject({ configuration: { skillIds: [] } });
+  expect(f.writes[0]?.body.value).toMatchObject({ name: "修改项目预设" });
   expect(
     readAutoOpsHost()?.projects.find((x) => x.id === "target-project")?.capabilities?.[
       "chat.configure"
@@ -518,7 +519,7 @@ it.each(["completed", "missing", "forbidden"] as const)(
         await expect
           .element(page.getByRole("button", { name: "添加项目助手", exact: true }))
           .toBeDisabled();
-      } else await userEvent.keyboard("{Escape}");
+      } else await page.getByRole("button", { name: "取消", exact: true }).click();
       await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
       const check = page.getByRole("button", { name: "检查保存结果", exact: true });
       await expect.element(check).toBeEnabled();
@@ -706,6 +707,10 @@ it.each(['target-project', 'source-project'])(
   },
 )
 async function menu(name: string, item: string) {
+  if (item === "编辑助手") {
+    await page.getByRole("button", { name: `编辑个人助手 ${name}`, exact: true }).click();
+    return;
+  }
   await page.getByRole("button", { name: `管理个人助手 ${name}`, exact: true }).click();
   await page.getByRole("menuitem", { name: item, exact: true }).click();
 }
@@ -822,7 +827,7 @@ it("编辑自用预设保留原参数，显式切换运行目录清除旧模型s
     .not.toBeInTheDocument();
   await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
   await expect
-    .element(page.getByRole("dialog").getByRole("alert"))
+    .element(page.getByRole("alert"))
     .toHaveTextContent("请选择所选运行目录提供的模型。");
   expect(f.writes).toHaveLength(0);
   await page.getByRole("combobox", { name: "运行目录", exact: true }).click();
@@ -877,7 +882,7 @@ it.each([false, true])("保存后等待目录刷新，恢复空焦点但不抢�
   } else {
     await expect.element(add).toHaveFocus();
     await userEvent.keyboard("{Enter}");
-    await expect.element(page.getByRole("dialog")).toBeVisible();
+    await expect.element(page.getByRole("form", { name: "添加个人助手", exact: true })).toBeVisible();
     await expect.element(page.getByRole("textbox", { name: "名称", exact: true })).toHaveValue("");
   }
   expect(f.writes).toHaveLength(1);
@@ -929,7 +934,7 @@ it.each(["withdrawn", "changed", "model"] as const)(
       .element(page.getByRole("combobox", { name: "思考强度", exact: true }))
       .toHaveTextContent("high · 已不可用");
     await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
-    await expect.element(page.getByRole("dialog").getByRole("alert")).toBeVisible();
+    await expect.element(page.getByRole("alert")).toBeVisible();
     expect(f.writes).toHaveLength(0);
     expect(configuration.customerProfile).toEqual(isolatedProfile);
     if (kind === "changed") {
@@ -980,7 +985,7 @@ it("普通提供者不需项目管理权，按真实来源创建，再主动共�
   await page.getByRole("button", { name: "保存共享", exact: true }).click();
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
   expect(f.writes[2]?.body).toMatchObject({ expectedRevision: 1, enabled: false });
-  await expect.element(page.getByRole("button", { name: "当前项目", exact: true })).toBeEnabled();
+  await expect.element(page.getByRole("button", { name: "助手与电脑", exact: true })).toBeEnabled();
 });
 
 it("个人预设断线按GET原payload恢复不重复创建；配对仍从同一我提供的入口可用", async () => {
@@ -1020,13 +1025,13 @@ it("原收据读取失败后关闭编辑并切分类，重开仍恢复同一原�
     .element(page.getByRole("button", { name: "添加个人助手", exact: true }))
     .toBeEnabled();
   await create();
-  await expect.element(page.getByRole("dialog").getByRole("alert"))
-    .toHaveTextContent("原收据读取暂不可用");
+  await expect.element(page.getByRole("alert").filter({ hasText: "原收据读取暂不可用" }))
+    .toBeVisible();
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect.element(page.getByRole("button", { name: "重试", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "当前项目", exact: true }).click();
+  await _screen.router!.navigate({ href: "/assistants?projectId=target-project&assistantView=project" });
   await expect.element(page.getByRole("heading", { name: "项目预设", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "我提供的", exact: true }).click();
+  await _screen.router!.navigate({ href: "/assistants?assistantView=provided" });
   await expect
     .element(page.getByRole("button", { name: "添加个人助手", exact: true }))
     .toBeEnabled();
@@ -1127,10 +1132,10 @@ it("409刷新后明确重开编辑，新保存使用新revision；来源身份�
   await expect
     .element(page.getByRole("textbox", { name: "名称", exact: true }))
     .toHaveValue("另一页面的新名称");
-  await page.getByRole("checkbox", { name: "启用个人助手", exact: true }).click();
+  await page.getByRole("textbox", { name: "名称", exact: true }).fill("重新保存名称");
   await page.getByRole("button", { name: "保存个人助手", exact: true }).click();
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
-  expect(f.writes[1]?.body).toMatchObject({ expectedRevision: 2, value: { enabled: false } });
+  expect(f.writes[1]?.body).toMatchObject({ expectedRevision: 2, value: { name: "重新保存名称", enabled: true } });
 });
 
 it("项目管理员只能分配已获共享助手，不能代提供者编辑或把未验证跨用户执行设成有效默认", async () => {
@@ -1210,7 +1215,7 @@ it("目标默认范围拒绝保留当前表单与实际目标，未把该业务�
   await page.getByRole("option", { name: "他人已共享助手", exact: true }).click();
   await page.getByRole("button", { name: "保存助手配置", exact: true }).click();
   await expect
-    .element(page.getByRole("dialog").getByRole("alert"))
+    .element(page.getByRole("alert"))
     .toHaveTextContent("所选目标成员不能使用此资料范围");
   await expect
     .element(page.getByRole("combobox", { name: "分配对象", exact: true }))
@@ -1262,7 +1267,7 @@ it("管理列表刷新并发503和403时，已知撤权清除旧预设并保留�
 });
 
 it.each(["light", "dark"])(
-  "%s的窄屏短窗口保留公共分类、模型标签、内部滚动与Esc焦点恢复",
+  "%s窄屏页面编辑保留字段、滚动和取消确认焦点恢复",
   async (theme) => {
     const f = setup();
     const previousDark = document.documentElement.classList.contains("dark"),
@@ -1285,12 +1290,72 @@ it.each(["light", "dark"])(
     await expect.element(page.getByRole("textbox", { name: "名称", exact: true })).toHaveFocus();
     await expect.element(page.getByRole("combobox", { name: "模型", exact: true })).toBeDisabled();
     await page.getByRole("textbox", { name: "名称", exact: true }).fill("长名称".repeat(30));
-    const bounds = document.querySelector('[role="dialog"]')!.getBoundingClientRect();
+    const bounds = document.querySelector('form[aria-label="添加个人助手"]')!.getBoundingClientRect();
     expect(bounds.left).toBeGreaterThanOrEqual(0);
     expect(bounds.right).toBeLessThanOrEqual(window.innerWidth);
-    expect(bounds.height).toBeLessThanOrEqual(window.innerHeight);
-    await userEvent.keyboard("{Escape}");
+    await page.screenshot({ path: `../../.test-artifacts/workbench-navigation/assistant-editor-390-${theme}.png` });
+    await page.getByRole("button", { name: "取消", exact: true }).click();
+    await expect.element(page.getByText("有尚未保存的修改。", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "放弃修改", exact: true }).click();
     await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
     await expect.element(add).toHaveFocus();
   },
 );
+
+
+it('项目行内启停保存真实状态，保留配置并且不能管理他人共享助手', async () => {
+  await page.viewport(1440, 700)
+  const f = setup(true)
+  projectPresetSave(f, false)
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(<App />, { router: '/assistants?projectId=target-project' })
+  const toggle = screen.getByRole('switch', { name: '启用助手 项目预设', exact: true })
+  await expect.element(toggle).toBeChecked()
+  await page.screenshot({ path: '../../.test-artifacts/workbench-navigation/assistant-list.png' })
+  const previous = structuredClone(f.platform.configuration)
+  await toggle.click()
+  await expect.element(toggle).not.toBeChecked()
+  await expect.element(toggle).toBeEnabled()
+  expect(f.writes[0]?.body).toMatchObject({ expectedRevision: 1, value: { enabled: false, configuration: previous } })
+  await toggle.click()
+  await expect.element(toggle).toBeChecked()
+  expect(f.writes[1]?.body).toMatchObject({ expectedRevision: 2, value: { enabled: true, configuration: previous } })
+  await expect.element(screen.getByRole('switch', { name: '启用助手 他人已共享助手', exact: true })).not.toBeInTheDocument()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+})
+
+it('个人助手开关断线只核对原请求，未确认状态不冒充停用且禁止重复点击', async () => {
+  const f = setup()
+  f.state.lost = true
+  f.state.receipt503 = 1
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(<App />, { router: '/assistants?assistantView=provided' })
+  const toggle = screen.getByRole('switch', { name: '启用助手 本人排障助手', exact: true })
+  await expect.element(toggle).toBeChecked()
+  await toggle.click()
+  await expect.element(page.getByRole('alert').filter({ hasText: '原收据读取暂不可用' })).toBeVisible()
+  await expect.element(toggle).toBeDisabled()
+  expect(f.writes).toHaveLength(1)
+  await screen.getByRole('button', { name: '重试', exact: true }).click()
+  await expect.element(toggle).not.toBeChecked()
+  await expect.element(toggle).toBeEnabled()
+  expect(f.writes).toHaveLength(1)
+})
+
+it('页面编辑离开先保留草稿，放弃后才导航且不改变项目选择或保存', async () => {
+  const f = setup()
+  using _fetch = stubGlobal('fetch', f.fetcher)
+  await using screen = await render(<App />, { router: '/assistants?assistantView=provided' })
+  await menu('本人排障助手', '编辑助手')
+  await page.getByRole('textbox', { name: '名称', exact: true }).fill('尚未保存的名称')
+  void screen.router!.navigate({ href: '/projects' })
+  const confirm = page.getByRole('button', { name: '放弃修改', exact: true })
+  await expect.element(confirm).toBeVisible()
+  expect(screen.router!.state.location.pathname).toBe('/assistants')
+  await page.getByRole('button', { name: '继续编辑', exact: true }).click()
+  await expect.element(page.getByRole('textbox', { name: '名称', exact: true })).toHaveValue('尚未保存的名称')
+  void screen.router!.navigate({ href: '/projects' })
+  await confirm.click()
+  await expect.poll(() => screen.router!.state.location.pathname).toBe('/projects')
+  expect(f.writes).toHaveLength(0)
+})

@@ -1,3 +1,5 @@
+import { Link, useLocation } from '@tanstack/react-router'
+import { ProjectId } from '@t3tools/contracts'
 import { useEffect, useState } from 'react'
 import { Button } from '~/components/ui/button'
 import { SettingsSection, SettingsRow } from '~/components/settings/settingsLayout'
@@ -11,11 +13,7 @@ import {
   type AssistantChoices,
   type AssistantTarget,
 } from './projectAssistants'
-import {
-  projectRoleNames,
-  emptyConfig,
-  type ProjectConfigurationEditor,
-} from './projectConfiguration'
+import { projectRoleNames, type ProjectConfigurationEditor } from './projectConfiguration'
 export function ProjectConfigurationPanel({
   project,
   disabled,
@@ -29,16 +27,28 @@ export function ProjectConfigurationPanel({
   onOpen(editor: ProjectConfigurationEditor, button: HTMLButtonElement): void
   onSummary?: (value: AssistantSetupSummary | null) => void
 }) {
+  const search = useLocation({ select: (location) => location.search }) as {
+    section?: string
+    from?: string
+  }
   const [assistants, setAssistants] = useState<AssistantSettings | null>(null)
   const [choices, setChoices] = useState<AssistantChoices | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [accessDenied, setAccessDenied] = useState(false)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
-    onSummary?.(error ? { error } : assistants ? {
-      enabled: assistants.presets.filter((preset) => preset.enabled).length,
-      allocations: assistants.allocations.filter((allocation) => allocation.assistantIds.length > 0).length,
-    } : null)
+    onSummary?.(
+      error
+        ? { error }
+        : assistants
+          ? {
+              enabled: assistants.presets.filter((preset) => preset.enabled).length,
+              allocations: assistants.allocations.filter(
+                (allocation) => allocation.assistantIds.length > 0,
+              ).length,
+            }
+          : null,
+    )
   }, [assistants, error, onSummary])
   useEffect(() => {
     const controller = new AbortController()
@@ -103,48 +113,35 @@ export function ProjectConfigurationPanel({
     )
   return (
     <>
-      <SettingsSection
-        title="项目助手"
-        headerAction={
-          <div className="flex gap-1">
+      <SettingsSection title="项目助手">
+        <SettingsRow
+          title="助手配置"
+          description={
+            assistants
+              ? `${assistants.presets.filter((preset) => preset.enabled).length} 个已启用助手`
+              : '管理本项目的助手与分配'
+          }
+          control={
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              disabled={disabled || !context || !!error}
-              onClick={(event) =>
-                context &&
-                onOpen(
-                  {
-                    kind: 'assistant',
-                    name: '',
-                    description: '',
-                    revision: 0,
-                    value: {
-                      name: '',
-                      description: '',
-                      instructions: '',
-                      enabled: true,
-                      configuration: emptyConfig(),
-                    },
-                    context,
-                  },
-                  event.currentTarget,
-                )
+              disabled={disabled}
+              render={
+                <Link
+                  to="/assistants"
+                  search={{
+                    projectId: ProjectId.make(project.project.id),
+                    from: 'projects',
+                    ...(search.section === 'git' ? { returnSection: 'git' } : {}),
+                    ...(search.from === 'deployments' ? { returnFrom: 'deployments' } : {}),
+                  }}
+                />
               }
             >
-              添加助手
+              管理助手
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={disabled || !context || !!error}
-              onClick={(event) => allocate({ kind: 'role', id: 'reader' }, event.currentTarget)}
-            >
-              分配助手
-            </Button>
-          </div>
-        }
-      >
+          }
+        />
         {error ? (
           <div role="alert" className="space-y-2">
             <p>{error}</p>
@@ -157,51 +154,7 @@ export function ProjectConfigurationPanel({
               重试助手目录
             </Button>
           </div>
-        ) : !assistants ? (
-          <p role="status">正在读取助手…</p>
-        ) : (
-          <>
-            {assistants.presets.map((preset) => (
-              <SettingsRow
-                key={preset.id}
-                title={preset.name}
-                description={`${preset.enabled ? (preset.configuration.executionBinding.kind === 'platform' ? '平台运行器' : '用户运行器') : '已停用'} · ${preset.configuration.model.model}`}
-                control={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={disabled || !context}
-                    aria-label={`编辑助手 ${preset.name}`}
-                    onClick={(event) =>
-                      context &&
-                      onOpen(
-                        {
-                          kind: 'assistant',
-                          id: preset.id,
-                          name: preset.name,
-                          description: preset.description,
-                          revision: preset.revision,
-                          value: {
-                            name: preset.name,
-                            description: preset.description,
-                            instructions: preset.instructions,
-                            enabled: preset.enabled,
-                            configuration: preset.configuration,
-                          },
-                          context,
-                        },
-                        event.currentTarget,
-                      )
-                    }
-                  >
-                    编辑
-                  </Button>
-                }
-              />
-            ))}
-            {!assistants.presets.length ? <SettingsRow title="暂无助手" /> : null}
-          </>
-        )}
+        ) : null}
       </SettingsSection>
       <SettingsSection
         title="成员与权限"
@@ -295,8 +248,7 @@ export function ProjectConfigurationPanel({
                 ? '全部环境'
                 : member.environmentIds
                     .map(
-                      (id) =>
-                        project.project.environments.find((env) => env.id === id)?.name ?? id,
+                      (id) => project.project.environments.find((env) => env.id === id)?.name ?? id,
                     )
                     .join('、') || '无环境'}
             </span>

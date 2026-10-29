@@ -276,6 +276,7 @@ async function fileBase64(file: File): Promise<string> {
 export function SkillAssignmentDialog({
   catalog,
   projectId,
+  allowedScopes = ['global', 'project', 'assistant'],
   initialSkillId,
   initialTargetType,
   initialTargetId,
@@ -288,6 +289,7 @@ export function SkillAssignmentDialog({
 }: SkillDialogProps & {
   catalog: SkillLibrary
   projectId: string
+  allowedScopes?: SkillTargetType[]
   initialSkillId?: string
   initialTargetType?: SkillTargetType
   initialTargetId?: string
@@ -307,7 +309,9 @@ export function SkillAssignmentDialog({
     versions.find((entry) => entry.id === selectedVersionId) ??
     versions.find((entry) => entry.id === skill?.latestVersionId) ??
     versions[0]
-  const assistants = catalog.assistants.filter((entry) => entry.projectId === projectId)
+  const assistants = catalog.assistants.filter(
+    (entry) => entry.projectId === projectId && entry.executionKind === 'platform',
+  )
   const targetId =
     targetType === 'global'
       ? GLOBAL_SKILL_TARGET
@@ -319,7 +323,8 @@ export function SkillAssignmentDialog({
   const inherited = skill
     ? inheritedSkillAssignment(catalog, skill.id, targetType, projectId)
     : undefined
-  const canManage = canManageSkillScope(catalog, targetType, projectId)
+  const canManage =
+    allowedScopes.includes(targetType) && canManageSkillScope(catalog, targetType, projectId)
   return (
     <Dialog
       open
@@ -378,11 +383,15 @@ export function SkillAssignmentDialog({
                   setTargetType(next)
               }}
             >
-              <Toggle value="global" disabled={!catalog.canManage}>
-                所有项目
-              </Toggle>
-              <Toggle value="project">当前项目</Toggle>
-              <Toggle value="assistant">指定助手</Toggle>
+              {allowedScopes.includes('global') ? (
+                <Toggle value="global" disabled={!catalog.canManage}>
+                  所有项目
+                </Toggle>
+              ) : null}
+              {allowedScopes.includes('project') ? <Toggle value="project">当前项目</Toggle> : null}
+              {allowedScopes.includes('assistant') ? (
+                <Toggle value="assistant">指定助手</Toggle>
+              ) : null}
             </ToggleGroup>
           </Field>
           {targetType === 'assistant' ? (
@@ -505,10 +514,12 @@ export function SkillDetailsDialog({
   finalFocus,
   mutate,
   onEdit,
+  allowedScopes = ['global', 'project', 'assistant'],
 }: SkillDialogProps & {
   skill: LibrarySkill
   catalog: SkillLibrary
   mutate: SkillMutate
+  allowedScopes?: SkillTargetType[]
   onEdit: (assignment: SkillAssignment) => void
 }) {
   const assignments = catalog.assignments.filter((entry) => entry.skillId === skill.id)
@@ -553,7 +564,8 @@ export function SkillDetailsDialog({
                           {!entry.enabled ? ' · 已停用' : ''}
                         </p>
                       </div>
-                      {canManageSkillScope(
+                      {allowedScopes.includes(entry.targetType) &&
+                      canManageSkillScope(
                         catalog,
                         entry.targetType,
                         entry.projectId ?? entry.targetId,

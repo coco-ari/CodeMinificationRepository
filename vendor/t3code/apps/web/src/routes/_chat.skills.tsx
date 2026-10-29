@@ -6,10 +6,12 @@ export const Route = createFileRoute('/_chat/skills')({
   validateSearch: (
     search: Record<string, unknown>,
   ): {
+    scope?: 'global'
     projectId?: ProjectId
     skillView?: 'library' | 'global' | 'assistant' | 'project'
     assistantId?: string
   } => ({
+    ...(search.scope === 'global' ? { scope: 'global' as const } : {}),
     // Preserve explicit invalid project selection; never fall back to another project.
     ...(Object.hasOwn(search, 'projectId')
       ? { projectId: ProjectId.make(typeof search.projectId === 'string' ? search.projectId : '') }

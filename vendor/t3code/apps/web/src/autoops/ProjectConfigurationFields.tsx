@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { MembershipDetails } from '../../../../../../autoops/contracts/project-directory.ts'
 import type { ProjectRole } from '../../../../../../autoops/contracts/project-access.ts'
 import { Checkbox } from '~/components/ui/checkbox'
@@ -72,11 +73,30 @@ function Check({
     </Label>
   )
 }
+function AssistantFieldGroup({
+  title,
+  page,
+  children,
+}: {
+  title: string
+  page: boolean
+  children: ReactNode
+}) {
+  if (!page) return <>{children}</>
+  return (
+    <fieldset className="min-w-0 space-y-4 border-b border-border/60 pb-6">
+      <legend className="mb-4 text-sm font-medium">{title}</legend>
+      <div className="grid min-w-0 gap-4 sm:grid-cols-2">{children}</div>
+    </fieldset>
+  )
+}
 export function ProjectConfigurationFields({
   editor,
   disabled,
   onChange,
+  presentation = 'compact',
 }: {
+  presentation?: 'compact' | 'page'
   editor: ProjectConfigurationEditor
   disabled: boolean
   onChange(editor: ProjectConfigurationEditor): void
@@ -346,202 +366,210 @@ export function ProjectConfigurationFields({
           (skill) =>
             skill.agentId === config.agentId && skill.workspaceType === config.workspaceType,
         )
+  const page = presentation === 'page'
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="assistant-name">名称</Label>
-        <Input
-          id="assistant-name"
-          value={editor.name}
-          required
-          maxLength={120}
-          autoFocus
-          disabled={disabled}
-          onChange={(event) => onChange({ ...editor, name: event.target.value })}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="assistant-description">说明（可选）</Label>
-        <Textarea
-          id="assistant-description"
-          value={editor.description}
-          maxLength={2000}
-          disabled={disabled}
-          onChange={(event) => onChange({ ...editor, description: event.target.value })}
-        />
-      </div>
-      <Choice
-        label="运行来源"
-        value={source?.id ?? 'unavailable'}
-        disabled={disabled}
-        options={choices.sources.map((source) => ({ id: source.id, name: source.name }))}
-        onChange={(id) => {
-          const next = choices.sources.find((source) => source.id === id)
-          if (!next) return
-          update({
-            executionBinding: next.executionBinding,
-            model: {
-              instanceId:
-                next.executionBinding.kind === 'platform'
-                  ? 'codex'
-                  : `customer-${next.executionBinding.deviceId}-codex`,
-              model: '',
-              reasoningEffort: null,
-            },
-            skillIds: [],
-            ...(next.executionBinding.kind === 'customer'
-              ? {
-                  agentId: 'a-project',
-                  environmentId: null,
-                  workspaceType: null,
-                  visibility: 'private',
-                }
-              : { workspaceType: 'internal' }),
-          })
-        }}
-      />
-      {source?.reason ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {source.reason.message}
-        </p>
-      ) : null}
-      {customer ? (
-        <>
-          <Choice
-            label="运行目录"
-            value={isolated ? 'shared' : 'self'}
-            disabled
-            options={[
-              { id: 'self', name: '自用运行器' },
-              ...(config.customerProfile
-                ? [{ id: 'shared', name: `隔离运行器 · ${config.customerProfile.id}` }]
-                : []),
-            ]}
-            onChange={() => {}}
+    <div className={page ? 'space-y-6' : 'space-y-4'}>
+      <AssistantFieldGroup title="基本信息" page={page}>
+        <div className="space-y-2">
+          <Label htmlFor="assistant-name">名称</Label>
+          <Input
+            id="assistant-name"
+            value={editor.name}
+            required
+            maxLength={120}
+            autoFocus
+            disabled={disabled}
+            onChange={(event) => onChange({ ...editor, name: event.target.value })}
           />
-          {isolated ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              隔离目录参数请在“我提供的”助手中维护。
-            </p>
-          ) : null}
-        </>
-      ) : null}
-      <Choice
-        label="业务助手"
-        value={config.agentId}
-        disabled={disabled || customer}
-        options={choices.agents.map((agent) => ({ id: agent.id, name: agent.name }))}
-        onChange={(agentId) => update({ agentId })}
-      />
-      <Choice
-        label="模型"
-        value={config.model.model}
-        disabled={disabled || isolated || !source?.models.length}
-        options={
-          isolated
-            ? [{ id: config.model.model, name: config.model.model }]
-            : (source?.models.map((model) => ({ id: model.id, name: model.name })) ?? [])
-        }
-        onChange={(id) => {
-          const next = source?.models.find((model) => model.id === id)
-          if (next)
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="assistant-description">说明（可选）</Label>
+          <Textarea
+            id="assistant-description"
+            value={editor.description}
+            maxLength={2000}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...editor, description: event.target.value })}
+          />
+        </div>
+      </AssistantFieldGroup>
+      <AssistantFieldGroup title="运行配置" page={page}>
+        <Choice
+          label="运行来源"
+          value={source?.id ?? 'unavailable'}
+          disabled={disabled}
+          options={choices.sources.map((source) => ({ id: source.id, name: source.name }))}
+          onChange={(id) => {
+            const next = choices.sources.find((source) => source.id === id)
+            if (!next) return
+            update({
+              executionBinding: next.executionBinding,
+              model: {
+                instanceId:
+                  next.executionBinding.kind === 'platform'
+                    ? 'codex'
+                    : `customer-${next.executionBinding.deviceId}-codex`,
+                model: '',
+                reasoningEffort: null,
+              },
+              skillIds: [],
+              ...(next.executionBinding.kind === 'customer'
+                ? {
+                    agentId: 'a-project',
+                    environmentId: null,
+                    workspaceType: null,
+                    visibility: 'private',
+                  }
+                : { workspaceType: 'internal' }),
+            })
+          }}
+        />
+        {source?.reason ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {source.reason.message}
+          </p>
+        ) : null}
+        {customer ? (
+          <>
+            <Choice
+              label="运行目录"
+              value={isolated ? 'shared' : 'self'}
+              disabled
+              options={[
+                { id: 'self', name: '自用运行器' },
+                ...(config.customerProfile
+                  ? [{ id: 'shared', name: `隔离运行器 · ${config.customerProfile.id}` }]
+                  : []),
+              ]}
+              onChange={() => {}}
+            />
+            {isolated ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                隔离目录参数请在“我的助手”助手中维护。
+              </p>
+            ) : null}
+          </>
+        ) : null}
+        <Choice
+          label="业务助手"
+          value={config.agentId}
+          disabled={disabled || customer}
+          options={choices.agents.map((agent) => ({ id: agent.id, name: agent.name }))}
+          onChange={(agentId) => update({ agentId })}
+        />
+        <Choice
+          label="模型"
+          value={config.model.model}
+          disabled={disabled || isolated || !source?.models.length}
+          options={
+            isolated
+              ? [{ id: config.model.model, name: config.model.model }]
+              : (source?.models.map((model) => ({ id: model.id, name: model.name })) ?? [])
+          }
+          onChange={(id) => {
+            const next = source?.models.find((model) => model.id === id)
+            if (next)
+              update({
+                model: {
+                  ...config.model,
+                  model: id,
+                  reasoningEffort:
+                    next.defaultReasoning as QuestionConfiguration['model']['reasoningEffort'],
+                },
+              })
+          }}
+        />
+        <Choice
+          label="思考强度"
+          value={config.model.reasoningEffort ?? 'none-supported'}
+          disabled={disabled || isolated || !model?.reasoningLevels.length}
+          options={
+            isolated && config.model.reasoningEffort
+              ? [{ id: config.model.reasoningEffort, name: config.model.reasoningEffort }]
+              : model?.reasoningLevels.length
+                ? model.reasoningLevels.map((id) => ({ id, name: id }))
+                : [{ id: 'none-supported', name: '此模型不提供思考档位' }]
+          }
+          onChange={(reasoningEffort) =>
             update({
               model: {
                 ...config.model,
-                model: id,
                 reasoningEffort:
-                  next.defaultReasoning as QuestionConfiguration['model']['reasoningEffort'],
+                  reasoningEffort as QuestionConfiguration['model']['reasoningEffort'],
               },
             })
-        }}
-      />
-      <Choice
-        label="思考强度"
-        value={config.model.reasoningEffort ?? 'none-supported'}
-        disabled={disabled || isolated || !model?.reasoningLevels.length}
-        options={
-          isolated && config.model.reasoningEffort
-            ? [{ id: config.model.reasoningEffort, name: config.model.reasoningEffort }]
-            : model?.reasoningLevels.length
-              ? model.reasoningLevels.map((id) => ({ id, name: id }))
-              : [{ id: 'none-supported', name: '此模型不提供思考档位' }]
-        }
-        onChange={(reasoningEffort) =>
-          update({
-            model: {
-              ...config.model,
-              reasoningEffort: reasoningEffort as QuestionConfiguration['model']['reasoningEffort'],
-            },
-          })
-        }
-      />
-      {!customer ? (
-        <>
-          <Choice
-            label="资料范围"
-            value={config.workspaceType ?? 'internal'}
-            disabled={disabled}
-            options={[
-              { id: 'internal', name: '内部当前资料' },
-              { id: 'external', name: '外部当前资料' },
-            ]}
-            onChange={(workspaceType) =>
-              update({ workspaceType: workspaceType as 'internal' | 'external' })
-            }
-          />
-          <Choice
-            label="业务环境"
-            value={config.environmentId ?? 'none'}
-            disabled={disabled}
-            options={[
-              { id: 'none', name: '无环境' },
-              ...editor.context.project.project.environments,
-            ]}
-            onChange={(environmentId) =>
-              update({ environmentId: environmentId === 'none' ? null : environmentId })
-            }
-          />
-          <Choice
-            label="会话可见范围"
-            value={config.visibility}
-            disabled={disabled}
-            options={[
-              { id: 'private', name: '仅自己' },
-              { id: 'project', name: '项目共享' },
-            ]}
-            onChange={(visibility) => update({ visibility: visibility as 'private' | 'project' })}
-          />
-        </>
-      ) : null}
-      {customer ? (
-        <fieldset className="space-y-3">
-          <legend className="mb-2 text-sm font-medium">本机 skills</legend>
-          {[
-            ...skillChoices,
-            ...config.skillIds
-              .filter((id) => !skillChoices.some((skill) => skill.id === id))
-              .map((id) => ({ id, name: `${id} · ${isolated ? '原预设skill' : '已不可用'}` })),
-          ].map((skill) => (
-            <Check
-              key={skill.id}
-              label={skill.name}
-              checked={config.skillIds.includes(skill.id)}
-              disabled={disabled || isolated}
-              onChange={(checked) =>
-                update({
-                  skillIds: checked
-                    ? [...config.skillIds, skill.id]
-                    : config.skillIds.filter((id) => id !== skill.id),
-                })
+          }
+        />
+      </AssistantFieldGroup>
+      <AssistantFieldGroup title="问答默认值" page={page}>
+        {!customer ? (
+          <>
+            <Choice
+              label="资料范围"
+              value={config.workspaceType ?? 'internal'}
+              disabled={disabled}
+              options={[
+                { id: 'internal', name: '内部当前资料' },
+                { id: 'external', name: '外部当前资料' },
+              ]}
+              onChange={(workspaceType) =>
+                update({ workspaceType: workspaceType as 'internal' | 'external' })
               }
             />
-          ))}
-        </fieldset>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          skill 的启用范围在项目的 skills 页面统一设置。
-        </p>
-      )}
+            <Choice
+              label="业务环境"
+              value={config.environmentId ?? 'none'}
+              disabled={disabled}
+              options={[
+                { id: 'none', name: '无环境' },
+                ...editor.context.project.project.environments,
+              ]}
+              onChange={(environmentId) =>
+                update({ environmentId: environmentId === 'none' ? null : environmentId })
+              }
+            />
+            <Choice
+              label="会话可见范围"
+              value={config.visibility}
+              disabled={disabled}
+              options={[
+                { id: 'private', name: '仅自己' },
+                { id: 'project', name: '项目共享' },
+              ]}
+              onChange={(visibility) => update({ visibility: visibility as 'private' | 'project' })}
+            />
+          </>
+        ) : null}
+        {customer ? (
+          <fieldset className="space-y-3">
+            <legend className="mb-2 text-sm font-medium">本机 skills</legend>
+            {[
+              ...skillChoices,
+              ...config.skillIds
+                .filter((id) => !skillChoices.some((skill) => skill.id === id))
+                .map((id) => ({ id, name: `${id} · ${isolated ? '原预设skill' : '已不可用'}` })),
+            ].map((skill) => (
+              <Check
+                key={skill.id}
+                label={skill.name}
+                checked={config.skillIds.includes(skill.id)}
+                disabled={disabled || isolated}
+                onChange={(checked) =>
+                  update({
+                    skillIds: checked
+                      ? [...config.skillIds, skill.id]
+                      : config.skillIds.filter((id) => id !== skill.id),
+                  })
+                }
+              />
+            ))}
+          </fieldset>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            skill 的启用范围在项目的 skills 页面统一设置。
+          </p>
+        )}
+      </AssistantFieldGroup>
       <div className="space-y-2">
         <Label htmlFor="assistant-instructions">角色指令（可选）</Label>
         <Textarea
@@ -554,12 +582,14 @@ export function ProjectConfigurationFields({
           }
         />
       </div>
-      <Check
-        label="启用助手"
-        checked={value.enabled}
-        disabled={disabled}
-        onChange={(enabled) => onChange({ ...editor, value: { ...value, enabled } })}
-      />
+      {!page ? (
+        <Check
+          label="启用助手"
+          checked={value.enabled}
+          disabled={disabled}
+          onChange={(enabled) => onChange({ ...editor, value: { ...value, enabled } })}
+        />
+      ) : null}
     </div>
   )
 }

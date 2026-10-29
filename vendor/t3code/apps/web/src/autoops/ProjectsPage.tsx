@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
-import { ArrowLeftIcon, FolderGit2Icon, PencilIcon, PlusIcon, RefreshCwIcon, ServerIcon } from 'lucide-react'
+import {
+  ArrowLeftIcon,
+  FolderGit2Icon,
+  PencilIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  ServerIcon,
+} from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
 import { Label } from '~/components/ui/label'
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from '~/components/ui/empty'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyContent,
+} from '~/components/ui/empty'
 import { SidebarInset } from '~/components/ui/sidebar'
 import {
   Dialog,
@@ -48,11 +61,23 @@ import { ProjectCredentialsPanel } from './ProjectCredentialsPanel'
 import { ProjectRepositoryPanel } from './ProjectRepositoryPanel'
 import { ProjectConfigurationPanel } from './ProjectConfigurationPanel'
 import { ProjectConfigurationFields } from './ProjectConfigurationFields'
-import { focusProjectSettingsArea, ProjectSettingsNavigation, ProjectSettingsTarget } from './ProjectSettingsNavigation'
+import {
+  focusProjectSettingsArea,
+  ProjectSettingsNavigation,
+  ProjectSettingsTarget,
+} from './ProjectSettingsNavigation'
 import { DeploymentServers } from './deployment'
-import { ProjectRemovalAction, ProjectRemovalDialog, type ProjectRemovalTarget } from './ProjectRemovalDialog'
+import {
+  ProjectRemovalAction,
+  ProjectRemovalDialog,
+  type ProjectRemovalTarget,
+} from './ProjectRemovalDialog'
 import { EnvironmentMcpDialog } from './EnvironmentMcpDialog'
-import { ProjectSetupOverview, type RepositorySetupSummary, type AssistantSetupSummary } from './ProjectSetupOverview'
+import {
+  ProjectSetupOverview,
+  type RepositorySetupSummary,
+  type AssistantSetupSummary,
+} from './ProjectSetupOverview'
 import { ProjectQuestionEntry } from './ProjectQuestionEntry'
 import {
   isConfigurationEditor,
@@ -81,16 +106,18 @@ export function AutoOpsProjectsPage() {
     </ModuleErrorBoundary>
   )
 }
-function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}}) {
+function ProjectsContent({ focusDirectory }: { focusDirectory: { current: boolean } }) {
   const wideHeader = useMediaQuery('sm')
-  const [mcpEnvironment, setMcpEnvironment] = useState<{id: string; name: string} | null>(null)
+  const [mcpEnvironment, setMcpEnvironment] = useState<{ id: string; name: string } | null>(null)
   const mcpTrigger = useRef<HTMLButtonElement | null>(null)
   const [removalTarget, setRemovalTarget] = useState<ProjectRemovalTarget | null>(null)
   const [removalLocked, setRemovalLocked] = useState(false)
   const [removalCanResume, setRemovalCanResume] = useState(false)
   const removalReturn = useRef<HTMLButtonElement | null>(null)
   const refreshButton = useRef<HTMLButtonElement | null>(null)
-  const [nodeScope, setNodeScope] = useState<{ scope: 'platform' } | { scope: 'project'; projectId: string; environmentId: string } | null>(null)
+  const [nodeScope, setNodeScope] = useState<
+    { scope: 'platform' } | { scope: 'project'; projectId: string; environmentId: string } | null
+  >(null)
   const nodeTrigger = useRef<HTMLButtonElement | null>(null)
   const [credentialLocked, setCredentialLocked] = useState(false)
   const repositoryAddButton = useRef<HTMLButtonElement | null>(null)
@@ -102,6 +129,7 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   const hasExplicitProject = Object.hasOwn(search, 'projectId')
   const selected = host?.projects.find((project) => project.id === explicit)
   const manageable = selected?.capabilities?.['project.manage'] === true
+  const [projectQuery, setProjectQuery] = useState('')
   const [projects, setProjects] = useState<DirectoryProject[]>([])
   const [settings, setSettings] = useState<ProjectSettings | null>(null)
   const [loading, setLoading] = useState(true)
@@ -134,20 +162,21 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       setError(null)
       try {
         const [directory, details] = await Promise.all([
-          loadProjectDirectory(controller.signal),
+          explicit && manageable ? Promise.resolve(null) : loadProjectDirectory(controller.signal),
           explicit && manageable
             ? loadProjectSettings(explicit, controller.signal)
             : Promise.resolve(null),
         ])
         if (controller.signal.aborted) return
-        setProjects(directory.items)
+        setProjects(directory?.items ?? (details ? [details.project] : []))
         setSettings(details)
       } catch (cause) {
         if (controller.signal.aborted) return
         if (isAutoOpsAccessError(cause)) {
           setProjects([])
           setSettings(null)
-          if (!readPendingProjectWrite(explicit ? { projectId: explicit } : undefined)) setEditor(null)
+          if (!readPendingProjectWrite(explicit ? { projectId: explicit } : undefined))
+            setEditor(null)
         }
         setError(cause instanceof Error ? cause.message : '项目读取失败')
       } finally {
@@ -162,7 +191,14 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   }, [load])
   const locatedSection = useRef<string | null>(null)
   useEffect(() => {
-    if (loading || !settings || !manageable || search.section !== 'git' || locatedSection.current === location.href) return
+    if (
+      loading ||
+      !settings ||
+      !manageable ||
+      search.section !== 'git' ||
+      locatedSection.current === location.href
+    )
+      return
     locatedSection.current = location.href
     focusProjectSettingsArea('git')
   }, [loading, settings, manageable, search.section, location.href])
@@ -215,7 +251,11 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       const entryUnverified = result.nativeSynchronization === 'unverified'
       toastManager.add({
         type: unavailable || entryUnverified ? 'info' : 'success',
-        title: unavailable ? '操作已保存，当前对象不可访问' : entryUnverified ? '已保存，运行入口待核对' : '已保存',
+        title: unavailable
+          ? '操作已保存，当前对象不可访问'
+          : entryUnverified
+            ? '已保存，运行入口待核对'
+            : '已保存',
       })
       try {
         await refreshProjectHost()
@@ -241,7 +281,10 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
       if (cause instanceof PendingProjectDeletion && cause.canResume) {
         removalReturn.current = refreshButton.current
         setRemovalCanResume(true)
-        setRemovalTarget({ ...cause.target, name: projects.find(project => project.id === cause.target.projectId)?.name ?? '原项目' })
+        setRemovalTarget({
+          ...cause.target,
+          name: projects.find((project) => project.id === cause.target.projectId)?.name ?? '原项目',
+        })
         setEditor(null)
         setError(null)
         return
@@ -292,44 +335,34 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
   }
   return (
     <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-project-directory>
-      <ModuleSidebar label="项目管理">
-        <ModuleSidebarItem
-          label="全部项目"
-          selected={!hasExplicitProject}
-          icon={FolderGit2Icon}
-          onClick={() => go()}
-        />
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {projects.map((project) => (
-            <ModuleSidebarItem
-              key={project.id}
-              label={project.name}
-              selected={project.id === explicit}
-              onClick={() => go(project.id)}
-            />
-          ))}
-          {!loading && !error && !projects.length ? (
-            <ModuleSidebarEmpty>没有可见项目</ModuleSidebarEmpty>
-          ) : null}
-        </div>
-      </ModuleSidebar>
+      {hasExplicitProject ? (
+        <ModuleSidebar label="项目设置">
+          <ProjectSettingsNavigation canManage={manageable && settings !== null} sidebar />
+        </ModuleSidebar>
+      ) : (
+        <ModuleSidebar
+          label="项目目录"
+          search={{ value: projectQuery, onChange: setProjectQuery, label: '搜索项目' }}
+        >
+          <ModuleSidebarItem
+            label="全部项目"
+            selected
+            icon={FolderGit2Icon}
+            onClick={() => setProjectQuery('')}
+          />
+        </ModuleSidebar>
+      )}
       <ModuleHeader
-        title="项目管理"
-        detail={hasExplicitProject ? (wideHeader ? '项目配置' : (selected?.name ?? '项目不可用')) : '全部项目'}
+        title={hasExplicitProject ? '项目设置' : '全部项目'}
+        detail={
+          hasExplicitProject
+            ? wideHeader
+              ? '项目设置'
+              : (selected?.name ?? '项目不可用')
+            : '全部项目'
+        }
         actions={
           <>
-            {host?.canManageDeploymentNodes ? (
-              <Button variant="outline" size={wideHeader ? 'sm' : 'icon-sm'}
-                aria-label="平台节点" title="平台节点"
-                disabled={busy || !!pending || credentialLocked || removalLocked}
-                onClick={(event) => {
-                  nodeTrigger.current = event.currentTarget
-                  setNodeScope({ scope: 'platform' })
-                }}>
-                <ServerIcon />
-                {wideHeader ? '平台节点' : null}
-              </Button>
-            ) : null}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -379,30 +412,40 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                 {wideHeader ? '编辑项目' : null}
               </Button>
             ) : null}
-            {manageable && settings ? <ProjectRemovalAction
-              target={{projectId: settings.project.id, name: settings.project.name, revision: settings.project.revision}}
-              disabled={busy || !!pending || credentialLocked || removalLocked}
-              onSelect={beginRemoval}
-            /> : null}
+            {manageable && settings ? (
+              <ProjectRemovalAction
+                target={{
+                  projectId: settings.project.id,
+                  name: settings.project.name,
+                  revision: settings.project.revision,
+                }}
+                disabled={busy || !!pending || credentialLocked || removalLocked}
+                onSelect={beginRemoval}
+              />
+            ) : null}
           </>
         }
       />
-      {!loading && explicit && current ? (
+      {!loading && explicit && current && search.from === 'deployments' ? (
         <ProjectSettingsNavigation
-          canManage={manageable && settings !== null}
-          returnAction={search.from === 'deployments' && selected?.capabilities?.['deployment.read'] ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy || credentialLocked || removalLocked}
-              render={<Link to="/deployments" search={{ projectId: ProjectId.make(explicit) }} />}
-            >
-              <ArrowLeftIcon />返回部署
-            </Button>
-          ) : undefined}
+          canManage={false}
+          returnOnly
+          returnAction={
+            search.from === 'deployments' && selected?.capabilities?.['deployment.read'] ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy || credentialLocked || removalLocked}
+                render={<Link to="/deployments" search={{ projectId: ProjectId.make(explicit) }} />}
+              >
+                <ArrowLeftIcon />
+                返回部署
+              </Button>
+            ) : undefined
+          }
         />
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto" data-project-settings-scroll>
         <WorkspacePageContainer>
           {error ? (
             <div role="alert" className="space-y-2">
@@ -454,44 +497,80 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                 <EmptyContent>
                   {host?.canCreateProject ? (
                     <Button
-                      disabled={busy || !!pending || refreshing || credentialLocked || removalLocked}
-                      onClick={(event) => open(
-                        { kind: 'create', revision: 0, name: '', description: '' },
-                        event.currentTarget,
-                      )}
+                      disabled={
+                        busy || !!pending || refreshing || credentialLocked || removalLocked
+                      }
+                      onClick={(event) =>
+                        open(
+                          { kind: 'create', revision: 0, name: '', description: '' },
+                          event.currentTarget,
+                        )
+                      }
                     >
-                      <PlusIcon />创建项目
+                      <PlusIcon />
+                      创建项目
                     </Button>
                   ) : (
-                    <Button disabled={busy || refreshing} aria-busy={refreshing} onClick={() => void refresh()}>
-                      <RefreshCwIcon />刷新项目
+                    <Button
+                      disabled={busy || refreshing}
+                      aria-busy={refreshing}
+                      onClick={() => void refresh()}
+                    >
+                      <RefreshCwIcon />
+                      刷新项目
                     </Button>
                   )}
                 </EmptyContent>
               </Empty>
-            ) : projects.length ? <SettingsSection title="项目">
-              {projects.map((project) => (
-                <SettingsRow
-                  key={project.id}
-                  title={project.name}
-                  description={project.description || undefined}
-                  control={
-                    <Button variant="ghost" size="sm" onClick={() => go(project.id)}>
-                      打开
-                    </Button>
-                  }
-                >
-                  <span className="text-xs text-muted-foreground">
-                    {project.environments.length} 个可见环境
-                  </span>
-                </SettingsRow>
-              ))}
-            </SettingsSection> : null
+            ) : projects.length ? (
+              <SettingsSection title="项目">
+                {projects
+                  .filter((project) =>
+                    `${project.name} ${project.description}`
+                      .toLocaleLowerCase()
+                      .includes(projectQuery.trim().toLocaleLowerCase()),
+                  )
+                  .map((project) => (
+                    <SettingsRow
+                      key={project.id}
+                      title={<span className="wrap-anywhere">{project.name}</span>}
+                      description={project.description || undefined}
+                      control={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label={`打开项目 ${project.name}`}
+                          onClick={() => go(project.id)}
+                        >
+                          打开项目
+                        </Button>
+                      }
+                    >
+                      <span className="text-xs text-muted-foreground">
+                        {project.environments.length} 个可见环境
+                      </span>
+                    </SettingsRow>
+                  ))}
+                {projectQuery &&
+                !projects.some((project) =>
+                  `${project.name} ${project.description}`
+                    .toLocaleLowerCase()
+                    .includes(projectQuery.trim().toLocaleLowerCase()),
+                ) ? (
+                  <p role="status" className="py-6 text-center text-sm text-muted-foreground">
+                    没有匹配的项目
+                  </p>
+                ) : null}
+              </SettingsSection>
+            ) : null
           ) : (
             <>
               <ProjectSettingsTarget area="general">
                 <SettingsSection title="项目信息">
-                  <SettingsRow title="名称" control={<span className="min-w-0 break-words">{current?.name}</span>} />
+                  <SettingsRow
+                    title="名称"
+                    control={<span className="min-w-0 break-words">{current?.name}</span>}
+                  />
                   {current?.description ? (
                     <SettingsRow title="说明">
                       <p className="whitespace-pre-wrap break-words text-sm">
@@ -546,48 +625,63 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
                       control={
                         manageable ? (
                           <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm"
-                            aria-label={`管理${env.name} MCP`}
-                            disabled={busy || !!pending || credentialLocked || removalLocked}
-                            onClick={(event) => {
-                              mcpTrigger.current = event.currentTarget
-                              setMcpEnvironment({id: env.id, name: env.name})
-                            }}>
-                            MCP
-                          </Button>
-                          <Button variant="ghost" size="sm"
-                            aria-label={`管理${env.name}节点`}
-                            disabled={busy || !!pending || credentialLocked || removalLocked}
-                            onClick={(event) => {
-                              nodeTrigger.current = event.currentTarget
-                              setNodeScope({ scope: 'project', projectId: current!.id, environmentId: env.id })
-                            }}>
-                            节点
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy || !!pending || credentialLocked || removalLocked}
-                            onClick={(event) =>
-                              open(
-                                {
-                                  kind: 'environment',
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`管理${env.name} MCP`}
+                              disabled={busy || !!pending || credentialLocked || removalLocked}
+                              onClick={(event) => {
+                                mcpTrigger.current = event.currentTarget
+                                setMcpEnvironment({ id: env.id, name: env.name })
+                              }}
+                            >
+                              MCP
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`管理${env.name}节点`}
+                              disabled={busy || !!pending || credentialLocked || removalLocked}
+                              onClick={(event) => {
+                                nodeTrigger.current = event.currentTarget
+                                setNodeScope({
+                                  scope: 'project',
+                                  projectId: current!.id,
                                   environmentId: env.id,
-                                  revision: env.revision,
-                                  name: env.name,
-                                  description: '',
-                                },
-                                event.currentTarget,
-                              )
-                            }
-                          >
-                            编辑
-                          </Button>
-                          <ProjectRemovalAction
-                            target={{projectId: current!.id, environmentId: env.id, name: env.name, revision: env.revision}}
-                            disabled={busy || !!pending || credentialLocked || removalLocked}
-                            onSelect={beginRemoval}
-                          />
+                                })
+                              }}
+                            >
+                              节点
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy || !!pending || credentialLocked || removalLocked}
+                              onClick={(event) =>
+                                open(
+                                  {
+                                    kind: 'environment',
+                                    environmentId: env.id,
+                                    revision: env.revision,
+                                    name: env.name,
+                                    description: '',
+                                  },
+                                  event.currentTarget,
+                                )
+                              }
+                            >
+                              编辑
+                            </Button>
+                            <ProjectRemovalAction
+                              target={{
+                                projectId: current!.id,
+                                environmentId: env.id,
+                                name: env.name,
+                                revision: env.revision,
+                              }}
+                              disabled={busy || !!pending || credentialLocked || removalLocked}
+                              onSelect={beginRemoval}
+                            />
                           </div>
                         ) : undefined
                       }
@@ -631,48 +725,68 @@ function ProjectsContent({focusDirectory}: {focusDirectory: {current: boolean}})
           )}
         </WorkspacePageContainer>
       </div>
-      {removalTarget ? <ProjectRemovalDialog
-        key={`${removalTarget.projectId}:${removalTarget.environmentId ?? 'project'}`}
-        target={removalTarget} finalFocus={removalReturn} initialCanResume={removalCanResume}
-        onLockChange={setRemovalLocked}
-        onClose={() => setRemovalTarget(null)}
-        onAccessDenied={(cause) => {
-          setError(cause instanceof Error ? cause.message : '当前管理权限不可用')
-          void refreshProjectHost().catch(() => {})
-        }}
-        onRemoved={() => {
-          removalReturn.current = refreshButton.current
-          setPending(readPending())
-          setRemovalTarget(null)
-          if (removalTarget.environmentId) {
+      {removalTarget ? (
+        <ProjectRemovalDialog
+          key={`${removalTarget.projectId}:${removalTarget.environmentId ?? 'project'}`}
+          target={removalTarget}
+          finalFocus={removalReturn}
+          initialCanResume={removalCanResume}
+          onLockChange={setRemovalLocked}
+          onClose={() => setRemovalTarget(null)}
+          onAccessDenied={(cause) => {
+            setError(cause instanceof Error ? cause.message : '当前管理权限不可用')
+            void refreshProjectHost().catch(() => {})
+          }}
+          onRemoved={() => {
+            removalReturn.current = refreshButton.current
+            setPending(readPending())
+            setRemovalTarget(null)
+            if (removalTarget.environmentId) {
+              void load(true)
+            } else {
+              focusDirectory.current = true
+              if (!explicit) void load()
+              go()
+            }
+          }}
+        />
+      ) : null}
+      {mcpEnvironment && explicit ? (
+        <EnvironmentMcpDialog
+          key={`${explicit}:${mcpEnvironment.id}`}
+          projectId={explicit}
+          environmentId={mcpEnvironment.id}
+          environmentName={mcpEnvironment.name}
+          open
+          finalFocus={mcpTrigger}
+          onOpenChange={(value) => {
+            if (!value) setMcpEnvironment(null)
+          }}
+          onChanged={() => setConfigurationRevision((value) => value + 1)}
+          onAccessDenied={(cause) => {
+            setError(cause instanceof Error ? cause.message : '当前环境管理权限不可用')
+            void refreshProjectHost().catch(() => {})
+          }}
+        />
+      ) : null}
+      {nodeScope ? (
+        <DeploymentServers
+          {...nodeScope}
+          open
+          finalFocus={nodeTrigger}
+          onOpenChange={(value) => {
+            if (!value) setNodeScope(null)
+          }}
+          onAccessDenied={(cause) => {
+            setError(cause instanceof Error ? cause.message : '当前节点权限已撤销')
+            void refreshProjectHost().catch(() => {})
+          }}
+          onChanged={() => {
             void load(true)
-          } else {
-            focusDirectory.current = true
-            if (!explicit) void load()
-            go()
-          }
-        }}
-      /> : null}
-      {mcpEnvironment && explicit ? <EnvironmentMcpDialog
-        key={`${explicit}:${mcpEnvironment.id}`}
-        projectId={explicit} environmentId={mcpEnvironment.id} environmentName={mcpEnvironment.name}
-        open finalFocus={mcpTrigger}
-        onOpenChange={(value) => { if (!value) setMcpEnvironment(null) }}
-        onChanged={() => setConfigurationRevision(value => value + 1)}
-        onAccessDenied={(cause) => {
-          setError(cause instanceof Error ? cause.message : '当前环境管理权限不可用')
-          void refreshProjectHost().catch(() => {})
-        }}
-      /> : null}
-      {nodeScope ? <DeploymentServers {...nodeScope} open
-        finalFocus={nodeTrigger}
-        onOpenChange={(value) => { if (!value) setNodeScope(null) }}
-        onAccessDenied={(cause) => {
-          setError(cause instanceof Error ? cause.message : '当前节点权限已撤销')
-          void refreshProjectHost().catch(() => {})
-        }}
-        onChanged={() => { void load(true); setConfigurationRevision(value => value + 1) }}
-      /> : null}
+            setConfigurationRevision((value) => value + 1)
+          }}
+        />
+      ) : null}
       <Dialog
         open={editor !== null}
         onOpenChange={(value) => {

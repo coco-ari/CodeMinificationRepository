@@ -28,7 +28,7 @@ const host = () => ({
   ],
   capabilities: {},
 })
-const labels = ['问答', '工作区', '部署', 'skill库', '项目管理', '助手', '账号']
+const labels = ['问答', '工作区', '部署', 'skills', '项目设置', '助手']
 const view = (width = 1200) => (
   <div style={{ width, maxWidth: '100%' }}>
     <SidebarProvider>
@@ -60,20 +60,20 @@ it('相同桌面窗口按容器空间逐步折叠，菜单只列溢出模块，E
   await expect.element(screen.getByRole('radio', { name: '问答', exact: true })).toBeVisible()
   const trigger = screen.getByRole('button', { name: '更多功能', exact: true })
   await trigger.click()
-  await expect.element(page.getByRole('option', { name: '账号', exact: true })).toBeVisible()
+  await expect.element(page.getByRole('option', { name: '助手', exact: true })).toBeVisible()
   await expect
     .element(page.getByRole('option', { name: '问答', exact: true }))
     .not.toBeInTheDocument()
   await page.getByRole('combobox', { name: '搜索功能', exact: true }).fill('助手')
   await expect.element(page.getByRole('option', { name: '助手', exact: true })).toBeVisible()
   await expect
-    .element(page.getByRole('option', { name: '账号', exact: true }))
+    .element(page.getByRole('option', { name: '项目设置', exact: true }))
     .not.toBeInTheDocument()
   await userEvent.keyboard('{Escape}')
   await expect.element(trigger).toHaveFocus()
   await trigger.click()
   await screen.rerender(view(1200))
-  await expect.element(screen.getByRole('radio', { name: '账号', exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('radio', { name: '助手', exact: true })).toBeVisible()
   await expect.element(screen.getByRole('button', { name: '更多功能' })).not.toBeInTheDocument()
   await expect.element(page.getByRole('combobox', { name: '搜索功能', exact: true })).not.toBeInTheDocument()
   await expect.element(screen.getByRole('radio', { name: '问答', exact: true })).toHaveFocus()
@@ -82,9 +82,9 @@ it('相同桌面窗口按容器空间逐步折叠，菜单只列溢出模块，E
 it('390px 深色只保留当前模块选择器，菜单选择和键盘可用且不横向溢出', async () => {
   await page.viewport(390, 600)
   document.documentElement.classList.add('dark')
-  await using screen = await render(view(390), { router: '/accounts?projectId=p-one' })
+  await using screen = await render(view(390), { router: '/assistants?projectId=p-one' })
   const trigger = screen.getByRole('button', { name: '切换模块', exact: true })
-  await expect.element(trigger).toHaveTextContent('账号')
+  await expect.element(trigger).toHaveTextContent('助手')
   await trigger.click()
   for (const name of labels)
     await expect.element(page.getByRole('option', { name, exact: true })).toBeVisible()
@@ -97,9 +97,9 @@ it('390px 深色只保留当前模块选择器，菜单选择和键盘可用且�
 })
 
 it('更换长项目名称不移动功能入口，当前溢出模块有名称，受限权限不泄漏入口', async () => {
-  await using screen = await render(view(680), { router: '/accounts?projectId=p-one' })
+  await using screen = await render(view(680), { router: '/assistants?projectId=p-one' })
   const trigger = screen.getByRole('button', { name: '更多功能', exact: true })
-  await expect.element(trigger).toHaveTextContent('账号')
+  await expect.element(trigger).toHaveTextContent('助手')
   const before = screen
     .getByRole('radio', { name: '问答', exact: true })
     .element()
@@ -126,20 +126,20 @@ it('零项目只显示已授权全局模块，功能菜单不存在空占位', a
   mocks.host.mockReturnValue({ ...host(), projects: [] })
   mocks.projectId = ''
   await using screen = await render(view(), { router: '/projects' })
-  for (const name of ['skill库', '项目管理', '助手', '账号'])
+  for (const name of ['全部项目', '我的助手', '账号'])
     await expect.element(screen.getByRole('radio', { name, exact: true })).toBeVisible()
   for (const name of ['问答', '工作区', '部署'])
     await expect.element(screen.getByRole('radio', { name, exact: true })).not.toBeInTheDocument()
 })
 
 it('缩窄时把被收起按钮的键盘焦点交给模块菜单，展开恢复当前入口', async () => {
-  await using screen = await render(view(), { router: '/accounts?projectId=p-one' })
-  await expect.element(screen.getByRole('radio', { name: '账号', exact: true })).toBeVisible()
-  screen.getByRole('radio', { name: '账号', exact: true }).element().focus()
+  await using screen = await render(view(), { router: '/assistants?projectId=p-one' })
+  await expect.element(screen.getByRole('radio', { name: '助手', exact: true })).toBeVisible()
+  screen.getByRole('radio', { name: '助手', exact: true }).element().focus()
   await screen.rerender(view(390))
   await expect.element(screen.getByRole('button', { name: '切换模块', exact: true })).toHaveFocus()
   await screen.rerender(view())
-  await expect.element(screen.getByRole('radio', { name: '账号', exact: true })).toHaveFocus()
+  await expect.element(screen.getByRole('radio', { name: '助手', exact: true })).toHaveFocus()
 })
 
 it.each([
@@ -158,10 +158,30 @@ it.each([
   await page.screenshot({ path: `../../.test-artifacts/adaptive-navigation/topbar-${width}.png` })
   if (width === 390) {
     await screen.getByRole('button', { name: '切换模块', exact: true }).click()
-    await expect.element(page.getByRole('option', { name: '项目管理', exact: true })).toBeVisible()
+    await expect.element(page.getByRole('option', { name: '项目设置', exact: true })).toBeVisible()
     await page.screenshot({ path: '../../.test-artifacts/adaptive-navigation/menu-390.png' })
     await userEvent.keyboard('{Escape}')
   }
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
   document.documentElement.classList.remove('dark')
+})
+
+
+it('全局工作台不冒用项目标题，按权限显示资源并进入明确项目', async () => {
+  mocks.host.mockReturnValue({ ...host(), canManageAccounts: true, canManageDeploymentNodes: true })
+  await using screen = await render(view(1400), { router: '/projects' })
+  await expect.element(screen.getByRole('button', { name: '切换项目' })).toHaveTextContent('进入项目')
+  for (const name of ['全部项目', '我的助手', '全局 skills', '平台节点', '账号'])
+    await expect.element(screen.getByRole('radio', { name, exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('radio', { name: '工作区', exact: true })).not.toBeInTheDocument()
+  await screen.getByRole('radio', { name: '平台节点', exact: true }).click()
+  expect(screen.router?.state.location.pathname).toBe('/nodes')
+  await screen.getByRole('button', { name: '切换项目' }).click()
+  await page.getByRole('option', { name: '短项目', exact: true }).click()
+  await expect.poll(() => screen.router?.state.location.href).toBe('/projects?projectId=p-one')
+  expect(mocks.select).not.toHaveBeenCalled()
+  await expect.element(screen.getByRole('radio', { name: '项目设置', exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('radio', { name: '账号', exact: true })).not.toBeInTheDocument()
+  await screen.getByRole('button', { name: '全局工作台', exact: true }).click()
+  await expect.poll(() => screen.router?.state.location.href).toBe('/projects')
 })

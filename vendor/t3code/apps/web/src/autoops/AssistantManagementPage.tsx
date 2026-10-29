@@ -8,7 +8,13 @@ import { WorkspacePageContainer } from "~/components/WorkspacePageContainer";
 import { SettingsGroup } from "~/components/settings/SettingsGroup";
 import { SettingsSection, SettingsRow } from "~/components/settings/settingsLayout";
 import { Button } from "~/components/ui/button";
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from "~/components/ui/empty";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyContent,
+} from "~/components/ui/empty";
 import { Label } from "~/components/ui/label";
 import { Checkbox } from "~/components/ui/checkbox";
 import {
@@ -43,9 +49,11 @@ import {
   type PendingProjectWrite,
 } from "./projectDirectory";
 import { loadAssistantManagement, type AssistantPreset } from "./projectAssistants";
+import { AssistantEditorPage, AssistantEnabledControl } from "./AssistantEditorPage";
 import { ProjectConfigurationFields } from "./ProjectConfigurationFields";
 import {
   configurationMutation,
+  assistantSourceKey,
   emptyConfig,
   projectRoleNames,
   type ProjectConfigurationEditor,
@@ -57,48 +65,18 @@ const message = (cause: unknown) =>
 export function AssistantManagementPage() {
   const host = useAutoOpsHost(),
     projectId = useAutoOpsProjectId(),
-    location = useLocation(),
-    navigate = useNavigate();
+    location = useLocation();
   const provided = (location.search as { assistantView?: string }).assistantView === "provided";
-  const selectedQuery = Object.hasOwn(location.search, "projectId")
-    ? String((location.search as { projectId?: unknown }).projectId ?? "")
-    : projectId;
-  const projectQuery =
-    Object.hasOwn(location.search, "projectId") || selectedQuery
-      ? `?projectId=${encodeURIComponent(selectedQuery)}&`
-      : "?";
-  const fromProject = (location.search as { from?: string }).from === "projects";
-  const returnContext = location.search as { returnSection?: string; returnFrom?: string };
-  const scopeQuery = [
-    projectQuery,
-    fromProject ? "from=projects&" : "",
-    fromProject && returnContext.returnSection === "git" ? "returnSection=git&" : "",
-    fromProject && returnContext.returnFrom === "deployments" ? "returnFrom=deployments&" : "",
-  ].join("");
   return (
     <ModuleErrorBoundary label="助手" resetKey={`${host?.principal.id}:${projectId}:${provided}`}>
       <SidebarInset className="h-dvh min-h-0 min-w-0 overflow-hidden" data-assistant-management>
-        <ModuleHeader title="助手" />
-        <ModuleSidebar label="助手管理">
+        <ModuleHeader title={provided ? "我的助手" : "助手"} />
+        <ModuleSidebar label={provided ? "我的助手" : "项目助手"}>
           <ModuleSidebarItem
-            label="当前项目"
-            icon={BotIcon}
-            selected={!provided}
-            onClick={() =>
-              void navigate({
-                href: `/assistants${scopeQuery}assistantView=project`,
-              })
-            }
-          />
-          <ModuleSidebarItem
-            label="我提供的"
-            icon={UserIcon}
-            selected={provided}
-            onClick={() =>
-              void navigate({
-                href: `/assistants${scopeQuery}assistantView=provided`,
-              })
-            }
+            label={provided ? "助手与电脑" : "当前项目"}
+            icon={provided ? UserIcon : BotIcon}
+            selected
+            onClick={() => {}}
           />
         </ModuleSidebar>
         <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
@@ -109,7 +87,9 @@ export function AssistantManagementPage() {
               ) : !host.projects.length && !Object.hasOwn(location.search, "projectId") ? (
                 <Empty size="compact">
                   <EmptyHeader>
-                    <EmptyTitle role="heading" aria-level={2}>先选择一个项目</EmptyTitle>
+                    <EmptyTitle role="heading" aria-level={2}>
+                      先选择一个项目
+                    </EmptyTitle>
                     <EmptyDescription>
                       {host.canCreateProject
                         ? "在项目管理中创建项目，或联系管理员加入已有项目，再配置可使用的助手。"
@@ -163,10 +143,10 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   const scoped = (value: PendingProjectWrite) =>
     value.path.startsWith(`/api/v1/projects/${encodeURIComponent(projectId)}/assistants`) ||
     value.path === `/api/v1/projects/${encodeURIComponent(projectId)}/assistant-allocations`;
-  const readPending = () => readPendingProjectWrite({ projectId, owner: 'assistant' });
+  const readPending = () => readPendingProjectWrite({ projectId, owner: "assistant" });
   useEffect(() => {
     alive.current = true;
-    const value = readPendingProjectWrite({ projectId, owner: 'assistant' });
+    const value = readPendingProjectWrite({ projectId, owner: "assistant" });
     if (value && scoped(value)) setPending(value);
     const projectPath = `/api/v1/projects/${encodeURIComponent(projectId)}`;
     const environmentPath = `${projectPath}/environments/`;
@@ -209,8 +189,8 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
   useEffect(() => {
     // 保存后目录会短暂禁用入口；恢复可用时只归还尚未被用户移走的焦点。
     if (savedFocus.current && editor === null && fresh && !busy && !pending && !otherPending) {
-      savedFocus.current = false
-      const focused = document.activeElement
+      savedFocus.current = false;
+      const focused = document.activeElement;
       if (
         (!focused ||
           focused === document.body ||
@@ -219,9 +199,9 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
         trigger.current?.isConnected &&
         !trigger.current.disabled
       )
-        trigger.current.focus()
+        trigger.current.focus();
     }
-  }, [editor, fresh, busy, pending, otherPending])
+  }, [editor, fresh, busy, pending, otherPending]);
   async function submit(original: PendingProjectWrite) {
     if (writing.current) return;
     const checking = original.submitted === true;
@@ -293,6 +273,32 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
       setError(message(cause));
     }
   }
+  function closeEditor() {
+    savedFocus.current = true;
+    setEditor(null);
+  }
+  function toggle(preset: AssistantPreset, enabled: boolean) {
+    if (!manage || !fresh || busy || pending || otherPending || preset.providedBy) return;
+    try {
+      void submit(
+        prepareProjectMutation(
+          `/api/v1/projects/${encodeURIComponent(projectId)}/assistants/${encodeURIComponent(preset.id)}`,
+          preset.revision,
+          {
+            value: {
+              name: preset.name,
+              description: preset.description,
+              instructions: preset.instructions,
+              configuration: preset.configuration,
+              enabled,
+            },
+          },
+        ),
+      );
+    } catch (cause) {
+      setError(message(cause));
+    }
+  }
   const availableDefault = (preset: AssistantPreset) =>
     preset.enabled &&
     (!preset.providedBy ||
@@ -346,7 +352,8 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
         choices: {
           ...context.choices,
           sources: context.choices.sources.filter(
-            (source) => source.executionBinding.kind === "platform",
+            (source) => source.executionBinding.kind === "platform" ||
+              (preset && assistantSourceKey(source.executionBinding) === assistantSourceKey(preset.configuration.executionBinding)),
           ),
         },
       },
@@ -358,7 +365,10 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
     <div className="space-y-6">
       {fromProject ? (
         busy || pending || otherPending || editor ? (
-          <Button variant="ghost" size="sm" disabled><ArrowLeftIcon />返回项目配置</Button>
+          <Button variant="ghost" size="sm" disabled>
+            <ArrowLeftIcon />
+            返回项目配置
+          </Button>
         ) : (
           <Button
             variant="ghost"
@@ -374,7 +384,8 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
               />
             }
           >
-            <ArrowLeftIcon />返回项目配置
+            <ArrowLeftIcon />
+            返回项目配置
           </Button>
         )
       ) : null}
@@ -421,114 +432,156 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
           </AlertDescription>
         </Alert>
       ) : null}
-      <SettingsSection
-        title="当前项目"
-        headerAction={
-          manage ? (
-            <div className="flex gap-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => {
-                  setError(null);
-                  setAttempt((value) => value + 1);
-                }}
-              >
-                刷新助手
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy || !!pending || !!otherPending || !context || !fresh}
-                onClick={(event) => allocate(event.currentTarget)}
-              >
-                分配助手
-              </Button>
-              <Button
-                size="sm"
-                disabled={busy || !!pending || !!otherPending || !context || !fresh}
-                onClick={(event) => edit(null, event.currentTarget)}
-              >
-                添加项目助手
-              </Button>
-            </div>
-          ) : undefined
-        }
-      >
-        {manage && !context && !error ? <p role="status">正在读取项目助手…</p> : null}
-        {manage && error ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => {
-              setError(null);
-              setAttempt((value) => value + 1);
-            }}
-          >
-            重试项目助手
-          </Button>
-        ) : null}
-        <SettingsGroup>
-          {(manage
-            ? (context?.assistants.presets ?? [])
-            : readonlyItems.map((item) => item.preset)
-          ).map((preset) => {
-            const provided = context?.provided.items.find((item) => item.preset.id === preset.id),
-              availability = readonlyItems.find((item) => item.preset.id === preset.id);
-            return (
-              <SettingsRow
-                key={preset.id}
-                title={preset.name}
-                description={
-                  <>
-                    <span className="block">
-                      {preset.configuration.model.model} ·{" "}
-                      {preset.configuration.model.reasoningEffort ?? "运行器默认"}
-                    </span>
-                    <span className="block">
-                      {preset.providedBy
-                        ? `提供者 · ${preset.providedBy.name}`
-                        : preset.enabled
-                          ? "项目预设"
-                          : "已停用"}
-                      {provided?.share?.enabled ? " · 已共享" : ""}
-                    </span>
-                    {provided?.reason || availability?.reason ? (
-                      <span role="status" className="block">
-                        {provided?.reason?.message ?? availability?.reason?.message}
-                      </span>
-                    ) : null}
-                  </>
-                }
-                control={
-                  manage && !preset.providedBy ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy || !!pending || !!otherPending || !fresh}
-                      aria-label={`编辑项目助手 ${preset.name}`}
-                      onClick={(event) => edit(preset, event.currentTarget)}
-                    >
-                      编辑
-                    </Button>
-                  ) : undefined
-                }
-              />
-            );
-          })}
-          {(!manage || context) &&
-          (manage ? context?.assistants.presets.length === 0 : readonlyItems.length === 0) ? (
-            <SettingsRow
-              title="当前没有已分配助手"
-              description={project.assistants?.reason?.message}
-            />
+      <div hidden={editor?.kind === "assistant"}>
+        <SettingsSection
+          title="项目助手"
+          headerAction={
+            manage ? (
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null);
+                    setAttempt((value) => value + 1);
+                  }}
+                >
+                  刷新助手
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || !!pending || !!otherPending || !context || !fresh}
+                  onClick={(event) => allocate(event.currentTarget)}
+                >
+                  分配助手
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy || !!pending || !!otherPending || !context || !fresh}
+                  onClick={(event) => edit(null, event.currentTarget)}
+                >
+                  添加项目助手
+                </Button>
+              </div>
+            ) : undefined
+          }
+        >
+          {manage && !context && !error ? <p role="status">正在读取项目助手…</p> : null}
+          {manage && error ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                setAttempt((value) => value + 1);
+              }}
+            >
+              重试项目助手
+            </Button>
           ) : null}
-        </SettingsGroup>
-      </SettingsSection>
+          <SettingsGroup>
+            {(manage
+              ? (context?.assistants.presets ?? [])
+              : readonlyItems.map((item) => item.preset)
+            ).map((preset) => {
+              const provided = context?.provided.items.find((item) => item.preset.id === preset.id),
+                availability = readonlyItems.find((item) => item.preset.id === preset.id);
+              return (
+                <SettingsRow
+                  key={preset.id}
+                  title={<span className="wrap-anywhere">{preset.name}</span>}
+                  description={
+                    <>
+                      <span className="block">
+                        {preset.configuration.model.model} ·{" "}
+                        {preset.configuration.model.reasoningEffort ?? "运行器默认"}
+                      </span>
+                      {preset.providedBy ? (
+                        <span className="block">
+                          {preset.providedBy
+                            ? `提供者 · ${preset.providedBy.name}`
+                            : preset.enabled
+                              ? "项目预设"
+                              : "已停用"}
+                          {provided?.share?.enabled ? " · 已共享" : ""}
+                        </span>
+                      ) : null}
+                      {preset.enabled && (provided?.reason || availability?.reason) ? (
+                        <span role="status" className="block">
+                          {provided?.reason?.message ?? availability?.reason?.message}
+                        </span>
+                      ) : null}
+                    </>
+                  }
+                  control={
+                    manage && !preset.providedBy ? (
+                      <div className="flex items-center gap-4">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy || !!pending || !!otherPending || !fresh}
+                          aria-label={`编辑项目助手 ${preset.name}`}
+                          onClick={(event) => edit(preset, event.currentTarget)}
+                        >
+                          编辑
+                        </Button>
+                        <AssistantEnabledControl
+                          name={preset.name}
+                          enabled={preset.enabled}
+                          busy={
+                            busy &&
+                            pending?.path.endsWith(
+                              `/assistants/${encodeURIComponent(preset.id)}`,
+                            ) === true
+                          }
+                          disabled={busy || !!pending || !!otherPending || !fresh}
+                          onFocus={(button) => {
+                            trigger.current = button;
+                          }}
+                          onChange={(enabled) => toggle(preset, enabled)}
+                        />
+                      </div>
+                    ) : undefined
+                  }
+                />
+              );
+            })}
+            {(!manage || context) &&
+            (manage ? context?.assistants.presets.length === 0 : readonlyItems.length === 0) ? (
+              <SettingsRow
+                title="当前没有已分配助手"
+                description={project.assistants?.reason?.message}
+              />
+            ) : null}
+          </SettingsGroup>
+        </SettingsSection>
+      </div>
+      {editor?.kind === "assistant" ? (
+        <AssistantEditorPage
+          title={editor.id ? "编辑项目助手" : "添加项目助手"}
+          value={{ name: editor.name, description: editor.description, value: editor.value }}
+          busy={busy}
+          pending={!!pending}
+          disabled={busy || !!pending || !!otherPending || !fresh || !editor.name.trim() || !editor.value.configuration.model.model}
+          saveLabel="保存助手配置"
+          onSave={save}
+          onClose={closeEditor}
+        >
+          <ProjectConfigurationFields
+            editor={editor}
+            disabled={busy || !!pending}
+            presentation="page"
+            onChange={(next) => {
+              if (next.kind === "assistant") setEditor(next);
+            }}
+          />
+        </AssistantEditorPage>
+      ) : null}
       <Dialog
-        open={editor !== null}
+        open={editor?.kind === "allocation"}
         onOpenChange={(open) => {
           if (!open && !busy) setEditor(null);
         }}
@@ -556,15 +609,7 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               ) : null}
-              {editor?.kind === "assistant" ? (
-                <ProjectConfigurationFields
-                  editor={editor}
-                  disabled={busy || !!pending}
-                  onChange={(next) => {
-                    if (next.kind === "assistant") setEditor(next);
-                  }}
-                />
-              ) : editor?.kind === "allocation" ? (
+              {editor?.kind === "allocation" ? (
                 <>
                   <div className="space-y-2">
                     <Label>分配对象</Label>

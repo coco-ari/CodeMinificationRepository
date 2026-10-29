@@ -36,7 +36,7 @@ test('设置返回识别真实模块，同项目保留完整工作区、部署�
   for (const [href, area] of [
     ['/workspaces?projectId=a&versionId=version-1', 'workspaces'],
     ['/deployments?projectId=a&sourceVersionId=version-1', 'deployments'],
-    ['/skills?projectId=a&skillView=agent&agentId=agent-a', 'skills'],
+    ['/skills?projectId=a&skillView=assistant&assistantId=assistant-a', 'skills'],
     ['/env/thread-a?view=files', 'chat'],
   ]) {
     assert.equal(captureAutoOpsMainLocation(href, 'a', f.projects)?.area, area)
@@ -46,16 +46,16 @@ test('设置返回识别真实模块，同项目保留完整工作区、部署�
 
 test('技能设置返回保留当前视图，切项目只携带仍授权的全局助手', () => {
   const f = fixture()
-  const href = '/skills?projectId=a&skillView=agent&agentId=agent-a&skillId=old&versionId=v1'
-  assert.equal(f.resolve(href, 'a', 'b'), '/skills?projectId=b&skillView=agent&agentId=agent-a')
+  const href = '/skills?projectId=a&skillView=assistant&assistantId=assistant-a&skillId=old&versionId=v1'
+  assert.equal(f.resolve(href, 'a', 'b'), '/skills?projectId=b&skillView=assistant')
   assert.equal(f.resolve('/skills?projectId=a&skillView=project&skillId=old', 'a', 'b'), '/skills?projectId=b&skillView=project')
   assert.equal(f.resolve('/skills?projectId=a&skillView=library', 'a', 'member'), '/skills?projectId=member&skillView=library')
   assert.equal(f.resolve('/skills?projectId=a&skillView=library', 'a', 'external'), '/skills?projectId=external&skillView=library')
   assert.equal(f.resolve('/skills?projectId=a&skillView=unknown&agentId=agent-a', 'a', 'b'), '/skills?projectId=b')
   const snapshot = captureAutoOpsMainLocation(href, 'a', f.projects)
   f.projects.splice(0, 1)
-  assert.equal(f.resolve('/settings/general', 'a', 'b', { location: snapshot }), '/skills?projectId=b&skillView=agent')
-  assert.equal(f.resolve('/settings/general', 'a', 'removed', { location: snapshot }), '/')
+  assert.equal(f.resolve('/settings/general', 'a', 'b', { location: snapshot }), '/skills?projectId=b&skillView=assistant')
+  assert.equal(f.resolve('/settings/general', 'a', 'removed', { location: snapshot }), '/projects')
 })
 
 test('设置内换项目后返回原模块下新项目恢复位置，不拼接旧会话的项目查询', () => {
@@ -72,7 +72,7 @@ test('部署权限按返回时项目检查，成员与外部项目返回工作�
   assert.equal(f.resolve('/deployments?projectId=a', 'a', 'external'), '/workspaces?projectId=external')
   f.projects[0].capabilities['deployment.read'] = false
   assert.equal(f.resolve('/deployments?projectId=a', 'a', 'a'), '/workspaces?projectId=a')
-  assert.equal(f.resolve('/workspaces?projectId=a', 'a', 'removed-project'), '/')
+  assert.equal(f.resolve('/workspaces?projectId=a', 'a', 'removed-project'), '/projects')
 })
 
 test('拒绝外部地址、控制页、错误项目查询和篡改的区域元数据', () => {
@@ -107,4 +107,14 @@ test('直接进入设置或原项目已撤权时，仍只返回当前授权项�
   const snapshot = captureAutoOpsMainLocation('/deployments?projectId=a', 'a', f.projects)
   f.projects.splice(0, 1)
   assert.equal(f.resolve('/settings/general', 'a', 'b', { location: snapshot }), '/deployments?projectId=b')
+})
+
+
+test('全局页面的设置返回不依赖项目，也不跳回最近项目', () => {
+  const f = fixture()
+  for (const href of ['/projects', '/nodes', '/accounts', '/skills?scope=global', '/assistants?assistantView=provided']) {
+    assert.equal(captureAutoOpsMainLocation(href, '', [])?.global, true)
+    assert.equal(f.resolve(href, 'a', 'removed'), href)
+    assert.equal(f.resolve(href, 'a', 'b'), href)
+  }
 })

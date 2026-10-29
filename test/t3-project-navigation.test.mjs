@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   autoOpsAreaFromPath,
+  autoOpsGlobalArea,
+  autoOpsGlobalAreaAvailable,
   autoOpsAreaAvailable,
   AUTOOPS_AREAS,
   createAutoOpsProjectNavigation,
@@ -186,7 +188,7 @@ test('技能切项目只保留已知视图，不携带上一个项目的助手�
   const oldHref = '/skills?projectId=project-a&skillView=assistant&assistantId=agent-a&skillId=old&versionId=v1&action=assign'
   assert.equal(f.store.projectHref('skills', 'project-b', oldHref), '/skills?projectId=project-b&skillView=assistant')
   assert.equal(f.store.readProjectId(), 'project-a', '生成链接不能改变当前项目或既有任务绑定')
-  for (const view of ['library', 'global', 'project']) {
+  for (const view of ['library', 'project']) {
     assert.equal(f.store.projectHref('skills', 'project-b', { skillView: view, assistantId: 'agent-a', skillId: 'old' }), `/skills?projectId=project-b&skillView=${view}`)
   }
   for (const search of [
@@ -261,9 +263,9 @@ test('助手统一入口保留个人与项目管理，电脑旧深链归到同�
     { id: 'project-a', membership: { workspaceAccess: 'external', role: 'external' } },
   ] }
   assert.equal(autoOpsAreaAvailable('assistants', owner, 'project-a'), true)
-  assert.equal(autoOpsAreaAvailable('assistants', owner, 'removed-project'), true)
-  assert.equal(autoOpsAreaAvailable('assistants', { ...owner, projects: [] }), true)
-  assert.equal(autoOpsAreaAvailable('assistants', { ...owner, customerAgentsEnabled: false }), true)
+  assert.equal(autoOpsAreaAvailable('assistants', owner, 'removed-project'), false)
+  assert.equal(autoOpsAreaAvailable('assistants', { ...owner, projects: [] }), false)
+  assert.equal(autoOpsAreaAvailable('assistants', { ...owner, customerAgentsEnabled: false }, 'project-a'), true)
   assert.equal(autoOpsAreaAvailable('assistants', undefined), false)
   assert.equal(autoOpsAreaAvailable('deployments', owner, 'project-a'), false)
   assert.equal(autoOpsAreaAvailable('deployments', { ...owner, projects: [{ id: 'project-a', capabilities: { 'deployment.read': true }, membership: { workspaceAccess: 'internal', role: 'project_admin' } }] }, 'project-a'), true)
@@ -272,7 +274,7 @@ test('助手统一入口保留个人与项目管理，电脑旧深链归到同�
   assert.equal(normalizeAutoOpsChatHref('/devices/other'), null)
   assert.equal(normalizeAutoOpsChatHref('/assistants/other'), null)
   const definition = AUTOOPS_AREAS.find(area => area.id === 'assistants')
-  assert.equal(definition.scope, 'global')
+  assert.equal(definition.scope, 'project')
   assert.equal(definition.common, false)
   assert.equal(definition.sidebar, true)
 })
@@ -281,7 +283,7 @@ test('助手模块切项目仅保留分类，不保留资源命令或改绑已�
   const f = fixture()
   f.chatOwners.set('/env/thread-a', 'project-a')
   f.store.rememberChatLocation('project-a', '/env/thread-a')
-  assert.equal(f.store.projectHref('assistants', 'project-a', { assistantView:'provided', deviceId: 'other', action: 'revoke' }), '/assistants?projectId=project-a&assistantView=provided')
+  assert.equal(f.store.projectHref('assistants', 'project-a', { assistantView:'provided', deviceId: 'other', action: 'revoke' }), '/assistants?projectId=project-a')
   f.store.selectProject('project-b')
   assert.equal(f.store.projectHref('assistants', 'project-b'), '/assistants?projectId=project-b')
   assert.equal(f.store.projectHref('chat', 'project-a'), '/env/thread-a')
@@ -304,8 +306,25 @@ test('工作区与部署入口只使用服务端能力，角色和缺失投影�
 })
 
 test('项目目录是已认证用户的全局模块，创建与设置仍由服务端独立授权', () => {
-  assert.equal(autoOpsAreaAvailable('projects', { principal: { id: 'internal' }, projects: [] }), true)
+  assert.equal(autoOpsGlobalAreaAvailable('projects', { principal: { id: 'internal' }, projects: [] }), true)
   assert.equal(autoOpsAreaAvailable('projects', undefined), false)
   assert.equal(autoOpsAreaFromPath('/projects'), 'projects')
   assert.equal(normalizeAutoOpsChatHref('/projects'), null)
+})
+
+
+test('全局与项目路由显式分离，旧查询和权限不能混合', () => {
+  assert.equal(autoOpsGlobalArea('/projects', {}), 'projects')
+  assert.equal(autoOpsGlobalArea('/projects', { projectId: 'a' }), null)
+  assert.equal(autoOpsGlobalArea('/accounts', { projectId: 'a' }), 'accounts')
+  assert.equal(autoOpsGlobalArea('/skills', { scope: 'global', projectId: 'a' }), 'skills')
+  assert.equal(autoOpsGlobalArea('/assistants', { assistantView: 'provided' }), 'provided')
+  const host = { principal: { id: 'a' }, projects: [] }
+  assert.equal(autoOpsGlobalAreaAvailable('nodes', host), false)
+  assert.equal(autoOpsGlobalAreaAvailable('skills', host), false)
+  assert.equal(autoOpsGlobalAreaAvailable('nodes', { ...host, canManageDeploymentNodes: true }), true)
+  assert.equal(autoOpsAreaFromPath('/nodes'), 'nodes')
+  assert.equal(normalizeAutoOpsChatHref('/nodes/anything'), null)
+  const f = fixture()
+  assert.equal(f.store.projectHref('skills', 'project-a', { scope: 'global', skillView: 'global' }), '/skills?projectId=project-a')
 })

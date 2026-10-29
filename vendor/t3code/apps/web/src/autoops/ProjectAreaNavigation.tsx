@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useState } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
 import {
   ChevronDownIcon,
+  LayoutGridIcon,
+  ServerIcon,
   BotIcon,
   FolderGit2Icon,
   MessageSquareIcon,
@@ -18,7 +20,13 @@ import {
   useAutoOpsProjectId,
   type AutoOpsArea,
 } from './projectNavigation'
-import { AUTOOPS_AREAS, autoOpsAreaAvailable } from './projectNavigation.logic'
+import {
+  AUTOOPS_AREAS,
+  AUTOOPS_GLOBAL_AREAS,
+  autoOpsGlobalArea,
+  autoOpsGlobalAreaAvailable,
+  autoOpsAreaAvailable,
+} from './projectNavigation.logic'
 import { useThreadRouteTarget } from '~/hooks/useThreadRouteTarget'
 import { useThreadSelectionStore } from '~/threadSelectionStore'
 import { Button } from '~/components/ui/button'
@@ -45,6 +53,7 @@ const areaIcons = {
   bot: BotIcon,
   folderSettings: FolderGit2Icon,
   users: UsersIcon,
+  server: ServerIcon,
 }
 const areas = AUTOOPS_AREAS.map((area) => ({ ...area, icon: areaIcons[area.icon] }))
 
@@ -85,9 +94,15 @@ export function ProjectAreaTopbar() {
   if (!host) return null
   const selected = host.projects.find((project) => project.id === projectId) ?? null
   const currentArea = autoOpsAreaFromPath(pathname)
-  const settings = pathname === '/settings' || pathname.startsWith('/settings/')
+  const globalArea = autoOpsGlobalArea(pathname, location.search)
+  const settings = globalArea === 'settings'
   const filtered = host.projects.filter((project) => filter.contains(project.name, query))
-  const availableAreas = areas.filter((area) => autoOpsAreaAvailable(area.id, host, projectId))
+  const availableAreas = areas.filter(
+    (area) => area.scope === 'project' && autoOpsAreaAvailable(area.id, host, projectId),
+  )
+  const globalAreas = AUTOOPS_GLOBAL_AREAS.filter((area) =>
+    autoOpsGlobalAreaAvailable(area.id, host),
+  ).map((area) => ({ ...area, icon: areaIcons[area.icon] }))
   const currentLabel = settings
     ? '设置'
     : (areas.find((area) => area.id === currentArea)?.label ?? '选择模块')
@@ -106,7 +121,6 @@ export function ProjectAreaTopbar() {
       if (definition?.scope === 'global') navigateTo(definition.path)
       return
     }
-    selectAutoOpsProject(nextProjectId)
     navigateTo(
       autoOpsProjectHref(
         area,
@@ -125,9 +139,19 @@ export function ProjectAreaTopbar() {
       data-testid="project-area-navigation"
       aria-label="项目与功能导航"
     >
-      {settings || areas.find((area) => area.id === currentArea)?.sidebar ? (
+      {globalArea || areas.find((area) => area.id === currentArea)?.sidebar ? (
         <SidebarTrigger aria-label="切换主侧栏" />
       ) : null}
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label="全局工作台"
+        title="全局工作台"
+        onClick={() => navigateTo('/projects')}
+      >
+        <LayoutGridIcon />
+        <span className="hidden xl:inline">工作台</span>
+      </Button>
       <div className="w-52 max-w-[38%] min-w-0 shrink-0">
         <Combobox
           items={host.projects}
@@ -136,21 +160,16 @@ export function ProjectAreaTopbar() {
           aria-label="搜索项目"
           itemToStringLabel={(project) => project.name}
           isItemEqualToValue={(left, right) => left.id === right.id}
-          value={selected}
+          value={globalArea ? null : selected}
           open={open}
           onOpenChange={(value) => {
             setOpen(value)
             if (!value) setQuery('')
           }}
           onValueChange={(project) => {
-            if (!project || project.id === projectId) return
-            if (settings) {
-              selectAutoOpsProject(project.id)
-              if (Object.hasOwn(location.search, 'projectId')) {
-                const url = new URL(location.href, 'https://autoops.invalid')
-                url.searchParams.delete('projectId')
-                navigateTo(url.pathname + url.search)
-              }
+            if (!project || (!globalArea && project.id === projectId)) return
+            if (globalArea) {
+              go('projects', project.id)
               return
             }
             const nextArea = autoOpsAreaAvailable(currentArea, host, project.id)
@@ -165,14 +184,14 @@ export function ProjectAreaTopbar() {
                 variant="ghost"
                 size="sm"
                 aria-label="切换项目"
-                title={selected?.name ?? '选择项目'}
+                title={globalArea ? '进入项目' : (selected?.name ?? '选择项目')}
                 className="w-full min-w-0 justify-start"
               />
             }
           >
             <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-left">
-              {selected?.name ?? '选择项目'}
+              {globalArea ? '进入项目' : (selected?.name ?? '选择项目')}
             </span>
             <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
           </ComboboxTrigger>
@@ -193,19 +212,43 @@ export function ProjectAreaTopbar() {
               )}
             </ComboboxList>
             <div className="border-t p-1">
-              <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setOpen(false); navigateTo('/projects') }}>项目管理</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => {
+                  setOpen(false)
+                  navigateTo('/projects')
+                }}
+              >
+                全部项目
+              </Button>
             </div>
           </ComboboxPopup>
         </Combobox>
       </div>
       <div className="h-5 w-px shrink-0 bg-border" aria-hidden="true" />
-      <ProjectModuleNavigation
-        contextKey={projectId}
-        items={availableAreas.toSorted((a, b) => Number(b.common) - Number(a.common))}
-        current={settings ? null : currentArea}
-        currentLabel={currentLabel}
-        onNavigate={go}
-      />
+      {globalArea ? (
+        <ProjectModuleNavigation
+          label="全局功能"
+          contextKey="global"
+          items={globalAreas}
+          current={globalArea === 'settings' ? null : globalArea}
+          currentLabel={globalAreas.find((area) => area.id === globalArea)?.label ?? '设置'}
+          onNavigate={(id) => {
+            const area = globalAreas.find((area) => area.id === id)
+            if (area) navigateTo(area.href)
+          }}
+        />
+      ) : (
+        <ProjectModuleNavigation
+          contextKey={projectId}
+          items={availableAreas.toSorted((a, b) => Number(b.common) - Number(a.common) || (a.id === 'projects' ? 1 : b.id === 'projects' ? -1 : 0))}
+          current={currentArea}
+          currentLabel={currentLabel}
+          onNavigate={go}
+        />
+      )}
     </WorkspacePageHeader>
   )
 }

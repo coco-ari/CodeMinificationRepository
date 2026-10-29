@@ -491,3 +491,19 @@ describe("部署节点管理", () => {
   });
 
 });
+
+
+it('全局节点独立页面直接管理，不生成整页弹窗且保留失败重试', async () => {
+  const props = platformProps(setup())
+  await using screen = await render(<DeploymentServers {...props} embedded />)
+  await expect.element(page.getByText('隔离部署节点', { exact: true })).toBeVisible()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
+  await page.getByRole('button', { name: '接入节点', exact: true }).click()
+  await page.getByRole('textbox', { name: '节点名称', exact: true }).fill('隔离新节点')
+  mocks.mutateGlobal.mockRejectedValueOnce(new AutoOpsRequestError('临时不可用，请重试。', 'UNAVAILABLE', 503))
+  await page.getByRole('button', { name: '生成安装命令', exact: true }).click()
+  await expect.element(page.getByRole('alert')).toHaveTextContent('临时不可用，请重试。')
+  await expect.element(page.getByRole('textbox', { name: '节点名称', exact: true })).toHaveValue('隔离新节点')
+  expect(mocks.mutateGlobal).toHaveBeenCalledTimes(1)
+  expect(screen.container.querySelector('[role="dialog"]')).toBeNull()
+})

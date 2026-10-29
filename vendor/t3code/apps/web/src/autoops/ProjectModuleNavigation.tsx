@@ -14,20 +14,22 @@ import {
 } from '~/components/ui/combobox'
 import type { AutoOpsArea } from './projectNavigation'
 
-type ModuleItem = { id: AutoOpsArea; label: string; icon: LucideIcon }
+type ModuleItem<Id extends string> = { id: Id; label: string; icon: LucideIcon }
 
-export function ProjectModuleNavigation({
+export function ProjectModuleNavigation<Id extends string = AutoOpsArea>({
   items,
   current,
   currentLabel,
   contextKey,
   onNavigate,
+  label: navigationLabel = '项目功能',
 }: {
-  items: readonly ModuleItem[]
-  current: AutoOpsArea | null
+  label?: string
+  items: readonly ModuleItem<Id>[]
+  current: Id | null
   currentLabel: string
   contextKey: string | null
-  onNavigate: (area: AutoOpsArea) => void
+  onNavigate: (area: Id) => void
 }) {
   const container = useRef<HTMLElement>(null)
   const measurement = useRef<HTMLDivElement>(null)
@@ -106,7 +108,7 @@ export function ProjectModuleNavigation({
       {visible.length > 0 && (
         <ToggleGroup
           variant="segmented"
-          aria-label="项目功能"
+          aria-label={navigationLabel}
           value={current ? [current] : []}
           onValueChange={(values) => {
             const item = visible.find((item) => item.id === values[0])
@@ -129,7 +131,7 @@ export function ProjectModuleNavigation({
       )}
       {overflow.length > 0 && (
         <div className="w-32 max-w-full min-w-0 shrink-0">
-          <Combobox<ModuleItem>
+          <Combobox<ModuleItem<Id>>
             items={overflow}
             filteredItems={overflow.filter((item) => filter.contains(item.label, query))}
             autoHighlight
@@ -171,7 +173,7 @@ export function ProjectModuleNavigation({
               />
               <ComboboxEmpty>没有匹配的功能。</ComboboxEmpty>
               <ComboboxList>
-                {(item: ModuleItem) => (
+                {(item: ModuleItem<Id>) => (
                   <ComboboxItem key={item.id} value={item}>
                     <item.icon className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>

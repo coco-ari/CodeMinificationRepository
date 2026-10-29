@@ -29,6 +29,7 @@ export function skillQuickAssignmentAllowed(skill: LibrarySkill, assignment?: Sk
   return skill.enabled && version?.readiness === 'ready'
 }
 type CardProps = {
+  mode?: 'project' | 'global' | 'all'
   skill: LibrarySkill
   catalog: SkillLibrary
   projectId: string
@@ -42,6 +43,7 @@ type CardProps = {
 /** 复用 T3 目录卡片与原生菜单，只显示当前项目的三级启用范围。 */
 export function SkillLibraryCard({
   skill,
+  mode = 'all',
   catalog,
   projectId,
   busy,
@@ -53,7 +55,9 @@ export function SkillLibraryCard({
 }: CardProps) {
   const version = skillVersion(skill)
   const [query, setQuery] = useState('')
-  const assistants = catalog.assistants.filter((entry) => entry.projectId === projectId)
+  const assistants = catalog.assistants.filter(
+    (entry) => entry.projectId === projectId && entry.executionKind === 'platform',
+  )
   const filtered = assistants.filter((entry) =>
     entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase().trim()),
   )
@@ -166,51 +170,61 @@ export function SkillLibraryCard({
         role="group"
         aria-label="skill 启用范围"
       >
-        {target('global', GLOBAL_SKILL_TARGET, '所有项目')}
-        {target('project', projectId, '当前项目')}
-        <Popover
-          onOpenChange={(open) => {
-            onProjectOpenChange(open)
-            if (!open) setQuery('')
-          }}
-        >
-          <PopoverTrigger
-            aria-label={`指定助手：${skill.displayName}`}
-            render={<Button size="xs" variant="ghost" />}
+        {mode !== 'project' ? (
+          target('global', GLOBAL_SKILL_TARGET, '所有项目')
+        ) : inherited?.targetType === 'global' && skill.enabled ? (
+          <span className="px-1 text-xs text-muted-foreground">已继承所有项目</span>
+        ) : null}
+        {mode !== 'global' ? target('project', projectId, '当前项目') : null}
+        {mode !== 'global' ? (
+          <Popover
+            onOpenChange={(open) => {
+              onProjectOpenChange(open)
+              if (!open) setQuery('')
+            }}
           >
-            <BotIcon />
-            指定助手
-            {inherited && skill.enabled ? ' · 已继承' : assignedCount ? ` · ${assignedCount}` : ''}
-          </PopoverTrigger>
-          <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
-            <div className="space-y-2">
-              <PopoverTitle>当前项目的助手</PopoverTitle>
-              {inherited && skill.enabled ? (
-                <p className="text-xs text-muted-foreground">
-                  已继承“{skillScopeNames[inherited.targetType]}”，无需重复开启。
-                </p>
-              ) : null}
-              <Input
-                size="sm"
-                type="search"
-                aria-label="搜索指定助手"
-                placeholder="搜索助手"
-                value={query}
-                onChange={(event) => setQuery(event.currentTarget.value)}
-              />
-              <ScrollArea contentSizing="viewport" className="max-h-72" radius="none">
-                <div className="flex min-w-0 flex-col gap-1" aria-label="指定助手列表">
-                  {filtered.map((entry) => target('assistant', entry.id, entry.name))}
-                  {!filtered.length ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      {assistants.length ? '没有匹配的助手' : '当前项目没有启用的助手'}
-                    </p>
-                  ) : null}
-                </div>
-              </ScrollArea>
-            </div>
-          </PopoverPopup>
-        </Popover>
+            <PopoverTrigger
+              aria-label={`指定助手：${skill.displayName}`}
+              render={<Button size="xs" variant="ghost" />}
+            >
+              <BotIcon />
+              指定助手
+              {inherited && skill.enabled
+                ? ' · 已继承'
+                : assignedCount
+                  ? ` · ${assignedCount}`
+                  : ''}
+            </PopoverTrigger>
+            <PopoverPopup width="md" padding="compact" align="end" touchBackdrop>
+              <div className="space-y-2">
+                <PopoverTitle>当前项目的助手</PopoverTitle>
+                {inherited && skill.enabled ? (
+                  <p className="text-xs text-muted-foreground">
+                    已继承“{skillScopeNames[inherited.targetType]}”，无需重复开启。
+                  </p>
+                ) : null}
+                <Input
+                  size="sm"
+                  type="search"
+                  aria-label="搜索指定助手"
+                  placeholder="搜索助手"
+                  value={query}
+                  onChange={(event) => setQuery(event.currentTarget.value)}
+                />
+                <ScrollArea contentSizing="viewport" className="max-h-72" radius="none">
+                  <div className="flex min-w-0 flex-col gap-1" aria-label="指定助手列表">
+                    {filtered.map((entry) => target('assistant', entry.id, entry.name))}
+                    {!filtered.length ? (
+                      <p className="py-3 text-center text-xs text-muted-foreground">
+                        {assistants.length ? '没有匹配的助手' : '当前项目没有启用的助手'}
+                      </p>
+                    ) : null}
+                  </div>
+                </ScrollArea>
+              </div>
+            </PopoverPopup>
+          </Popover>
+        ) : null}
       </div>
     </article>
   )

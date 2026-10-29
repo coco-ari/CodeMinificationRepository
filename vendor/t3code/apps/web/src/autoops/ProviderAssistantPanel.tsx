@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { EllipsisIcon } from "lucide-react";
+import { AssistantEditorPage, AssistantEnabledControl } from "./AssistantEditorPage";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -261,12 +262,15 @@ export function ProviderAssistantPanel() {
     return () => controller.abort();
   }, [actor, attempt]);
   useEffect(() => {
-    // 保存会先关闭弹窗，再刷新目录；入口暂时禁用时不能丢失键盘返回位置。
+    // 保存后目录暂时禁用入口，恢复时归还尚未被用户移走的焦点。
     if (savedFocus.current && editor === null && !disabled) {
       savedFocus.current = false;
       const focused = document.activeElement;
       if (
-        (!focused || focused === document.body || focused === trigger.current || !focused.isConnected) &&
+        (!focused ||
+          focused === document.body ||
+          focused === trigger.current ||
+          !focused.isConnected) &&
         trigger.current?.isConnected
       )
         trigger.current.focus();
@@ -372,6 +376,212 @@ export function ProviderAssistantPanel() {
       setError(message(cause));
     }
   };
+  function closeEditor() {
+    savedFocus.current = true;
+    setEditor(null);
+  }
+  function toggle(preset: AssistantPreset, enabled: boolean) {
+    if (disabled) return;
+    try {
+      void execute(
+        prepareProvidedSave(preset.id, preset.projectId, preset.revision, {
+          name: preset.name,
+          description: preset.description,
+          instructions: preset.instructions,
+          configuration: preset.configuration,
+          enabled,
+        }),
+      );
+    } catch (cause) {
+      setError(message(cause));
+    }
+  }
+  const saveFields =
+    editor?.kind === "save" ? (
+      <>
+        <div className="space-y-2">
+          <Label htmlFor="provided-name">名称</Label>
+          <Input
+            id="provided-name"
+            autoFocus
+            required
+            maxLength={120}
+            value={editor.draft.name}
+            disabled={disabled}
+            onChange={(event) => update({ name: event.target.value })}
+          />
+        </div>
+        <Choice
+          label="本人运行来源"
+          value={editor.draft.source}
+          disabled={disabled || !!editor.preset}
+          options={[
+            ...sources.map((value) => ({
+              id: assistantSourceKey(value.executionBinding),
+              name: `${value.deviceName} · ${value.workspaceName}`,
+            })),
+            ...(!source && editor.draft.source
+              ? [{ id: editor.draft.source, name: "原运行来源暂不可用", disabled: true }]
+              : []),
+          ]}
+          onChange={(source) =>
+            update({ source, runtime: null, model: "", reasoning: null, skillIds: [] })
+          }
+        />
+        <Choice
+          label="运行目录"
+          value={providedRuntimeKey(editor.draft.runtime)}
+          disabled={disabled || !source}
+          options={[
+            { id: "self", name: "自用运行器" },
+            ...(source?.capabilities?.sharedProfile
+              ? [
+                  {
+                    id: providedRuntimeKey(source.capabilities.sharedProfile),
+                    name:
+                      source.sharedProfileAvailable === true
+                        ? "隔离运行器"
+                        : "隔离运行器 · 已不可用",
+                    disabled: source.sharedProfileAvailable !== true,
+                  },
+                ]
+              : []),
+            ...(editor.draft.runtime !== null &&
+            editor.draft.runtime !== "self" &&
+            (!source?.capabilities?.sharedProfile ||
+              providedRuntimeKey(editor.draft.runtime) !==
+                providedRuntimeKey(source.capabilities.sharedProfile))
+              ? [
+                  {
+                    id: providedRuntimeKey(editor.draft.runtime),
+                    name: "原隔离运行器 · 已不可用",
+                    disabled: true,
+                  },
+                ]
+              : []),
+          ]}
+          onChange={(value) => {
+            const profile = source?.capabilities?.sharedProfile;
+            if (value === "self")
+              update({ runtime: "self", model: "", reasoning: null, skillIds: [] });
+            else if (
+              profile &&
+              value === providedRuntimeKey(profile) &&
+              source?.sharedProfileAvailable === true
+            )
+              update({
+                runtime: providedProfileDescriptor(profile),
+                model: "",
+                reasoning: null,
+                skillIds: [],
+              });
+          }}
+        />
+        {editor.draft.runtime !== null && !directory.available ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {directory.reason}
+          </p>
+        ) : null}
+        {editor.draft.runtime === null &&
+        source?.sharedProfileAvailable !== true &&
+        source?.sharedProfileReason ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {source.sharedProfileReason.message}
+          </p>
+        ) : null}
+        <Choice
+          label="模型"
+          value={editor.draft.model}
+          disabled={disabled || !directory.available || !directory.models.length}
+          options={[
+            ...directory.models.map((model) => ({
+              id: model.id,
+              name: model.name ?? model.id,
+            })),
+            ...(!model && editor.draft.model
+              ? [
+                  {
+                    id: editor.draft.model,
+                    name: `${editor.draft.model} · 已不可用`,
+                    disabled: true,
+                  },
+                ]
+              : []),
+          ]}
+          onChange={(id) => {
+            const next = directory.models.find((model) => model.id === id);
+            if (next) update({ model: id, reasoning: next.defaultReasoningEffort ?? null });
+          }}
+        />
+        <Choice
+          label="思考强度"
+          value={editor.draft.reasoning ?? "runtime-default"}
+          disabled={disabled || !directory.available || !model}
+          options={[
+            ...(!model?.supportedReasoningEfforts.length
+              ? [{ id: "runtime-default", name: "此模型不提供思考档位" }]
+              : []),
+            ...(model?.supportedReasoningEfforts.map((id) => ({ id, name: id })) ?? []),
+            ...(editor.draft.reasoning &&
+            !model?.supportedReasoningEfforts.includes(editor.draft.reasoning)
+              ? [
+                  {
+                    id: editor.draft.reasoning,
+                    name: `${editor.draft.reasoning} · 已不可用`,
+                    disabled: true,
+                  },
+                ]
+              : []),
+          ]}
+          onChange={(value) => update({ reasoning: value === "runtime-default" ? null : value })}
+        />
+        <fieldset className="space-y-2">
+          <legend className="mb-2 text-sm font-medium">skill</legend>
+          {[
+            ...directory.skills,
+            ...editor.draft.skillIds
+              .filter((id) => !directory.skills.some((skill) => skill.id === id))
+              .map((id) => ({ id, name: `${id} · 已不可用` })),
+          ].map((skill) => (
+            <Label key={skill.id} className="flex items-center gap-2">
+              <Checkbox
+                aria-label={skill.name}
+                checked={editor.draft.skillIds.includes(skill.id)}
+                disabled={disabled || !directory.available}
+                onCheckedChange={(checked) =>
+                  update({
+                    skillIds: checked
+                      ? [...editor.draft.skillIds, skill.id]
+                      : editor.draft.skillIds.filter((id) => id !== skill.id),
+                  })
+                }
+              />
+              {skill.name}
+            </Label>
+          ))}
+        </fieldset>
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor="provided-description">说明（可选）</Label>
+          <Textarea
+            id="provided-description"
+            maxLength={2000}
+            disabled={disabled}
+            value={editor.draft.description}
+            onChange={(event) => update({ description: event.target.value })}
+          />
+        </div>
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor="provided-instructions">角色指令（可选）</Label>
+          <Textarea
+            id="provided-instructions"
+            maxLength={16000}
+            disabled={disabled}
+            value={editor.draft.instructions}
+            onChange={(event) => update({ instructions: event.target.value })}
+          />
+        </div>
+      </>
+    ) : null;
   return (
     <div className="space-y-6" data-provider-assistants>
       {error ? (
@@ -394,155 +604,183 @@ export function ProviderAssistantPanel() {
           </AlertDescription>
         </Alert>
       ) : null}
-      <SettingsSection
-        title="我提供的助手"
-        headerAction={
-          <div className="flex gap-1">
+      <div hidden={editor?.kind === "save"} className="space-y-6">
+        <SettingsSection
+          title="我的助手"
+          headerAction={
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setError(null);
+                  setAttempt((value) => value + 1);
+                }}
+              >
+                刷新助手
+              </Button>
+              <Button
+                size="sm"
+                disabled={disabled || !data}
+                onClick={(event) => openSave(null, event.currentTarget)}
+              >
+                添加个人助手
+              </Button>
+            </div>
+          }
+        >
+          {!data && !error ? <p role="status">正在读取本人运行来源…</p> : null}
+          {!data && error ? (
             <Button
               size="sm"
-              variant="ghost"
-              disabled={busy}
+              variant="outline"
               onClick={() => {
                 setError(null);
                 setAttempt((value) => value + 1);
               }}
             >
-              刷新助手
+              重试读取助手
             </Button>
-            <Button
-              size="sm"
-              disabled={disabled || !data}
-              onClick={(event) => openSave(null, event.currentTarget)}
-            >
-              添加个人助手
-            </Button>
-          </div>
-        }
-      >
-        {!data && !error ? <p role="status">正在读取本人运行来源…</p> : null}
-        {!data && error ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setError(null);
-              setAttempt((value) => value + 1);
-            }}
-          >
-            重试读取助手
-          </Button>
-        ) : null}
-        <SettingsGroup>
-          {data?.items.map(({ preset, shares }) => (
-            <SettingsRow
-              key={preset.id}
-              title={preset.name}
-              description={
-                <>
-                  <span className="block">
-                    {preset.configuration.model.model} · {preset.enabled ? "已启用" : "已停用"}
-                  </span>
-                  <span className="block">
-                    {shares
-                      .filter((share) => share.enabled)
-                      .map(
-                        (share) =>
-                          host.projects.find((project) => project.id === share.projectId)?.name ??
-                          share.projectId,
-                      )
-                      .join("、") || "仅自己"}
-                  </span>
-                </>
-              }
-              control={
-                <Menu>
-                  <MenuTrigger
-                    render={
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={`管理个人助手 ${preset.name}`}
-                        ref={(element) => {
-                          if (element) menuTriggers.current.set(preset.id, element);
-                          else menuTriggers.current.delete(preset.id);
-                        }}
-                        disabled={disabled}
-                        onFocus={(event) => {
-                          trigger.current = event.currentTarget;
-                        }}
-                      />
-                    }
-                  >
-                    <EllipsisIcon />
-                  </MenuTrigger>
-                  <MenuPopup align="end">
-                    <MenuItem
-                      onClick={() => {
-                        const button = menuTriggers.current.get(preset.id);
-                        if (button) openSave(preset, button);
-                      }}
-                    >
-                      编辑助手
-                    </MenuItem>
-                    <MenuItem
-                      onClick={() => {
-                        trigger.current = menuTriggers.current.get(preset.id) ?? null;
-                        setError(null);
-                        setEditor({ kind: "share", preset, projectId: "", enabled: true });
-                      }}
-                    >
-                      共享到项目
-                    </MenuItem>
-                  </MenuPopup>
-                </Menu>
-              }
-            />
-          ))}
-          {data?.items.length === 0 ? (
-            <SettingsRow title="尚无个人助手" description="从本人已登记目录和实际能力创建。" />
           ) : null}
-        </SettingsGroup>
-      </SettingsSection>
-      <SettingsSection title="本人运行来源">
-        <SettingsGroup>
-          {sources.map((value) => (
-            <SettingsRow
-              key={assistantSourceKey(value.executionBinding)}
-              title={`${value.deviceName} · ${value.workspaceName}`}
-              description={
-                <>
-                  <span className="block">
-                    {host.projects.find((project) => project.id === value.sourceProjectId)?.name ??
-                      value.sourceProjectId}{" "}
-                    ·{" "}
-                    {value.deviceStatus !== "active" || value.workspaceStatus !== "active"
-                      ? "已停用或撤回"
-                      : value.online
-                        ? "在线"
-                        : "离线"}
-                  </span>
-                  <span className="block">
-                    {value.capabilities?.models.map((model) => model.name ?? model.id).join("、") ||
-                      "模型能力暂不可用"}
-                  </span>
-                </>
-              }
-            />
-          ))}
-          {data && sources.length === 0 ? (
-            <SettingsRow title="尚无已登记来源" description="连接电脑后在本机登记目录。" />
-          ) : null}
-        </SettingsGroup>
-      </SettingsSection>
-      {host.customerAgentsEnabled ? (
-        <CustomerDevicesContent embedded />
-      ) : (
-        <p role="status" className="text-sm text-muted-foreground">
-          电脑接入已暂停，已有助手配置保留。
-        </p>
-      )}
+          <SettingsGroup>
+            {data?.items.map(({ preset, shares }) => (
+              <SettingsRow
+                key={preset.id}
+                title={<span className="wrap-anywhere">{preset.name}</span>}
+                description={
+                  <>
+                    <span className="block">{preset.configuration.model.model}</span>
+                    <span className="block">
+                      {shares
+                        .filter((share) => share.enabled)
+                        .map(
+                          (share) =>
+                            host.projects.find((project) => project.id === share.projectId)?.name ??
+                            share.projectId,
+                        )
+                        .join("、") || "仅自己"}
+                    </span>
+                  </>
+                }
+                control={
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={disabled}
+                      aria-label={`编辑个人助手 ${preset.name}`}
+                      onClick={(event) => openSave(preset, event.currentTarget)}
+                    >
+                      编辑
+                    </Button>
+                    <AssistantEnabledControl
+                      name={preset.name}
+                      enabled={preset.enabled}
+                      busy={busy && pending?.assistantId === preset.id}
+                      disabled={disabled}
+                      onFocus={(button) => {
+                        trigger.current = button;
+                      }}
+                      onChange={(enabled) => toggle(preset, enabled)}
+                    />
+                    <Menu>
+                      <MenuTrigger
+                        render={
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`管理个人助手 ${preset.name}`}
+                            ref={(element) => {
+                              if (element) menuTriggers.current.set(preset.id, element);
+                              else menuTriggers.current.delete(preset.id);
+                            }}
+                            disabled={disabled}
+                            onFocus={(event) => {
+                              trigger.current = event.currentTarget;
+                            }}
+                          />
+                        }
+                      >
+                        <EllipsisIcon />
+                      </MenuTrigger>
+                      <MenuPopup align="end">
+                        <MenuItem
+                          onClick={() => {
+                            trigger.current = menuTriggers.current.get(preset.id) ?? null;
+                            setError(null);
+                            setEditor({ kind: "share", preset, projectId: "", enabled: true });
+                          }}
+                        >
+                          共享到项目
+                        </MenuItem>
+                      </MenuPopup>
+                    </Menu>
+                  </div>
+                }
+              />
+            ))}
+            {data?.items.length === 0 ? (
+              <SettingsRow title="尚无个人助手" description="从本人已登记目录和实际能力创建。" />
+            ) : null}
+          </SettingsGroup>
+        </SettingsSection>
+        <SettingsSection title="本人运行来源">
+          <SettingsGroup>
+            {sources.map((value) => (
+              <SettingsRow
+                key={assistantSourceKey(value.executionBinding)}
+                title={`${value.deviceName} · ${value.workspaceName}`}
+                description={
+                  <>
+                    <span className="block">
+                      {host.projects.find((project) => project.id === value.sourceProjectId)
+                        ?.name ?? value.sourceProjectId}{" "}
+                      ·{" "}
+                      {value.deviceStatus !== "active" || value.workspaceStatus !== "active"
+                        ? "已停用或撤回"
+                        : value.online
+                          ? "在线"
+                          : "离线"}
+                    </span>
+                    <span className="block">
+                      {value.capabilities?.models
+                        .map((model) => model.name ?? model.id)
+                        .join("、") || "模型能力暂不可用"}
+                    </span>
+                  </>
+                }
+              />
+            ))}
+            {data && sources.length === 0 ? (
+              <SettingsRow title="尚无已登记来源" description="连接电脑后在本机登记目录。" />
+            ) : null}
+          </SettingsGroup>
+        </SettingsSection>
+        {host.customerAgentsEnabled ? (
+          <CustomerDevicesContent embedded />
+        ) : (
+          <p role="status" className="text-sm text-muted-foreground">
+            电脑接入已暂停，已有助手配置保留。
+          </p>
+        )}
+      </div>
+      {editor?.kind === "save" ? (
+        <AssistantEditorPage
+          title={editor.preset ? "编辑个人助手" : "添加个人助手"}
+          value={editor.draft}
+          busy={busy}
+          pending={!!pending}
+          disabled={disabled}
+          saveLabel="保存个人助手"
+          onSave={save}
+          onClose={closeEditor}
+        >
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">{saveFields}</div>
+        </AssistantEditorPage>
+      ) : null}
       <Dialog
-        open={editor !== null}
+        open={editor?.kind === "share"}
         onOpenChange={(open) => {
           if (!open) {
             setEditor(null);
@@ -573,203 +811,7 @@ export function ProviderAssistantPanel() {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               ) : null}
-              {editor?.kind === "save" ? (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="provided-name">名称</Label>
-                    <Input
-                      id="provided-name"
-                      autoFocus
-                      required
-                      maxLength={120}
-                      value={editor.draft.name}
-                      disabled={disabled}
-                      onChange={(event) => update({ name: event.target.value })}
-                    />
-                  </div>
-                  <Choice
-                    label="本人运行来源"
-                    value={editor.draft.source}
-                    disabled={disabled || !!editor.preset}
-                    options={[
-                      ...sources.map((value) => ({
-                        id: assistantSourceKey(value.executionBinding),
-                        name: `${value.deviceName} · ${value.workspaceName}`,
-                      })),
-                      ...(!source && editor.draft.source
-                        ? [{ id: editor.draft.source, name: "原运行来源暂不可用", disabled: true }]
-                        : []),
-                    ]}
-                    onChange={(source) =>
-                      update({ source, runtime: null, model: "", reasoning: null, skillIds: [] })
-                    }
-                  />
-                  <Choice
-                    label="运行目录"
-                    value={providedRuntimeKey(editor.draft.runtime)}
-                    disabled={disabled || !source}
-                    options={[
-                      { id: "self", name: "自用运行器" },
-                      ...(source?.capabilities?.sharedProfile
-                        ? [
-                            {
-                              id: providedRuntimeKey(source.capabilities.sharedProfile),
-                              name:
-                                source.sharedProfileAvailable === true
-                                  ? "隔离运行器"
-                                  : "隔离运行器 · 已不可用",
-                              disabled: source.sharedProfileAvailable !== true,
-                            },
-                          ]
-                        : []),
-                      ...(editor.draft.runtime !== null &&
-                      editor.draft.runtime !== "self" &&
-                      (!source?.capabilities?.sharedProfile ||
-                        providedRuntimeKey(editor.draft.runtime) !==
-                          providedRuntimeKey(source.capabilities.sharedProfile))
-                        ? [
-                            {
-                              id: providedRuntimeKey(editor.draft.runtime),
-                              name: "原隔离运行器 · 已不可用",
-                              disabled: true,
-                            },
-                          ]
-                        : []),
-                    ]}
-                    onChange={(value) => {
-                      const profile = source?.capabilities?.sharedProfile;
-                      if (value === "self")
-                        update({ runtime: "self", model: "", reasoning: null, skillIds: [] });
-                      else if (
-                        profile &&
-                        value === providedRuntimeKey(profile) &&
-                        source?.sharedProfileAvailable === true
-                      )
-                        update({
-                          runtime: providedProfileDescriptor(profile),
-                          model: "",
-                          reasoning: null,
-                          skillIds: [],
-                        });
-                    }}
-                  />
-                  {editor.draft.runtime !== null && !directory.available ? (
-                    <p role="status" className="text-sm text-muted-foreground">
-                      {directory.reason}
-                    </p>
-                  ) : null}
-                  {editor.draft.runtime === null &&
-                  source?.sharedProfileAvailable !== true &&
-                  source?.sharedProfileReason ? (
-                    <p role="status" className="text-sm text-muted-foreground">
-                      {source.sharedProfileReason.message}
-                    </p>
-                  ) : null}
-                  <Choice
-                    label="模型"
-                    value={editor.draft.model}
-                    disabled={disabled || !directory.available || !directory.models.length}
-                    options={[
-                      ...directory.models.map((model) => ({
-                        id: model.id,
-                        name: model.name ?? model.id,
-                      })),
-                      ...(!model && editor.draft.model
-                        ? [
-                            {
-                              id: editor.draft.model,
-                              name: `${editor.draft.model} · 已不可用`,
-                              disabled: true,
-                            },
-                          ]
-                        : []),
-                    ]}
-                    onChange={(id) => {
-                      const next = directory.models.find((model) => model.id === id);
-                      if (next)
-                        update({ model: id, reasoning: next.defaultReasoningEffort ?? null });
-                    }}
-                  />
-                  <Choice
-                    label="思考强度"
-                    value={editor.draft.reasoning ?? "runtime-default"}
-                    disabled={disabled || !directory.available || !model}
-                    options={[
-                      ...(!model?.supportedReasoningEfforts.length
-                        ? [{ id: "runtime-default", name: "此模型不提供思考档位" }]
-                        : []),
-                      ...(model?.supportedReasoningEfforts.map((id) => ({ id, name: id })) ?? []),
-                      ...(editor.draft.reasoning &&
-                      !model?.supportedReasoningEfforts.includes(editor.draft.reasoning)
-                        ? [
-                            {
-                              id: editor.draft.reasoning,
-                              name: `${editor.draft.reasoning} · 已不可用`,
-                              disabled: true,
-                            },
-                          ]
-                        : []),
-                    ]}
-                    onChange={(value) =>
-                      update({ reasoning: value === "runtime-default" ? null : value })
-                    }
-                  />
-                  <fieldset className="space-y-2">
-                    <legend className="mb-2 text-sm font-medium">skill</legend>
-                    {[
-                      ...directory.skills,
-                      ...editor.draft.skillIds
-                        .filter((id) => !directory.skills.some((skill) => skill.id === id))
-                        .map((id) => ({ id, name: `${id} · 已不可用` })),
-                    ].map((skill) => (
-                      <Label key={skill.id} className="flex items-center gap-2">
-                        <Checkbox
-                          aria-label={skill.name}
-                          checked={editor.draft.skillIds.includes(skill.id)}
-                          disabled={disabled || !directory.available}
-                          onCheckedChange={(checked) =>
-                            update({
-                              skillIds: checked
-                                ? [...editor.draft.skillIds, skill.id]
-                                : editor.draft.skillIds.filter((id) => id !== skill.id),
-                            })
-                          }
-                        />
-                        {skill.name}
-                      </Label>
-                    ))}
-                  </fieldset>
-                  <div className="space-y-2">
-                    <Label htmlFor="provided-description">说明（可选）</Label>
-                    <Textarea
-                      id="provided-description"
-                      maxLength={2000}
-                      disabled={disabled}
-                      value={editor.draft.description}
-                      onChange={(event) => update({ description: event.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="provided-instructions">角色指令（可选）</Label>
-                    <Textarea
-                      id="provided-instructions"
-                      maxLength={16000}
-                      disabled={disabled}
-                      value={editor.draft.instructions}
-                      onChange={(event) => update({ instructions: event.target.value })}
-                    />
-                  </div>
-                  <Label className="flex items-center gap-2">
-                    <Checkbox
-                      aria-label="启用个人助手"
-                      checked={editor.draft.enabled}
-                      disabled={disabled}
-                      onCheckedChange={(enabled) => update({ enabled })}
-                    />
-                    启用个人助手
-                  </Label>
-                </>
-              ) : editor?.kind === "share" ? (
+              {editor?.kind === "share" ? (
                 <>
                   <Choice
                     label="共享目标项目"

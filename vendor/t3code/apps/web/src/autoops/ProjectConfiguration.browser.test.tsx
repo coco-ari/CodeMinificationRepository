@@ -2,6 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { projectAssistantReceiptIntent } from '../../../../../../autoops/contracts/project-management-receipts.ts'
 import { StrictMode } from 'react'
+import { AssistantManagementPage } from './AssistantManagementPage'
 import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { fakeTimers, render, stubGlobal } from '../../test/render'
@@ -56,6 +57,7 @@ function setup({ lost = false, conflict = false, manage = true, denied = false, 
     if (path.endsWith('/workspace/authoring')) return Response.json({ projectId: project.id, revision: 0, sources: [], entries: [], limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 } })
     if (path.endsWith('/deployments')) return Response.json({ enabled: true, services: [], targets: [], servers: [], environments: project.environments, tasks: [] })
     if (path.endsWith('/workspace/credentials')) return Response.json({ credentials: [] })
+    if (path.endsWith('/assistants/provided')) return Response.json({ items: [] })
     if (path.endsWith('/assistants/choices')) return denied ? Response.json({ code: 'PROJECT_ACTION_FORBIDDEN', error: '项目管理权限已撤回' }, { status: 403 }) : Response.json(choices)
     if (path.endsWith('/assistants/settings')) return Response.json({ presets, allocations })
     if (path.endsWith('/settings')) return Response.json({ project, members, candidates: [{ id: 'member', name: '待分配成员', kind: 'internal' }, { id: 'external', name: '外部账号', kind: 'external' }] })
@@ -63,21 +65,21 @@ function setup({ lost = false, conflict = false, manage = true, denied = false, 
   })
   return { fetch, writes, presets, choices, allocations, receipts, receiptQueries, setReceiptMode: (value: typeof receiptState) => { receiptState = value } }
 }
-function App() { return <StrictMode><SidebarProvider><ModuleSidebarProvider><ModuleSidebarOutlet /><AutoOpsProjectsPage /></ModuleSidebarProvider></SidebarProvider></StrictMode> }
+function App({ assistants = false }: { assistants?: boolean }) { return <StrictMode><SidebarProvider><ModuleSidebarProvider><ModuleSidebarOutlet />{assistants ? <AssistantManagementPage /> : <AutoOpsProjectsPage />}</ModuleSidebarProvider></SidebarProvider></StrictMode> }
 const choose = async (label: string, name: string) => { await page.getByRole('combobox', { name: label, exact: true }).click(); await page.getByRole('option', { name, exact: true }).click() }
 
 it('短窗口创建助手明确选择实际模型，使用其真实默认强度，保存返回并恢复原入口焦点', async () => {
   await page.viewport(390, 500)
   const f = setup(); using _fetch = stubGlobal('fetch', f.fetch)
-  await using screen = await render(<App />, { router: '/projects?projectId=config-project' })
-  const add = screen.getByRole('button', { name: '添加助手', exact: true })
+  await using screen = await render(<App assistants />, { router: '/assistants?projectId=config-project' })
+  const add = screen.getByRole('button', { name: '添加项目助手', exact: true })
   await expect.element(add).toBeEnabled(); await add.click()
   await page.getByRole('textbox', { name: '名称', exact: true }).fill('测试排障助手')
-  await expect.element(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+  await expect.element(page.getByRole('button', { name: '保存助手配置', exact: true })).toBeDisabled()
   await choose('模型', '实际模型')
   await expect.element(page.getByRole('combobox', { name: '思考强度', exact: true })).toHaveTextContent('high')
   await expect.element(page.getByRole('checkbox', { name: '诊断skill', exact: true })).not.toBeInTheDocument()
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '保存助手配置', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   await expect.element(add).toHaveFocus()
   expect(f.writes[0]?.body.value.configuration).toMatchObject({ model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: 'high' }, skillIds: [], environmentId: null })
@@ -163,12 +165,12 @@ it('编辑用户来源保留原目录、实际模型及思考强度，不被平�
   f.choices.sources.push({ id: 'own-source', name: '自己的电脑 · 登记目录', executionBinding: source, available: true, models: [{ id: 'customer-model', name: '本机模型', reasoningLevels: ['high'], defaultReasoning: 'high' }], skills: [] })
   Object.assign(f.presets[0]!.configuration, { executionBinding: { runtimeId: 'codex', workspaceBindingRevision: 2, registeredWorkspaceId: source.registeredWorkspaceId, deviceId: source.deviceId, kind: 'customer' }, environmentId: null, workspaceType: null, model: { instanceId: `customer-${source.deviceId}-codex`, model: 'customer-model', reasoningEffort: 'high' } })
   using _fetch = stubGlobal('fetch', f.fetch)
-  await using screen = await render(<App />, { router: '/projects?projectId=config-project' })
-  const edit = screen.getByRole('button', { name: '编辑助手 资料分析', exact: true })
+  await using screen = await render(<App assistants />, { router: '/assistants?projectId=config-project' })
+  const edit = screen.getByRole('button', { name: '编辑项目助手 资料分析', exact: true })
   await expect.element(edit).toBeEnabled(); await edit.click()
   await expect.element(page.getByRole('combobox', { name: '运行来源', exact: true })).toHaveTextContent('自己的电脑 · 登记目录')
   await expect.element(page.getByRole('combobox', { name: '模型', exact: true })).toHaveTextContent('本机模型')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '保存助手配置', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   expect(f.writes[0]?.body.value.configuration).toMatchObject({ executionBinding: source, model: { model: 'customer-model', reasoningEffort: 'high' }, workspaceType: null })
 })
@@ -213,8 +215,8 @@ it('项目表单保留隔离预设目录与原参数，不用自用目录显示�
     skillIds: ['isolated-skill'],
   })
   using _fetch = stubGlobal('fetch', f.fetch)
-  await using screen = await render(<App />, { router: '/projects?projectId=config-project' })
-  const edit = screen.getByRole('button', { name: '编辑助手 资料分析', exact: true })
+  await using screen = await render(<App assistants />, { router: '/assistants?projectId=config-project' })
+  const edit = screen.getByRole('button', { name: '编辑项目助手 资料分析', exact: true })
   await expect.element(edit).toBeEnabled()
   await edit.click()
   await expect
@@ -234,7 +236,7 @@ it('项目表单保留隔离预设目录与原参数，不用自用目录显示�
     .element(page.getByRole('checkbox', { name: 'isolated-skill · 原预设skill', exact: true }))
     .toBeDisabled()
   await page.getByRole('textbox', { name: '名称', exact: true }).fill('保留隔离参数')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '保存助手配置', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   expect(f.writes[0]?.body.value.configuration).toMatchObject({
     customerProfile: profile,

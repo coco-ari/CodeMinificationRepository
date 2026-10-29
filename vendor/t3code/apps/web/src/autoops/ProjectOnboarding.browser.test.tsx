@@ -197,7 +197,7 @@ it('无创建权限的新成员看到等待分配，刷新后进入实际授权�
     .not.toBeInTheDocument()
   f.assign()
   await entry.getByRole('button', { name: '刷新项目', exact: true }).click()
-  await screen.getByRole('button', { name: '打开', exact: true }).click()
+  await screen.getByRole('button', { name: '打开项目 新项目', exact: true }).click()
   await expect.element(screen.getByText('尚无可用助手', { exact: true })).toBeVisible()
   await expect
     .element(screen.getByRole('link', { name: '配置助手', exact: true }))
@@ -318,8 +318,7 @@ it('部署仓库入口往返助手后保留原项目分组和返回部署', asyn
   )
   await screen.getByRole('link', { name: '配置助手', exact: true }).click()
   await expect.poll(() => router.state.location.pathname).toBe('/assistants')
-  await screen.getByRole('button', { name: '我提供的', exact: true }).click()
-  await screen.getByRole('button', { name: '当前项目', exact: true }).click()
+  await expect.element(screen.getByRole('button', { name: '我提供的', exact: true })).not.toBeInTheDocument()
   await screen.getByRole('link', { name: '返回项目配置', exact: true }).click()
   await expect.poll(() => router.state.location.href).toBe(
     '/projects?projectId=new-project&section=git&from=deployments',
@@ -362,4 +361,31 @@ it('助手路由仅保留项目返回白名单，不接收任意返回地址或�
       returnFrom: 'deployments',
     }),
   ).toEqual({ projectId: 'new-project' })
+})
+
+
+it('全局目录搜索后进入项目，仅显示当前配置分组和单一助手入口', async () => {
+  await page.viewport(1440, 700)
+  const f = setup()
+  f.assign()
+  const current = f.bootstrap()
+  installAutoOpsHost({ ...current, projects: [...current.projects, { ...current.projects[0]!, id: 'another-project', name: '不应混入配置页的其他项目' }] }, location.origin)
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<App fullShell />, { router: '/projects' })
+  const search = screen.getByRole('searchbox', { name: '搜索项目', exact: true })
+  await search.fill('不存在')
+  await expect.element(screen.getByText('没有匹配的项目', { exact: true })).toBeVisible()
+  await search.fill('新项目')
+  await page.screenshot({ path: '../../.test-artifacts/workbench-navigation/global-projects.png' })
+  await screen.getByRole('button', { name: '打开项目 新项目', exact: true }).click()
+  await expect.element(screen.getByRole('button', { name: '基本信息', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect.element(screen.getByRole('button', { name: '平台节点', exact: true })).not.toBeInTheDocument()
+  await expect.element(screen.getByRole('button', { name: '不应混入配置页的其他项目', exact: true })).not.toBeInTheDocument()
+  await screen.getByRole('button', { name: '助手与成员', exact: true }).click()
+  await expect.element(screen.getByRole('link', { name: '管理助手', exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('button', { name: '添加助手', exact: true })).not.toBeInTheDocument()
+  await page.screenshot({ path: '../../.test-artifacts/workbench-navigation/project-settings.png' })
+  await screen.getByRole('link', { name: '管理助手', exact: true }).click()
+  await expect.poll(() => screen.router?.state.location.pathname).toBe('/assistants')
+  await expect.element(screen.getByRole('link', { name: '返回项目配置', exact: true })).toBeVisible()
 })

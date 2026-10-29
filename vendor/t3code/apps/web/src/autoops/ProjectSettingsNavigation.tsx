@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { ModuleSidebarItem } from './ModuleWorkspace'
 import { Button } from '~/components/ui/button'
 
 const areas = [
@@ -18,12 +19,53 @@ export function focusProjectSettingsArea(area: ProjectSettingsArea) {
   target?.focus({ preventScroll: true })
 }
 
-export function ProjectSettingsNavigation({ canManage, returnAction }: { canManage: boolean; returnAction?: ReactNode }) {
+export function ProjectSettingsNavigation({
+  canManage,
+  returnAction,
+  sidebar = false,
+  returnOnly = false,
+}: {
+  canManage: boolean
+  returnAction?: ReactNode
+  sidebar?: boolean
+  returnOnly?: boolean
+}) {
+  const [active, setActive] = useState<ProjectSettingsArea>('general')
+  useEffect(() => {
+    if (!sidebar) return
+    const update = () => {
+      const container = document.querySelector('[data-project-settings-scroll]')
+      if (!container) return
+      const top = container.getBoundingClientRect().top + 48
+      const visible = areas.filter((area) => document.getElementById(targetId(area.id)))
+      const current = visible.findLast(
+        (area) => document.getElementById(targetId(area.id))!.getBoundingClientRect().top <= top,
+      )
+      setActive(current?.id ?? 'general')
+    }
+    document.addEventListener('scroll', update, true)
+    return () => document.removeEventListener('scroll', update, true)
+  }, [sidebar])
+  if (sidebar)
+    return (
+      <nav aria-label="项目配置分组">
+        {areas
+          .filter((area) => !area.manage || canManage)
+          .map((area) => (
+            <ModuleSidebarItem
+              key={area.id}
+              label={area.label}
+              selected={active === area.id}
+              onClick={() => focusProjectSettingsArea(area.id)}
+            />
+          ))}
+      </nav>
+    )
   return (
     <nav aria-label="项目配置分组" className="shrink-0 border-b border-border/60">
       <div className="mx-auto flex max-w-4xl flex-wrap gap-1 px-5 py-2 sm:px-6">
         {returnAction}
-        {areas
+        {(returnOnly ? [] : areas)
           .filter((area) => !area.manage || canManage)
           .map((area) => (
             <Button

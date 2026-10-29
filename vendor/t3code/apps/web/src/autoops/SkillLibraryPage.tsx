@@ -96,14 +96,19 @@ function readView(
 /** 公共项目框架负责导航，skills保留全局分配语义。 */
 export function AutoOpsSkillLibraryPage() {
   const host = readAutoOpsHost()
-  const projectId = useAutoOpsProjectId()
+  const selectedProjectId = useAutoOpsProjectId()
   const search = useSearch({ from: '/_chat/skills' })
   const navigate = useNavigate()
+  const globalMode = search.scope === 'global'
+  const projectId = globalMode ? '' : selectedProjectId
   const project = host?.projects.find((entry) => entry.id === projectId)
   const saved = readView(host?.principal.id ?? '', projectId)
   const requestedScope = search.skillView ?? saved.scope
-  const scope: Scope =
-    requestedScope === 'assistant' || requestedScope === 'project' || requestedScope === 'global'
+  const scope: Scope = globalMode
+    ? requestedScope === 'global'
+      ? 'global'
+      : 'library'
+    : requestedScope === 'assistant' || requestedScope === 'project'
       ? requestedScope
       : 'library'
   const assistantId =
@@ -123,7 +128,7 @@ export function AutoOpsSkillLibraryPage() {
       },
     })
   }, [host, project, search.skillView, projectId, scope, assistantId, navigate])
-  if (!host || !project)
+  if (!host || (!globalMode && !project))
     return (
       <SidebarInset
         className="h-dvh min-h-0 min-w-0 overflow-hidden"
@@ -140,7 +145,7 @@ export function AutoOpsSkillLibraryPage() {
     void navigate({
       to: '/skills',
       search: {
-        projectId: ProjectId.make(projectId),
+        ...(globalMode ? { scope: 'global' as const } : { projectId: ProjectId.make(projectId) }),
         skillView: view,
         ...(view === 'assistant' && selectedAgentId ? { assistantId: selectedAgentId } : {}),
       },
@@ -150,7 +155,8 @@ export function AutoOpsSkillLibraryPage() {
     <SkillLibraryContent
       key={`${host.principal.id}:${projectId}:${scope}:${assistantId}`}
       projectId={projectId}
-      projectName={project.name}
+      projectName={project?.name ?? '所有项目'}
+      globalMode={globalMode}
       scope={scope}
       assistantId={assistantId}
       selectView={selectView}
@@ -161,12 +167,14 @@ export function AutoOpsSkillLibraryPage() {
 function SkillLibraryContent({
   projectId,
   projectName,
+  globalMode = false,
   scope,
   assistantId,
   selectView,
 }: {
   projectId: string
   projectName: string
+  globalMode?: boolean
   scope: Scope
   assistantId: string
   selectView: (scope: Scope, assistantId?: string) => void
@@ -182,7 +190,7 @@ function SkillLibraryContent({
     isUpdating,
     mutate: mutateCatalog,
     clearError,
-  } = useSkillLibraryCatalog(projectId)
+  } = useSkillLibraryCatalog(projectId || undefined)
   const [query, setQuery] = useState(() => {
     const saved = readView(host.principal.id, projectId)
     return saved.scope === scope && typeof saved.query === 'string' ? saved.query : ''
@@ -228,7 +236,9 @@ function SkillLibraryContent({
 
   const targets =
     scope === 'assistant'
-      ? (catalog?.assistants.filter((entry) => entry.projectId === projectId) ?? [])
+      ? (catalog?.assistants.filter(
+          (entry) => entry.projectId === projectId && entry.executionKind === 'platform',
+        ) ?? [])
       : scope === 'project'
         ? (catalog?.projects ?? [])
         : scope === 'global'
@@ -284,7 +294,7 @@ function SkillLibraryContent({
     dialog && 'skill' in dialog && dialog.skill
       ? (catalog?.skills.find((entry) => entry.id === dialog.skill?.id) ?? dialog.skill)
       : undefined
-  const canManage = catalog?.canManage === true
+  const canManage = globalMode && catalog?.canManage === true
   const finalFocus = () =>
     dialogReturnFocus.current?.isConnected && dialogReturnFocus.current.getClientRects().length
       ? dialogReturnFocus.current
@@ -402,7 +412,9 @@ function SkillLibraryContent({
             {
               type: 'assign',
               skillId: skill.id,
-              ...(currentAssignment ? { assignment: currentAssignment } : {}),
+              ...(currentAssignment && (globalMode || currentAssignment.targetType !== 'global')
+                ? { assignment: currentAssignment }
+                : {}),
             },
             trigger,
           )
@@ -473,15 +485,19 @@ function SkillLibraryContent({
         }}
       >
         <div className="space-y-1 px-[var(--sidebar-content-inset)]">
-          {Object.entries(scopeNames).map(([value, name]) => (
-            <ModuleSidebarItem
-              key={value}
-              label={name}
-              icon={scopeIcons[value as Scope]}
-              selected={scope === value}
-              onClick={() => selectView(value as Scope)}
-            />
-          ))}
+          {Object.entries(scopeNames)
+            .filter(([value]) =>
+              globalMode ? value === 'library' || value === 'global' : value !== 'global',
+            )
+            .map(([value, name]) => (
+              <ModuleSidebarItem
+                key={value}
+                label={name}
+                icon={scopeIcons[value as Scope]}
+                selected={scope === value}
+                onClick={() => selectView(value as Scope)}
+              />
+            ))}
         </div>
       </ModuleSidebar>
       {error && !dialog ? (
@@ -577,6 +593,7 @@ function SkillLibraryContent({
                         <PopoverTitle>skill分配</PopoverTitle>
                         <div className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
                           <p>所有项目 → 当前项目 → 指定助手，按上层启用优先。</p>
+                          <p>中央 skills 供平台助手使用；电脑助手沿用本机 skills。</p>
                           <p>上层开启后下层显示“已继承”。关闭上层后，按保留的下层配置生效。</p>
                           <p>
                             启用范围不增加文件、环境或电脑操作权限。更新包不会自动更换已启用的固定版本。
@@ -597,6 +614,7 @@ function SkillLibraryContent({
                         skill={skill}
                         catalog={catalog}
                         projectId={projectId}
+                        mode={globalMode ? 'global' : 'project'}
                         busy={busy || loading}
                         pendingTarget={pendingTarget}
                         actions={actions(
@@ -720,15 +738,17 @@ function SkillLibraryContent({
           {...dialogProps}
           catalog={catalog}
           projectId={projectId}
+          allowedScopes={globalMode ? ['global'] : ['project', 'assistant']}
           {...(dialog.skillId ? { initialSkillId: dialog.skillId } : {})}
           {...(dialog.assignment ? { assignment: dialog.assignment } : {})}
           {...(scope !== 'library'
             ? { initialTargetType: scope, ...(target ? { initialTargetId: target.id } : {}) }
-            : {})}
+            : { initialTargetType: globalMode ? 'global' : 'project' })}
         />
       ) : null}
       {dialog?.type === 'details' && selectedDialogSkill && catalog ? (
         <SkillDetailsDialog
+          allowedScopes={globalMode ? ['global'] : ['project', 'assistant']}
           {...dialogProps}
           skill={selectedDialogSkill}
           catalog={catalog}

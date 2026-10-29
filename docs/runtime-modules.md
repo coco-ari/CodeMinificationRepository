@@ -12,6 +12,12 @@
 - 前端由 [hostConfig](../vendor/t3code/apps/web/src/autoops/hostConfig.ts) 组合启动与公开出口；[hostSnapshot](../vendor/t3code/apps/web/src/autoops/hostSnapshot.ts) 只保存已认证宿主快照和用户存储视图，[threadScopes](../vendor/t3code/apps/web/src/autoops/threadScopes.ts) 通过统一客户端处理会话范围。页面继续使用当前 T3 路由与公共框架，组件不读取服务端表或凭证。
 - 部署保留 [DeploymentService](../src/deployment.mjs) 与 [Agent](../agent/main.mjs) 的现有协议、构建及恢复；业务适配器只提供项目授权、独立 Git 源码包与公开 DTO。
 
+## 工作台与项目导航（2026-10-29）
+
+公开模块注册及范围判断由 `projectNavigation.logic.ts` 统一维护，`ProjectAreaNavigation`、`ModuleHeader` 与设置返回逻辑共用。全局目录和项目设置共用 `/projects`，以明确 `projectId` 区分；全局助手使用 `assistantView=provided`，全局 skills 使用 `scope=global`，平台节点使用 `/nodes`。这些仅为呈现范围，不替代后端 capabilities 与写入授权。
+
+`PlatformNodesPage` 从部署公开入口导入原 `DeploymentServers` 的嵌入页面变体，环境节点绑定继续使用原对话框。项目助手与个人助手共用 `AssistantEditorPage` 的页面编辑、离开保护和启停呈现，原保存/修订/恢复服务不变。设计与验证入口见[工作台导航设计](../examples/workbench-navigation-design.md)、[本批验证](validation/workbench-navigation.md)。
+
 ## 统一问答最终参数接入（2026-10-26）
 
 本批影响范围是既有问答的宿主配置/草稿发送、会话绑定、RPC 授权、原生队列公开查询、轮次资料输入、技能目录、MCP 调用、客户适配及原连接程序合同。继续使用 T3 原生轮次/队列/收据，不新增执行器；项目和助手模块分别保有权限和不可变预设修订。平台与电脑来源由同一个助手选择入口派生最终配置，发送使用实际模型，不在执行前重套公共预设或平台默认。

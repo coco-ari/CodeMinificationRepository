@@ -6,6 +6,8 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react'
+import { useLocation } from '@tanstack/react-router'
+import { autoOpsGlobalArea } from './projectNavigation.logic'
 import { createPortal } from 'react-dom'
 import { FolderGit2Icon, SearchIcon, type LucideIcon } from 'lucide-react'
 import { WorkspacePageHeader } from '~/components/WorkspacePageHeader'
@@ -148,13 +150,15 @@ export function ModuleHeader({
   actions?: ReactNode
 }) {
   const projectId = useAutoOpsProjectId()
+  const location = useLocation()
+  const global = autoOpsGlobalArea(location.pathname, location.search) !== null
   const project = readAutoOpsHost()?.projects.find((entry) => entry.id === projectId)
   return (
     <WorkspacePageHeader data-module-header="" {...props}>
       <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
         <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="hidden min-w-0 truncate font-medium text-muted-foreground sm:block">
-          {project?.name ?? 'AutoOps'}
+          {global ? '工作台' : (project?.name ?? '项目不可用')}
         </span>
         <span className="hidden text-muted-foreground/60 sm:block">/</span>
         <h1

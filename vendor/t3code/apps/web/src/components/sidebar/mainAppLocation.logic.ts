@@ -1,4 +1,4 @@
-import { AUTOOPS_AREAS, normalizeAutoOpsChatHref, type AutoOpsArea } from '../../autoops/projectNavigation.logic.ts'
+import { AUTOOPS_AREAS, autoOpsGlobalArea, normalizeAutoOpsChatHref, type AutoOpsArea } from '../../autoops/projectNavigation.logic.ts'
 import type { ProjectRole } from '../../../../../../../autoops/contracts/project-access.ts'
 
 export interface SettingsReturnProject {
@@ -13,6 +13,7 @@ export interface SettingsReturnProject {
 export interface AutoOpsMainLocation {
   readonly href: string
   readonly projectId: string
+  readonly global?: boolean
   readonly area: AutoOpsArea
 }
 
@@ -33,6 +34,10 @@ export function captureAutoOpsMainLocation(
   projects: ReadonlyArray<SettingsReturnProject>,
 ): AutoOpsMainLocation | null {
   const area = areaFromHref(href)
+  if (area) {
+    const url = new URL(href, 'https://autoops.invalid')
+    if (autoOpsGlobalArea(url.pathname, Object.fromEntries(url.searchParams))) return { href, projectId: '', area, global: true }
+  }
   if (!area || !projects.some((project) => project.id === projectId)) return null
   const query = new URL(href, 'https://autoops.invalid').searchParams.getAll('projectId')
   if (query.length > 1 || (query.length === 1 && query[0] !== projectId)) return null
@@ -47,8 +52,12 @@ export function resolveAutoOpsSettingsReturnHref(input: {
   readonly projectHref: (area: AutoOpsArea, projectId: string, search?: unknown) => string
   readonly chatProjectId: (href: string) => string | null
 }): string {
+  if (input.location?.global) {
+    const captured = captureAutoOpsMainLocation(input.location.href, '', [])
+    if (captured?.global && captured.area === input.location.area) return captured.href
+  }
   const project = input.projects.find((entry) => entry.id === input.projectId)
-  if (!project) return '/'
+  if (!project) return '/projects'
   const previous = input.location && captureAutoOpsMainLocation(
     // The old project can have lost access while settings were open. Its area
     // can still be retained, but its resource is reused only for today's project.

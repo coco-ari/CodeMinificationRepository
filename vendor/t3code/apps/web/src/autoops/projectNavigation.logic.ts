@@ -1,19 +1,111 @@
 import type { ProjectCapabilities } from '../../../../../../autoops/contracts/runtime.ts'
 /** One module definition feeds navigation, route identity and the shared shell. */
 export const AUTOOPS_AREAS = [
-  { id: 'chat', label: '问答', icon: 'message', path: '/', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'workspaces', label: '工作区', icon: 'folder', path: '/workspaces', scope: 'project', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'deployments', label: '部署', icon: 'rocket', path: '/deployments', scope: 'project', common: true, enabled: 'hosted', read: 'deployment.read', manage: 'server', sidebar: true },
-  { id: 'projects', label: '项目管理', icon: 'folderSettings', path: '/projects', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'assistants', label: '助手', icon: 'bot', path: '/assistants', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'accounts', label: '账号', icon: 'users', path: '/accounts', scope: 'global', common: false, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
-  { id: 'skills', label: 'skills', icon: 'sparkles', path: '/skills', scope: 'global', common: true, enabled: 'hosted', read: 'authenticated', manage: 'server', sidebar: true },
+  {
+    id: 'chat',
+    label: '问答',
+    icon: 'message',
+    path: '/',
+    scope: 'project',
+    common: true,
+    enabled: 'hosted',
+    read: 'authenticated',
+    manage: 'server',
+    sidebar: true,
+  },
+  {
+    id: 'workspaces',
+    label: '工作区',
+    icon: 'folder',
+    path: '/workspaces',
+    scope: 'project',
+    common: true,
+    enabled: 'hosted',
+    read: 'authenticated',
+    manage: 'server',
+    sidebar: true,
+  },
+  {
+    id: 'deployments',
+    label: '部署',
+    icon: 'rocket',
+    path: '/deployments',
+    scope: 'project',
+    common: true,
+    enabled: 'hosted',
+    read: 'deployment.read',
+    manage: 'server',
+    sidebar: true,
+  },
+  {
+    id: 'projects',
+    label: '项目设置',
+    icon: 'folderSettings',
+    path: '/projects',
+    scope: 'project',
+    common: false,
+    enabled: 'hosted',
+    read: 'authenticated',
+    manage: 'server',
+    sidebar: true,
+  },
+  {
+    id: 'assistants',
+    label: '助手',
+    icon: 'bot',
+    path: '/assistants',
+    scope: 'project',
+    common: false,
+    enabled: 'hosted',
+    read: 'authenticated',
+    manage: 'server',
+    sidebar: true,
+  },
+  {
+    id: 'nodes',
+    label: '平台节点',
+    icon: 'server',
+    path: '/nodes',
+    scope: 'global',
+    common: false,
+    enabled: 'hosted',
+    read: 'authenticated',
+    manage: 'server',
+    sidebar: true,
+  },
+  {
+    id: 'accounts',
+    label: '账号',
+    icon: 'users',
+    path: '/accounts',
+    scope: 'global',
+    common: false,
+    enabled: 'hosted',
+    read: 'authenticated',
+    manage: 'server',
+    sidebar: true,
+  },
+  {
+    id: 'skills',
+    label: 'skills',
+    icon: 'sparkles',
+    path: '/skills',
+    scope: 'project',
+    common: true,
+    enabled: 'hosted',
+    read: 'authenticated',
+    manage: 'server',
+    sidebar: true,
+  },
 ] as const
 
-export type AutoOpsArea = typeof AUTOOPS_AREAS[number]['id']
+export type AutoOpsArea = (typeof AUTOOPS_AREAS)[number]['id']
 
 export interface NavigationHost {
   readonly principal: { readonly id: string }
+  readonly canManageDeploymentNodes?: boolean
+  readonly canManageAccounts?: boolean
+  readonly canManageSkills?: boolean
   readonly customerAgentsEnabled?: boolean
   readonly projects: ReadonlyArray<{
     readonly id: string
@@ -24,15 +116,54 @@ export interface NavigationHost {
 }
 
 /** 导航与深链共用注册表及服务端能力，不在前端重新推导角色权限。 */
-export function autoOpsAreaAvailable(areaId: AutoOpsArea, host: NavigationHost | undefined, projectId = ''): boolean {
+export function autoOpsAreaAvailable(
+  areaId: AutoOpsArea,
+  host: NavigationHost | undefined,
+  projectId = '',
+): boolean {
   if (!host?.principal.id) return false
   const area = AUTOOPS_AREAS.find((entry) => entry.id === areaId)
   if (!area) return false
+  if (areaId === 'nodes') return host.canManageDeploymentNodes === true
   if (area.scope === 'global') return true
   const project = host.projects.find((entry) => entry.id === projectId)
   if (!project) return false
   if (area.read === 'deployment.read') return project.capabilities?.['deployment.read'] === true
   if (areaId === 'workspaces') return project.capabilities?.['workspace.read'] === true
+  return true
+}
+
+/** 全局入口不借用最近项目的标题或权限，项目入口始终绑定明确项目。 */
+export const AUTOOPS_GLOBAL_AREAS = [
+  { id: 'projects', label: '全部项目', icon: 'folderSettings', href: '/projects' },
+  { id: 'provided', label: '我的助手', icon: 'bot', href: '/assistants?assistantView=provided' },
+  { id: 'skills', label: '全局 skills', icon: 'sparkles', href: '/skills?scope=global' },
+  { id: 'nodes', label: '平台节点', icon: 'server', href: '/nodes' },
+  { id: 'accounts', label: '账号', icon: 'users', href: '/accounts' },
+] as const
+export type AutoOpsGlobalArea = (typeof AUTOOPS_GLOBAL_AREAS)[number]['id']
+export function autoOpsGlobalArea(
+  pathname: string,
+  search: unknown,
+): AutoOpsGlobalArea | 'settings' | null {
+  const value = search && typeof search === 'object' ? (search as Record<string, unknown>) : {}
+  if (pathname === '/projects' && !Object.hasOwn(value, 'projectId')) return 'projects'
+  if (pathname === '/nodes') return 'nodes'
+  if (pathname === '/accounts') return 'accounts'
+  if (pathname === '/devices' || (pathname === '/assistants' && value.assistantView === 'provided'))
+    return 'provided'
+  if (pathname === '/skills' && value.scope === 'global') return 'skills'
+  if (pathname === '/settings' || pathname.startsWith('/settings/')) return 'settings'
+  return null
+}
+export function autoOpsGlobalAreaAvailable(
+  area: AutoOpsGlobalArea,
+  host: NavigationHost | undefined,
+): boolean {
+  if (!host?.principal.id) return false
+  if (area === 'nodes') return host.canManageDeploymentNodes === true
+  // 中央包管理与所有项目启用归平台管理员；项目成员在项目内查看与配置获准范围。
+  if (area === 'skills') return host.canManageSkills === true || host.canManageAccounts === true
   return true
 }
 
@@ -57,8 +188,13 @@ export function resolveAutoOpsNativeThreadProjectId(
 ): string {
   const identity = shell ?? detail
   if (!identity || !identity.projectId || identity.deletedAt !== null) return ''
-  if (shell && detail && (shell.projectId !== detail.projectId || detail.deletedAt !== null)) return ''
-  if (purpose === 'recent' && (identity.archivedAt !== null || (detail && detail.archivedAt !== null))) return ''
+  if (shell && detail && (shell.projectId !== detail.projectId || detail.deletedAt !== null))
+    return ''
+  if (
+    purpose === 'recent' &&
+    (identity.archivedAt !== null || (detail && detail.archivedAt !== null))
+  )
+    return ''
   return identity.projectId
 }
 
@@ -87,7 +223,8 @@ export function resolveAutoOpsRouteProjectId(
   }
   if (values.length === 0) return { status: 'absent' }
   const value = values[0]
-  return values.length === 1 && typeof value === 'string' &&
+  return values.length === 1 &&
+    typeof value === 'string' &&
     projects.some((project) => project.id === value)
     ? { status: 'selected', projectId: value }
     : { status: 'invalid' }
@@ -95,14 +232,33 @@ export function resolveAutoOpsRouteProjectId(
 
 export function autoOpsAreaFromPath(pathname: string): AutoOpsArea {
   if (pathname === '/devices' || pathname.startsWith('/devices/')) return 'assistants'
-  return AUTOOPS_AREAS.find((area) => area.path !== '/' &&
-    (pathname === area.path || pathname.startsWith(`${area.path}/`)))?.id ?? 'chat'
+  return (
+    AUTOOPS_AREAS.find(
+      (area) =>
+        area.path !== '/' && (pathname === area.path || pathname.startsWith(`${area.path}/`)),
+    )?.id ?? 'chat'
+  )
 }
 
 const CONTROL_ROUTES = new Set([
   'accounts',
-  'settings', 'projects', 'workspaces', 'deployments', 'skills', 'assistants', 'devices', 'usage', 'pull-requests',
-  'connect', 'connect-agent', 'pair', 'welcome', 'new', 'api', 'autoops',
+  'nodes',
+  'settings',
+  'projects',
+  'workspaces',
+  'deployments',
+  'skills',
+  'assistants',
+  'devices',
+  'usage',
+  'pull-requests',
+  'connect',
+  'connect-agent',
+  'pair',
+  'welcome',
+  'new',
+  'api',
+  'autoops',
 ])
 
 /** 切项目只保留 skills 视图，不携带上一项目的助手或待提交操作。 */
@@ -110,8 +266,11 @@ function skillNavigationSearch(search: unknown): URLSearchParams {
   let params: URLSearchParams
   if (search instanceof URLSearchParams) params = search
   else if (typeof search === 'string' || search instanceof URL) {
-    try { params = new URL(String(search), 'https://autoops.invalid/').searchParams }
-    catch { return new URLSearchParams() }
+    try {
+      params = new URL(String(search), 'https://autoops.invalid/').searchParams
+    } catch {
+      return new URLSearchParams()
+    }
   } else {
     params = new URLSearchParams()
     if (search && typeof search === 'object') {
@@ -124,21 +283,36 @@ function skillNavigationSearch(search: unknown): URLSearchParams {
   const result = new URLSearchParams()
   const views = params.getAll('skillView')
   const view = views.length === 1 ? views[0] : undefined
-  if (view !== 'library' && view !== 'global' && view !== 'assistant' && view !== 'project') return result
+  if (view !== 'library' && view !== 'assistant' && view !== 'project') return result
   result.set('skillView', view)
   return result
 }
 
 /** Keep only a native chat pathname; never restore saved query commands or external URLs. */
 export function normalizeAutoOpsChatHref(href: unknown): string | null {
-  if (typeof href !== 'string' || !href.startsWith('/') || href.startsWith('//') ||
-    /[\\\s\u0000-\u001f\u007f]/u.test(href)) return null
+  if (
+    typeof href !== 'string' ||
+    !href.startsWith('/') ||
+    href.startsWith('//') ||
+    /[\\\s\u0000-\u001f\u007f]/u.test(href)
+  )
+    return null
   const pathname = href.split(/[?#]/u, 1)[0]!.replace(/\/$/u, '')
   const segments = pathname.slice(1).split('/')
   if (segments.length !== 2) return null
   let parts: string[]
-  try { parts = segments.map(decodeURIComponent) } catch { return null }
-  if (parts.some((part) => !part || part === '.' || part === '..' || /[\\/\s?#\u0000-\u001f\u007f]/u.test(part))) return null
+  try {
+    parts = segments.map(decodeURIComponent)
+  } catch {
+    return null
+  }
+  if (
+    parts.some(
+      (part) =>
+        !part || part === '.' || part === '..' || /[\\/\s?#\u0000-\u001f\u007f]/u.test(part),
+    )
+  )
+    return null
   if (CONTROL_ROUTES.has(parts[0]!)) return null
   return `/${parts.map(encodeURIComponent).join('/')}`
 }
@@ -159,13 +333,25 @@ export function createAutoOpsProjectNavigation(options: {
   const key = (userId: string, suffix: string) =>
     `autoops:project-navigation:${encodeURIComponent(userId)}:${suffix}`
   const readStored = (storageKey: string) => {
-    try { return options.readStorage()?.getItem(storageKey) ?? null } catch { return null }
+    try {
+      return options.readStorage()?.getItem(storageKey) ?? null
+    } catch {
+      return null
+    }
   }
   const writeStored = (storageKey: string, value: string) => {
-    try { options.readStorage()?.setItem(storageKey, value) } catch { /* In-memory navigation remains usable. */ }
+    try {
+      options.readStorage()?.setItem(storageKey, value)
+    } catch {
+      /* In-memory navigation remains usable. */
+    }
   }
   const removeStored = (storageKey: string) => {
-    try { options.readStorage()?.removeItem(storageKey) } catch { /* Storage may be disabled. */ }
+    try {
+      options.readStorage()?.removeItem(storageKey)
+    } catch {
+      /* Storage may be disabled. */
+    }
   }
   const hostNow = () => {
     const host = options.readHost()
@@ -176,9 +362,11 @@ export function createAutoOpsProjectNavigation(options: {
     }
     return host
   }
-  const allowed = (host: NavigationHost, id: string) => host.projects.some((project) => project.id === id)
+  const allowed = (host: NavigationHost, id: string) =>
+    host.projects.some((project) => project.id === id)
   const selectionKey = (host: NavigationHost) => key(host.principal.id, 'project')
-  const chatKey = (host: NavigationHost, id: string) => key(host.principal.id, `chat:${encodeURIComponent(id)}`)
+  const chatKey = (host: NavigationHost, id: string) =>
+    key(host.principal.id, `chat:${encodeURIComponent(id)}`)
 
   const readProjectId = (
     search: unknown = options.readRouteSearch(),
@@ -201,7 +389,9 @@ export function createAutoOpsProjectNavigation(options: {
     readProjectId,
     subscribe(listener: () => void) {
       listeners.add(listener)
-      return () => { listeners.delete(listener) }
+      return () => {
+        listeners.delete(listener)
+      }
     },
     selectProject(id: string) {
       const host = hostNow()
@@ -214,7 +404,13 @@ export function createAutoOpsProjectNavigation(options: {
     rememberChatLocation(projectId: string, href: string) {
       const host = hostNow()
       const normalized = normalizeAutoOpsChatHref(href)
-      if (!host || !allowed(host, projectId) || !normalized || !options.ownsChatHref(projectId, normalized)) return
+      if (
+        !host ||
+        !allowed(host, projectId) ||
+        !normalized ||
+        !options.ownsChatHref(projectId, normalized)
+      )
+        return
       remembered.set(projectId, normalized)
       writeStored(chatKey(host, projectId), normalized)
     },
@@ -227,10 +423,11 @@ export function createAutoOpsProjectNavigation(options: {
         for (const [key, value] of skillNavigationSearch(search)) params.set(key, value)
       }
       if (area === 'assistants' && search && typeof search === 'object') {
-        const view = search instanceof URLSearchParams
-          ? search.get('assistantView')
-          : (search as Record<string, unknown>).assistantView
-        if (view === 'project' || view === 'provided') params.set('assistantView', view)
+        const view =
+          search instanceof URLSearchParams
+            ? search.get('assistantView')
+            : (search as Record<string, unknown>).assistantView
+        if (view === 'project') params.set('assistantView', view)
       }
       const query = params.toString()
       if (area !== 'chat') return `/${area}?${query}`

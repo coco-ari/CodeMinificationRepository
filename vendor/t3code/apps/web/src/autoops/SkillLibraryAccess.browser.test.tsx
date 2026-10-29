@@ -84,6 +84,7 @@ beforeEach(() => {
 describe('skill库写入后的撤权处理', () => {
   for (const phase of ['mutation', 'refresh'] as const) {
     it(phase + ' 撤权会清除旧目录与操作入口', async () => {
+      mocks.search.mockReturnValue({ scope: 'global', skillView: 'library' })
       await using screen = await render(
         <SidebarProvider>
           <AutoOpsSkillLibraryPage />
@@ -120,6 +121,7 @@ describe('skill库写入后的撤权处理', () => {
 describe('skill卡片就地分配', () => {
   for (const targetType of ['assistant', 'project', 'global'] as const) {
     it(`${targetType} 分组可直接分配与取消，状态以服务端返回为准`, async () => {
+      if (targetType === 'global') mocks.search.mockReturnValue({ scope: 'global', skillView: 'library' })
       const initial = catalog()
       initial.assistants = [
         { id: 'assistant-one', name: '隔离助手', projectId: 'p-one', executionKind: 'platform' },
@@ -182,7 +184,7 @@ describe('skill卡片就地分配', () => {
           ...(targetType === 'assistant' ? { projectId: 'p-one' } : {}),
           enabled: true,
         },
-        'p-one',
+        targetType === 'global' ? undefined : 'p-one',
       )
       await act(() => accepted.resolve(assigned))
       const selected = group.getByRole('button', { name: `${name}：已启用`, exact: true })
@@ -196,7 +198,7 @@ describe('skill卡片就地分配', () => {
           action: 'unassign',
           assignmentId: 'assignment-one',
         },
-        'p-one',
+        targetType === 'global' ? undefined : 'p-one',
       )
       expect(screen.container.querySelector('[data-skill-card]')).not.toBeNull()
     })
@@ -282,6 +284,7 @@ describe('skill目录控制器的跨页面隔离', () => {
       .toBeVisible()
   })
   it('旧页面已经接受的写入完成后只刷新当前页，不把旧写入响应作为当前目录', async () => {
+    mocks.search.mockReturnValue({ scope: 'global', skillView: 'library' })
     const accepted = deferred<SkillLibrary>()
     mocks.change.mockReturnValue(accepted.promise)
     await using previous = await render(library(), testLocation)
@@ -306,6 +309,7 @@ describe('skill目录控制器的跨页面隔离', () => {
     expect(mocks.change).toHaveBeenCalledTimes(1)
   })
   it('写入冲突后的核对读取随页面离开取消，保留原写入次数', async () => {
+    mocks.search.mockReturnValue({ scope: 'global', skillView: 'library' })
     const checking = deferred<SkillLibrary>()
     mocks.change.mockRejectedValue(
       new AutoOpsRequestError('版本发生变化，请刷新。', 'CONFLICT', 409),
@@ -351,6 +355,7 @@ for (const [width, theme] of [
         executionKind: 'platform',
       },
       { id: 'other', name: '其他项目助手', projectId: 'p-two', executionKind: 'platform' },
+      { id: 'computer', name: '本机 skills 助手', projectId: 'p-one', executionKind: 'customer' },
     ]
     mocks.load.mockResolvedValue(value)
     try {
@@ -372,6 +377,7 @@ for (const [width, theme] of [
         )
         .toBeDisabled()
       expect(document.body.textContent).not.toContain('其他项目助手')
+      expect(document.body.textContent).not.toContain('本机 skills 助手')
       await page.getByRole('searchbox', { name: '搜索指定助手' }).fill('不存在')
       await expect.element(page.getByText('没有匹配的助手')).toBeVisible()
       await userEvent.keyboard('{Escape}')
