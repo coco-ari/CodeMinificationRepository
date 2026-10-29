@@ -1,7 +1,7 @@
 'use client'
 
 import type { Autocomplete as AutocompletePrimitive } from '@base-ui/react/autocomplete'
-import { AutocompleteAdapter as AutocompleteRuntime } from './radix-search'
+import { Autocomplete as AutocompleteRuntime } from '@base-ui/react/autocomplete'
 import { ChevronsUpDownIcon, XIcon } from 'lucide-react'
 
 import { cn } from '~/lib/utils'
@@ -84,6 +84,7 @@ function AutocompletePopup({
   alignOffset,
   align = 'start',
   anchor,
+  container,
   ...props
 }: AutocompletePrimitive.Popup.Props & {
   align?: AutocompletePrimitive.Positioner.Props['align']
@@ -91,9 +92,10 @@ function AutocompletePopup({
   alignOffset?: AutocompletePrimitive.Positioner.Props['alignOffset']
   side?: AutocompletePrimitive.Positioner.Props['side']
   anchor?: AutocompletePrimitive.Positioner.Props['anchor']
+  container?: AutocompletePrimitive.Portal.Props['container']
 }) {
   return (
-    <AutocompleteRuntime.Portal>
+    <AutocompleteRuntime.Portal container={container}>
       <AutocompleteRuntime.Positioner
         align={align}
         alignOffset={alignOffset}

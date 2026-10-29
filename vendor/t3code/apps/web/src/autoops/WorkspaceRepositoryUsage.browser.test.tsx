@@ -35,6 +35,17 @@ function setup({ failRead = false, denied = false } = {}) {
         limits: { maxFileBytes: 8000000, maxBytes: 50000000, maxFiles: 100 },
       })
     if (path.endsWith('/workspace/credentials')) return Response.json({ credentials: [] })
+    if (path.endsWith('/refs'))
+      return Response.json({
+        sourceId: 'repo-usage',
+        defaultRef: 'main',
+        branches: [{ name: 'workspace-feature', commit: 'a'.repeat(40) }],
+        tags: [
+          { name: 'release-1', commit: 'b'.repeat(40) },
+          { name: 'release-2', commit: 'c'.repeat(40) },
+        ],
+        truncated: false,
+      })
     if (path.endsWith('/repositories')) {
       if (fail) {
         fail = false
@@ -51,6 +62,11 @@ function setup({ failRead = false, denied = false } = {}) {
             name: '项目业务仓库',
             url: 'https://isolated.invalid/repo.git',
             credentialId: 'project-credential',
+          },
+          {
+            id: 'another-repo',
+            name: '另一个项目仓库',
+            url: 'https://isolated.invalid/another.git',
           },
         ],
       })
@@ -105,9 +121,8 @@ it('工作区选择已登记仓库及自己的分支，只提交使用配置并�
   await expect.element(page.getByRole('combobox', { name: '项目仓库', exact: true })).toBeEnabled()
   await select('项目仓库', '项目业务仓库')
   await select('版本引用', '分支')
-  await page
-    .getByRole('textbox', { name: '分支、标签或提交', exact: true })
-    .fill('workspace-feature')
+  await page.getByRole('combobox', { name: '分支', exact: true }).fill('workspace')
+  await page.getByRole('option', { name: 'workspace-feature', exact: true }).click()
   await page.getByRole('textbox', { name: '工作区挂载目录', exact: true }).fill('sources/business')
   await expect
     .element(page.getByRole('textbox', { name: 'HTTPS 仓库地址', exact: true }))
@@ -155,7 +170,8 @@ it('编辑既有来源只保留使用字段，不能用派生地址或凭证覆�
     .element(page.getByRole('combobox', { name: '项目仓库', exact: true }))
     .toHaveTextContent('项目业务仓库')
   await expect.element(page.getByRole('combobox', { name: '项目仓库', exact: true })).toBeDisabled()
-  await page.getByRole('textbox', { name: '分支、标签或提交', exact: true }).fill('release-2')
+  await page.getByRole('combobox', { name: '标签', exact: true }).fill('release-2')
+  await page.getByRole('option', { name: 'release-2', exact: true }).click()
   await page.getByRole('button', { name: '保存来源', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   expect(f.writes[0]?.input).toMatchObject({
@@ -203,4 +219,27 @@ it('提交期间仓库撤回拒绝写入且不自动换仓库或分支', async (
     .element(page.getByRole('combobox', { name: '项目仓库', exact: true }))
     .toHaveTextContent('项目业务仓库')
   expect(f.writes).toHaveLength(1)
+})
+
+it('切换引用类型或仓库清除旧引用，目录草稿保持', async () => {
+  const f = setup()
+  using _fetch = stubGlobal('fetch', f.fetch)
+  await using screen = await render(<Harness />)
+  await screen.getByRole('button', { name: '配置工作区来源', exact: true }).click()
+  await expect.element(page.getByRole('combobox', { name: '项目仓库', exact: true })).toBeEnabled()
+  await select('项目仓库', '项目业务仓库')
+  await select('版本引用', '分支')
+  await page.getByRole('combobox', { name: '分支', exact: true }).fill('workspace-feature')
+  await page.getByRole('option', { name: 'workspace-feature', exact: true }).click()
+  await page.getByRole('textbox', { name: '工作区挂载目录', exact: true }).fill('sources/kept')
+  await select('版本引用', '标签')
+  await expect.element(page.getByRole('combobox', { name: '标签', exact: true })).toHaveValue('')
+  await page.getByRole('combobox', { name: '标签', exact: true }).fill('release-2')
+  await page.getByRole('option', { name: 'release-2', exact: true }).click()
+  await select('项目仓库', '另一个项目仓库')
+  await expect.element(page.getByRole('combobox', { name: '标签', exact: true })).toHaveValue('')
+  await expect
+    .element(page.getByRole('textbox', { name: '工作区挂载目录', exact: true }))
+    .toHaveValue('sources/kept')
+  expect(f.writes).toHaveLength(0)
 })

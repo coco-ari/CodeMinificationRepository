@@ -1,0 +1,74 @@
+name: autoops
+x-common: &common
+  image: ${AUTOOPS_IMAGE:?请指定固定发行镜像}
+  restart: unless-stopped
+  init: true
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 90s
+  pids_limit: 512
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=512m,uid=1000,gid=1000
+  volumes:
+    - /srv/autoops/data:/data
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+x-environment: &environment
+  AGENT_DEMO_ENGINE: t3
+  DATA_DIR: /data
+  STATIC_DIR: /app/dist/web
+  AUTOOPS_T3_BASE_DIR: /data/t3
+  AUTOOPS_T3_INTERNAL_URL: http://127.0.0.1:8788
+  AUTOOPS_T3_PORT: "8788"
+  AGENT_DEMO_PROVIDER: cpa
+  AGENT_DEMO_CPA_BASE_URL: ${CPA_BASE_URL:?请配置 CPA HTTPS 地址}
+  AGENT_DEMO_MODEL: ${CPA_MODEL:?请配置实际支持的默认模型}
+  AGENT_DEMO_CODEX_BINARY: /usr/local/bin/codex
+  AGENT_DEMO_CPA_API_KEY_FILE: /run/secrets/cpa-api-key
+  AUTOOPS_CUSTOMER_AGENTS: "1"
+  AUTOOPS_DEPLOYMENT_ENABLED: "1"
+  AUTOOPS_DEPLOYMENT_AGENT_PORT: "8789"
+  AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?请配置访问入口}
+  COOKIE_SECURE: ${COOKIE_SECURE:-0}
+services:
+  gateway:
+    <<: *common
+    environment:
+      <<: *environment
+      HOST: 0.0.0.0
+      PORT: "8787"
+    ports:
+      - "${BIND_ADDRESS:?请指定主机内网地址}:28887:8787"
+      - "127.0.0.1:28887:8787"
+    mem_limit: 1g
+    cpus: 2
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/api/agent-demo/health').then(async r=>{const b=await r.json();process.exit(r.ok&&b.workerReachable?0:1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+  worker:
+    <<: *common
+    command: [node, scripts/start-t3-worker.mjs]
+    network_mode: service:gateway
+    depends_on:
+      gateway:
+        condition: service_started
+    environment: *environment
+    volumes:
+      - /srv/autoops/data:/data
+      - /opt/autoops/secrets/cpa-api-key:/run/secrets/cpa-api-key:ro
+    mem_limit: 6g
+    cpus: 4
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8788/.well-known/t3/environment').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3

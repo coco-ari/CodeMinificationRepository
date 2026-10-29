@@ -457,13 +457,6 @@ export function ProjectConfigurationFields({
           </>
         ) : null}
         <Choice
-          label="业务助手"
-          value={config.agentId}
-          disabled={disabled || customer}
-          options={choices.agents.map((agent) => ({ id: agent.id, name: agent.name }))}
-          onChange={(agentId) => update({ agentId })}
-        />
-        <Choice
           label="模型"
           value={config.model.model}
           disabled={disabled || isolated || !source?.models.length}

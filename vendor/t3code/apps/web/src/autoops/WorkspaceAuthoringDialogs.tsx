@@ -39,6 +39,7 @@ import {
 import type { WorkspaceAuthoringController } from './useWorkspaceAuthoring'
 import { loadProjectRepositories, type ProjectRepositoryConnection } from './projectRepositories'
 import { WorkspaceSubmissionNotice } from './WorkspaceActions'
+import { WorkspaceRepositoryReference } from './WorkspaceRepositoryReference'
 
 export const WorkspaceAuthoringFocus = createContext<(() => HTMLElement | null) | undefined>(
   undefined,
@@ -297,7 +298,7 @@ export function WorkspaceSourceDialog({
               : []),
           ]}
           disabled={controller.busy || !!source || !repositories}
-          onChange={(value) => field('id', value)}
+          onChange={(value) => setInput((current) => ({ ...current, id: value, ref: '' }))}
         />
         {readError ? (
           <Alert variant="error">
@@ -331,21 +332,26 @@ export function WorkspaceSourceDialog({
             value={input.refKind}
             options={refKinds}
             onChange={(value) =>
-              field('refKind', value as WorkspaceRepositoryUsageInput['refKind'])
+              setInput((current) => ({
+                ...current,
+                refKind: value as WorkspaceRepositoryUsageInput['refKind'],
+                ref: '',
+              }))
             }
             disabled={controller.busy}
           />
         </div>
-        {input.refKind !== 'default' ? (
-          <AuthoringField label="分支、标签或提交">
-            <Input
-              aria-label="分支、标签或提交"
-              value={input.ref}
-              disabled={controller.busy}
-              onChange={(event) => field('ref', event.target.value)}
-            />
-          </AuthoringField>
-        ) : null}
+        <WorkspaceRepositoryReference
+          key={`${projectId}:${input.id}`}
+          projectId={projectId}
+          repositoryId={
+            repositories?.some((repository) => repository.id === input.id) ? input.id : ''
+          }
+          refKind={input.refKind}
+          value={input.ref}
+          disabled={controller.busy}
+          onChange={(value) => field('ref', value)}
+        />
         <AuthoringField label="工作区挂载目录">
           <Input
             aria-label="工作区挂载目录"

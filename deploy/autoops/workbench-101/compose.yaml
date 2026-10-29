@@ -1,0 +1,113 @@
+name: autoops
+x-common: &common
+  image: ${AUTOOPS_IMAGE:?请指定固定发行镜像}
+  restart: unless-stopped
+  init: true
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 90s
+  pids_limit: 512
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=512m,uid=1000,gid=1000
+  volumes:
+    - /srv/autoops/data:/data
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+x-environment: &environment
+  AGENT_DEMO_ENGINE: t3
+  DATA_DIR: /data
+  STATIC_DIR: /app/dist/web
+  AUTOOPS_T3_BASE_DIR: /data/t3
+  AUTOOPS_T3_INTERNAL_URL: http://127.0.0.1:8788
+  AUTOOPS_T3_PORT: "8788"
+  AGENT_DEMO_PROVIDER: cpa
+  AGENT_DEMO_CPA_BASE_URL: ${CPA_BASE_URL:?请配置 CPA HTTPS 地址}
+  AGENT_DEMO_MODEL: ${CPA_MODEL:?请配置实际支持的默认模型}
+  AGENT_DEMO_CODEX_BINARY: /usr/local/bin/codex
+  AGENT_DEMO_CPA_API_KEY_FILE: /run/secrets/cpa-api-key
+  AUTOOPS_CUSTOMER_AGENTS: "1"
+  AUTOOPS_DEPLOYMENT_ENABLED: "1"
+  AUTOOPS_DEPLOYMENT_AGENT_PORT: "8789"
+  AUTOOPS_DEPLOYMENT_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?请配置访问入口}
+  COOKIE_SECURE: ${COOKIE_SECURE:-0}
+  AUTOOPS_WORKSPACE_MAX_BYTES: ${AUTOOPS_WORKSPACE_MAX_BYTES:-1073741824}
+  AUTOOPS_WORKSPACE_MAX_FILES: ${AUTOOPS_WORKSPACE_MAX_FILES:-100000}
+  AUTOOPS_WORKSPACE_MAX_FILE_BYTES: ${AUTOOPS_WORKSPACE_MAX_FILE_BYTES:-67108864}
+  AUTOOPS_WORKSPACE_GIT_MAX_BYTES: ${AUTOOPS_WORKSPACE_GIT_MAX_BYTES:-4294967296}
+  AUTOOPS_WORKSPACE_GIT_MAX_FILES: ${AUTOOPS_WORKSPACE_GIT_MAX_FILES:-200000}
+services:
+  proxy:
+    image: ${NGINX_IMAGE:?请指定固定代理镜像摘要}
+    restart: unless-stopped
+    user: "101:101"
+    entrypoint: [nginx]
+    command: [-g, "daemon off;"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m,uid=101,gid=101
+    ports:
+      - "80:8080"
+    volumes:
+      - /opt/autoops/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gateway:
+        condition: service_started
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/api/agent-demo/health]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+  gateway:
+    <<: *common
+    environment:
+      <<: *environment
+      HOST: 0.0.0.0
+      PORT: "8787"
+    ports:
+      - "28887:8787"
+    mem_limit: 768m
+    cpus: 1
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/api/agent-demo/health').then(async r=>{const b=await r.json();process.exit(r.ok&&b.workerReachable?0:1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+  worker:
+    <<: *common
+    # Git 的 ASKPASS 辅助脚本需要在临时目录执行，脚本本身不含凭据。
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=512m,uid=1000,gid=1000
+    command: [node, scripts/start-t3-worker.mjs]
+    network_mode: service:gateway
+    depends_on:
+      gateway:
+        condition: service_started
+    environment: *environment
+    volumes:
+      - /srv/autoops/data:/data
+      - /opt/autoops/secrets/cpa-api-key:/run/secrets/cpa-api-key:ro
+    mem_limit: 5g
+    cpus: 3
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8788/.well-known/t3/environment').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3

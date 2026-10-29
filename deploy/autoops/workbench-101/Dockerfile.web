@@ -1,0 +1,15 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+WORKDIR /app
+# 先验证固定基础发行，再替换网页目录，保留原生运行器和业务服务。
+RUN node scripts/verify-t3-release.mjs /app && rm -rf /app/dist/web
+COPY --chown=node:node web/ /app/dist/web/
+COPY refresh-web-manifest.mjs /tmp/refresh-web-manifest.mjs
+ARG FRONTEND_SOURCE_SHA
+ARG FRONTEND_ARCHIVE_SHA
+LABEL cn.autoops.frontend.source-sha256="${FRONTEND_SOURCE_SHA}" \
+      cn.autoops.frontend.archive-sha256="${FRONTEND_ARCHIVE_SHA}"
+RUN node /tmp/refresh-web-manifest.mjs && rm /tmp/refresh-web-manifest.mjs \
+    && node scripts/verify-t3-release.mjs /app
+USER node
