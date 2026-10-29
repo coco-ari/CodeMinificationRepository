@@ -41,10 +41,23 @@ pnpm --dir vendor/t3code/apps/web exec vp test run src/autoops/deployment/Deploy
 
 本机浏览器命令使用已有 Chromium 可执行文件，通过 `T3_TEST_BROWSER_EXECUTABLE_PATH` 指定。完整命令日志位于忽略目录 `.deployment/deployment-workbench-*.log`，不将临时日志、截图或安装依赖提交进仓库。
 
-## 环境问题与未测边界
+## 2026-10-30 提交、推送与内网更新
 
-- Windows 检出曾把固定旧发行源码夹具转换为 CRLF，导致原始摘要断言失败；已核对 Git 原件摘要完全一致，并用属性明确该夹具采用 LF，未改写旧发行内容或放宽断言。Windows tar 列表输出同样使用 CRLF，安装包校验现支持两种行尾，程序内容及条目边界检查保持。
-- 单独尝试的两项完整发行包测试在建立既有符号链接夹具时被 Windows `EPERM` 阻止，未计入通过。Agent 自身实际打包和逐文件校验已通过；尚未完成 Linux 完整发行清单验收。
-- 本机 Docker 守护进程未运行。未执行隔离静态站点及 Java 的真实构建、发布、健康、回退、恢复失败和断线验收；模拟任务与原生路由测试不替代这些结果。
-- 未登录在线页面或检查现有业务服务健康，未更新中心或 appSphere Agent，未重新发布现有五个服务。`project-assistant-lite-v1`、模型、节点、已有配置及版本链没有服务器写入。
-- 上线前仍需在独立 Docker 位置完成两种服务的真实验收，再对固定产物进行发行及内网健康核对；上线本身为单独操作。
+用户随后授权提交、推送及部署。代码提交 `8f0a78d4c78d0294caa0e6b389a3cda5f71fda51` 已推送到 `origin/feat/workspace-deployment-validation`，运行镜像 `autoops:deployment-workbench-8f0a78d4`，ID 为 `sha256:dd4ebb5d5882e24daccb8fa5bc41d1dba01b129551c90fb887f15632a8665989`。其他任务的三个未提交文件没有进入本次提交或构建。
+
+- 从固定提交生成源码，显式使用 Git 原始行尾，归档 SHA256 `9ab0a969c24e682861d23e5c1bbb0aa354a511c2ae19a3105e3012b2b8d50d11`。复用现有锁定依赖构建 Linux 网页、Server 和 Agent 包；不安装无关上游移动端依赖。
+- Linux 上两项发行包测试通过；完整发行文件、原生依赖及工作区冒烟通过。随后以镜像默认非 root 用户、无网络的独立容器复验发行及工作区检查，两项通过。
+- 切换前问答、Provider Turn、工作区更新及部署均无执行事务。只重建 gateway、worker；仅修改 `.env` 的镜像，Compose 中两个服务其余内容逐项比较相等，代理未重建。
+- 网关、Worker、代理全部 healthy；两容器实际环境变量及登录后的 `bootstrap.productProfile.id` 均为 `project-assistant-lite-v1`。
+- 真实 Chromium 登录后验证五服务定位、真实仓库提交列表、选择提交、一次确认及展开固定配置、配置页和 390px 窄屏，页面脚本错误 0。取消发布确认，没有创建发布任务或保存业务配置。
+- 五个既有服务的 Swagger HTTP 检查均为 200，运行版本不变。5 个共享服务、5 个部署位置、5 条发行记录以及项目环境源码、节点绑定／准入的逻辑摘要前后一致，SHA256 为 `69ca95b867a12bc509e019ceb2214d288c185f06893a9dbff9066b8584d9e7d2`。
+- 内外网健康均通过，入口引用同一新前端 `/assets/agentDemo-BvnAdPxC.js`。模型及其他 Compose 配置未修改；未升级 appSphere Agent。
+
+服务器材料为 `/opt/autoops/build/deployment-workbench-8f0a78d4/`，结果为 `/opt/autoops/releases/deployment-workbench-8f0a78d4/`，包括 `deployment.json`、`before.json`、`build.json`、发行校验日志、浏览器结果与前端一致性记录。配置备份保持私有权限，旧镜像 `autoops:external-workspace-20261029` 保留；恢复步骤见[运维入口](../../deploy/autoops/workbench-101/README.md#当前发行与产品模式)。本地对应证据在 `.deployment/deployment-workbench-release/`，未提交凭据、截图或临时构建工具。
+
+## 环境问题与剩余边界
+
+- Windows 检出曾把固定旧发行源码夹具转换为 CRLF，已核对 Git 原件并明确该夹具采用 LF，未放宽摘要断言。Windows tar 列表输出兼容 CRLF；原始程序字节和条目边界仍严格检查。
+- Windows 两项完整发行包测试曾被符号链接 `EPERM` 阻止，初次未计入通过；本批 Linux 上同两项测试及完整发行校验已通过。构建中依赖自动补装和新旧 Agent 行尾差异都在切换前发现并处理，未放宽发行校验，未将失败候选投入运行。
+- 尚未执行独立静态站点及 Java 的新构建、发布、健康、回退、恢复失败和断线验收；自动模拟、页面打开发布确认及既有服务 HTTP 200 不替代这些结果。没有重新发布现有五个业务服务充当验收。
+- 本次未新发模型问答、修改存储策略或实际触发程序回退；这些不列为本批通过。后续在独立位置完成两类新发布及恢复，再判定完整部署业务验收完成。
