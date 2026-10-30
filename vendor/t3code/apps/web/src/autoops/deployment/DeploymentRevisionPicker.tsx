@@ -8,8 +8,6 @@ import { Spinner } from '~/components/ui/spinner'
 import { Choice } from './DeploymentControls'
 import {
   DeploymentRequestError,
-  loadDeploymentRepositoryRefs,
-  loadDeploymentRepositoryHistory,
   type DeploymentServiceSource,
   type DeploymentSourceRef,
   type DeploymentSubmission,
@@ -18,6 +16,7 @@ import {
 } from '../deployments'
 import { AutoOpsRequestError } from '../apiClient'
 import type { ProjectRepositoryConnection } from '../workspaceAuthoring'
+import type { DeploymentRepositoryQueries } from './repositoryQueries'
 
 type ChoiceValue = Pick<DeploymentSourceRef, 'refKind' | 'ref' | 'commit'>
 export type DeploymentCandidate = Pick<DeploymentSubmission, 'sourceSelection' | 'sourceRefs'>
@@ -25,6 +24,7 @@ export type DeploymentCandidate = Pick<DeploymentSubmission, 'sourceSelection' |
 /** 多仓库逐个选择固定提交，只有当前仓库查询 Git，避免挤占既有并发预算。 */
 export function DeploymentRevisionPicker({
   projectId,
+  queries,
   source,
   repositories,
   currentCommits,
@@ -33,6 +33,7 @@ export function DeploymentRevisionPicker({
   onAccessDenied,
 }: {
   projectId: string
+  queries: DeploymentRepositoryQueries
   source: DeploymentServiceSource
   repositories: ProjectRepositoryConnection[]
   currentCommits: string[]
@@ -65,6 +66,7 @@ export function DeploymentRevisionPicker({
             <RepositoryCommits
               key={row.sourceId}
               projectId={projectId}
+              queries={queries}
               sourceId={row.sourceId}
               initial={{ refKind: row.refKind ?? 'default', ref: row.ref ?? '' }}
               value={choices[row.sourceId]}
@@ -116,6 +118,7 @@ export function DeploymentRevisionPicker({
 
 function RepositoryCommits({
   projectId,
+  queries,
   sourceId,
   initial,
   value,
@@ -124,6 +127,7 @@ function RepositoryCommits({
   onAccessDenied,
 }: {
   projectId: string
+  queries: DeploymentRepositoryQueries
   sourceId: string
   initial: { refKind: DeploymentSourceRef['refKind']; ref: string }
   value: ChoiceValue | undefined
@@ -142,7 +146,8 @@ function RepositoryCommits({
   const [sha, setSha] = useState(reference.refKind === 'commit' ? reference.ref : '')
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const refsCache = useRef<{ key: string; value: DeploymentRepositoryRefs } | null>(null)
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null)
+  const refreshed = useRef({ refs: 0, history: 0 })
   const selected = useRef(value)
   const update = useRef(onChange)
   const denied = useRef(onAccessDenied)
@@ -154,13 +159,11 @@ function RepositoryCommits({
     setBusy(true)
     setError(null)
     void (async () => {
-      const cacheKey = `${projectId}:${sourceId}:${branchRevision}`
-      const list =
-        refsCache.current?.key === cacheKey
-          ? refsCache.current.value
-          : await loadDeploymentRepositoryRefs(projectId, sourceId, controller.signal)
+      const forceRefs = refreshed.current.refs !== branchRevision
+      const forceHistory = refreshed.current.history !== revision
+      refreshed.current = { refs: branchRevision, history: revision }
+      const { data: list } = await queries.refs(sourceId, forceRefs)
       if (controller.signal.aborted) return
-      refsCache.current = { key: cacheKey, value: list }
       setRefs(list)
       const ref =
         reference.refKind === 'default'
@@ -171,14 +174,10 @@ function RepositoryCommits({
         return
       }
       if (!ref.ref) throw new Error('仓库没有可用的默认分支，请选择分支。')
-      const result = await loadDeploymentRepositoryHistory(
-        projectId,
-        sourceId,
-        ref,
-        controller.signal,
-      )
+      const { data: result, updatedAt: timestamp } = await queries.history(sourceId, ref, forceHistory)
       if (controller.signal.aborted) return
       setHistory(result)
+      setUpdatedAt(timestamp)
       if (
         selected.current &&
         !result.commits.some((row) => row.revision === selected.current!.commit)
@@ -196,7 +195,7 @@ function RepositoryCommits({
             (cause instanceof DeploymentRequestError || cause instanceof AutoOpsRequestError) &&
             [401, 403].includes(cause.status ?? 0)
           ) {
-            refsCache.current = null
+            queries.clear()
             setRefs(null)
             denied.current(cause)
           }
@@ -206,7 +205,7 @@ function RepositoryCommits({
         if (!controller.signal.aborted) setBusy(false)
       })
     return () => controller.abort()
-  }, [projectId, sourceId, reference.refKind, reference.ref, revision, branchRevision])
+  }, [projectId, sourceId, reference.refKind, reference.ref, revision, branchRevision, queries])
   const options = [
     ...(refs?.defaultRef
       ? [{ id: `branch:${refs.defaultRef}`, name: `${refs.defaultRef}（默认分支）` }]
@@ -294,6 +293,11 @@ function RepositoryCommits({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
+      {history && updatedAt && !busy ? (
+        <p className="text-xs text-muted-foreground">
+          提交读取于 {new Date(updatedAt).toLocaleTimeString('zh-CN')}；同仓库、同分支的服务共享查询，可手动刷新。
+        </p>
+      ) : null}
       <Input
         aria-label="搜索提交"
         placeholder="搜索提交说明或 SHA"
@@ -336,7 +340,7 @@ function RepositoryCommits({
               </span>
             </Button>
           ))}
-          {!commits.length ? (
+          {!commits.length && !error ? (
             <p className="py-4 text-sm text-muted-foreground">
               {query ? '没有匹配的提交。' : '没有可用提交。'}
             </p>

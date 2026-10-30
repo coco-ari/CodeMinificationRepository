@@ -267,6 +267,69 @@ it('从环境服务选择具体提交，一次确认后固定 SHA 并显示真�
   expect(screen.router?.state.location.href).toContain('taskId=task-accepted')
 })
 
+it('同仓同分支跨服务复用查询，手动刷新分别更新列表且保留所选SHA', async () => {
+  const f = setup()
+  const service = { ...f.state.services[0]!, id: 'service-other', name: '其他服务' }
+  f.state.services.push(service)
+  f.state.targets.push({ ...f.state.targets[0]!, id: 'target-other', serviceId: service.id, name: service.name })
+  f.state.serviceSources!.push({ ...f.state.serviceSources![0]!, serviceId: service.id })
+  await using screen = await render(f.ui, { router: '/deployments?projectId=p-one' })
+  const commit = () => screen.getByRole('button', { name: /修复订单/ })
+  await expect.element(commit()).toBeVisible()
+  await screen.getByRole('button', { name: /其他服务.*部署位置/ }).click()
+  await expect.element(commit()).toBeVisible()
+  expect(mocks.refs).toHaveBeenCalledTimes(1)
+  expect(mocks.history).toHaveBeenCalledTimes(1)
+  await commit().click()
+  await screen.getByRole('button', { name: '刷新提交', exact: true }).click()
+  await expect.poll(() => mocks.history.mock.calls.length).toBe(2)
+  await expect.element(commit()).toHaveAttribute('aria-pressed', 'true')
+  expect(mocks.refs).toHaveBeenCalledTimes(1)
+  await screen.getByRole('button', { name: '刷新分支列表' }).click()
+  await expect.poll(() => mocks.refs.mock.calls.length).toBe(2)
+  await expect.element(commit()).toHaveAttribute('aria-pressed', 'true')
+  expect(mocks.history).toHaveBeenCalledTimes(2)
+  await screen.getByRole('button', { name: '发布', exact: true }).click()
+  await expect.element(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: '确认发布', exact: true }).click()
+  await expect.poll(() => mocks.submit.mock.calls.length).toBe(1)
+  expect(mocks.submit.mock.calls[0]![1]).toMatchObject({
+    targetId: 'target-other',
+    sourceSelection: { sources: [{ sourceId: 'repo-one', refKind: 'commit', ref: 'a'.repeat(40) }] },
+  })
+})
+
+it('相同仓库查询失败后切换服务可重试，不将失败缓存成空提交', async () => {
+  const f = setup()
+  mocks.history.mockRejectedValueOnce(new DeploymentRequestError('服务响应超时，请稍后重试。', false, 504))
+  const service = { ...f.state.services[0]!, id: 'service-other', name: '其他服务' }
+  f.state.services.push(service)
+  f.state.targets.push({ ...f.state.targets[0]!, id: 'target-other', serviceId: service.id, name: service.name })
+  f.state.serviceSources!.push({ ...f.state.serviceSources![0]!, serviceId: service.id })
+  await using screen = await render(f.ui, { router: '/deployments?projectId=p-one' })
+  await expect.element(screen.getByText('服务响应超时，请稍后重试。')).toBeVisible()
+  expect(screen.container.textContent).not.toContain('没有可用提交')
+  expect(screen.container.textContent).not.toContain('部署操作未完成')
+  await screen.getByRole('button', { name: /其他服务.*部署位置/ }).click()
+  await expect.element(screen.getByRole('button', { name: /修复订单/ })).toBeVisible()
+  expect(mocks.refs).toHaveBeenCalledTimes(1)
+  expect(mocks.history).toHaveBeenCalledTimes(2)
+})
+
+it('离开环境清除仓库查询，返回时重新按当前授权读取', async () => {
+  const f = setup()
+  await using screen = await render(f.ui, { router: '/deployments?projectId=p-one' })
+  await expect.element(screen.getByRole('button', { name: /修复订单/ })).toBeVisible()
+  await screen.getByRole('combobox', { name: '部署环境' }).click()
+  await page.getByRole('option', { name: '生产环境', exact: true }).click()
+  await expect.element(screen.getByText('当前环境还没有服务', { exact: true })).toBeVisible()
+  await screen.getByRole('combobox', { name: '部署环境' }).click()
+  await page.getByRole('option', { name: '测试环境', exact: true }).click()
+  await expect.element(screen.getByRole('button', { name: /修复订单/ })).toBeVisible()
+  expect(mocks.refs).toHaveBeenCalledTimes(2)
+  expect(mocks.history).toHaveBeenCalledTimes(2)
+})
+
 it('生产只读环境不显示测试服务，环境运维不能新建共享服务', async () => {
   const f = setup()
   await using screen = await render(f.ui, {

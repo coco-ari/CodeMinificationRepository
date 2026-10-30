@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useBlocker, useNavigate, useSearch } from '@tanstack/react-router'
 import {
   PlusIcon,
@@ -34,6 +34,7 @@ import { readAutoOpsHost } from './hostConfig'
 import { AutoOpsRequestError } from './apiClient'
 import type { WorkspaceRelease } from './workspaces'
 import type { ProjectRepositoryConnection } from './workspaceAuthoring'
+import { createDeploymentRepositoryQueries } from './deployment/repositoryQueries'
 import {
   loadDeployments,
   loadDeploymentReleases,
@@ -164,6 +165,21 @@ export function DeploymentsPanel({
       : (environments[0]?.id ?? ''))
   const tab = route.tab ?? 'publish'
   const step = route.setupStep
+  const host = readAutoOpsHost()
+  const repositoryScope = JSON.stringify([
+    host?.principal.id,
+    host?.csrfToken,
+    projectId,
+    environmentId,
+    project?.capabilities,
+    project?.membership,
+    sources.map((row) => [row.id, row.url, row.credentialId]),
+  ])
+  const repositoryQueries = useMemo(
+    () => createDeploymentRepositoryQueries(projectId),
+    [projectId, repositoryScope],
+  )
+  useEffect(() => () => repositoryQueries.dispose(), [repositoryQueries])
   const [overview, setOverview] = useState<DeploymentOverview | null>(null)
   const [catalog, setCatalog] = useState<DeploymentService[]>([])
   const [catalogError, setCatalogError] = useState<string | null>(null)
@@ -227,6 +243,7 @@ export function DeploymentsPanel({
   const scopeDenied = useRef(false)
   const scopeAbort = useRef<AbortController | null>(null)
   const revokeScope = useCallback((cause: unknown) => {
+    repositoryQueries.clear()
     scopeDenied.current = true
     scopeAbort.current?.abort()
     setOverview(null)
@@ -236,7 +253,7 @@ export function DeploymentsPanel({
     setDialog(null)
     setLoadError(errorLabel(cause))
     setError(errorLabel(cause))
-  }, [])
+  }, [repositoryQueries])
   const requestGuard = useRef(false)
   const autoChecked = useRef(new Set<string>())
   const allowNavigation = useRef(false)
@@ -261,6 +278,9 @@ export function DeploymentsPanel({
       replace,
     })
   const permits = overview?.capabilities?.environments[environmentId]
+  useEffect(() => {
+    if (permits && !permits.read) repositoryQueries.clear()
+  }, [permits?.read, repositoryQueries])
   const manage = overview?.capabilities?.serviceManage === true
   const configure = permits?.configure === true
   const services = permits?.read ? (overview?.services ?? []) : []
@@ -334,6 +354,7 @@ export function DeploymentsPanel({
         if (!controller.signal.aborted) {
           setLoadError(errorLabel(cause))
           if ([401, 403, 404].includes(statusOf(cause) ?? 0)) {
+            repositoryQueries.clear()
             forbidden = true
             setOverview(null)
             setCatalog([])
@@ -356,7 +377,7 @@ export function DeploymentsPanel({
       clearTimeout(timer)
       document.removeEventListener('visibilitychange', visibility)
     }
-  }, [projectId, environmentId, refresh])
+  }, [projectId, environmentId, refresh, repositoryQueries])
   useEffect(() => {
     if (!step || !configure) return
     const controller = new AbortController()
@@ -901,7 +922,9 @@ export function DeploymentsPanel({
       {error || loadError || pending ? (
         <div className="shrink-0 border-b border-border/60 p-3">
           <Alert variant={error || loadError ? 'error' : 'info'}>
-            <AlertTitle>{pending ? '有一项操作结果待核对' : '部署操作未完成'}</AlertTitle>
+            <AlertTitle>
+              {pending ? '有一项操作结果待核对' : error ? '部署操作未完成' : '部署状态读取失败'}
+            </AlertTitle>
             <AlertDescription>
               {error ?? loadError ?? '正在确认原请求结果。'}
               {pending ? (
@@ -1373,6 +1396,7 @@ export function DeploymentsPanel({
                     <DeploymentRevisionPicker
                       key={`${projectId}:${environmentId}:${service.id}:${source.configKey}`}
                       projectId={projectId}
+                      queries={repositoryQueries}
                       source={source}
                       repositories={sources}
                       currentCommits={

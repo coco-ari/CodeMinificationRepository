@@ -23,11 +23,20 @@ export function createT3Gateway(target, { timeout = 30000 } = {}) {
     })
     const skillImport = req.method === 'POST' && req.url.split('?')[0] === T3_GATEWAY_PATH + '/autoops/skill-library'
     const workspaceWrite = req.method === 'POST' && req.url.startsWith(T3_GATEWAY_PATH + '/api/v1/projects/')
-    remote.setTimeout(workspaceWrite ? Math.max(timeout, 180000) : skillImport ? Math.max(timeout, 120000) : timeout, () => remote.destroy(new Error('T3 gateway timeout')))
+    const repositoryHistory = req.method === 'GET' && /^\/autoops\/projects\/[^/]+\/deployments\/repositories\/[^/]+\/history$/.test(req.url.slice(T3_GATEWAY_PATH.length).split('?')[0])
+    let timedOut = false
+    remote.setTimeout(repositoryHistory ? Math.max(timeout, 200000) : workspaceWrite ? Math.max(timeout, 180000) : skillImport ? Math.max(timeout, 120000) : timeout, () => {
+      timedOut = true
+      remote.destroy(new Error('T3 gateway timeout'))
+    })
     remote.on('error', () => {
       if (res.headersSent) return res.destroy()
-      res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-      res.end(JSON.stringify({ code: 'T3_UNAVAILABLE', error: '对话服务正在恢复，请稍后重试；输入未丢失。' }))
+      const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(req.method)
+      res.writeHead(timedOut ? 504 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify({
+        code: timedOut ? 'T3_UPSTREAM_TIMEOUT' : 'T3_UNAVAILABLE',
+        error: mutation ? '操作响应中断，结果尚未确认，请核对原操作记录。' : timedOut ? '服务响应超时，请稍后重试。' : '服务暂时无法连接，请稍后重试。',
+      }))
     })
     req.on('aborted', () => remote.destroy())
     res.on('close', () => { if (!res.writableEnded) remote.destroy() })

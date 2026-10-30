@@ -74,6 +74,7 @@ async function request<T>(
   body?: object,
   signal?: AbortSignal,
   method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  timeoutMs?: number,
 ): Promise<T> {
   try {
     return await autoOpsRequest<T>(
@@ -83,6 +84,7 @@ async function request<T>(
         ...(method ? { method } : {}),
         ...(body === undefined ? {} : { body }),
         ...(signal ? { signal } : {}),
+        ...(timeoutMs ? { timeoutMs } : {}),
       },
     )
   } catch (cause) {
@@ -156,6 +158,8 @@ export const loadDeploymentRepositoryHistory = (
     `/repositories/${encodeURIComponent(sourceId)}/history?${query}`,
     undefined,
     signal,
+    undefined,
+    210_000,
   )
 }
 export const saveDeploymentService = (projectId: string, input: DeploymentServiceSubmission) =>
