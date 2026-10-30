@@ -21,6 +21,6 @@
 
 - 运行模块边界检查扫描 319 个源文件，报告 1 项既有错误：DeploymentsWorkbench.tsx 直接引用 deployment/repositoryQueries.ts；该文件与 HEAD 一致，本批未修改。新增 Agent 模块已进入扫描，不将整体边界检查记为通过。
 
-## 未上线及未测范围
+## 发行状态及未测范围
 
-未提交、推送或部署中心与 Agent；原有业务容器未操作。当前主机没有可用 Docker 守护进程，尚未执行真实 Linux Docker 环境变量注入及真实业务迁移，模拟 Docker 流程不替代这两项验收。源项目的中间件地址、证书和其他配置适配不计为本批已完成。
+功能提交 `36e7df04` 已推送到 `feat/workspace-deployment-validation`。Agent 1.6.2 固定源码安装包已构建校验；中心部署因 workbench（ubuntu@10.2.2.115）的 SSH 认证未通过而等待，线上安装入口尚未更新。用户将在中心更新后自行安装业务服务器 Agent，本批不替其安装，也未操作原业务容器。当前主机没有可用 Docker 守护进程，尚未执行真实 Linux Docker 环境变量注入及真实业务迁移，模拟 Docker 流程不替代这两项验收。源项目的中间件地址、证书和其他配置适配不计为本批已完成。
