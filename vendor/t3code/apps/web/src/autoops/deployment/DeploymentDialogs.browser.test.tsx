@@ -72,6 +72,39 @@ function fixture() {
 }
 
 describe('部署确认与配置', () => {
+  it('Java 位置保存有序环境文件路径，配置详情展示当前文件的恢复边界', async () => {
+    const { overview, service, target, config } = javaFixture()
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const files = ['/opt/cmr-agent/env-files/api.env', '/opt/cmr-agent/env-files/override.env']
+    await using screen = await render(
+      <TargetDialog
+        open
+        onOpenChange={() => {}}
+        finalFocus={false}
+        overview={overview}
+        service={service}
+        environmentId="test"
+        busy={false}
+        error={null}
+        onSubmit={onSubmit}
+        onUpdate={vi.fn()}
+      />,
+    )
+    await page.getByRole('button', { name: '网络与存储', exact: true }).click()
+    await page
+      .getByRole('textbox', { name: '环境文件路径（env_file，每行一个）', exact: true })
+      .fill(files.join('\n'))
+    await page.getByRole('button', { name: '添加位置', exact: true }).click()
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ config: { ...config, envFiles: files } }),
+    )
+    await screen.rerender(
+      <ConfigurationDetails target={{ ...target, config: { ...config, envFiles: files } }} />,
+    )
+    await expect.element(screen.getByText(files.join('\n'), { exact: true })).toBeVisible()
+    await expect.element(screen.getByText(/代码回滚恢复历史路径/)).toBeVisible()
+  })
+
   it('自动刷新不覆盖草稿或条件键，核对最新配置后才显式采用新版本', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const service: DeploymentService = {

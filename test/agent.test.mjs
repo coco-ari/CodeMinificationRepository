@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, readdir, symlink, readlink } f
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { normalizeConfig, assertManaged, labels, managedName, releaseImage, owns, safeChild } from '../agent/config.mjs';
 import { inspectZip, extractZip, crc32 } from '../agent/archive.mjs';
 import { TaskJournal, readJson, writeJson } from '../agent/state.mjs';
@@ -541,6 +541,57 @@ test('心跳上报上一成功请求的实测往返耗时，首次和失败时�
   runner.identity=identity(); runner.monitor={metrics:async()=>({cpuPercent:1}),containers:async()=>[]};
   await runner.heartbeat(); await runner.heartbeat();
   assert.equal(reports[0].metrics.centerRttMs,undefined);assert.ok(Number.isFinite(reports[1].metrics.centerRttMs));assert.ok(reports[1].metrics.centerRttMs>=0);
+});
+
+test('环境文件发布后重启仅重建原镜像，文件缺失保留原服务与版本链', async t => {
+  const f = await fixture(t), parent = path.resolve('.deployment');
+  await mkdir(parent, { recursive: true });
+  const envRoot = await mkdtemp(path.join(parent, 'env-file-test-'));
+  t.after(async () => { if (path.dirname(envRoot) !== parent) throw new Error('环境文件测试目录越界'); await rm(envRoot, { recursive: true, force: true }); });
+  const nativeFile = path.join(envRoot, 'api.env'), file = nativeFile.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/');
+  await writeFile(nativeFile, 'EXAMPLE_VALUE=first-fictional-value\n');
+  const first = task('env-first', { config: config({ envFiles: [file] }) });
+  await f.executor.execute(first);
+  assert.equal((await f.journal.get(first.id)).status, 'succeeded');
+  const current = await f.executor.current(first), builds = f.docker.calls.filter(args => args.includes('mvn')).length;
+  const chain = await readFile(path.join(f.executor.targetRoot(first), 'chain.json'), 'utf8');
+  await writeFile(nativeFile, 'EXAMPLE_VALUE=second-fictional-value\n');
+  const restart = task('env-restart', { action: 'restart', release: current, config: current.config });
+  await f.executor.execute(restart);
+  assert.equal((await f.journal.get(restart.id)).status, 'succeeded');
+  assert.equal((await f.executor.current(first)).id, current.id);
+  assert.equal(f.docker.calls.filter(args => args.includes('mvn')).length, builds);
+  assert.equal(f.docker.calls.some(args => args[0] === 'restart'), false);
+  assert.ok(f.docker.calls.some(args => args[0] === 'compose' && args.includes('--force-recreate')));
+  assert.equal(await readFile(path.join(f.executor.targetRoot(first), 'chain.json'), 'utf8'), chain);
+  await rm(nativeFile);
+  const upCount = f.docker.calls.filter(args => args[0] === 'compose' && args.includes('up')).length;
+  const missing = task('env-missing', { action: 'restart', release: current, config: current.config });
+  await f.executor.execute(missing);
+  assert.equal((await f.journal.get(missing.id)).status, 'failed');
+  assert.equal(f.docker.calls.filter(args => args[0] === 'compose' && args.includes('up')).length, upCount);
+  assert.equal((await f.executor.current(first)).id, current.id);
+});
+
+test('环境文件解析失败在构建和切换前拒绝，错误值不进入任务日志', async t => {
+  const f = await fixture(t), parent = path.resolve('.deployment');
+  await mkdir(parent, { recursive: true });
+  const envRoot = await mkdtemp(path.join(parent, `env-parse-test-${randomUUID()}-`));
+  t.after(async () => { if (path.dirname(envRoot) !== parent) throw new Error('环境文件测试目录越界'); await rm(envRoot, { recursive: true, force: true }); });
+  const nativeFile = path.join(envRoot, 'api.env'), file = nativeFile.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/');
+  await writeFile(nativeFile, 'INVALID_INPUT=fictional-only\n');
+  const original = f.docker.run.bind(f.docker), secret = 'fictional-parser-secret';
+  t.mock.method(f.docker, 'run', async (args, options) => {
+    if (args[0] === 'compose' && args.includes('config')) throw new Error(secret);
+    return original(args, options);
+  });
+  const value = task('env-invalid', { config: config({ envFiles: [file] }) });
+  await f.executor.execute(value);
+  const record = await f.journal.get(value.id);
+  assert.equal(record.status, 'failed');
+  assert.ok(record.result.error.includes('环境文件校验失败'));
+  assert.equal(JSON.stringify(record).includes(secret), false);
+  assert.equal(f.docker.calls.some(args => args.includes('mvn') || args.includes('up')), false);
 });
 
 test('固定网络别名在重启及历史回退中保留，不覆盖历史配置或添加重启版本', async t => {

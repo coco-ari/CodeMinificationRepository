@@ -663,6 +663,53 @@ test('HTTP 管理接口沿用登录与 CSRF，Agent 来源文件严格隔离', a
   )
 })
 
+test('环境文件留空不改变既有配置键，旧 Agent 继续部署普通项目，新能力在创建与领取时拒绝降级', async t => {
+  const f = await fixture(t), a = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  const input = { serverId: a.target.serverId, serviceId: a.target.serviceId, environmentId: a.target.environmentId };
+  const originalKey = f.deployment.configKey(a.target.id);
+  const unchanged = await f.deployment.saveEntity('targets', { ...input, config: { ...a.target.config, envFiles: [] } }, a.target.id);
+  assert.equal(f.deployment.configKey(a.target.id), originalKey);
+  assert.equal('envFiles' in unchanged.config, false);
+  const ordinary = await ready(f, a.target.id);
+  assert.equal((await f.deployment.claim(a.agent.serverId)).id, ordinary.id);
+  await f.deployment.events(a.agent.serverId, ordinary.id, { seq: 1, stage: 'succeeded', status: 'succeeded', result: { release: release(ordinary) } });
+  const envFiles = ['/opt/cmr-agent/env-files/api.env'];
+  await f.deployment.saveEntity('targets', { ...input, config: { ...a.target.config, envFiles } }, a.target.id);
+  assert.notEqual(f.deployment.configKey(a.target.id), originalKey);
+  const taskCount = f.deployment.data.tasks.length;
+  await assert.rejects(f.deployment.createTask({ targetId: a.target.id, action: 'deploy' }), /升级目标 Agent/);
+  assert.equal(f.deployment.data.tasks.length, taskCount);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['env-file-v1', 'source-archive-recovery-v1'] });
+  const configured = await ready(f, a.target.id);
+  assert.deepEqual(configured.config.envFiles, envFiles);
+  await assert.rejects(f.deployment.saveEntity('targets', { ...input, config: a.target.config }, a.target.id), /未完成任务/);
+  assert.deepEqual(f.deployment.data.tasks.find(task => task.id === configured.id).config.envFiles, envFiles);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['source-archive-recovery-v1'] });
+  assert.equal(await f.deployment.claim(a.agent.serverId), null);
+  assert.equal(f.deployment.data.tasks.find(task => task.id === configured.id).status, 'interrupted');
+});
+
+test('启用环境文件的当前成功版本重启也核对 Agent 能力，不借下次空配置绕过', async t => {
+  const f = await fixture(t), a = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  const input = { serverId: a.target.serverId, serviceId: a.target.serviceId, environmentId: a.target.environmentId };
+  const envFiles = ['/opt/cmr-agent/env-files/api.env'];
+  await f.deployment.saveEntity('targets', { ...input, config: { ...a.target.config, envFiles } }, a.target.id);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['env-file-v1', 'source-archive-recovery-v1'] });
+  const first = await ready(f, a.target.id);
+  await f.deployment.claim(a.agent.serverId);
+  await f.deployment.events(a.agent.serverId, first.id, { seq: 1, stage: 'succeeded', status: 'succeeded', result: { release: release(first) } });
+  await f.deployment.saveEntity('targets', { ...input, config: a.target.config }, a.target.id);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['source-archive-recovery-v1'] });
+  await assert.rejects(f.deployment.createTask({ targetId: a.target.id, action: 'restart' }), /升级目标 Agent/);
+  await assert.rejects(f.deployment.createTask({ targetId: a.target.id, action: 'deploy' }), /升级目标 Agent/);
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['env-file-v1', 'source-archive-recovery-v1'] });
+  const restarted = await ready(f, a.target.id, 'restart');
+  assert.deepEqual(restarted.config.envFiles, envFiles);
+  assert.equal(restarted.release.id, first.id);
+});
+
 test('固定别名独立于历史配置，唯一且不可变，任务下发需要 Agent 支持', async t => {
   const f = await fixture(t), a = await targetFixture(f);
   t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });

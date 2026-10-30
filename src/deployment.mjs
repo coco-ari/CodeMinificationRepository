@@ -11,6 +11,7 @@ import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
 import { DEFAULT_STORAGE_POLICY, storagePolicy, artifactId } from '../agent/storage-policy.mjs';
 import { networkIdentity } from '../agent/config.mjs';
+import { normalizeEnvFiles, assertEnvFileAgent } from '../agent/env-files.mjs';
 import { createProjectDeployments, normalizeDeploymentSourceSelection, projectDeploymentReferences, deploymentSourceRefs } from './deployment-projects.mjs';
 
 export function readDeploymentDeletionReferences(directory, projectId, environmentId) {
@@ -195,7 +196,16 @@ export function validateConfig(input = {}, module = '.', kind = input?.kind || '
   if (result.volumes.some(volume => !/^[a-z0-9][a-z0-9-]{0,63}$/.test(volume.name) || !/^\/app\/[a-zA-Z0-9_/.-]+$/.test(volume.mountPath) || volume.mountPath.split('/').some(part => ['.', '..'].includes(part)) || volume.mountPath === '/app/app.jar')) fail('数据卷只能使用平台命名卷并挂载到 /app 下的子目录');
   if (typeof result.health.path !== 'string' || !result.health.path.startsWith('/') || result.health.path.startsWith('//') || /[\x00-\x20]/.test(result.health.path) || result.health.path.length > 512) fail('健康检查路径无效');
   if (typeof result.health.bodyIncludes !== 'string' || result.health.bodyIncludes.length > 1024) fail('健康检查响应内容过长');
+  let envFiles;
+  try { envFiles = normalizeEnvFiles(input.envFiles); } catch (error) { fail(error.message); }
+  if (isStatic && envFiles.length) fail('静态站点不使用容器环境文件');
+  if (envFiles.length) result.envFiles = envFiles;
   return result;
+}
+
+function requireEnvFileAgent(server, ...configs) {
+  try { for (const config of configs) assertEnvFileAgent(config, server.capabilities); }
+  catch (error) { throw new HttpError(409, error.message); }
 }
 
 // 两种项目入口共用服务器登记规则，归属映射由同一个事务提交。
@@ -567,6 +577,7 @@ export class DeploymentService extends EventEmitter {
         networkIdentity: structuredClone(target.networkIdentity || null), config: effectiveTargetConfig(data, target.id),
         sourceSnapshot: null, source: null, createdAt: now(), updatedAt: now(), lastSeq: 0 };
       this.authorizeWorkspaceTask(created, target);
+      requireEnvFileAgent(server, created.config, target.currentRelease?.config);
       transition(created, 'preparing'); data.tasks.push(created); return structuredClone(created);
     });
     if (task.status === 'preparing') this.startPrepare(task.id);
@@ -618,6 +629,7 @@ export class DeploymentService extends EventEmitter {
         revision: fixedArchive.revision, commitSubject: fixedArchive.commitSubject,
         recoveryAllowed: !!server.capabilities?.includes('source-archive-recovery-v1'), requestId: input.requestId, requestFingerprint, ...(submission ? { submissionFingerprint: submission } : {}), lastSeq: 0 };
       this.authorizeWorkspaceTask(current, target);
+      requireEnvFileAgent(server, current.config, target.currentRelease?.config);
       transition(current, 'preparing'); data.tasks.push(current); return structuredClone(current);
     });
     if (task.id === taskId) await this.startPrepare(task.id, fixedArchive);
@@ -696,6 +708,7 @@ export class DeploymentService extends EventEmitter {
         recoveryAllowed: !!supportsRecovery, requestId: input.requestId, requestFingerprint, ...(submission ? { submissionFingerprint: submission } : {}), lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
       this.authorizeWorkspaceTask(task, target);
       transition(task, task.status);
+      requireEnvFileAgent(find(data.servers, target.serverId), task.config, target.currentRelease?.config);
       data.tasks.push(task); return structuredClone(task);
     }); } catch (error) {
       if (selection) await this.repository.releasePin(selection, taskId).catch(() => {});
@@ -839,6 +852,12 @@ export class DeploymentService extends EventEmitter {
       if (next.config?.kind === 'static' && !server.capabilities?.includes('static-site-v1')) {
         transition(next, 'interrupted', true);
         Object.assign(next, { status: 'interrupted', stage: 'interrupted', finishedAt: now(), updatedAt: now(), error: '当前 Agent 不支持静态站点发布，请升级后重试' });
+        interruptedId = next.id;
+        return null;
+      }
+      if ((next.config?.envFiles?.length || target.currentRelease?.config?.envFiles?.length) && !server.capabilities?.includes('env-file-v1')) {
+        transition(next, 'interrupted', true);
+        Object.assign(next, { status: 'interrupted', stage: 'interrupted', finishedAt: now(), updatedAt: now(), error: 'Agent 不支持环境文件，请升级后重新创建任务' });
         interruptedId = next.id;
         return null;
       }

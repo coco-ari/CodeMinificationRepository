@@ -1,7 +1,8 @@
 import path from 'node:path';
+import { normalizeEnvFiles } from './env-files.mjs';
 
-export const VERSION = '1.6.0';
-export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1', 'fixed-network-alias-v1'];
+export const VERSION = '1.6.2';
+export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1', 'fixed-network-alias-v1', 'env-file-v1'];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
   if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error(`${label}无效`);
@@ -88,6 +89,9 @@ export function normalizeConfig(input) {
   if (typeof result.health.path !== 'string' || !result.health.path.startsWith('/') || /[\x00-\x20]/.test(result.health.path) || result.health.path.length > 2000
     || typeof result.health.bodyIncludes !== 'string' || result.health.bodyIncludes.length > 1024) throw new Error('健康检查配置无效');
   if (result.jvmArgs.some(arg => !arg.startsWith('-') || /^-(?:jar|cp|classpath|javaagent|agentlib|agentpath)(?:[:=]|$)/.test(arg))) throw new Error('JVM 参数不能替换程序入口或加载代理');
+  const envFiles = normalizeEnvFiles(input.envFiles);
+  if (isStatic && envFiles.length) throw new Error('静态站点不使用容器环境文件');
+  if (envFiles.length) result.envFiles = envFiles;
   return result;
 }
 export function managedName(targetId) { return `cmr-${identifier(targetId)}`; }

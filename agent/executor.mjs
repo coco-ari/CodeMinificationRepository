@@ -9,6 +9,7 @@ import { StaticDeployment } from './static-deployment.mjs';
 import { checkRuntimeBase } from './image-policy.mjs';
 import { artifactId, storagePolicy } from './storage-policy.mjs';
 import { BuildCache } from './build-cache.mjs';
+import { preflightEnvFiles } from './env-files.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 export const terminal = status => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(status);
@@ -25,6 +26,7 @@ export function composeFor(identity, task, release) {
     ports: config.ports.map(p => `${p.host}:${p.hostPort}:${p.containerPort}`),
     networks: binding ? Object.fromEntries(networkNames.map(n => [n, n === binding.network ? { aliases: [binding.alias] } : {}])) : networkNames,
     volumes: config.volumes.map(v => `${v.name}:${v.mountPath}`),
+    ...(config.envFiles?.length ? { env_file: config.envFiles } : {}),
     logging: { driver: 'json-file', options: { 'max-size': '10m', 'max-file': '3' } },
     healthcheck: { test: ['CMD', 'java', '-Xms8m', '-Xmx32m', '-cp', '/cmr', 'HealthProbe', String(config.health.port), config.health.path, String(config.health.status), config.health.bodyIncludes],
       interval: `${config.health.intervalSeconds}s`, timeout: '7s', retries: Math.ceil(config.health.timeoutSeconds / config.health.intervalSeconds), start_period: '10s' },
@@ -54,6 +56,14 @@ export class DeploymentExecutor {
   }
   async preflight(task, config) {
     assertManaged(this.getIdentity(), task);
+    await preflightEnvFiles(config.envFiles || [], this.root);
+    if (config.envFiles?.length) {
+      const root = this.taskRoot(task); await mkdir(root, { recursive: true, mode: 0o700 });
+      const file = safeChild(root, 'compose-env-check.json');
+      await writeJson(file, composeFor(this.getIdentity(), task, { id: task.id, image: 'env-validation:local', config }));
+      try { await this.mutation(task, ['compose', '--project-name', managedName(task.targetId), '-f', file, 'config', '--quiet'], { timeoutMs: 15000 }); }
+      catch { throw new Error('环境文件校验失败，请检查文件格式、引用的变量与 Compose 状态'); }
+    }
     const current = await this.requireOwned(task), binding = networkIdentity(task.networkIdentity);
     for (const volume of config.volumes) await this.requireOwned(task, `${managedName(task.targetId)}-${volume.name}`, 'volume');
     if (!config.networks.length && !binding) await this.requireOwned(task, `${managedName(task.targetId)}-network`, 'network');
@@ -71,7 +81,10 @@ export class DeploymentExecutor {
   }
   async restart(task, release) {
     const current = await this.requireOwned(task), binding = networkIdentity(task.networkIdentity);
-    if (binding && !current?.NetworkSettings?.Networks?.[binding.network]?.Aliases?.includes(binding.alias)) {
+    if (normalizeConfig(release.config).envFiles?.length) {
+      await this.event(task, 'deploying', '正在重新读取环境文件并重建当前版本容器');
+      await this.activate(task, release, true);
+    } else if (binding && !current?.NetworkSettings?.Networks?.[binding.network]?.Aliases?.includes(binding.alias)) {
       await this.event(task, 'deploying', '正在应用固定网络别名，使用已部署配置重建当前容器');
       await this.activate(task, release);
     } else await this.mutation(task, ['restart', '--time', '45', managedName(task.targetId)], { timeoutMs: 90000 });
@@ -219,11 +232,18 @@ export class DeploymentExecutor {
     if (image.Config?.Labels?.['io.cmr.task'] !== artifactId(release)) throw new Error('历史镜像的版本归属不匹配');
     return release;
   }
-  async activate(task, release) {
-    await this.requireRelease(task, release); await this.preflight(task, normalizeConfig(release.config));
+  async activate(task, release, forceRecreate = false) {
+    const config = normalizeConfig(release.config);
+    await this.requireRelease(task, release); await this.preflight(task, config);
     const file = safeChild(this.taskRoot(task), `compose-${identifier(release.id)}.json`);
     await writeJson(file, composeFor(this.getIdentity(), task, release));
-    await this.mutation(task, ['compose', '--project-name', managedName(task.targetId), '-f', file, 'up', '-d', '--no-deps', 'app'], { timeoutMs: 120000, onOutput: text => this.output(task, 'deploying', text) });
+    try {
+      await this.mutation(task, ['compose', '--project-name', managedName(task.targetId), '-f', file, 'up', '-d', '--no-deps', ...(forceRecreate ? ['--force-recreate'] : []), 'app'], { timeoutMs: 120000, ...(config.envFiles?.length ? {} : { onOutput: text => this.output(task, 'deploying', text) }) });
+    } catch (error) {
+      // Compose 的环境文件解析错误可能包含变量值，不能进入中心日志。
+      if (config.envFiles?.length) throw new Error('容器创建失败，请检查环境文件格式、目录权限、端口及 Docker 状态');
+      throw error;
+    }
   }
   async health(task, release) {
     const config = normalizeConfig(release.config), deadline = Date.now() + config.health.timeoutSeconds * 1000;

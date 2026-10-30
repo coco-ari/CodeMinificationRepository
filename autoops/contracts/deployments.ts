@@ -39,6 +39,7 @@ export interface JavaDeploymentConfig {
   jvmArgs: string[]
   args: string[]
   profile: string
+  envFiles?: string[]
   ports: Array<{ host: string; hostPort: number; containerPort: number }>
   networks: string[]
   volumes: Array<{ name: string; mountPath: string }>

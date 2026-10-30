@@ -133,6 +133,22 @@ export function ConfigurationDetails({
             }
           />
           <SettingsRow title="Docker 网络" description={config.networks.join('、') || '默认网络'} />
+          {config.envFiles?.length ? (
+            <>
+              <SettingsRow
+                title="环境文件（env_file）"
+                description={
+                  <span className="block whitespace-pre-wrap break-all font-mono">
+                    {config.envFiles.join('\n')}
+                  </span>
+                }
+              />
+              <SettingsRow
+                title="环境文件更新与恢复"
+                description="重启会使用当前成功镜像重建容器，重新注入变量；代码回滚恢复历史路径，使用该路径下的当前文件。"
+              />
+            </>
+          ) : null}
           <SettingsRow
             title="平台命名卷"
             description={

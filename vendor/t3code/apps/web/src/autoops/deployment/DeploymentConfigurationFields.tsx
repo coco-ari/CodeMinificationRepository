@@ -390,6 +390,20 @@ function JavaNetworkFields({
       <CollapsiblePanel>
         <div className="space-y-4 pt-3">
           <LinesField
+            label="环境文件路径（env_file，每行一个）"
+            value={config.envFiles ?? []}
+            disabled={disabled}
+            onChange={(envFiles) => {
+              const { envFiles: previous, ...rest } = config
+              void previous
+              onChange(envFiles.length ? { ...rest, envFiles } : rest)
+            }}
+          />
+          <p className="text-xs text-muted-foreground">
+            可留空。填写 Agent 可读取的节点文件路径，容器化 Agent 可使用其数据目录的 env-files
+            子目录。文件内容不会上传；配置后重启会重建当前版本容器，代码回滚仍使用路径下的当前文件。
+          </p>
+          <LinesField
             label="Docker 网络（每行一个）"
             value={config.networks}
             disabled={disabled}
