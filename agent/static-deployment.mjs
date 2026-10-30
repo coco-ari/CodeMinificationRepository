@@ -5,6 +5,7 @@ import { assertManaged, identifier, normalizeConfig, safeChild } from './config.
 import { readJson, writeJson } from './state.mjs';
 import { copyStaticSite } from './static-site.mjs';
 import { artifactId } from './storage-policy.mjs';
+import { lockName } from './frontend-toolchain.mjs';
 
 const terminal = status => ['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(status);
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -69,20 +70,25 @@ export class StaticDeployment {
     await lstat(path.join(project, 'package.json'));
     const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'));
     if (!Object.hasOwn(manifest.scripts || {}, config.buildScript)) throw new Error(`所选提交的 package.json 缺少 ${config.buildScript} 构建脚本`);
-    await lstat(path.join(project, config.packageManager === 'npm' ? 'package-lock.json' : 'pnpm-lock.yaml')).catch(() => { throw new Error('所选提交缺少依赖锁文件，请先提交锁文件'); });
+    if (config.installMode !== 'install') await lstat(path.join(project, lockName(config.packageManager))).catch(() => { throw new Error(`所选提交缺少 ${lockName(config.packageManager)}，请先提交锁文件或明确选择兼容安装`); });
     const resolved = await this.owner.buildConfig(task, config); config = resolved.config;
     const cache = safeChild(this.owner.root, 'cache', identifier(task.applicationId || task.targetId), 'node');
     const tools = path.join(work, 'static-tools');
     await this.owner.mountDirectory(cache); await this.owner.mountDirectory(tools);
     await copyFile(path.join(directory, 'static-build.mjs'), path.join(tools, 'static-build.mjs'));
-    await this.event(task, 'building', `正在安装锁定依赖并执行 ${config.packageManager} run ${config.buildScript}`);
-    let versionOutput = '';
-    await this.owner.builder(task, config, 'node', [[source, '/workspace'], [cache, '/cache'], [tools, '/cmr', true]], ['node', '/cmr/static-build.mjs', config.packageManager, config.packageManagerVersion, config.buildScript, ...config.buildArgs], 'building', text => { if (versionOutput.length < 8192) versionOutput += text; });
-    const versionInfo = /CMR_BUILD_INFO=(\{[^\n]+\})/.exec(versionOutput)?.[1];
+    await copyFile(path.join(directory, 'frontend-toolchain.mjs'), path.join(tools, 'frontend-toolchain.mjs'));
+    await this.event(task, 'building', `正在${config.installMode === 'install' ? '兼容' : '锁定'}安装依赖并执行 ${config.packageManager} run ${config.buildScript}`);
+    let versionOutput = '', versionInfo;
+    await this.owner.builder(task, config, 'node', [[source, '/workspace'], [cache, '/cache'], [tools, '/cmr', true]], ['node', '/cmr/static-build.mjs', config.packageManager, config.packageManagerVersion, config.buildScript, ...config.buildArgs], 'building', text => {
+      if (versionInfo) return;
+      versionOutput = (versionOutput + text).slice(-16384);
+      versionInfo = /CMR_BUILD_INFO=(\{[^\n]+\})/.exec(versionOutput)?.[1];
+    });
     if (versionInfo) Object.assign(resolved.snapshot, JSON.parse(versionInfo));
-    const output = this.releasePath(task, task.id);
+    const output = task.action === 'build-check' ? path.join(work, 'trial-output') : this.releasePath(task, task.id);
     try { await lstat(output); throw new Error('本次版本目录已存在，拒绝覆盖'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const copied = await copyStaticSite(source, config.artifactPath, output);
+    if (task.action === 'build-check') return { revision: task.source.revision, sourceSha256: task.source.sha256, buildSnapshot: resolved.snapshot, files: copied.files, bytes: copied.bytes };
     await writeFile(path.join(output, '__cmr_release.txt'), task.id, { mode: 0o644 });
     await chmod(path.join(output, '__cmr_release.txt'), 0o644);
     await this.event(task, 'building', `静态产物已固定：${copied.files} 个文件，共 ${copied.bytes} 字节`);
@@ -135,7 +141,14 @@ export class StaticDeployment {
     await journal.create(task);
     let previous, deploying = false;
     try {
-      const config = normalizeConfig(task.config);
+      const config = normalizeConfig(task.config, { buildOnly: task.action === 'build-check' });
+      if (task.action === 'build-check') {
+        // 试构建不读取或修改站点指针、恢复基线、版本链与保留策略。
+        assertManaged(this.owner.getIdentity(), task);
+        const buildCheck = await this.build(task, config);
+        await this.event(task, 'building', `试构建通过：${buildCheck.files} 个文件，共 ${buildCheck.bytes} 字节；未发布站点，临时产物将清理`, { status: 'succeeded', result: { buildCheck } });
+        return;
+      }
       if (!['deploy', 'rollback'].includes(task.action)) throw new Error('静态站点不重启共用 Nginx，请发布或回退版本');
       await this.preflight(task); previous = await this.owner.current(task);
       if (await this.selected(task) !== (previous ? artifactId(previous) : null) || (!previous && task.previousRelease)) throw new Error('站点指针与本地成功版本记录不一致，请先恢复 Agent 数据');
@@ -157,7 +170,7 @@ export class StaticDeployment {
   async recover(record) {
     const task = record.task;
     try {
-      await this.preflight(task);
+      if (task.action !== 'build-check') await this.preflight(task);
       if (['deploying', 'verifying'].includes(record.stage) && record.release) {
         await this.event(task, 'verifying', 'Agent 恢复，正在核对静态版本');
         try { await this.health(task, record.release); await this.finish(task, record.release, record.previousRelease); }
@@ -174,7 +187,7 @@ export class StaticDeployment {
   }
   async cleanupWork(task) {
     assertManaged(this.owner.getIdentity(), task);
-    for (const name of ['source.zip', 'source', 'static-tools']) await rm(path.join(this.owner.taskRoot(task), name), { recursive: true, force: true });
+    for (const name of ['source.zip', 'source', 'static-tools', 'trial-output']) await rm(path.join(this.owner.taskRoot(task), name), { recursive: true, force: true });
     const record = await this.owner.journal.get(task.id);
     if (['deploy', 'rollback'].includes(task.action) && record?.status !== 'succeeded') {
       await this.preflight(task);

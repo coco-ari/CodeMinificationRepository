@@ -9,6 +9,7 @@ import { atomicWrite } from './store.mjs';
 import { HttpError, requireText, digest, equal, randomSecret } from './security.mjs';
 import { DEFAULT_STORAGE_POLICY, storagePolicy, artifactId } from '../agent/storage-policy.mjs';
 import { networkIdentity } from '../agent/config.mjs';
+import { frontendOptions, FRONTEND_CAPABILITY } from '../agent/frontend-toolchain.mjs';
 
 const now = () => new Date().toISOString();
 const terminal = new Set(['succeeded', 'failed', 'rolled_back', 'interrupted']);
@@ -84,7 +85,8 @@ export function validateConfig(input = {}, module = '.', kind = input?.kind || '
     Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || (input.packageManager === 'pnpm' ? '10.11.0' : '10.9.9'),
       buildScript: input.buildScript || 'build', buildArgs: list(input.buildArgs, 40, '构建参数').map(value => requireText(value, '构建参数', 1024)),
       jvmArgs: [], args: [], profile: '' });
-    if (!['npm', 'pnpm'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) fail('请选择 npm 或指定准确版本的 pnpm');
+    if (!['npm', 'pnpm', 'yarn'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) fail('请选择包管理器并指定准确版本');
+    try { Object.assign(result, frontendOptions({ ...input, packageManager: result.packageManager, packageManagerVersion: result.packageManagerVersion })); } catch (error) { fail(error.message); }
     if (result.buildArgs.some(value => /[\x00-\x1f]/.test(value))) fail('构建参数不能包含控制字符');
     if (!/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,79}$/.test(result.buildScript)) fail('构建脚本必须是 package.json 中的脚本名称');
     if (result.artifactPath === '.' || result.artifactPath.split('/').some(part => part === 'node_modules' || part === '.git')) fail('静态产物必须是独立的构建输出目录');
@@ -368,8 +370,11 @@ export class DeploymentService extends EventEmitter {
   }
   async createTask(input) {
     if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
-    if (!['deploy', 'restart', 'rollback'].includes(input.action)) fail('操作类型无效');
-    const requestFingerprint = digest(JSON.stringify([input.targetId, input.action, input.branch || null, input.revision || null, input.releaseId || null, input.sourceKey || null, input.configKey || null]));
+    if (!['deploy', 'restart', 'rollback', 'build-check'].includes(input.action)) fail('操作类型无效');
+    const trial = input.action === 'build-check', fromSource = trial || input.action === 'deploy';
+    if (input.buildConfig !== undefined && (!trial || !input.buildConfig || typeof input.buildConfig !== 'object' || Array.isArray(input.buildConfig) || Object.keys(input.buildConfig).some(key => !['module', 'buildImage', 'packageManager', 'packageManagerVersion', 'installMode', 'legacyPeerDeps', 'buildScript', 'buildArgs', 'artifactPath', 'build'].includes(key)))) fail('试构建仅允许覆盖前端构建字段');
+    if (trial && (!input.branch || !input.revision || !input.sourceKey || !input.configKey || !input.requestId)) fail('试构建必须选择分支和具体提交，并刷新配置');
+    const requestFingerprint = digest(JSON.stringify([input.targetId, input.action, input.branch || null, input.revision || null, input.releaseId || null, input.sourceKey || null, input.configKey || null, input.buildConfig || null]));
     if (input.requestId && !/^[a-f0-9-]{36}$/.test(input.requestId)) fail('幂等请求标识无效');
     const duplicate = data => {
       const existing = input.requestId && data.tasks.find(item => item.requestId === input.requestId);
@@ -384,7 +389,7 @@ export class DeploymentService extends EventEmitter {
     if (input.branch !== undefined && input.action === 'deploy' && (!input.revision || !input.sourceKey || !input.configKey || !input.requestId)) fail('请选择分支和具体提交，并刷新发布配置');
     const taskId = randomUUID();
     let selection, selectedCommit;
-    if (input.action === 'deploy' && input.revision) {
+    if (fromSource && input.revision) {
       validateRevision(input.revision);
       const target = this.ensureManaged(this.data, input.targetId);
       const environment = find(this.data.environments, target.environmentId);
@@ -401,6 +406,7 @@ export class DeploymentService extends EventEmitter {
       if (this.closing) throw new HttpError(503, '中心正在停止，请稍后重试');
       const data = state.deployments; const target = this.ensureManaged(data, input.targetId); const environment = find(data.environments, target.environmentId); const service = find(data.services, target.serviceId);
       const previousRequest = duplicate(data); if (previousRequest) return structuredClone(previousRequest);
+      if (trial && service.kind !== 'static') fail('试构建仅支持前端静态站点');
       if (target.networkIdentity && !find(data.servers, target.serverId).capabilities?.includes('fixed-network-alias-v1')) throw new HttpError(409, '请先升级目标 Agent，使其支持固定网络别名');
       if (service.kind === 'static' && !find(data.servers, target.serverId).capabilities?.includes('static-site-v1')) throw new HttpError(409, '请先升级目标服务器 Agent，使其支持静态站点发布');
       if (service.kind === 'static' && input.action === 'restart') throw new HttpError(400, '静态站点无需重启共用 Nginx，请使用发布或回退');
@@ -413,24 +419,27 @@ export class DeploymentService extends EventEmitter {
         if (!release.available || release.sourceClearedAt) throw new HttpError(409, '该版本源码已清理或无法恢复');
       }
       if (input.action === 'restart') { release = target.currentRelease; if (!release) throw new HttpError(409, '目标尚无成功部署版本'); }
-      const sourceProject = input.action === 'deploy' ? find(state.projects, selected?.sourceProjectId || environment.sourceProjectId, '源码仓库') : (release.sourceSnapshot || { id: release.sourceProjectId });
+      const sourceProject = fromSource ? find(state.projects, selected?.sourceProjectId || environment.sourceProjectId, '源码仓库') : (release.sourceSnapshot || { id: release.sourceProjectId });
       if (sourceProject.applicationId && sourceProject.applicationId !== target.applicationId) fail('仓库不属于当前项目');
-      if (!sourceProject.enabled && input.action === 'deploy') throw new HttpError(409, '源码项目已停用');
-      const snapshot = input.action === 'deploy' ? sourceSnapshot(sourceProject, validateBranch(input.branch || selected?.branch || sourceProject.defaultBranch || sourceProject.branch)) : structuredClone(release.sourceSnapshot || null);
-      if (input.action === 'deploy' && input.sourceKey && input.sourceKey !== sourceKey(snapshot)) throw new HttpError(409, '环境源码配置已变化，请刷新发布工作台');
+      if (!sourceProject.enabled && fromSource) throw new HttpError(409, '源码项目已停用');
+      const snapshot = fromSource ? sourceSnapshot(sourceProject, validateBranch(input.branch || selected?.branch || sourceProject.defaultBranch || sourceProject.branch)) : structuredClone(release.sourceSnapshot || null);
+      if (fromSource && input.sourceKey && input.sourceKey !== sourceKey(snapshot)) throw new HttpError(409, '环境源码配置已变化，请刷新发布工作台');
       if (selection && sourceKey(selection) !== sourceKey(snapshot)) throw new HttpError(409, '环境源码配置已变化，请重新选择提交');
       if (input.configKey && input.configKey !== this.configKey(target.id)) throw new HttpError(409, '发布配置已变化，请刷新后重新确认');
-      if (input.revision && input.action === 'deploy') snapshot.revision = input.revision;
+      if (input.revision && fromSource) snapshot.revision = input.revision;
       const archived = release && this.archives.releaseSource(release);
       const supportsRecovery = find(data.servers, target.serverId).capabilities?.includes('source-archive-recovery-v1');
       if (input.action === 'rollback' && archived && input.requestId && !supportsRecovery) throw new HttpError(409, '请先升级目标 Agent 以支持源码档案恢复；旧客户端仍可使用原本机缓存恢复接口');
-      const task = { id: taskId, targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: input.action === 'deploy' ? 'preparing' : 'queued', stage: 'queued',
+      const config = release ? structuredClone(release.config) : validateConfig({ ...target.config, ...(trial ? input.buildConfig : {}) }, trial ? input.buildConfig?.module ?? service.module : service.module, service.kind || 'java');
+      const requiresToolchain = trial || config.kind === 'static' && (config.installMode === 'install' || config.legacyPeerDeps || config.packageManager === 'yarn');
+      if (requiresToolchain && !find(data.servers, target.serverId).capabilities?.includes(FRONTEND_CAPABILITY)) throw new HttpError(409, '请先升级 Agent 以支持多工具链和试构建');
+      const task = { id: taskId, targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: fromSource ? 'preparing' : 'queued', stage: 'queued',
         detailedAgentStages: find(data.servers, target.serverId).capabilities?.includes('delivery-telemetry-v1') || false,
         networkIdentity: structuredClone(target.networkIdentity || null),
-        createdAt: now(), updatedAt: now(), config: release ? structuredClone(release.config) : validateConfig(target.config, service.module, service.kind || 'java'),
+        createdAt: now(), updatedAt: now(), config, requiresToolchain,
         sourceProjectId: sourceProject.id, sourceSnapshot: snapshot, source: archived ? { ...archived, url: `/api/agent/v1/tasks/${taskId}/source` } : null,
         sourceArchiveId: archived?.archiveId, revision: release?.revision || input.revision, commitSubject: release?.commitSubject || selectedCommit?.subject,
-        recoveryAllowed: !!supportsRecovery, requestId: input.requestId, requestFingerprint, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
+        recoveryAllowed: !trial && !!supportsRecovery, requestId: input.requestId, requestFingerprint, lastSeq: 0, ...(release ? { release: structuredClone(release) } : {}) };
       transition(task, task.status);
       data.tasks.push(task); return structuredClone(task);
     }); } catch (error) {
@@ -501,6 +510,9 @@ export class DeploymentService extends EventEmitter {
       const next = data.tasks.find(task => task.serverId === serverId && ['preparing', 'queued'].includes(task.status));
       if (!next || next.status !== 'queued') return null;
       const target = this.ensureManaged(data, next.targetId);
+      if (next.requiresToolchain && !server.capabilities?.includes(FRONTEND_CAPABILITY)) {
+        Object.assign(next, { status: 'interrupted', stage: 'interrupted', error: 'Agent 不支持本次前端工具链或试构建，请升级后重试', finishedAt: now() }); transition(next, 'interrupted', true); interruptedId = next.id; return null;
+      }
       if (next.networkIdentity && !server.capabilities?.includes('fixed-network-alias-v1')) {
         Object.assign(next, { status: 'interrupted', stage: 'interrupted', error: 'Agent 不支持固定网络别名，请升级后重新创建任务', finishedAt: now() }); transition(next, 'interrupted', true); interruptedId = next.id; return null;
       }
@@ -510,13 +522,13 @@ export class DeploymentService extends EventEmitter {
         interruptedId = next.id;
         return null;
       }
-      Object.assign(next, { status: 'running', startedAt: now(), updatedAt: now(), previousRelease: target.currentRelease || null });
+      Object.assign(next, { status: 'running', startedAt: now(), updatedAt: now(), previousRelease: next.action === 'build-check' ? null : target.currentRelease || null });
       if (next.recoveryAllowed && !server.capabilities?.includes('source-archive-recovery-v1')) {
         Object.assign(next, { status: 'interrupted', stage: 'interrupted', error: 'Agent 已降级，请升级后重新创建任务', finishedAt: now() }); transition(next, 'interrupted', true); interruptedId = next.id; return null;
       }
       const baselineSource = this.archives.releaseSource(target.currentRelease);
       if (baselineSource && next.recoveryAllowed) Object.assign(next, { baselineReleaseId: randomUUID(), baselineSource: { ...baselineSource, url: `/api/agent/v1/tasks/${next.id}/source?role=baseline` } });
-      if (next.action !== 'deploy') { const release = next.release || target.currentRelease; next.revision = release?.revision || null; next.commitSubject = release?.commitSubject; }
+      if (!['deploy', 'build-check'].includes(next.action)) { const release = next.release || target.currentRelease; next.revision = release?.revision || null; next.commitSubject = release?.commitSubject; }
       return structuredClone(next);
     });
     if (interruptedId) this.changed('task', interruptedId);
@@ -568,6 +580,11 @@ export class DeploymentService extends EventEmitter {
       if (seq <= task.lastSeq) return task.lastSeq;
       if (seq !== task.lastSeq + 1) throw new HttpError(409, `日志序号不连续，下一序号为 ${task.lastSeq + 1}`);
       if (terminal.has(task.status)) throw new HttpError(409, '任务已完成');
+      if (task.action === 'build-check') {
+        if (result?.release || result?.baseline || result?.rollback || status === 'rolled_back' || ['image', 'deploying', 'verifying'].includes(input.stage)) fail('试构建不能执行站点切换或创建发布版本');
+        const check = result?.buildCheck;
+        if (status === 'succeeded' && (!check || check.revision !== task.revision || check.sourceSha256 !== task.source?.sha256 || !Number.isSafeInteger(check.files) || check.files < 1 || !Number.isSafeInteger(check.bytes) || check.bytes < 1 || !check.buildSnapshot?.buildImage)) fail('试构建成功结果必须包含匹配的源码、工具链和产物统计');
+      } else if (result?.buildCheck) fail('发布任务不能提交试构建结果');
       const baseline = result?.baseline || (status === 'rolled_back' ? result?.rollback?.release : null);
       if (baseline?.id === task.baselineReleaseId && baseline) {
         const prior = task.previousRelease;
@@ -579,7 +596,7 @@ export class DeploymentService extends EventEmitter {
         task.recoveryBaselineId = baseline.id;
       }
       const release = result?.release;
-      for (const value of [release, baseline].filter(Boolean)) if (value.buildSnapshot) {
+      for (const value of [release, baseline, result?.buildCheck].filter(Boolean)) if (value.buildSnapshot) {
         const snapshot = value.buildSnapshot;
         if (typeof snapshot !== 'object' || Array.isArray(snapshot) || Object.keys(snapshot).some(key => !['buildImage', 'runtimeImage', 'packageManager', 'packageManagerVersion', 'mavenVersion', 'nodeVersion'].includes(key))) fail('实际构建信息格式错误');
         for (const key of ['buildImage', 'runtimeImage']) if (snapshot[key] !== undefined && (!imagePattern.test(snapshot[key]) || !/(?:^|@)sha256:[a-f0-9]{64}$/.test(snapshot[key]))) fail('实际构建镜像必须固定到摘要');
@@ -599,7 +616,7 @@ export class DeploymentService extends EventEmitter {
         if (task.action !== 'deploy' && status === 'succeeded' && !rebuilt && !cached && !(task.action === 'restart' && release.id === task.release?.id && ownedArtifactId === artifactId(task.release))) fail('目标历史版本不存在');
         if (task.action === 'rollback' && status === 'succeeded' && release.revision !== task.release?.revision) fail('回退版本与历史源码不一致');
       }
-      if (status === 'succeeded' && !release) fail('成功任务必须包含实际运行版本');
+      if (status === 'succeeded' && !release && task.action !== 'build-check') fail('成功任务必须包含实际运行版本');
       const timing = agentEventTime(task, input.timestamp, now());
       const record = { seq, stage: input.stage, message: input.message || '', status, ...timing };
       const directory = path.join(this.root, 'tasks', taskId, 'logs'); await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -627,7 +644,7 @@ export class DeploymentService extends EventEmitter {
           const saved = data.releases.find(existing => existing.id === rollbackRelease.id && existing.targetId === target.id);
           if (!saved || ![task.previousRelease?.id, task.recoveryBaselineId].includes(saved.id) || saved.image !== rollbackRelease.image || saved.artifact !== rollbackRelease.artifact) fail('回退版本不属于此目标'); target.currentRelease = structuredClone(saved);
         }
-        for (const existing of data.releases.filter(existing => existing.targetId === target.id)) if (existing.sourceArchiveId && !existing.sourceClearedAt) existing.available = true;
+        if (task.action !== 'build-check') for (const existing of data.releases.filter(existing => existing.targetId === target.id)) if (existing.sourceArchiveId && !existing.sourceClearedAt) existing.available = true;
       }
       return seq;
     });

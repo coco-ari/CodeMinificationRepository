@@ -8,6 +8,7 @@ import { Store } from '../src/store.mjs';
 import { RepositoryService } from '../src/service.mjs';
 import { DeploymentService, validateConfig } from '../src/deployment.mjs';
 import { createApplication } from '../src/server.mjs';
+import { sourceKey } from '../src/archive.mjs';
 
 const projectInput = { name: '独立验证源码', repository: 'https://gitee.com/example/demo.git', branch: 'main' };
 async function directory(t) {
@@ -42,6 +43,41 @@ async function ready(f, targetId, action = 'deploy', extra = {}) {
 }
 function release(task) { return { id: task.id, image: `cmr/${task.targetId}:${task.id}`, revision: task.revision, config: task.config }; }
 function restored(task, original) { return { ...original, id: task.id, artifactId: original.artifactId || original.id, restoredFromReleaseId: original.id, recoveryMethod: 'cache' }; }
+
+test('试构建固定源码和临时配置，不修改部署位置、成功版本或恢复基线，拒绝伪造发布结果', async t => {
+  const f = await fixture(t), records = await targetFixture(f);
+  t.after(async () => { await f.deployment.close(); await f.repository.store.close(); });
+  await f.repository.store.change(state => {
+    const d = state.deployments;
+    Object.assign(d.services.find(s => s.id === records.service.id), { kind: 'static', module: 'old-site' });
+    Object.assign(d.targets.find(s => s.id === records.target.id), { config: validateConfig({ health: { url: 'https://site.test/' } }, 'old-site', 'static') });
+  });
+  f.repository.history = async () => ({ commits: [{ revision: f.fake.revision, subject: '试构建固定提交' }] });
+  const before = structuredClone(f.deployment.data.targets);
+  const input = { action: 'build-check', targetId: records.target.id, branch: 'main', revision: f.fake.revision, requestId: randomUUID(), sourceKey: sourceKey({ ...records.source.project, branch: 'main' }), configKey: f.deployment.configKey(records.target.id), buildConfig: { module: 'new-site', artifactPath: 'new-site/dist', buildImage: 'node:14.21.3-bullseye', packageManagerVersion: '8.19.4', installMode: 'install' } };
+  await assert.rejects(f.deployment.createTask(input), /升级/);
+  await f.deployment.heartbeat(records.agent.serverId, { capabilities: ['static-site-v1', 'frontend-toolchain-v1', 'source-archive-recovery-v1'] });
+  const trial = await f.deployment.createTask(input);
+  assert.equal((await f.deployment.createTask(input)).id, trial.id);
+  await assert.rejects(f.deployment.createTask({ ...input, buildConfig: { ...input.buildConfig, buildScript: 'different' } }), /同一请求/);
+  await assert.rejects(f.deployment.createTask({ ...input, requestId: randomUUID(), buildConfig: { health: {} } }), /仅允许覆盖/);
+  await f.deployment.preparations.get(trial.id);
+  const claimed = await f.deployment.claim(records.agent.serverId);
+  assert.equal(claimed.revision, f.fake.revision);
+  assert.equal(claimed.config.module, 'new-site');
+  assert.equal(claimed.previousRelease, null); assert.equal(claimed.baselineSource, undefined);
+  await assert.rejects(f.deployment.events(records.agent.serverId, trial.id, { seq: 1, stage: 'deploying' }), /不能执行/);
+  await assert.rejects(f.deployment.events(records.agent.serverId, trial.id, { seq: 1, stage: 'building', status: 'succeeded', result: { release: release(claimed) } }), /不能执行/);
+  await assert.rejects(f.deployment.events(records.agent.serverId, trial.id, { seq: 1, stage: 'building', status: 'succeeded', result: {} }), /试构建成功/);
+  await f.deployment.events(records.agent.serverId, trial.id, { seq: 1, stage: 'building', status: 'succeeded', result: { buildCheck: { revision: claimed.revision, sourceSha256: claimed.source.sha256, files: 3, bytes: 100, buildSnapshot: { buildImage: `node@sha256:${'a'.repeat(64)}`, nodeVersion: 'v14.21.3', packageManager: 'npm', packageManagerVersion: '8.19.4' } } } });
+  assert.deepEqual(f.deployment.data.targets, before);
+  assert.equal(f.deployment.data.releases.length, 0);
+  const next = await f.deployment.createTask({ ...input, requestId: randomUUID() });
+  await f.deployment.preparations.get(next.id);
+  await f.deployment.heartbeat(records.agent.serverId, { capabilities: ['static-site-v1'] });
+  assert.equal(await f.deployment.claim(records.agent.serverId), null);
+  assert.equal(f.deployment.data.tasks.find(t => t.id === next.id).status, 'interrupted');
+});
 
 test('服务器存储策略独立下发，校验范围，旧回报不能伪装新策略已应用', async t => {
   const f = await fixture(t), a = await targetFixture(f), b = await targetFixture(f);

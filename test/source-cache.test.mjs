@@ -108,3 +108,20 @@ test('连续完成任务立即领取下一项，空闲和异常仍有退避', as
   await runner.loop('任务', async () => { if (++calls === 1) throw new Error('暂时断线'); if (calls === 3) runner.stop(); }, 30);
   assert.ok(performance.now() - idleStart >= 50);
 });
+
+test('试构建完成只补报结果，不强制触发版本和构建缓存清理', async () => {
+  const runner = new AgentRunner({ centerUrl: 'https://center.example', logger: { warn() {} } });
+  runner.identity = { mode: 'managed' };
+  runner.lock = { held: true };
+  runner.flushEvents = async () => {};
+  runner.heartbeat = async () => {};
+  runner.client.post = async () => ({ task: { id: 'trial', action: 'build-check' } });
+  runner.journal.get = async () => null;
+  runner.executor.execute = async () => {};
+  let maintenanceCalls = 0;
+  // 领取前保留正常的周期维护，试构建结束不额外触发维护。
+  runner.maintain = async () => { maintenanceCalls++; };
+  assert.equal(await runner.tick(), true);
+  assert.equal(maintenanceCalls, 1);
+  assert.notEqual(runner.maintenanceDue, true);
+});

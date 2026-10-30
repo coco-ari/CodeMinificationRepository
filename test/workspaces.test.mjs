@@ -302,6 +302,8 @@ test('首页卡片数据只包含本项目服务和绑定服务器，排除密�
   const json=JSON.stringify(dashboard);
   assert.ok(!json.includes(b.service.id)); assert.ok(!json.includes(b.targets[0].id));
   assert.ok(!json.includes('tokenHash')); assert.ok(!json.includes('registrationHash')); assert.ok(!json.includes('jvmArgs'));
+  await f.service.store.change(state => state.deployments.tasks.push({ id: randomUUID(), applicationId: a.app.id, targetId: a.targets[0].id, action: 'build-check', status: 'failed' }));
+  assert.equal(f.workspaces.list().find(p => p.id === a.app.id).dashboard.targets.find(t => t.id === a.targets[0].id).latestTask, null);
 });
 
 test('提交刷新与发布同步共用并发队列，按队列再缓存锁的顺序执行', async t => {

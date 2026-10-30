@@ -1,7 +1,8 @@
 import path from 'node:path';
+import { frontendOptions, FRONTEND_CAPABILITY } from './frontend-toolchain.mjs';
 
-export const VERSION = '1.6.0';
-export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1', 'fixed-network-alias-v1'];
+export const VERSION = '1.7.0';
+export const CAPABILITIES = ['static-site-v1', 'delivery-telemetry-v1', 'source-archive-recovery-v1', 'storage-policy-v1', 'fixed-network-alias-v1', FRONTEND_CAPABILITY];
 export const LABEL = 'io.cmr';
 export function identifier(value, label = '标识') {
   if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) throw new Error(`${label}无效`);
@@ -40,7 +41,7 @@ export function networkIdentity(value) {
     || ['app', 'localhost', 'host', 'none', 'bridge'].includes(value.alias) || value.alias.startsWith('cmr-')) throw new Error('固定网络和别名无效，请使用独立的项目、环境和服务名称');
   return { network: value.network, alias: value.alias };
 }
-export function normalizeConfig(input) {
+export function normalizeConfig(input, { buildOnly = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('部署配置无效');
   const kind = input.kind || 'java', isStatic = kind === 'static';
   if (!['java', 'static'].includes(kind)) throw new Error('服务类型无效');
@@ -65,14 +66,15 @@ export function normalizeConfig(input) {
   if (isStatic) {
     Object.assign(result, { packageManager: input.packageManager || 'npm', packageManagerVersion: input.packageManagerVersion || (input.packageManager === 'pnpm' ? '10.11.0' : '10.9.9'),
       buildScript: input.buildScript || 'build', buildArgs: strings(input.buildArgs, 40), jvmArgs: [], args: [], profile: '' });
-    if (!['npm', 'pnpm'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) throw new Error('包管理器或版本无效');
+    if (!['npm', 'pnpm', 'yarn'].includes(result.packageManager) || result.packageManagerVersion.length > 40 || !/^\d+\.\d+\.\d+$/.test(result.packageManagerVersion)) throw new Error('包管理器或版本无效');
+    Object.assign(result, frontendOptions({ ...input, packageManager: result.packageManager, packageManagerVersion: result.packageManagerVersion }));
     if (!/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,79}$/.test(result.buildScript)) throw new Error('静态站点构建配置无效');
     if (artifactPath.split('/').some(part => part === 'node_modules' || part === '.git')) throw new Error('静态产物必须是独立的构建输出目录');
     if (result.volumes.length || result.ports.length || result.networks.length) throw new Error('静态站点不单独创建容器或网络');
-    let url; try { url = new URL(input.health?.url); } catch { throw new Error('静态站点需要有效的访问地址'); }
+    let url; try { url = new URL(buildOnly && !input.health?.url ? 'http://unused.invalid/' : input.health?.url); } catch { throw new Error('静态站点需要有效的访问地址'); }
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('静态站点访问地址无效');
     if (!url.pathname.endsWith('/')) url.pathname += '/';
-    result.health.url = url.href;
+    result.health.url = buildOnly && !input.health?.url ? '' : url.href;
     if (result.health.status !== 200) throw new Error('静态站点发布验证要求 HTTP 200');
     delete result.runtimeImage; delete result.runtime;
   }
@@ -104,6 +106,6 @@ export function assertManaged(identity, task) {
   const target = identity.targets?.find(t => t.id === task.targetId);
   if (identity.mode !== 'managed' || !target || target.mode !== 'managed' || (task.serverId && task.serverId !== identity.serverId)
     || target.retiredAt || (target.serverId && target.serverId !== identity.serverId)) throw new Error('目标不属于平台，禁止发布、重启、回退和清理');
-  if (!['deploy', 'restart', 'rollback', 'cleanup'].includes(task.action)) throw new Error('任务操作无效');
+  if (!['deploy', 'restart', 'rollback', 'cleanup', 'build-check'].includes(task.action) || task.action === 'build-check' && task.config?.kind !== 'static') throw new Error('任务操作无效');
   return target;
 }

@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { SearchField } from './search-field'
 import { ReleaseInfo, ReleaseBuildDetails } from './release-info'
+import { BuildTrial } from './build-trial'
 import { navigateSafely } from '@/lib/navigation-guard'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -67,6 +68,9 @@ export function Configuration({ target }) {
         ...(isStatic
           ? [
               ['包管理器', config.packageManager],
+              ['工具版本', config.packageManagerVersion],
+              ['依赖安装', config.installMode === 'install' ? '兼容安装' : '锁定安装'],
+              ['npm peer 依赖', config.legacyPeerDeps ? '忽略旧项目冲突' : '仓库默认规则'],
               ['构建脚本', config.buildScript],
               ['构建参数', config.buildArgs?.join('\n')],
             ]
@@ -565,6 +569,7 @@ export function ReleaseWorkbench() {
     [tab, setTab] = useState(route.action === 'rollback' ? 'releases' : 'commits'),
     [releaseId, setReleaseId] = useState(''),
     [showConfig, setShowConfig] = useState(false),
+    [trial, setTrial] = useState(false),
     [loading, setLoading] = useState(true)
   const live = useRef(true),
     locked = useRef(false),
@@ -610,6 +615,7 @@ export function ReleaseWorkbench() {
     setLoading(true)
     setHistory(null)
     setChoice('')
+    setTrial(false)
     setBranch('')
     setBranchInfo(null)
     setReleaseNext(null)
@@ -852,6 +858,21 @@ export function ReleaseWorkbench() {
         </Notice>
       )}
       {showConfig && <Configuration target={{ ...target, config }} />}
+      {trial && (
+        <BuildTrial
+          key={signature}
+          target={target}
+          config={config}
+          selection={{
+            branch,
+            revision: choice,
+            sourceKey: history?.sourceKey,
+            configKey: history?.configKey,
+          }}
+          subject={history?.commits.find((c) => c.revision === choice)?.subject}
+          onClose={() => setTrial(false)}
+        />
+      )}
       <div className={action === 'restart' ? 'mx-auto w-full max-w-3xl' : 'release-layout'}>
         {action !== 'restart' && (
           <Card className="release-selection" aria-busy={loading || busy}>
@@ -1201,6 +1222,32 @@ export function ReleaseWorkbench() {
                 <Detail label="Profile">{config.profile || '默认'}</Detail>
               )}
             </dl>
+            {action === 'deploy' && config.kind === 'static' && (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={
+                    !managed ||
+                    !!activeTask ||
+                    busy ||
+                    loading ||
+                    !choice ||
+                    !history?.sourceKey ||
+                    !history?.configKey ||
+                    !server?.capabilities?.includes('frontend-toolchain-v1')
+                  }
+                  onClick={() => setTrial(true)}
+                >
+                  试构建 · 不发布站点
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  {server?.capabilities?.includes('frontend-toolchain-v1')
+                    ? '可临时调整目录和工具链，验证通过后再保存正式部署配置。'
+                    : '请先升级 Agent，以启用多工具链与试构建。'}
+                </p>
+              </div>
+            )}
             <Action
               id="confirm-release"
               variant="default"
@@ -1319,33 +1366,37 @@ const stageDuration = (task, stage) =>
     )
 function taskStages(task) {
   const history = task.stageHistory || []
-  const center =
-    task.action !== 'deploy'
-      ? []
-      : history.some((s) => s.stage.startsWith('source_'))
-        ? [
-            ['source_fetch', '拉取代码'],
-            ['source_resolve', '固定提交'],
-            ['source_archive', '打包 ZIP'],
-          ]
-        : [['preparing', '准备源码']]
+  const center = !['deploy', 'build-check'].includes(task.action)
+    ? []
+    : history.some((s) => s.stage.startsWith('source_'))
+      ? [
+          ['source_fetch', '拉取代码'],
+          ['source_resolve', '固定提交'],
+          ['source_archive', '打包 ZIP'],
+        ]
+      : [['preparing', '准备源码']]
   const image = task.detailedAgentStages || history.some((s) => s.stage === 'image')
   const agent =
-    task.action === 'deploy'
+    task.action === 'build-check'
       ? [
           ['downloading', '下载源码包'],
-          [
-            'building',
-            task.config?.kind === 'static' ? '构建前端' : image ? '编译 JAR' : '编译 / 镜像',
-          ],
-          ...(image ? [['image', '构建镜像']] : []),
-          ['deploying', task.config?.kind === 'static' ? '切换站点' : '更新服务'],
-          ['verifying', '健康检查'],
+          ['building', '安装依赖、打包与产物验证'],
         ]
-      : [
-          ['deploying', task.action === 'restart' ? '重启服务' : '恢复版本'],
-          ['verifying', '健康检查'],
-        ]
+      : task.action === 'deploy'
+        ? [
+            ['downloading', '下载源码包'],
+            [
+              'building',
+              task.config?.kind === 'static' ? '构建前端' : image ? '编译 JAR' : '编译 / 镜像',
+            ],
+            ...(image && task.config?.kind !== 'static' ? [['image', '构建镜像']] : []),
+            ['deploying', task.config?.kind === 'static' ? '切换站点' : '更新服务'],
+            ['verifying', '健康检查'],
+          ]
+        : [
+            ['deploying', task.action === 'restart' ? '重启服务' : '恢复版本'],
+            ['verifying', '健康检查'],
+          ]
   return { center, agent }
 }
 function failedStage(task) {
@@ -1678,7 +1729,7 @@ export function TaskWorkbench({ id }) {
           </Action>
           {task && finished(task) && target?.mode === 'managed' && (
             <Button size="sm" onClick={() => open('release', { target, action: 'deploy' })}>
-              再次发布 <ArrowRight />
+              {task.action === 'build-check' ? '返回发布工作台' : '再次发布'} <ArrowRight />
             </Button>
           )}
         </div>
@@ -1687,7 +1738,9 @@ export function TaskWorkbench({ id }) {
       <Tabs value={tab} onValueChange={setTab}>
         <div className="task-toolbar" id="deploy-task-info">
           <TabsList variant="line" className="section-tabs">
-            <TabsTrigger value="flow">发布进度</TabsTrigger>
+            <TabsTrigger value="flow">
+              {task?.action === 'build-check' ? '试构建进度' : '发布进度'}
+            </TabsTrigger>
             <TabsTrigger value="snapshot">任务快照</TabsTrigger>
             <TabsTrigger value="logs">完整日志</TabsTrigger>
           </TabsList>
@@ -1716,6 +1769,16 @@ export function TaskWorkbench({ id }) {
                   </Notice>
                 )}
                 {outcome?.cleanupError && <Notice error>{outcome.cleanupError}</Notice>}
+                {outcome?.buildCheck && (
+                  <Notice>
+                    试构建通过：{outcome.buildCheck.files} 个文件，
+                    {(outcome.buildCheck.bytes / 1024 / 1024).toFixed(2)} MiB。工具链：Node{' '}
+                    {outcome.buildCheck.buildSnapshot?.nodeVersion} /{' '}
+                    {outcome.buildCheck.buildSnapshot?.packageManager}{' '}
+                    {outcome.buildCheck.buildSnapshot?.packageManagerVersion}
+                    。未切换站点；临时产物已安排清理。
+                  </Notice>
+                )}
                 {outcome?.release?.kind === 'static' && (
                   <p className="text-xs text-muted-foreground wrap-anywhere">
                     静态版本：{outcome.release.artifact}
@@ -1754,7 +1817,7 @@ export function TaskWorkbench({ id }) {
                             outcome?.release?.artifact ||
                             task.release?.image ||
                             task.release?.artifact ||
-                            '尚未生成'}
+                            (task.action === 'build-check' ? '试构建不保留发布产物' : '尚未生成')}
                         </span>
                       </Detail>
                     </div>

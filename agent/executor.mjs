@@ -97,7 +97,7 @@ export class DeploymentExecutor {
     await this.requireOwned(task, name);
     const labelArgs = Object.entries(labels(this.getIdentity().serverId, task.targetId, task.id)).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
     const environment = config.kind === 'static'
-      ? ['HOME=/tmp', 'CI=true', 'npm_config_cache=/cache/npm', 'npm_config_update_notifier=false', `NODE_OPTIONS=--max-old-space-size=${Math.floor(config.build.memoryMb * 0.65)}`]
+      ? ['HOME=/tmp', 'CI=true', 'npm_config_cache=/cache/npm', 'npm_config_update_notifier=false', `CMR_INSTALL_MODE=${config.installMode || 'frozen'}`, `CMR_LEGACY_PEER_DEPS=${!!config.legacyPeerDeps}`, `NODE_OPTIONS=--max-old-space-size=${Math.floor(config.build.memoryMb * 0.65)}`]
       : ['HOME=/tmp', 'MAVEN_CONFIG=/tmp/.m2', `MAVEN_OPTS=-Xmx${Math.floor(config.build.memoryMb * 0.6)}m -XX:MaxMetaspaceSize=${Math.max(96, Math.floor(config.build.memoryMb * 0.18))}m -Duser.home=/tmp`];
     const run = ['run', '--rm', '--name', name, ...labelArgs, '--cpus', String(config.build.cpus), '--memory', `${config.build.memoryMb}m`, '--memory-swap', `${Math.round(config.build.memoryMb * 1.5)}m`, '--pids-limit', '256', '--user', '1000:1000', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
       ...environment.flatMap(value => ['--env', value]),
@@ -277,7 +277,7 @@ export class DeploymentExecutor {
     }
   }
   async execute(task) {
-    if (!['deploy', 'restart', 'rollback'].includes(task.action)) throw new Error('任务操作无效');
+    if (!['deploy', 'restart', 'rollback', 'build-check'].includes(task.action) || (task.action === 'build-check' && task.config?.kind !== 'static')) throw new Error('任务操作无效');
     if (task.config?.kind === 'static') return this.static.execute(task);
     const existing = await this.journal.get(task.id); if (existing) { if (terminal(existing.status)) return; return this.recover(existing); }
     await this.journal.create(task);

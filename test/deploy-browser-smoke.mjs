@@ -469,7 +469,12 @@ try {
   const firstAgent = await agentRequest('register', {
     registrationToken: token,
     version: '1.3.0-browser',
-    capabilities: ['static-site-v1', 'source-archive-recovery-v1', 'fixed-network-alias-v1'],
+    capabilities: [
+      'static-site-v1',
+      'source-archive-recovery-v1',
+      'fixed-network-alias-v1',
+      'frontend-toolchain-v1',
+    ],
   })
   await close()
   await click('#create-button')
@@ -1271,6 +1276,80 @@ try {
   await until(
     () => evaluate(`!document.querySelector('#confirm-release').disabled`),
     '前端发布准备',
+  )
+  const beforeTrial = structuredClone(staticTarget)
+  await clickText('试构建 · 不发布站点')
+  await visible('[role=dialog]')
+  for (const width of [390, 768, 1280, 1920]) {
+    await command('Emulation.setDeviceMetricsOverride', {
+      width,
+      height: 1050,
+      deviceScaleFactor: 1,
+      mobile: width < 768,
+    })
+    await animationsSettled()
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[role=dialog]').scrollWidth <= document.querySelector('[role=dialog]').clientWidth + 1`,
+      ),
+      true,
+      `试构建表单在 ${width}px 溢出`,
+    )
+    await screenshot(`frontend-trial-${width}.png`)
+  }
+  await clickText('旧项目 · Node 14 / npm 8', '[role=dialog]')
+  await submit()
+  await visible('[role=alertdialog]')
+  await click('[data-confirm-action]')
+  await visible('#deploy-task-logs')
+  await until(
+    () => deployment.data.tasks.some((t) => t.action === 'build-check' && t.status === 'queued'),
+    '试构建任务排队',
+  )
+  const trialTask = (await agentRequest('claim', {}, firstAgent.token)).task
+  assert.equal(trialTask.action, 'build-check')
+  assert.equal(trialTask.config.packageManagerVersion, '8.19.4')
+  await send(trialTask, 1, 'building', '独立试构建通过', 'succeeded', {
+    buildCheck: {
+      revision: trialTask.revision,
+      sourceSha256: trialTask.source.sha256,
+      files: 2,
+      bytes: 120,
+      buildSnapshot: {
+        buildImage: `node@sha256:${'b'.repeat(64)}`,
+        nodeVersion: 'v14.21.3',
+        packageManager: 'npm',
+        packageManagerVersion: '8.19.4',
+      },
+    },
+  })
+  await until(
+    () =>
+      evaluate(`document.querySelector('#deploy-task-info').textContent.includes('试构建成功')`),
+    '试构建成功',
+  )
+  assert.deepEqual(
+    deployment.data.targets.find((t) => t.id === staticTarget.id),
+    beforeTrial,
+  )
+  assert.equal(
+    deployment.data.releases.some((r) => r.id === trialTask.id),
+    false,
+  )
+  assert.equal(
+    await evaluate(
+      `document.querySelector('#deploy-task-progress').textContent.includes('切换站点')`,
+    ),
+    false,
+  )
+  await screenshot('frontend-trial-result.png')
+  await go('release', `?environment=${staticTarget.environmentId}&target=${staticTarget.id}`)
+  await until(
+    () =>
+      evaluate(
+        `!!document.querySelector('#confirm-release') && !document.querySelector('#confirm-release').disabled`,
+      ),
+    '返回正式发布',
   )
   await click('#confirm-release')
   await visible('[role=alertdialog]')
@@ -2139,6 +2218,8 @@ try {
         ?.retainedVersions === 3,
     '存储策略保存',
   )
+  await until(() => evaluate(`!document.querySelector('[data-ui=sheet]')`), '存储策略保存后关闭')
+  await animationsSettled()
   for (const width of [390, 768, 1280, 1920]) {
     await command('Emulation.setDeviceMetricsOverride', {
       width,
@@ -2188,6 +2269,7 @@ try {
     false,
   )
 
+  await agentRequest('heartbeat', { metrics, containers: [] }, secondAgent.token)
   await evaluate(`location.hash='/projects/${another.id}/servers'`)
   await visible('.bind-server')
   await click('.bind-server')

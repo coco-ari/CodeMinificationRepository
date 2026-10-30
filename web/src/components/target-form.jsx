@@ -113,6 +113,8 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
                   input.packageManagerVersion || (packageManager === 'pnpm' ? '10.11.0' : '10.9.9'),
                 buildScript: input.buildScript,
                 buildArgs: lines(input.buildArgs),
+                installMode: input.installMode,
+                legacyPeerDeps: input.legacyPeerDeps === 'legacy',
               }
             : {}),
           runtimeImage: input.runtimeImage,
@@ -284,6 +286,7 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
                   choices={[
                     ['npm', 'npm'],
                     ['pnpm', 'pnpm'],
+                    ['yarn', 'Yarn Classic'],
                   ]}
                   onChange={(event) => setPackageManager(event.target.value)}
                 />
@@ -293,7 +296,11 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
                   label={`${packageManager} 版本`}
                   defaultValue={
                     (c.packageManager === packageManager && c.packageManagerVersion) ||
-                    (packageManager === 'pnpm' ? '10.11.0' : '10.9.9')
+                    (packageManager === 'pnpm'
+                      ? '10.11.0'
+                      : packageManager === 'yarn'
+                        ? '1.22.22'
+                        : '10.9.9')
                   }
                   required
                   hint="使用此准确版本安装依赖并构建；pnpm 需与 package.json 的 packageManager 一致。"
@@ -315,9 +322,31 @@ export function TargetForm({ item, onClose, service: fixedService, onSaved }) {
                   placeholder={'--mode\ntest'}
                 />
               </Grid>
+              <Grid>
+                <Field
+                  name="installMode"
+                  label="依赖安装方式"
+                  defaultValue={c.installMode || 'frozen'}
+                  choices={[
+                    ['frozen', '锁定安装（推荐）'],
+                    ['install', '兼容安装（允许生成锁文件）'],
+                  ]}
+                  hint="兼容安装允许没有锁文件的旧项目，重新构建时依赖可能变化。"
+                />
+                <Field
+                  key={`peer-${packageManager}`}
+                  name="legacyPeerDeps"
+                  label="npm peer 依赖处理"
+                  defaultValue={packageManager === 'npm' && c.legacyPeerDeps ? 'legacy' : 'strict'}
+                  disabled={packageManager !== 'npm'}
+                  choices={[
+                    ['strict', '使用仓库默认规则'],
+                    ['legacy', '忽略旧项目 peer 冲突'],
+                  ]}
+                />
+              </Grid>
               <Notice>
-                Agent
-                使用锁文件安装依赖并构建，只发布输出目录。环境变量会进入浏览器产物，不能放数据库密码等服务端秘密。
+                工具链仅影响当前部署位置，建议先在发布工作台试构建。旧工具链预设不自动修正源码依赖，也不保证支持所有旧项目。环境变量会进入浏览器产物，不能放服务端秘密。
               </Notice>
             </>
           )}

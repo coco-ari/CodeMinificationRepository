@@ -68,7 +68,12 @@ export const size = (bytes) =>
   Number.isFinite(Number(bytes)) && bytes != null
     ? `${(Number(bytes) / 1024 ** 3).toFixed(1)} GB`
     : '—'
-export const actionNames = { deploy: '发布', restart: '重启', rollback: '回退' }
+export const actionNames = {
+  deploy: '发布',
+  restart: '重启',
+  rollback: '回退',
+  'build-check': '试构建',
+}
 export const statusNames = {
   preparing: '准备源码',
   queued: '排队中',

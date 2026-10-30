@@ -78,6 +78,30 @@ async function fixture(t, currentIdentity = identity()) {
   return { root, docker, journal, client, executor, identity: currentIdentity };
 }
 
+test('前端试构建不接触线上目录和版本链，结束清理临时产物，重启只报告中断', async t => {
+  const f = await fixture(t);
+  const trial = task('trial-task', { action: 'build-check', config: normalizeConfig({ kind: 'static', module: 'web', health: { url: 'https://site.test/' } }) });
+  const forbidden = async () => { throw new Error('试构建不能接触发布状态'); };
+  for (const method of ['preflight', 'selected', 'activate', 'health', 'finish', 'cleanup']) f.executor.static[method] = forbidden;
+  for (const method of ['current', 'ensureBaseline', 'saveRelease', 'recordSuccess']) f.executor[method] = forbidden;
+  f.executor.static.build = async () => {
+    await mkdir(path.join(f.executor.taskRoot(trial), 'trial-output'), { recursive: true });
+    await writeFile(path.join(f.executor.taskRoot(trial), 'trial-output/index.html'), 'hello');
+    return { revision, sourceSha256: trial.source.sha256, files: 1, bytes: 5, buildSnapshot: { nodeVersion: 'v14.21.3' } };
+  };
+  await f.executor.execute(trial);
+  const result = await f.journal.get(trial.id);
+  assert.equal(result.status, 'succeeded'); assert.equal(result.result.buildCheck.files, 1);
+  assert.equal(result.result.release, undefined);
+  await assert.rejects(readFile(path.join(f.executor.taskRoot(trial), 'trial-output/index.html')), { code: 'ENOENT' });
+  await f.executor.execute(trial);
+  assert.equal((await f.journal.get(trial.id)).seq, result.seq);
+  const interrupted = { ...trial, id: 'interrupted-trial' };
+  await f.journal.create(interrupted);
+  await f.executor.static.recover(await f.journal.get(interrupted.id));
+  assert.equal((await f.journal.get(interrupted.id)).status, 'interrupted');
+});
+
 async function staticFixture(t) {
   const f = await fixture(t), publicRoot = `${f.root}-static`;
   await mkdir(publicRoot, { mode: 0o755 }); await writeFile(path.join(publicRoot, '.cmr-static-root'), publicRoot);

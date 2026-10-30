@@ -103,7 +103,7 @@ export class WorkspaceService {
       const targets = this.deployment.overview().targets.filter(item => item.applicationId === project.id);
       const tasks = this.data.tasks.filter(item => item.applicationId === project.id);
       const latestTasks = new Map();
-      for (const task of tasks) latestTasks.set(task.targetId, task);
+      for (const task of tasks) if (task.action !== 'build-check') latestTasks.set(task.targetId, task);
       const overview = this.overview(project.id);
       const dashboard = {
         environments: overview.environments, services: overview.services, environmentSources: overview.environmentSources,

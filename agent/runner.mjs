@@ -96,9 +96,8 @@ export class AgentRunner {
       // 领取后刷新目标白名单，避免刚创建的目标尚未出现在上一轮心跳中。
       await this.heartbeat(); await this.executor.execute(task);
     } finally { this.activeTaskId = null; }
-    this.maintenanceDue = true;
     await this.flushEvents();
-    await this.maintain();
+    if (task.action !== 'build-check') { this.maintenanceDue = true; await this.maintain(); }
     return true;
     } finally { this.ticking = false; }
   }
