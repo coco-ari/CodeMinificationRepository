@@ -4,6 +4,12 @@
 
 ## 当前发行与产品模式
 
+当前镜像 `autoops:env-file-36e7df04`，ID `sha256:c4f15005cdecfc83d139c63b589a960f64ce902fa571517d1222bc79feb24702`，应用提交 `36e7df044b6d75749b12958491ee265d4ac56fd6`。Java 部署增加可选环境文件，原标准网络、端口和命名卷保持；公开安装包升级到 Agent 1.6.2，SHA256 为 `5827bb489c49b0be522f3108894b45cb05762bb64a4ebc8a589aa2b397236ac9`。网关、Worker 及代理健康，精简模式、模型、其他 Compose 配置以及原五服务／位置／成功版本／绑定摘要一致，代理未重建。业务节点 Agent 未升级。
+
+构建材料为 `/opt/autoops/build/env-file-36e7df04/`，发行与配置备份为 `/opt/autoops/releases/env-file-36e7df04/`。Linux 定向回归 74 项全部通过，真实 Docker 环境注入与更新重建、完整发行／原生依赖及隔离工作区校验通过；真实桌面／窄屏输入、内外网健康及公网安装包校验通过。安装步骤及未测业务边界见 [环境文件验证](../../../docs/validation/deployment-env-file.md)。回退时先确认无在途任务，仅将 `.env` 的 `AUTOOPS_IMAGE` 改回保留的 `autoops:select-blank-30ffdb9b`，执行 `docker compose config -q` 和 `docker compose up -d --force-recreate --wait --wait-timeout 180 gateway worker`，复核健康，不恢复旧数据库；本次未实际触发回退。
+
+### 上一发行：分支弹窗白屏
+
 当前镜像 `autoops:select-blank-30ffdb9b`，ID `sha256:9da37a7ba2d855169da1968854e258c67334e0226d5b112539bcf068e3d5a441`，网页提交 `30ffdb9b07d30f6c5e6f698f6132e83ef99a44bc`。修复分支弹窗白色渐变盖住列表，仅更新网页及发行清单，网关保留 `ed778705`，Worker／Agent 保留 `8f0a78d4`。两容器精简模式、模型及其他 Compose 配置保持，原五服务、位置、版本及绑定摘要一致，代理未重建。内外网健康，入口均为 `/assets/agentDemo-qRxs8Y5q.js`；实站桌面、短窗口及窄屏滚动、选择、重开和前后截图通过。
 
 构建材料为 `/opt/autoops/build/select-blank-30ffdb9b/`，发行与配置备份为 `/opt/autoops/releases/select-blank-30ffdb9b/`。网页归档 SHA256 `f939611c1cb2f0c222c270b5624fdb07caceb1d56019052e54eac60ac94c5d22`。需要回退时，先等待问答、工作区及部署事务结束，将 `.env` 的 `AUTOOPS_IMAGE` 改回 `autoops:deployment-query-ed778705`，执行 `docker compose config -q` 和 `docker compose up -d --force-recreate --wait --wait-timeout 180 gateway worker`，再验证健康；不恢复旧数据库。本批未实际触发程序回退，具体证据及边界见[白屏修复记录](../../../docs/validation/deployment-workbench.md#2026-10-30-分支弹窗白屏)。
