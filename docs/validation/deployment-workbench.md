@@ -68,4 +68,12 @@ pnpm --dir vendor/t3code/apps/web exec vp test run src/autoops/deployment/Deploy
 
 全项目扫描当前 Web 的选择器、搜索列表、菜单、弹窗及滚动区域。40 个产品代码文件直接使用共享 `SelectPopup`，包含部署、工作区、助手、技能、成员、环境及 T3 设置；修复在共享 `Select` 和 `ScrollArea` 完成，不逐页增加固定高度或新滚动组件。操作菜单没有复现同一滚动故障；其末项选择、长配置弹窗、横向文件和日志一并验证。
 
-8 项直接交互测试通过，覆盖项目对齐／浮层定位、选中中间项、弹窗内选择、搜索与末项选择、长弹窗、横向滚动及焦点恢复；现有共享组件和日志 3 文件 31 项通过。Web 类型检查、网页构建及差分检查通过，未跑后端或整站回归。实站前后证据和临时工具位于忽略目录 `.deployment/popup-scroll/`，上线结果另记。
+8 项直接交互测试通过，覆盖项目对齐／浮层定位、选中中间项、弹窗内选择、搜索与末项选择、长弹窗、横向滚动及焦点恢复；现有共享组件和日志 3 文件 31 项通过。Web 类型检查、网页构建及差分检查通过，未跑后端或整站回归。
+
+修复提交 `9dccad316dba67a758681607ad9847edbfff67c5` 已推送并部署到 workbench，镜像 `autoops:popup-scroll-9dccad31`，ID 为 `sha256:297d289d9372494889e5ed0707bb180d10642f1325af6c38856011e483bdbfeb`。基于上一发行，仅替换校验后的网页产物及其发行清单绑定；后端与 Agent 仍为 `8f0a78d4`，未包含其他任务未提交的 RPC／删除回执修改。
+
+真实 Chromium 对同一 55 项分支列表执行鼠标滚轮：1440×1000 桌面窗口的 `scrollTop` 从 659 变为 259，390×600 窄屏从 1381 变为 981，视口均约束在窗口内。滚动后点击分支能更新选中值，Esc 恢复触发器焦点，页面脚本错误 0；窄屏为浏览器窗口验证，未使用真实触控设备。选择只改变页面草稿，未保存配置或发起业务发布。
+
+网关、Worker 及代理健康，内外网健康与 Worker 连通检查通过，两个入口均引用 `/assets/agentDemo-D-HOTsjf.js`。两容器变量及登录 bootstrap 的产品模式均为 `project-assistant-lite-v1`；Compose 除镜像外比较相等，模型配置保留。5 个服务、5 个位置、5 条版本及源码、节点绑定的逻辑摘要仍为 `69ca95b867a12bc509e019ceb2214d288c185f06893a9dbff9066b8584d9e7d2`。
+
+服务器材料和日志在 `/opt/autoops/build/popup-scroll-9dccad31/`，发行结果、配置备份及滚动前后浏览器记录在 `/opt/autoops/releases/popup-scroll-9dccad31/`。本地证据和临时工具位于忽略目录 `.deployment/popup-scroll/`；旧镜像 `autoops:deployment-workbench-8f0a78d4` 保留。本批没有执行后端变更、Agent 升级、业务服务重发或真实程序回退。
