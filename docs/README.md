@@ -21,6 +21,7 @@
 | [当前业务需求](../examples/workbench-v2-requirements.md) | 产品要实现什么、谁可以操作什么 |
 | [工作台设计](../examples/project-workbench-design.md) | [创建项目与功能启用总图](../examples/project-workbench-design.md#项目建立与功能启用总图)、[已确认权限设计](../examples/project-workbench-design.md#项目权限设计)、[统一助手与用户运行来源](../examples/project-workbench-design.md#统一助手与用户提供的运行来源)、[方案一致性审查](../examples/project-workbench-design.md#方案一致性审查2026-10-26)，以及工作区、交付物、会话与扩展的业务关系；新增设计与实现状态分开 |
 | [部署核心适配方案（已确认）](../examples/deployment-core-adaptation-plan.md) | 固定 main 提交的完整部署能力、当前接入缺口、数据归属与分批实施范围；旧 Jenkins／脚本源码下载明确退役 |
+| [中心源码 ZIP 与包内配置](validation/zip-source-deployment.md) | 业务环境配置随源码 ZIP 固定、中心回滚待上线与企业版实际迁移记录；凭据适用范围统一见 [AGENTS.md](../AGENTS.md#交付纪律) |
 | [Java 部署可选环境文件](validation/deployment-env-file.md) | env_file 的旧项目兼容、节点能力、文件校验、重启／恢复语义、1.6.2 上线验证与用户安装步骤 |
 | [部署工作台本批验证](validation/deployment-workbench.md) | 环境服务导航、连续配置、固定提交、权限与原请求恢复的本地实现和未上线边界 |
 | [重建计划](../examples/autoops-rebuild-plan.md) | 最新三步顺序、保留的完整业务要求及早期阶段 0–7 参考 |

@@ -31,7 +31,7 @@ async function targetFixture(f, serverMode = 'managed') {
   const environment = await f.deployment.saveEntity('environments', { name: '隔离测试', applicationId: application.id, sourceProjectId: source.project.id });
   const service = await f.deployment.saveEntity('services', { name: '演示服务', applicationId: application.id, module: 'demo' });
   const server = await f.deployment.createServer({ name: '验证服务器', mode: serverMode });
-  const agent = await f.deployment.register({ registrationToken: server.registrationToken, version: 'test' });
+  const agent = await f.deployment.register({ registrationToken: server.registrationToken, version: 'test', capabilities: ['source-archive-recovery-v1'] });
   const target = await f.deployment.saveEntity('targets', { serverId: server.server.id, environmentId: environment.id, serviceId: service.id,
     mode: serverMode, ...(serverMode === 'observe' ? { containerName: 'jenkins-managed-api' } : {}), config: {} });
   return { source, application, environment, service, server, agent, target };
@@ -240,7 +240,7 @@ test('前端目标按服务类型固定配置，旧 Agent 拒绝任务，版本�
   assert.equal(target.config.health.url, 'https://app.example.com/'); assert.equal(target.containerName, null);
   assert.equal(target.config.runtimeImage, undefined);
   await assert.rejects(f.deployment.createTask({ targetId: target.id, action: 'deploy' }), /升级/);
-  await f.deployment.heartbeat(base.agent.serverId, { version: '1.1.0', capabilities: ['static-site-v1'], containers: [] });
+  await f.deployment.heartbeat(base.agent.serverId, { version: '1.6.1', capabilities: ['static-site-v1', 'source-archive-recovery-v1'], containers: [] });
   await assert.rejects(f.deployment.createTask({ targetId: target.id, action: 'restart' }), /无需重启/);
   await assert.rejects(f.deployment.saveEntity('services', { ...frontend, kind: 'java' }, frontend.id), /不能切换类型/);
   const first = await ready(f, target.id); await f.deployment.claim(base.agent.serverId);
@@ -721,7 +721,7 @@ test('固定别名独立于历史配置，唯一且不可变，任务下发需�
   await f.deployment.saveEntity('targets', { ...input, networkIdentity: binding }, a.target.id);
   assert.notEqual(f.deployment.configKey(a.target.id), oldKey);
   await assert.rejects(f.deployment.createTask({ targetId: a.target.id, action: 'restart' }), /升级目标 Agent/);
-  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['fixed-network-alias-v1'] });
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['fixed-network-alias-v1', 'source-archive-recovery-v1'] });
   const restart = await ready(f, a.target.id, 'restart');
   assert.deepEqual(restart.networkIdentity, binding);
   assert.deepEqual(restart.config, first.config);
@@ -734,7 +734,7 @@ test('固定别名独立于历史配置，唯一且不可变，任务下发需�
   assert.deepEqual(preserved.networkIdentity, binding);
   const otherService = await f.deployment.saveEntity('services', { applicationId: a.application.id, name: '另一服务', module: 'other' });
   await assert.rejects(f.deployment.saveEntity('targets', { ...input, serviceId: otherService.id, networkIdentity: binding }), /已被其他部署位置使用/);
-  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['fixed-network-alias-v1'] });
+  await f.deployment.heartbeat(a.agent.serverId, { capabilities: ['fixed-network-alias-v1', 'source-archive-recovery-v1'] });
   const rollback = await ready(f, a.target.id, 'rollback', { releaseId: first.id });
   assert.deepEqual(rollback.networkIdentity, binding);
   assert.deepEqual(rollback.config, first.config);

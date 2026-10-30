@@ -694,7 +694,8 @@ export class DeploymentService extends EventEmitter {
       if (input.revision && input.action === 'deploy') snapshot.revision = input.revision;
       const archived = release && this.archives.releaseSource(release);
       const supportsRecovery = find(data.servers, target.serverId).capabilities?.includes('source-archive-recovery-v1');
-      if (input.action === 'rollback' && archived && input.requestId && !supportsRecovery) throw new HttpError(409, '请先升级目标 Agent 以支持源码档案恢复；旧客户端仍可使用原本机缓存恢复接口');
+      if (input.action === 'rollback' && !archived) throw new HttpError(409, '中心历史源码 ZIP 不可用，不能回滚');
+      if (input.action === 'rollback' && !supportsRecovery) throw new HttpError(409, '请先升级目标 Agent 以支持中心源码 ZIP 回滚');
       const task = { id: taskId, targetId: target.id, applicationId: target.applicationId, serverId: target.serverId, action: input.action, status: input.action === 'deploy' ? 'preparing' : 'queued', stage: 'queued',
         detailedAgentStages: find(data.servers, target.serverId).capabilities?.includes('delivery-telemetry-v1') || false,
         networkIdentity: structuredClone(target.networkIdentity || null),

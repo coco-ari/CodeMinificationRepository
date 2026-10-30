@@ -53,6 +53,18 @@ test('损坏缓存重新下载固定包，中心校验失败不留缓存和半�
   await assert.rejects(readFile(f.destination('bad')), { code: 'ENOENT' });
 });
 
+test('显式回滚即使本机有相同源码缓存也完整下载中心原ZIP', async t => {
+  const f = await fixture(t), client = f.client();
+  await client.download(f.task, f.destination('published'));
+  await client.download({ ...f.task, action: 'rollback' }, f.destination('rollback'));
+  assert.deepEqual(f.requests.map(r => r[0]), ['GET', 'GET']);
+  assert.deepEqual(await readFile(f.destination('rollback')), f.content);
+  f.badBody = true;
+  await assert.rejects(client.download({ ...f.task, action: 'rollback' }, f.destination('broken-rollback')), /ZIP 校验失败/);
+  await assert.rejects(readFile(f.destination('broken-rollback')), { code: 'ENOENT' });
+  assert.deepEqual(f.requests.map(r => r[0]), ['GET', 'GET', 'GET']);
+});
+
 test('缓存不能绕过撤销授权、错误摘要和外部下载地址', async t => {
   const f = await fixture(t), client = f.client(); await client.download(f.task, f.destination('first'));
   f.status = 403;

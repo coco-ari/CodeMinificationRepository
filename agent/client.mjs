@@ -24,7 +24,8 @@ export class CenterClient {
     if (!/^[a-f0-9]{64}$/.test(task.source.sha256) || !/^[a-f0-9]{40,64}$/.test(task.source.revision)) throw new Error('源码摘要或版本无效');
     const started = performance.now();
     const key = createHash('sha256').update(JSON.stringify([this.url.origin, task.applicationId || task.targetId, task.sourceProjectId || task.targetId, task.source.revision, task.source.sha256])).digest('hex');
-    const available = this.cache && await this.cache.has(key).catch(() => false);
+    // 显式回滚重新取得中心原 ZIP，普通发布保留经过中心授权校验的源码缓存。
+    const available = task.action !== 'rollback' && this.cache && await this.cache.has(key).catch(() => false);
     if (available) {
       // 即使命中缓存，也必须通过当前任务授权，不能用缓存绕过撤销或跨 Agent 隔离。
       const response = await fetch(url, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(this.timeoutMs), headers: { authorization: `Bearer ${this.token}` } });

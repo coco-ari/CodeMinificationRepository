@@ -119,10 +119,10 @@ test('前端通过共用站点目录发布、单独回退，不创建或重启 W
   const count = f.docker.calls.length; await f.executor.execute(f.staticTask('static-1')); assert.equal(f.docker.calls.length, count);
   await f.executor.execute(f.staticTask('static-2'));
   assert.equal((await f.journal.get('static-2')).status, 'succeeded');
-  await f.executor.execute(f.staticTask('static-rollback', { action: 'rollback', release: first }));
+  await f.executor.execute(f.staticTask('static-rollback', { action: 'rollback', release: first, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-static' } }));
   assert.equal((await f.journal.get('static-rollback')).status, 'succeeded');
   assert.equal((await f.executor.current(f.staticTask('unused'))).id, 'static-rollback');
-  assert.equal((await f.executor.current(f.staticTask('unused'))).artifactId, first.id);
+  assert.equal((await f.executor.current(f.staticTask('unused'))).artifact, 'static/target-1/static-rollback');
   assert.equal(f.docker.containers.get('shared-nginx'), shared);
   assert.equal(f.docker.calls.some(args => ['compose', 'build', 'restart'].includes(args[0])), false);
   for (const args of f.docker.calls.filter(args => args[0] === 'run')) {
@@ -273,7 +273,7 @@ test('完整发布与手动回退、重启使用目标专属资源，重复任�
   const release1 = (await journal.get('task-1')).result.release;
   const calls = docker.calls.length; await executor.execute(task()); assert.equal(docker.calls.length, calls);
   await executor.execute(task('task-2')); assert.equal((await journal.get('task-2')).status, 'succeeded');
-  await executor.execute(task('rollback-1', { action: 'rollback', release: release1 }));
+  await executor.execute(task('rollback-1', { action: 'rollback', release: release1, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-first' } }));
   assert.equal((await journal.get('rollback-1')).status, 'succeeded'); assert.equal((await executor.current(task())).id, 'rollback-1');
   await executor.execute(task('restart-1', { action: 'restart' })); assert.equal((await journal.get('restart-1')).status, 'succeeded');
   assert.equal(docker.containers.get('jenkins-service'), jenkins);
@@ -313,6 +313,22 @@ test('Java 历史镜像清理后使用原源码和历史配置重建，不覆盖
   assert.equal((await f.journal.get('original')).result.release.image, original.image);
   assert.notEqual(result.result.release.image, original.image);
   const count = f.docker.calls.length; await f.executor.execute(restore); assert.equal(f.docker.calls.length, count);
+});
+
+test('本机镜像存在时中心ZIP缺失或下载失败也不能旁路回滚', async t => {
+  const f = await fixture(t);
+  await f.executor.execute(task('published'));
+  const original = (await f.journal.get('published')).result.release;
+  const before = f.docker.calls.filter(call => call[0] === 'compose').length;
+  await f.executor.execute(task('missing-zip', { action: 'rollback', release: original, config: original.config, recoveryAllowed: true }));
+  assert.equal((await f.journal.get('missing-zip')).status, 'failed');
+  assert.match((await f.journal.get('missing-zip')).result.error, /中心历史源码 ZIP/);
+  f.client.download = async () => { throw new Error('中心源码下载失败'); };
+  await f.executor.execute(task('download-failed', { action: 'rollback', release: original, config: original.config, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-published' } }));
+  assert.equal((await f.journal.get('download-failed')).status, 'failed');
+  assert.equal((await f.executor.current(task())).id, original.id);
+  assert.equal(f.docker.calls.filter(call => call[0] === 'compose').length, before);
+  assert.ok(f.docker.images.has(original.image));
 });
 
 test('Java 回退重建失败不切换，健康失败恢复当前版本，缺失基线先重建并保护', async t => {
@@ -387,12 +403,13 @@ test('历史默认保留最近两个成功节点，不清理外部镜像和数�
   assert.equal(docker.calls.some(c => c.includes('prune') || (c[0] === 'volume' && c[1] === 'rm')), false);
 });
 
-test('成功链按回退操作顺序保留，重启和失败不挤掉节点，旧产物从源码重建', async t => {
+test('成功链按回退操作顺序保留，即使本机镜像存在也从中心历史ZIP重建', async t => {
   const f = await fixture(t), versions = {};
   for (const id of ['a', 'b', 'c']) { await f.executor.execute(task(id)); versions[id] = (await f.journal.get(id)).result.release; }
   assert.deepEqual([...f.docker.images.keys()].sort(), ['cmr/target-1:b', 'cmr/target-1:c']);
-  await f.executor.execute(task('restore-b', { action: 'rollback', release: versions.b }));
-  assert.equal((await f.journal.get('restore-b')).result.recoveryMethod, 'cache');
+  await f.executor.execute(task('restore-b', { action: 'rollback', release: versions.b, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-b' } }));
+  assert.equal((await f.journal.get('restore-b')).result.recoveryMethod, 'rebuild');
+  assert.notEqual((await f.journal.get('restore-b')).result.release.image, versions.b.image);
   assert.deepEqual((await f.executor.localReleases(task())).map(r => r.id).sort(), ['c', 'restore-b']);
   await f.executor.execute(task('restart-b', { action: 'restart' }));
   f.docker.unhealthyTask = 'failed'; await f.executor.execute(task('failed'));
@@ -401,20 +418,20 @@ test('成功链按回退操作顺序保留，重启和失败不挤掉节点，�
   await f.executor.execute(task('restore-a', { action: 'rollback', release: versions.a, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-a' } }));
   assert.equal((await f.journal.get('restore-a')).result.recoveryMethod, 'rebuild');
   assert.deepEqual((await f.executor.localReleases(task())).map(r => r.id).sort(), ['restore-a', 'restore-b']);
-  assert.deepEqual([...f.docker.images.keys()].sort(), ['cmr/target-1:b', 'cmr/target-1:restore-a']);
+  assert.deepEqual([...f.docker.images.keys()].sort(), ['cmr/target-1:restore-a', 'cmr/target-1:restore-b']);
 });
 
-test('前端缓存回退生成新节点并共享目录，超过保留范围的目录被回收', async t => {
+test('前端从中心历史ZIP回退生成独立目录，超过保留范围的目录被回收', async t => {
   const f = await staticFixture(t), versions = {};
   for (const id of ['a', 'b', 'c']) { await f.executor.execute(f.staticTask(id)); versions[id] = (await f.journal.get(id)).result.release; }
   const files = () => readdir(path.join(f.publicRoot, 'target-1', 'releases'));
   assert.deepEqual((await files()).sort(), ['b', 'c']);
-  await f.executor.execute(f.staticTask('restore-b', { action: 'rollback', release: versions.b }));
-  assert.equal((await f.journal.get('restore-b')).result.release.artifactId, 'b');
-  assert.deepEqual((await files()).sort(), ['b', 'c']);
+  await f.executor.execute(f.staticTask('restore-b', { action: 'rollback', release: versions.b, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-b' } }));
+  assert.equal((await f.journal.get('restore-b')).result.release.artifact, 'static/target-1/restore-b');
+  assert.deepEqual((await files()).sort(), ['c', 'restore-b']);
   await f.executor.execute(f.staticTask('restore-a', { action: 'rollback', release: versions.a, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-a' } }));
   assert.equal((await f.journal.get('restore-a')).result.recoveryMethod, 'rebuild');
-  assert.deepEqual((await files()).sort(), ['b', 'restore-a']);
+  assert.deepEqual((await files()).sort(), ['restore-a', 'restore-b']);
 });
 
 test('成功结果写入中断不会提前清理旧节点，失败恢复后链条保持不变', async t => {
@@ -607,7 +624,7 @@ test('固定网络别名在重启及历史回退中保留，不覆盖历史配�
   assert.equal(f.docker.calls.filter(args => args[0] === 'restart').length, 0);
   await f.executor.execute({ ...restart, id: 'restart-again' });
   assert.equal(f.docker.calls.filter(args => args[0] === 'restart').length, 1);
-  const rollback = task('rollback-alias', { action: 'rollback', networkIdentity: binding, release: previous });
+  const rollback = task('rollback-alias', { action: 'rollback', networkIdentity: binding, release: previous, recoveryAllowed: true, source: { ...task().source, archiveId: 'archive-alias' } });
   await f.executor.execute(rollback);
   assert.equal((await f.journal.get(rollback.id)).status, 'succeeded');
   const manifest = composeFor(f.identity, rollback, previous);

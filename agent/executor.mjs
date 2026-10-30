@@ -156,22 +156,8 @@ export class DeploymentExecutor {
   }
   async recoverRelease(task, requested, backend = this) {
     if (!requested?.id) throw new Error('必须指定需要回退的成功版本');
-    const candidates = await this.localReleases(task);
-    const local = candidates.find(item => artifactId(item) === artifactId(requested));
-    const agrees = local && local.image === requested.image && local.artifact === requested.artifact && local.revision === requested.revision && JSON.stringify(normalizeConfig(local.config)) === JSON.stringify(normalizeConfig(requested.config))
-      && (!local.sourceSha256 || !task.source || local.sourceSha256 === task.source.sha256);
-    if (agrees) {
-      try {
-        await backend.requireRelease(task, local);
-        await this.event(task, 'building', '已核验历史产物，直接恢复本机缓存');
-        return { ...local, id: task.id, artifactId: artifactId(local), createdAt: new Date().toISOString(), restoredFromReleaseId: requested.id, recoveryMethod: 'cache' };
-      } catch (error) {
-        // 只把明确的产物缺失作为重建条件，归属错误和 Docker 连接错误继续中止。
-        if (error.code !== 'ENOENT' && !/历史镜像不存在|静态版本文件缺失/.test(error.message)) throw error;
-      }
-    }
-    if (!task.recoveryAllowed || !task.source?.archiveId) throw new Error('历史产物已缺失，且当前任务没有中心源码重建授权；请升级 Agent 或恢复源码档案');
-    await this.event(task, 'building', '历史产物已清理，正在使用中心原源码包和历史配置重新构建');
+    if (!task.recoveryAllowed || !task.source?.archiveId) throw new Error('当前任务缺少中心历史源码 ZIP 或重建授权，不能回滚；请升级 Agent 或恢复源码档案');
+    await this.event(task, 'building', '正在使用中心保存的历史源码 ZIP 和该版本部署参数重新构建');
     const release = await backend.build(task, normalizeConfig(requested.config));
     return { ...release, restoredFromReleaseId: requested.id, recoveryMethod: 'rebuild' };
   }
