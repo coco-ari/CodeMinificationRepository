@@ -4,7 +4,13 @@
 
 ## 当前发行与产品模式
 
-当前镜像 `autoops:deployment-query-ed778705`，镜像 ID 为 `sha256:76d49909663231701ad37847174adc83a32f74c0682ffb2489ccfe939baa2ab2`，网页和网关修复提交 `ed778705a82c434d2ad5e1a400f7623a59c22e89`，来自 `feat/workspace-deployment-validation`。本批复用同仓同分支的查询、独立刷新并准确区分网关超时和操作结果未知；此前下拉滚动修复保留。Worker 与 Agent 仍为 `8f0a78d4c78d0294caa0e6b389a3cda5f71fda51`，环境服务导航、静态／Java 配置、固定提交发布及环境权限继续保留。不包含另一任务未提交的 RPC／删除回执改动。
+当前镜像 `autoops:select-blank-30ffdb9b`，ID `sha256:9da37a7ba2d855169da1968854e258c67334e0226d5b112539bcf068e3d5a441`，网页提交 `30ffdb9b07d30f6c5e6f698f6132e83ef99a44bc`。修复分支弹窗白色渐变盖住列表，仅更新网页及发行清单，网关保留 `ed778705`，Worker／Agent 保留 `8f0a78d4`。两容器精简模式、模型及其他 Compose 配置保持，原五服务、位置、版本及绑定摘要一致，代理未重建。内外网健康，入口均为 `/assets/agentDemo-qRxs8Y5q.js`；实站桌面、短窗口及窄屏滚动、选择、重开和前后截图通过。
+
+构建材料为 `/opt/autoops/build/select-blank-30ffdb9b/`，发行与配置备份为 `/opt/autoops/releases/select-blank-30ffdb9b/`。网页归档 SHA256 `f939611c1cb2f0c222c270b5624fdb07caceb1d56019052e54eac60ac94c5d22`。需要回退时，先等待问答、工作区及部署事务结束，将 `.env` 的 `AUTOOPS_IMAGE` 改回 `autoops:deployment-query-ed778705`，执行 `docker compose config -q` 和 `docker compose up -d --force-recreate --wait --wait-timeout 180 gateway worker`，再验证健康；不恢复旧数据库。本批未实际触发程序回退，具体证据及边界见[白屏修复记录](../../../docs/validation/deployment-workbench.md#2026-10-30-分支弹窗白屏)。
+
+### 上一发行：部署查询复用
+
+上一镜像 `autoops:deployment-query-ed778705`，镜像 ID 为 `sha256:76d49909663231701ad37847174adc83a32f74c0682ffb2489ccfe939baa2ab2`，网页和网关修复提交 `ed778705a82c434d2ad5e1a400f7623a59c22e89`，来自 `feat/workspace-deployment-validation`。该批复用同仓同分支的查询、独立刷新并准确区分网关超时和操作结果未知；此前下拉滚动修复保留。Worker 与 Agent 仍为 `8f0a78d4c78d0294caa0e6b389a3cda5f71fda51`，环境服务导航、静态／Java 配置、固定提交发布及环境权限继续保留。不包含另一任务未提交的 RPC／删除回执改动。
 
 构建材料为 `/opt/autoops/build/deployment-query-ed778705/`，发行记录为 `/opt/autoops/releases/deployment-query-ed778705/`。网页归档 SHA256 为 `19209588985d3ed5e97ad827adde8f69d74e928bb3c44f26bfcc9c49eb0d4a3b`；基于固定的上一发行镜像，仅替换已校验网页、网关传输文件和对应发行清单绑定，原生依赖及 Worker 文件不变。网关及 Worker 已切换，代理保持原容器。两容器实际产品模式均为 `project-assistant-lite-v1`；Compose 除镜像外逐项比较保持一致。上一完整发行材料保留在 `/opt/autoops/releases/deployment-workbench-8f0a78d4/`。
 
