@@ -74,7 +74,7 @@ function ScrollArea({
   }, [overflowEdgeThreshold]);
   return renderWithPrimitive(ScrollAreaPrimitive.Root, {
     ...props, ...stateDataAttributes(state),
-    className: cn("relative size-full min-h-0 overflow-hidden", radius === "none" ? "rounded-none" : "rounded-[inherit]", resolveStateValue(className, state)),
+    className: cn("relative flex size-full min-h-0 flex-col overflow-hidden", radius === "none" ? "rounded-none" : "rounded-[inherit]", resolveStateValue(className, state)),
     style: resolveStateValue(style, state),
     children: <ScrollState value={state}>
       <ScrollAreaPrimitive.Viewport
@@ -83,7 +83,7 @@ function ScrollArea({
         {...stateDataAttributes(state)}
         {...(viewportTabIndex === undefined ? {} : { tabIndex: viewportTabIndex })}
         className={cn(
-          "h-full max-h-[inherit] overflow-auto overscroll-contain rounded-[inherit] outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-has-overflow-x:overscroll-x-contain",
+          "h-full min-h-0 max-h-[inherit] flex-1 overflow-auto overscroll-contain rounded-[inherit] outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background data-has-overflow-x:overscroll-x-contain",
           chainVerticalScroll && "overscroll-y-auto",
           scrollFade &&
             "mask-t-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-start)))] mask-b-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-y-end)))] mask-l-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-start)))] mask-r-from-[calc(100%-min(var(--fade-size),var(--scroll-area-overflow-x-end)))] focus-visible:mask-none [--fade-size:1.5rem]",
