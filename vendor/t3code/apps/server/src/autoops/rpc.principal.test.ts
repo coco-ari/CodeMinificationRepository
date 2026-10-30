@@ -2,8 +2,8 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-const mocks = vi.hoisted(() => ({ principal: { id: "actor-a", username: "actor-a" }, authorize: vi.fn() }));
-vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ getThreadBinding: () => undefined, principalForNativeSession: () => mocks.principal, visibleCustomerProviderInstances: () => ({ owned: ["customer-owned-codex"], shared: [] }), customerRegistry: { listDevices: () => [{ id: "owned" }] } }) }));
+const mocks = vi.hoisted(() => ({ principal: { id: "actor-a", username: "actor-a" }, authorize: vi.fn(), markThreadDeleted: vi.fn() }));
+vi.mock("../../../../../../agent-demo/t3-adapters/access.mjs", () => ({ configuredAutoOpsAccess: () => ({ markThreadDeleted: mocks.markThreadDeleted, getThreadBinding: () => undefined, principalForNativeSession: () => mocks.principal, visibleCustomerProviderInstances: () => ({ owned: ["customer-owned-codex"], shared: [] }), customerRegistry: { listDevices: () => [{ id: "owned" }] } }) }));
 vi.mock("../../../../../../agent-demo/t3-adapters/rpc-policy.mjs", () => ({
   authorizeAutoOpsRpc: mocks.authorize,
   filterAutoOpsShell: (_access: unknown, _principal: unknown, value: unknown) => value,
@@ -11,12 +11,51 @@ vi.mock("../../../../../../agent-demo/t3-adapters/rpc-policy.mjs", () => ({
   prepareAutoOpsRpcPayload: (_access: unknown, _principal: unknown, _method: string, value: unknown) => value,
 }));
 vi.mock("./resources.ts", () => ({ resourceRequest: () => undefined }));
+// 本组只验证 RPC 身份和回执，不初始化问答执行及外部中间件驱动。
+vi.mock("./questionCommands.ts", async () => {
+  const Effect = await import("effect/Effect");
+  return { validateQuestionCommand: () => Effect.void };
+});
 vi.mock("./personalPreferences.ts", () => ({ overlayPersonalResult: (_session: string, _method: string, value: unknown) => value }));
 import { protectHandlers, authorize } from "./rpc.ts";
 import { CurrentAutoOpsPrincipal } from "./RequestScope.ts";
 import { PRODUCT_CAPABILITY_DISABLED, PRODUCT_CAPABILITY_MESSAGE } from "../../../../../../agent-demo/t3-adapters/product-profile.mjs";
 
 describe("AutoOps signed attachment RPC identity", () => {
+  it("删除清理绑定后仍返回成功回执，后续读取继续拒绝", async () => {
+    let deleted = false;
+    mocks.markThreadDeleted.mockReset();
+    mocks.authorize.mockReset().mockImplementation(() => {
+      if (deleted) throw new Error("会话绑定已清理");
+    });
+    const payload = { type: "thread.delete", threadId: "thread-a" };
+    const handlers = protectHandlers({
+      "orchestration.dispatchCommand": (_payload: object) => Effect.sync(() => {
+        deleted = true;
+        return { sequence: 42 };
+      }),
+      "orchestration.getThreadProjection": (_payload: object) => Effect.succeed({}),
+    }, "native-session", () => Stream.empty);
+    await expect(Effect.runPromise(authorize("native-session", "orchestration.dispatchCommand", payload).pipe(
+      Effect.andThen(handlers["orchestration.dispatchCommand"](payload)),
+    ))).resolves.toEqual({ sequence: 42 });
+    expect(mocks.markThreadDeleted).toHaveBeenCalledWith("thread-a");
+    await expect(Effect.runPromise(handlers["orchestration.getThreadProjection"]({ threadId: "thread-a" }))).rejects.toThrow("会话绑定已清理");
+  });
+
+  it("未授权删除不能执行处理器或返回成功回执", async () => {
+    mocks.authorize.mockReset().mockImplementation(() => { throw new Error("无删除权限"); });
+    const remove = vi.fn(() => ({ sequence: 42 }));
+    const payload = { type: "thread.delete", threadId: "foreign-thread" };
+    const handlers = protectHandlers({
+      "orchestration.dispatchCommand": (_payload: object) => Effect.sync(remove),
+    }, "native-session", () => Stream.empty);
+    await expect(Effect.runPromise(authorize("native-session", "orchestration.dispatchCommand", payload).pipe(
+      Effect.andThen(handlers["orchestration.dispatchCommand"](payload)),
+    ))).rejects.toThrow("AutoOps access denied or session expired.");
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("文件选择的授权载荷和交给原生持久化的载荷一致", async () => {
     mocks.authorize.mockReset();
     const path = "autoops/p-autoops/inputs/selected/src/client.ts";

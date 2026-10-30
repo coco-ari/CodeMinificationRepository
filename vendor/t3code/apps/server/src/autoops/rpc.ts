@@ -51,12 +51,16 @@ function projectResult(sessionId: string, method: string, payload: unknown, resu
   const access = configuredAutoOpsAccess();
   if (!access) return result;
   const principal = access.principalForNativeSession(sessionId);
+  if (method === "orchestration.dispatchCommand" && (payload as {type: string}).type === "thread.delete") {
+    // 接单与执行前已授权；成功回执不能依赖删除清理已移除的绑定。
+    // 上方仍核对登录有效性，其他结果与后续读取继续执行完整授权。
+    access.markThreadDeleted((payload as {threadId: string}).threadId);
+    return result;
+  }
   authorizeAutoOpsRpc(access, principal, method, payload);
   if (['server.getConfig','subscribeServerConfig','server.refreshProviders'].includes(method)) {
     return filterBusinessProviderResult(process.env.AUTOOPS_T3_DATA_DIR!,projectCustomerProviderResult(access,principal,result),{access,principal});
   }
-  if (method === "orchestration.dispatchCommand" && (payload as {type: string}).type === "thread.delete")
-    access.markThreadDeleted((payload as {threadId: string}).threadId);
   if (method === "orchestration.subscribeShell" || method === "orchestration.subscribeArchivedShell")
     return filterAutoOpsShellItem(access, principal, result);
   if (method === "orchestration.getArchivedShellSnapshot") return filterAutoOpsShell(access, principal, result);
