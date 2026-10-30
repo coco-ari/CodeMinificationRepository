@@ -52,8 +52,14 @@ async function checkScrollable(selector: string) {
   const viewport = document.querySelector<HTMLElement>(selector)!
   await act(() => {
     viewport.scrollTop = 0
-    viewport.scrollBy({ top: 350, behavior: 'instant' })
   })
+  // 原生对齐浮层可能先用滚动量扩展高度，待布局稳定后继续验证视口位移。
+  for (let attempt = 0; attempt < Math.ceil(window.innerHeight / 350) + 2 && viewport.scrollTop <= 100; attempt++) {
+    await act(async () => {
+      viewport.scrollBy({ top: 350, behavior: 'instant' })
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    })
+  }
   await expect.poll(() => viewport.scrollTop).toBeGreaterThan(100)
   const bounds = viewport.getBoundingClientRect()
   expect(bounds.top).toBeGreaterThanOrEqual(0)
@@ -96,6 +102,28 @@ it('设置弹窗中的长选择列表有独立滚动区域', async () => {
   await checkScrollable('[data-slot="select-list"]')
   await userEvent.keyboard('{Escape}')
   await expect.element(page.getByRole('combobox', { name: '分支', exact: true })).toHaveFocus()
+})
+
+it('长列表滚动箭头的渐变只覆盖边缘，不遮住整个分支列表', async () => {
+  await using screen = await render(
+    <div style={{ padding: 70, width: 800 }}>
+      <Branches selected={35} />
+    </div>,
+  )
+  await screen.getByRole('combobox', { name: '分支', exact: true }).click()
+  await expect.poll(() => document.querySelectorAll('[data-slot^="select-scroll-"]').length).toBe(2)
+  for (const arrow of document.querySelectorAll<HTMLElement>('[data-slot^="select-scroll-"]')) {
+    const gradientHeight = parseFloat(getComputedStyle(arrow, '::before').height)
+    expect(gradientHeight).toBeGreaterThan(0)
+    expect(gradientHeight).toBeLessThanOrEqual(arrow.clientHeight * 2 + 1)
+  }
+  const viewport = document.querySelector<HTMLElement>('[data-slot="select-list"]')!
+  await act(() => { viewport.scrollTop = viewport.scrollHeight })
+  await page.getByRole('option', { name: '分支-59', exact: true }).click()
+  await screen.getByRole('combobox', { name: '分支', exact: true }).click()
+  await expect.element(page.getByRole('option', { name: '分支-59', exact: true })).toHaveFocus()
+  await userEvent.keyboard('{Escape}')
+  await expect.element(screen.getByRole('combobox', { name: '分支', exact: true })).toHaveFocus()
 })
 
 it('长操作菜单可滚动并选到末项', async () => {
