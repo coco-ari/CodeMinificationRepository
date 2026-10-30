@@ -4,13 +4,13 @@
 
 ## 当前发行与产品模式
 
-当前镜像 `autoops:popup-scroll-9dccad31`，镜像 ID 为 `sha256:297d289d9372494889e5ed0707bb180d10642f1325af6c38856011e483bdbfeb`，网页修复提交 `9dccad316dba67a758681607ad9847edbfff67c5`，来自 `feat/workspace-deployment-validation`。本批修复分支等共享下拉和搜索列表无法滚动的问题；后端与 Agent 保持上一发行 `8f0a78d4c78d0294caa0e6b389a3cda5f71fda51`，环境服务导航、静态／Java 配置、固定提交发布及环境权限继续保留。不包含另一任务未提交的 RPC／删除回执改动。
+当前镜像 `autoops:deployment-query-ed778705`，镜像 ID 为 `sha256:76d49909663231701ad37847174adc83a32f74c0682ffb2489ccfe939baa2ab2`，网页和网关修复提交 `ed778705a82c434d2ad5e1a400f7623a59c22e89`，来自 `feat/workspace-deployment-validation`。本批复用同仓同分支的查询、独立刷新并准确区分网关超时和操作结果未知；此前下拉滚动修复保留。Worker 与 Agent 仍为 `8f0a78d4c78d0294caa0e6b389a3cda5f71fda51`，环境服务导航、静态／Java 配置、固定提交发布及环境权限继续保留。不包含另一任务未提交的 RPC／删除回执改动。
 
-构建材料为 `/opt/autoops/build/popup-scroll-9dccad31/`，发行记录为 `/opt/autoops/releases/popup-scroll-9dccad31/`。网页归档 SHA256 为 `c0ba0c2084072f7e614cabd458cd2e3a4252435daf9e81ad21873970a34a79bc`；基于固定的上一发行镜像，只替换已校验网页和对应发行清单绑定，原生依赖及后端文件不变。网关及 Worker 已切换，代理保持原容器。两容器环境变量及登录 bootstrap 均为 `project-assistant-lite-v1`；Compose 除镜像外逐项比较保持一致。上一完整发行材料保留在 `/opt/autoops/releases/deployment-workbench-8f0a78d4/`。
+构建材料为 `/opt/autoops/build/deployment-query-ed778705/`，发行记录为 `/opt/autoops/releases/deployment-query-ed778705/`。网页归档 SHA256 为 `19209588985d3ed5e97ad827adde8f69d74e928bb3c44f26bfcc9c49eb0d4a3b`；基于固定的上一发行镜像，仅替换已校验网页、网关传输文件和对应发行清单绑定，原生依赖及 Worker 文件不变。网关及 Worker 已切换，代理保持原容器。两容器实际产品模式均为 `project-assistant-lite-v1`；Compose 除镜像外逐项比较保持一致。上一完整发行材料保留在 `/opt/autoops/releases/deployment-workbench-8f0a78d4/`。
 
-本批真实 Chromium 验证 55 项分支列表：桌面滚轮从 659 滚到 259，390px 窄屏从 1381 滚到 981，滚动后可点击选择，Esc 恢复焦点，无脚本错误。内外网健康正常，入口均引用 `/assets/agentDemo-D-HOTsjf.js`。五个服务、部署位置、版本链及项目节点绑定摘要前后一致；模型未改。完整自动检查、历史页面结果及未测边界见[部署工作台验收](../../../docs/validation/deployment-workbench.md)。appSphere Agent 未升级，也未重新发布业务服务；独立静态／Java 的新发布及恢复验收仍待完成。
+本批真实 Chromium 验证五服务切换，仅查询 1 次分支、1 次历史；首次远端读取后，其他服务切换为 89–126 毫秒。手动刷新分别增加一次对应请求，可继续选择固定 SHA，无脚本错误。内外网健康正常，入口均引用 `/assets/agentDemo-Teikqfwr.js`。五个服务、部署位置、版本链及项目节点绑定摘要前后一致；模型未改。完整自动检查、历史页面结果及未测边界见[部署工作台验收](../../../docs/validation/deployment-workbench.md)。appSphere Agent 未升级，也未重新发布业务服务；独立静态／Java 的新发布及恢复验收仍待完成。
 
-本批不重建数据库。回退时先确认没有执行中的问答、工作区或部署任务，仅将 `.env` 的 `AUTOOPS_IMAGE` 改回保留的 `autoops:deployment-workbench-8f0a78d4`，运行 `docker compose config -q`，再执行 `docker compose up -d --force-recreate --wait --wait-timeout 180 gateway worker` 并复核健康。保留当前数据、模型及显式产品模式，不恢复旧数据库；配置修改前备份与本次 `deployment.json` 在发行目录。此次没有实际触发程序回退，不将备份和恢复命令视作回退验收通过。
+本批不重建数据库。回退时先确认没有执行中的问答、工作区或部署任务，仅将 `.env` 的 `AUTOOPS_IMAGE` 改回保留的 `autoops:popup-scroll-9dccad31`，运行 `docker compose config -q`，再执行 `docker compose up -d --force-recreate --wait --wait-timeout 180 gateway worker` 并复核健康。保留当前数据、模型及显式产品模式，不恢复旧数据库；配置修改前备份与本次 `deployment.json` 在发行目录。此次没有实际触发程序回退，不将备份和恢复命令视作回退验收通过。
 
 ## 节点接入与存储配置
 
