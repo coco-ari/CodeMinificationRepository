@@ -1,6 +1,8 @@
 # 当前运行模块与检查入口
 
-2026-10-31 思考强度回显已修复：当前 workbench 101 镜像为 `autoops:effort-label-a0e3b7de`。3 项直接回归与正式站桌面／窄屏四档强度、草稿及焦点检查通过；内外网健康、页面摘要和默认用户发行清单通过，非网页内容保持，见[修复证据](validation/composer-layout.md#思考强度回显修复)。
+2026-10-31 无环境文件引用已修复：当前 workbench 101 镜像为 `autoops:mention-no-environment-5af9987f`。无环境资源地址恢复识别，项目资料候选仍经服务端范围授权；40 项资源与查询回归、后端目录／越权检查、正式站桌面与窄屏的 `@` 引用及内外网健康通过。非网页内容保持，见[本批记录](validation/composer-layout.md#无环境引用项目文件)。
+
+2026-10-31 思考强度回显已修复：当批 workbench 101 镜像为 `autoops:effort-label-a0e3b7de`。3 项直接回归与正式站桌面／窄屏四档强度、草稿及焦点检查通过；内外网健康、页面摘要和默认用户发行清单通过，非网页内容保持，见[修复证据](validation/composer-layout.md#思考强度回显修复)。
 
 2026-10-31 问答输入区已发布：当批 workbench 101 镜像为 `autoops:composer-layout-bfa35487`，范围与可选助手预设并入原生输入工具栏。48 项相关浏览器测试、正式站三种窗口与浅深色、菜单和焦点验收及内外网健康通过；本批仅替换网页，非网页清单与两个 Agent 保持上一发行，详见[输入区验收](validation/composer-layout.md)。
 
