@@ -27,9 +27,9 @@
 
 主回归的原失败来自旧展示预期、缺少当前发布源码/权限投影的夹具，以及焦点和浏览位置问题。更新夹具时保留保存次数、原 UUID 恢复、撤权拒绝、返回范围和焦点等业务断言；节点虚构接入口令改为相对当前时刻的正常十分钟窗口，未修改过期拒绝逻辑。静态设备详情检查改为真实浏览器滚动与跨电脑目录隔离，保留原两项场景。
 
-额外运行的 `MessagesTimeline.browser.test.tsx` 全量为 78 项，35 通过、43 失败，涉及旧英文文案、按钮名称和旧展示预期；此文件及对应时间线实现本批未修改，失败未删除，不能将该全量集记为通过。独立阅读位置检查和真实问答结果分别列明，不以其代替全部上游时间线覆盖。
+额外运行的 `MessagesTimeline.browser.test.tsx` 初次全量为 78 项，35 通过、43 失败。已将旧英文控件名称及文案预期同步到仓库现有中文界面，保留全部键盘、消息展开、选区复制、PDF 预览下载、工具/子任务分组、回调次数和阅读位置断言；最终完整 78 项全部通过。没有删除失败场景、增加测试兼容层或修改时间线实现。该收尾仅修改测试和验收文档，正式镜像及已发布前端实现保持 `4f591884`。
 
-原始日志位于忽略目录 `.deployment/frontend-native/`，主要为 `full-regression-final.log`、`final-business-slice.log`、`deployment-return-final.log`、`chat-final.log`、`timeline-scroll-final.log`、`web-types-release.log`、`build-release.log` 及 `runtime-boundaries-final.log`。未完成的独立基线副本复测不作为通过证据。
+原始日志位于忽略目录 `.deployment/frontend-native/`，主要为 `full-regression-final.log`、`final-business-slice.log`、`deployment-return-final.log`、`chat-final.log`、`timeline-translated-final.log`、`timeline-scroll-final.log`、`web-types-release.log`、`build-release.log` 及 `runtime-boundaries-final.log`。原失败日志保留；未完成的独立基线副本复测不作为通过证据。
 
 ## 真实站点验收
 

@@ -221,7 +221,7 @@ describe('MessagesTimeline work rows', () => {
     expect(row.getAttribute('aria-expanded')).toBe('false')
     await press(row)
     expect(row.getAttribute('aria-expanded')).toBe('true')
-    const openDiff = screen.button('Open diff')
+    const openDiff = screen.button('打开差异')
     await press(openDiff)
     expect(onOpenTurnDiff).toHaveBeenCalledWith('run-1', 'src/index.ts')
     expect(onOpenTurnDiff).toHaveBeenCalledTimes(1)
@@ -308,8 +308,8 @@ describe('MessagesTimeline work rows', () => {
         toolLifecycleStatus: 'failed',
       }),
     ])
-    const summary = screen.button(/^Ran 2 commands/)
-    expect(summary.getAttribute('aria-label')).toContain('tool call failed')
+    const summary = screen.button(/^已运行 2 条命令/)
+    expect(summary.getAttribute('aria-label')).toContain('工具调用失败')
     expect(screen.text()).not.toContain('vp lint')
     await click(summary)
     await vi.waitFor(() => expect(screen.text()).toContain('vp lint'))
@@ -331,7 +331,7 @@ describe('MessagesTimeline work rows', () => {
         toolLifecycleStatus: 'completed',
       }),
     ])
-    expect(screen.button('Ran 2 commands and received 1 update')).toBeDefined()
+    expect(screen.button('已运行 2 条命令，已收到 1 条更新')).toBeDefined()
   })
 
   it('marks a failed tool inside an expanded work log', async () => {
@@ -344,9 +344,9 @@ describe('MessagesTimeline work rows', () => {
         detail: 'No files found',
       }),
     ])
-    await click(screen.button(/^Received 1 update/))
+    await click(screen.button(/^已收到 1 条更新/))
     await vi.waitFor(() =>
-      expect(screen.container.querySelector('[aria-label="Tool call failed"]')).not.toBeNull(),
+      expect(screen.container.querySelector('[aria-label="工具调用失败"]')).not.toBeNull(),
     )
   })
 
@@ -371,7 +371,7 @@ describe('MessagesTimeline work rows', () => {
       ],
       { workspaceRoot: 'C:/Users/mike/dev-stuff/t3code' },
     )
-    await click(screen.button(/^Received 1 update/))
+    await click(screen.button(/^已收到 1 条更新/))
     await vi.waitFor(() => expect(screen.text()).toContain('t3code/apps/web/src/session-logic.ts'))
     expect(screen.text()).not.toContain(
       'C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts',
@@ -400,8 +400,8 @@ describe('MessagesTimeline work rows', () => {
         projectedItem: v2Item('dynamic_tool', item),
       }),
     ])
-    await click(screen.button(/^Received 1 update/))
-    await vi.waitFor(() => expect(screen.text()).toContain('Read a T3 thread'))
+    await click(screen.button(/^已收到 1 条更新/))
+    await vi.waitFor(() => expect(screen.text()).toContain('读取 对话'))
     expect(screen.text()).not.toContain('mcp__t3-code__t3_thread_read')
   })
 
@@ -455,8 +455,8 @@ describe('MessagesTimeline work rows', () => {
     ['- first\n- second', 'first second', 0],
     ['first  \nsecond', 'first second', 0],
     ['![image description](image.png)', 'image description', 0],
-    ['![](image.png)', 'Thought', 0],
-    ['---', 'Thought', 0],
+    ['![](image.png)', '思考', 0],
+    ['---', '思考', 0],
   ] as const)(
     'shows plain text for a V2 reasoning preview: %s',
     async (markdown, expected, strongCount) => {
@@ -502,7 +502,7 @@ describe('MessagesTimeline messages', () => {
       )
       const diagram = await vi.waitFor(
         () => {
-          const svg = screen.container.querySelector('[aria-label="Expand diagram"] svg')
+          const svg = screen.container.querySelector('[aria-label="展开图表"] svg')
           expect(svg).not.toBeNull()
           return svg!
         },
@@ -525,7 +525,7 @@ describe('MessagesTimeline messages', () => {
         range.setStart(labelText, 2)
         range.setEnd(labelText, 5)
       } else {
-        await click(screen.button('Show code'))
+        await click(screen.button('显示代码'))
         const code = screen.container.querySelector('pre code')!
         const firstToken = document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode()!
         range.setStart(firstToken, 0)
@@ -573,7 +573,7 @@ describe('MessagesTimeline messages', () => {
     ])
     await vi.waitFor(
       () =>
-        expect(screen.container.querySelector('[aria-label="Expand diagram"] svg')).not.toBeNull(),
+        expect(screen.container.querySelector('[aria-label="展开图表"] svg')).not.toBeNull(),
       { timeout: 10_000 },
     )
     const paragraphs = [...screen.container.querySelectorAll('p')]
@@ -680,16 +680,16 @@ describe('MessagesTimeline messages', () => {
 
   it('collapses long user messages behind a toggle and keeps their copy button', async () => {
     await using screen = await renderTimeline([message(longText())])
-    const toggle = screen.button('Show full message')
+    const toggle = screen.button('显示完整消息')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.buttons('Copy message')).toHaveLength(1)
+    expect(screen.buttons('复制消息')).toHaveLength(1)
     await click(toggle)
-    expect(screen.button('Show less').getAttribute('aria-expanded')).toBe('true')
+    expect(screen.button('收起').getAttribute('aria-expanded')).toBe('true')
   })
 
   it('does not offer a collapse toggle for short user messages', async () => {
     await using screen = await renderTimeline([message('Short prompt.')])
-    expect(screen.buttons(/Show full message|Show less/)).toHaveLength(0)
+    expect(screen.buttons(/显示完整消息|收起/)).toHaveLength(0)
   })
 
   it('identifies user-role messages sent by another agent', async () => {
@@ -697,18 +697,18 @@ describe('MessagesTimeline messages', () => {
       await using screen = await renderTimeline([
         message('Review this area', { createdBy: 'agent', creationSource: 'provider' }),
       ])
-      expect(screen.text()).toContain('Sent by another agent')
+      expect(screen.text()).toContain('由其他 Agent 发送')
     }
     await using screen = await renderTimeline([message('Review this area')])
-    expect(screen.text()).not.toContain('Sent by another agent')
+    expect(screen.text()).not.toContain('由其他 Agent 发送')
   })
 
   it('shows steer intent ahead of committed user messages', async () => {
     await using screen = await renderTimeline([
       message('Adjust the current turn', { inputIntent: 'steer' }),
     ])
-    expect(screen.text().indexOf('Steer')).toBeGreaterThanOrEqual(0)
-    expect(screen.text().indexOf('Steer')).toBeLessThan(
+    expect(screen.text().indexOf('引导当前执行')).toBeGreaterThanOrEqual(0)
+    expect(screen.text().indexOf('引导当前执行')).toBeLessThan(
       screen.text().indexOf('Adjust the current turn'),
     )
   })
@@ -730,7 +730,7 @@ describe('MessagesTimeline messages', () => {
     expect(screen.text()).toContain('Terminal 1 lines 1-5')
     expect(screen.text()).toContain("yoo what's")
     expect(screen.text()).not.toContain('terminal_context')
-    expect(screen.buttons('Show full message')).toHaveLength(1)
+    expect(screen.buttons('显示完整消息')).toHaveLength(1)
   })
 
   it('renders chips for standalone element-pick context messages', async () => {
@@ -825,8 +825,8 @@ describe('MessagesTimeline messages', () => {
     )
     expect(screen.text()).toContain('Current response remains visible')
     expect(screen.text()).not.toContain('Partial response from the old attempt')
-    const disclosure = screen.button(/Superseded attempt/)
-    expect(disclosure.textContent).toContain('Cut off by a steer')
+    const disclosure = screen.button(/已被替代的尝试/)
+    expect(disclosure.textContent).toContain('被引导消息中断')
     await click(disclosure)
     expect(screen.text()).toContain('Partial response from the old attempt')
   })
@@ -847,7 +847,7 @@ describe('MessagesTimeline messages', () => {
       ],
       { onForkFromRun },
     )
-    await click(screen.button('Fork from this response'))
+    await click(screen.button('从此回答创建分支'))
     expect(onForkFromRun).toHaveBeenCalledWith({ sourceThreadId: 'thread-1', runId: 'run-1' })
   })
 
@@ -873,8 +873,8 @@ describe('MessagesTimeline messages', () => {
         ],
       },
     )
-    expect(screen.text()).toContain('1 changed file')
-    await click(screen.button('Open diff'))
+    expect(screen.text()).toContain('1 个已更改文件')
+    await click(screen.button('打开差异'))
     expect(onOpenTurnDiff).toHaveBeenCalledWith(runId, 'README.md')
   })
 })
@@ -900,14 +900,14 @@ describe('MessagesTimeline attachments', () => {
         previewUrl: 'https://environment.test/api/assets/report.pdf',
       }),
     ])
-    expect(screen.buttons('Preview report.pdf')).toHaveLength(1)
-    expect(screen.buttons('Download report.pdf')).toHaveLength(1)
+    expect(screen.buttons('预览 report.pdf')).toHaveLength(1)
+    expect(screen.buttons('下载 report.pdf')).toHaveLength(1)
     expect(screen.container.querySelector('img[alt="report.pdf"]')).toBeNull()
   })
 
   it('does not create a download URL before the download is requested', async () => {
     await using screen = await renderTimeline([withAttachment({ id: 'attachment-report-pdf' })])
-    expect(screen.buttons('Download report.pdf')).toHaveLength(1)
+    expect(screen.buttons('下载 report.pdf')).toHaveLength(1)
     expect(screen.container.querySelector('a[href]')).toBeNull()
   })
 
@@ -916,7 +916,7 @@ describe('MessagesTimeline attachments', () => {
       withAttachment({ id: 'composer-local-report', downloadable: false }),
     ])
     expect(screen.text()).toContain('report.pdf')
-    expect(screen.buttons('Download report.pdf')).toHaveLength(0)
+    expect(screen.buttons('下载 report.pdf')).toHaveLength(0)
   })
 
   it('renders unknown attachment types as inert rows instead of crashing', async () => {
@@ -929,7 +929,7 @@ describe('MessagesTimeline attachments', () => {
       }),
     ])
     expect(screen.text()).toContain('voice-memo.ogg')
-    expect(screen.buttons('Download voice-memo.ogg')).toHaveLength(0)
+    expect(screen.buttons('下载 voice-memo.ogg')).toHaveLength(0)
     expect(screen.container.querySelector('a[href], img')).toBeNull()
   })
 
@@ -985,7 +985,7 @@ describe('MessagesTimeline history and thread links', () => {
         '[data-assistant-citation-source="citation-source"]',
       )
     await vi.waitFor(() => expect(screen.text()).toContain('Investigation complete.'))
-    expect(screen.buttons(/^Worked/)).toHaveLength(1)
+    expect(screen.buttons(/^执行用时/)).toHaveLength(1)
     expect(source()).toBeNull()
 
     await screen.rerender(
@@ -1035,10 +1035,10 @@ describe('MessagesTimeline history and thread links', () => {
       },
     })
     expect(screen.text()).toContain('Earlier activity could not be loaded.')
-    expect(screen.text().indexOf('Load earlier turns')).toBeLessThan(
+    expect(screen.text().indexOf('加载更早轮次')).toBeLessThan(
       screen.text().indexOf('Recent activity'),
     )
-    await click(screen.button('Load earlier turns'))
+    await click(screen.button('加载更早轮次'))
     expect(onLoadEarlier).toHaveBeenCalledOnce()
   })
 
@@ -1051,9 +1051,9 @@ describe('MessagesTimeline history and thread links', () => {
         onLoadEarlier: () => {},
       },
     })
-    expect(screen.text()).toContain('Loading earlier turns…')
-    expect(screen.button('Load earlier turns')).toHaveProperty('disabled', true)
-    expect(screen.text()).not.toContain('Send a message to start the conversation.')
+    expect(screen.text()).toContain('正在加载更早轮次…')
+    expect(screen.button('加载更早轮次')).toHaveProperty('disabled', true)
+    expect(screen.text()).not.toContain('发送消息以开始对话.')
   })
 
   it('opens the parent thread from the top of an empty subagent timeline', async () => {
@@ -1062,10 +1062,10 @@ describe('MessagesTimeline history and thread links', () => {
       onOpenThread,
       parentThreadLink: { threadId: ThreadId.make('thread-parent'), title: 'Architecture audit' },
     })
-    expect(screen.text()).toContain('Subagent of')
+    expect(screen.text()).toContain('此对话的子任务：')
     expect(screen.text()).toContain('Architecture audit')
-    expect(screen.text()).not.toContain('Send a message to start the conversation')
-    await click(screen.button('Open parent thread'))
+    expect(screen.text()).not.toContain('发送消息以开始对话')
+    await click(screen.button('打开父对话'))
     expect(onOpenThread).toHaveBeenCalledWith('thread-parent')
   })
 
@@ -1167,7 +1167,7 @@ describe('MessagesTimeline history and thread links', () => {
     )
     expect(screen.text()).toContain('Claude research thread')
     expect(screen.text()).not.toContain('Work Log')
-    await click(screen.button('Open Claude research thread'))
+    await click(screen.button('打开 Claude research thread'))
     expect(onOpenThread).toHaveBeenCalledWith('thread-2')
   })
 
@@ -1224,7 +1224,7 @@ describe('MessagesTimeline history and thread links', () => {
           toModel: 'claude-fable-5',
         }),
       )
-      expect(screen.text()).toContain('Context handoff')
+      expect(screen.text()).toContain('上下文交接')
       expect(screen.text()).toContain('GPT 5.6 Sol')
       expect(screen.text()).toContain('Claude Fable 5')
       expect(screen.text()).not.toContain('Full conversation context')
@@ -1332,9 +1332,9 @@ describe('MessagesTimeline subagents', () => {
         ),
         { onOpenThread },
       )
-      const children = () => screen.buttons('Open Package audit')
-      // A settled run folds its work behind a "Worked for" summary.
-      const fold = screen.buttons(/^Worked for/)[0]
+      const children = () => screen.buttons('打开 Package audit')
+      // 已结束的轮次先展开执行用时摘要，再检查子任务分组。
+      const fold = screen.buttons(/^执行用时/)[0]
       if (fold) await click(fold)
       if (count > 1) {
         expect(children()).toHaveLength(0)
