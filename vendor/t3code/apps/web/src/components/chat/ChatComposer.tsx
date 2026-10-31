@@ -2973,11 +2973,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     iconOnlyBlockCount: restingControlsIconOnlyBlockCount,
     controlsVisible: restingControlsVisible,
   } = useRestingComposerControlsLayout(restingControlsHost ?? inlineRestingControlsHost);
+  // 内部范围工具栏已自行分行，保留强度文字并让模型名称先收缩。
   const {
     attachControls: attachExpandedComposerControls,
     hiddenBlockCount: expandedControlsHiddenBlockCount,
     iconOnlyBlockCount: expandedControlsIconOnlyBlockCount,
-  } = useRestingComposerControlsLayout(null, true);
+  } = useRestingComposerControlsLayout(null, !contextControls);
   const pendingPrimaryAction = activePendingProgress
     ? {
         questionIndex: activePendingProgress.questionIndex,

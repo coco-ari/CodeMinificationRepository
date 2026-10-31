@@ -605,6 +605,33 @@ it.each([false, true])(
   },
 );
 
+it.each([1280, 390])("宽度 %s 的输入栏选择思考强度后持续显示当前值并保留草稿", async (width) => {
+  await page.viewport(width, 600);
+  const f = setup(`visible-effort-${width}`, true);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(
+    <div style={{ maxWidth: 768, marginInline: "auto" }}><Harness fixture={f} /></div>,
+  );
+  await editor().fill("切换思考强度后继续编辑");
+  for (const [label, value] of [["低", "low"], ["高", "high"]] as const) {
+    await screen.getByRole("button", { name: value === "low" ? "高" : "低", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: label, exact: true }).click();
+    await expect.element(editor()).toHaveFocus();
+    const trigger = screen.getByRole("button", { name: label, exact: true });
+    await expect.element(trigger.getByText(label, { exact: true })).toBeVisible();
+    const button = trigger.element(), text = button.querySelector<HTMLElement>("[data-composer-control-label]")!;
+    const controls = button.closest<HTMLElement>('[data-chat-composer-controls="left"]')!;
+    expect(text.getBoundingClientRect().width).toBeGreaterThanOrEqual(text.scrollWidth - 1);
+    expect(button.getBoundingClientRect().left).toBeGreaterThanOrEqual(controls.getBoundingClientRect().left);
+    expect(button.getBoundingClientRect().right).toBeLessThanOrEqual(controls.getBoundingClientRect().right);
+    expect(f.handle.current?.getSendContext().selectedModelSelection.options).toContainEqual({ id: "reasoningEffort", value });
+    await expect.element(editor()).toHaveTextContent("切换思考强度后继续编辑");
+  }
+  expect(f.bindings).toHaveLength(0);
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  await page.screenshot({ path: `__screenshots__/composer-effort-${width}.png` });
+});
+
 it("有调整权者使用实际思考快捷键，点击发送使用改后的值，切换预设再装载原值", async () => {
   await page.viewport(1280, 800);
   const f = setup("actual-composer-adjust", true);
