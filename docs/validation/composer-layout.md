@@ -27,11 +27,15 @@
 
 2026-10-31 用户反馈选择强度后不显示当前值。实际输入器在 736px 桌面输入表面将强度文字收成图标，390px 窄屏则收入更多菜单，新增两项浏览器回归均复现失败。内部范围工具栏已有分行与模型名称收缩，现不再套用原紧凑工具栏的强度隐藏测量；原生独立输入器保持原流程。
 
-桌面／窄屏连续选择低、高、文字实际可见且完整位于工具栏内、草稿与焦点保留，以及原快捷键发送合同共 3 项通过；Web 类型、网页构建及 ChatView 编译器 2 项通过。本地证据位于 `.deployment/effort-label/`，正式站结果随本次修复发布核验。
+桌面／窄屏连续选择低、高、文字实际可见且完整位于工具栏内、草稿与焦点保留，以及原快捷键发送合同共 3 项通过；Web 类型、网页构建及 ChatView 编译器 2 项通过。本地证据位于 `.deployment/effort-label/`。
+
+修复提交 `a0e3b7de9b0dd34045bec48ad0ecc71d802ff3e2` 已部署为当前镜像 `autoops:effort-label-a0e3b7de`。正式站 1440×600 浅色与 390×600 深色逐项选择“低／中／高／很高”，强度文字均完整可见且位于工具栏内，没有横向溢出，草稿与菜单焦点恢复正常；页面异常与会话绑定提交为 0，不发送真实问答。报告与截图位于 `live-after/`。
+
+内外网健康均为 200、`workerReachable=true`，页面 SHA256 均为 `deacd740720ca4645e59e1e7d6318402ec493dbeccbea47d7cf053ba2fa720d1`。默认 node 用户发行清单验证通过，gateway、worker、proxy 健康；非网页文件与符号链接均与上一镜像相同，原业务配置与版本记录摘要保持。网页归档 SHA256 为 `b3f502b599198c3c5b0f1f4dae941a570abcfbcef1e18393d3acf14e83e8db6d`，源码归档为 `82a0c4f0c4a24b95e49863fea854f0e607cac532e794e26b2373e2a9d485d58f`。虚拟机发行与验收资料位于 `/opt/autoops/releases/effort-label-a0e3b7de/`，构建位于同名 `build` 目录。
 
 ## 正式发布
 
-2026-10-31 已将应用提交 `bfa35487b89c4d7da4175832acaee6349788cc00` 部署至 workbench 101，当前镜像为 `autoops:composer-layout-bfa35487`。仅在 `autoops:direct-question-f39d9828` 上替换网页并更新发行清单；运行清单中全部非 `dist/web/` 文件及符号链接与原镜像一致，不夹带当前分支的其他后端或 Agent 功能。
+2026-10-31 已将应用提交 `bfa35487b89c4d7da4175832acaee6349788cc00` 部署至 workbench 101，当批镜像为 `autoops:composer-layout-bfa35487`。仅在 `autoops:direct-question-f39d9828` 上替换网页并更新发行清单；运行清单中全部非 `dist/web/` 文件及符号链接与原镜像一致，不夹带当前分支的其他后端或 Agent 功能。
 
 切换前检查没有活动问答、工作区或部署事务；gateway、worker 与原 proxy 均 healthy，proxy 未重建。默认 node 用户发行校验通过，两个 Agent 包摘要不变。原 5 个服务、5 个目标、14 条发布记录与业务配置摘要保持，摘要为 `8d9e9a6875cd790f956698be53e22f559c003fdc1364ca66a833bb4b828a584e`。
 

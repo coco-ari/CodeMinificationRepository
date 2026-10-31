@@ -1,6 +1,8 @@
 # 当前运行模块与检查入口
 
-2026-10-31 问答输入区已发布：当前 workbench 101 镜像为 `autoops:composer-layout-bfa35487`，范围与可选助手预设并入原生输入工具栏。48 项相关浏览器测试、正式站三种窗口与浅深色、菜单和焦点验收及内外网健康通过；本批仅替换网页，非网页清单与两个 Agent 保持上一发行，详见[输入区验收](validation/composer-layout.md)。
+2026-10-31 思考强度回显已修复：当前 workbench 101 镜像为 `autoops:effort-label-a0e3b7de`。3 项直接回归与正式站桌面／窄屏四档强度、草稿及焦点检查通过；内外网健康、页面摘要和默认用户发行清单通过，非网页内容保持，见[修复证据](validation/composer-layout.md#思考强度回显修复)。
+
+2026-10-31 问答输入区已发布：当批 workbench 101 镜像为 `autoops:composer-layout-bfa35487`，范围与可选助手预设并入原生输入工具栏。48 项相关浏览器测试、正式站三种窗口与浅深色、菜单和焦点验收及内外网健康通过；本批仅替换网页，非网页清单与两个 Agent 保持上一发行，详见[输入区验收](validation/composer-layout.md)。
 
 2026-10-31 平台问答直接配置已发布：`f39d9828` 部署为 `autoops:direct-question-f39d9828`。有调整权者可不选助手直接配置，受限成员及用户电脑继续保留预设和来源授权；最终配置、持续撤权检查、48 项 Linux 隔离回归和 66 项 Web 回归见[本批记录](validation/direct-question.md)。真实模型问答与刷新验收的状态以该记录为准。
 
