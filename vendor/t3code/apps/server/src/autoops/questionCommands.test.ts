@@ -22,10 +22,10 @@ vi.mock(import('../../../../../../agent-demo/t3-adapters/access.mjs'), async ori
 import { createAutoOpsAccess, initializeAutoOpsAccessSchema } from '../../../../../../agent-demo/t3-adapters/access.mjs'
 import { withCommandPrincipal } from './RequestScope.ts'
 const model = (effort = 'low') => ({ instanceId: 'codex', model: 'actual-model', options: [{ id: 'reasoningEffort', value: effort }] })
-function setup() {
+function setup(direct = false) {
   const dataDir = mkdtempSync(join(tmpdir(), 'question-command-')), sessions = new DatabaseSync(':memory:'), bindings = new DatabaseSync(':memory:')
   sessions.exec('CREATE TABLE sessions(token TEXT PRIMARY KEY, uid TEXT, csrf TEXT, expires INTEGER)'); initializeAutoOpsAccessSchema(bindings)
-  const project: AutoOpsProject = { id: 'project', name: '项目', documents: [], resources: [], environments: [], memberIds: ['reader'], memberships: [{ userId: 'reader', role: 'reader', workspaceAccess: 'internal', environmentIds: [], status: 'active', canAdjustChat: false }] }
+  const project: AutoOpsProject = { id: 'project', name: '项目', documents: [], resources: [], environments: [], memberIds: ['reader'], memberships: [{ userId: 'reader', role: 'reader', workspaceAccess: 'internal', environmentIds: [], status: 'active', canAdjustChat: direct }] }
   const agents: AutoOpsAgent[] = [{ id: 'a-project', name: '项目开发', description: '', projectIds: ['project'], capabilities: [] }]
   let assistants: ReturnType<typeof createAssistantDirectory>
   const access = createAutoOpsAccess({ sessionDb: sessions, bindingDb: bindings, now: () => 1000, catalog: { users: [{ id: 'admin', name: '管理员', role: 'admin' }, { id: 'reader', name: '成员', role: 'member' }], projects: [project], agents }, questions: () => assistants })
@@ -37,9 +37,9 @@ function setup() {
   const preset = assistants.save('admin', 'project', null, { requestId: 'preset', expectedRevision: 0, value: { name: '只读助手', description: '', instructions: '', enabled: true, configuration: { agentId: 'a-project', executionBinding: { kind: 'platform' }, environmentId: null, workspaceType: 'internal', visibility: 'project', model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: 'low' }, skillIds: [] } } })
   const assignment = { requestId: 'assignment', expectedRevision: 0, target: { kind: 'role', id: 'reader' }, assistantIds: [preset.id], defaultAssistantId: preset.id }
   assistants.assign('admin', 'project', assignment)
-  access.reserveThread(principal, { threadId: 'question-thread', projectId: 'project', environmentId: null, agentId: 'a-project', visibility: 'project', workspaceType: 'internal', question: { assistantId: preset.id, presetRevision: 1, configuration: preset.configuration } }); access.markThreadAccepted('question-thread')
+  access.reserveThread(principal, { threadId: 'question-thread', projectId: 'project', environmentId: null, agentId: 'a-project', visibility: 'project', workspaceType: 'internal', question: direct ? { assistantId: null, presetRevision: null, configuration: preset.configuration } : { assistantId: preset.id, presetRevision: 1, configuration: preset.configuration } }); access.markThreadAccepted('question-thread')
   mocks.access = access
-  return { access, assistants, assignment, [Symbol.dispose]() { mocks.access = undefined; assistants.close(); sessions.close(); bindings.close(); rmSync(dataDir, { recursive: true, force: true }) } }
+  return { access, assistants, assignment, project, [Symbol.dispose]() { mocks.access = undefined; assistants.close(); sessions.close(); bindings.close(); rmSync(dataDir, { recursive: true, force: true }) } }
 }
 function projection(effort: string) {
   const at = DateTime.makeUnsafe('2026-10-26T00:00:00Z')
@@ -49,6 +49,16 @@ function projection(effort: string) {
 }
 const command = (type: string) => ({ type, commandId: 'native-command', threadId: 'question-thread', runId: 'queued-run', text: '继续原问题', attachments: [] })
 const provide = (read: Effect.Effect<C.OrchestrationV2ThreadProjection>) => Layer.mock(Threads.ThreadManagementService)({ getThreadProjection: () => read })
+
+it.each(['queued-run.edit', 'prepared-run.retry', 'queue.resume', 'message.dispatch'])('直接配置的 %s 使用原生参数且撤回调整权限后禁止继续', async type => {
+  using f = setup(true); const native = vi.fn()
+  const run = () => withCommandPrincipal(Effect.sync(native), 'reader-native', 'orchestration.dispatchCommand', command(type)).pipe(Effect.provide(provide(Effect.succeed(projection('high')))))
+  await Effect.runPromise(run())
+  expect(native).toHaveBeenCalledTimes(1)
+  f.project.memberships![0]!.canAdjustChat = false
+  await expect(Effect.runPromise(run())).rejects.toThrow('当前成员须使用已分配的助手预设')
+  expect(native).toHaveBeenCalledTimes(1)
+})
 
 it.each(['queued-run.edit', 'prepared-run.retry', 'queue.resume', 'message.dispatch'])('省略模型的 %s 按原生已固定参数拒绝越过受限预设，拒绝前不执行或固定编辑者', async type => {
   using f = setup(); const native = vi.fn()

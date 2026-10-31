@@ -96,7 +96,7 @@ export function resolveSkillLibrary(
     workspaceType: 'internal' | 'external'
     assistantId?: string
     skillIds?: readonly string[]
-    question?: { assistantId?: string; configuration: { skillIds: readonly string[] } }
+    question?: { assistantId?: string | null; configuration: { skillIds: readonly string[] } }
   },
 ): ResolvedLibrarySkill[]
 export function readSkillLibraryVersion(

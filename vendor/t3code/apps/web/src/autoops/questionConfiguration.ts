@@ -1,9 +1,9 @@
 import { ProviderInstanceId, type ModelSelection, type ServerProvider } from '@t3tools/contracts'
-import type { AssistantSelection } from '../../../../../../autoops/contracts/assistants.ts'
+import type { QuestionSelection } from '../../../../../../autoops/contracts/assistants.ts'
 import { readAutoOpsHost } from './hostSnapshot'
 import type { AutoOpsThreadScope } from './threadScopes'
 
-export function questionModelSelection(question: AssistantSelection): ModelSelection {
+export function questionModelSelection(question: QuestionSelection): ModelSelection {
   const model = question.configuration.model
   return {
     instanceId: ProviderInstanceId.make(model.instanceId),
@@ -52,6 +52,12 @@ export function questionSendDisabledReason(scope: AutoOpsThreadScope | undefined
   // 共享原电脑会话的目录与执行授权由会话接口复核，不要求成员另建助手分配。
   if (scope?.scopeState === 'locked' && scope.executionBinding?.kind === 'customer' &&
       scope.visibility === 'project' && scope.ownerId !== host.principal.id) return null
+  if (scope?.question?.assistantId === null) {
+    if (host.projects.find(project => project.id === scope.projectId)?.capabilities?.['chat.configure'] !== true)
+      return '当前成员须使用已分配的助手预设，请新建对话。'
+    if (scope.executionBinding?.kind !== 'platform') return '使用电脑请选择对应助手。'
+    return null
+  }
   const state = host.projects.find((project) => project.id === scope?.projectId)?.assistants
   if (!state) return '助手目录尚未就绪，请刷新项目配置。'
   if (!state.canAdjust && !state.ready)

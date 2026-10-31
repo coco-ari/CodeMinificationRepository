@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- 真实登录、SQLite 和路由使用独立临时数据验证。
 import { expect, it, vi } from 'vite-plus/test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -19,8 +19,10 @@ import {
 } from '../../../../../../../agent-demo/t3-adapters/access.mjs'
 import { skillsRoutes } from './skills.ts'
 import { conversationsRoutes } from './conversations.ts'
+import { createAssistantDirectory, questionConfigurationPolicy } from '../../../../../../../agent-demo/t3-adapters/assistants/index.ts'
+import { readBusinessModels } from '../../../../../../../agent-demo/t3-adapters/models.mjs'
 
-function setup() {
+function setup(withQuestions = false) {
   const dataDir = mkdtempSync(join(tmpdir(), 'assistant-http-')),
     sessions = new DatabaseSync(':memory:'),
     bindings = new DatabaseSync(':memory:')
@@ -66,12 +68,23 @@ function setup() {
       },
     ],
   }
+  let directory: ReturnType<typeof createAssistantDirectory> | undefined
   const access = createAutoOpsAccess({
     sessionDb: sessions,
     bindingDb: bindings,
     catalog,
     now: () => 1000,
+    ...(withQuestions ? { questions: () => directory! } : {}),
   })
+  if (withQuestions) {
+    mkdirSync(join(dataDir, 't3'))
+    writeFileSync(join(dataDir, 't3/models-catalog.json'), JSON.stringify({ version: 1, source: 'https://isolated.invalid/models', models: [{ id: 'actual-model', name: '隔离模型', reasoningLevels: [], defaultReasoning: null, inputModalities: ['text'] }] }))
+    directory = createAssistantDirectory({ dataDir,
+      membership: (actor, project) => access.requireProjectActionForActor(actor, project, 'chat.use'),
+      manage: (actor, project) => access.requireProjectActionForActor(actor, project, 'project.manage'),
+      validate: questionConfigurationPolicy({ projects: () => catalog.projects, agents: () => catalog.agents, models: () => readBusinessModels(dataDir, 'actual-model'), skills: () => [], customers: () => access.customerRegistry }), validateTarget: () => {},
+    })
+  }
   for (const id of ['admin', 'reader'])
     access.recordNativeSession(access.authenticateCookie(`demo_session=${id}`), id)
   vi.stubEnv('AUTOOPS_T3_DATA_DIR', dataDir)
@@ -125,6 +138,7 @@ function setup() {
     handle: app.handler,
     async [Symbol.asyncDispose]() {
       await app.dispose()
+      directory?.close()
       vi.unstubAllEnvs()
       sessions.close()
       bindings.close()
@@ -140,6 +154,23 @@ const binding = {
   workspaceType: 'internal',
   visibility: 'private',
 }
+it('无助手目录的管理员通过真实 HTTP 直接配置并恢复同一会话，受限成员与电脑伪造仍拒绝', async () => {
+  await using f = setup(true)
+  const question = { assistantId: null, presetRevision: null, configuration: {
+    agentId: 'a-project', executionBinding: { kind: 'platform' }, environmentId: null,
+    workspaceType: 'internal', visibility: 'private', model: { instanceId: 'codex', model: 'actual-model', reasoningEffort: null }, skillIds: [],
+  } }
+  const response = await f.handle(f.request('/autoops/thread-bindings', { ...binding, question }))
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({ binding: { ...binding, question, ownerId: 'admin' } })
+  f.access.markThreadAccepted(binding.threadId)
+  expect(await (await f.handle(f.request(`/autoops/thread-bindings/${binding.threadId}`))).json()).toMatchObject({ binding: { question, scopeState: 'locked' } })
+  const restricted = await f.handle(f.request('/autoops/thread-bindings', { ...binding, threadId: 'restricted-direct', question }, 'reader'))
+  expect(restricted.status).toBe(403)
+  expect(await restricted.json()).toMatchObject({ code: 'QUESTION_CONFIGURATION_FORBIDDEN' })
+  expect((await f.handle(f.request('/autoops/thread-bindings', { ...binding, threadId: 'forged-direct', question: { ...question, configuration: { ...question.configuration, agentId: 'forged' } } }))).status).toBe(403)
+  expect((await f.handle(f.request('/autoops/thread-bindings', { ...binding, threadId: 'invalid-source', question: { ...question, presetRevision: 1 } }))).status).toBe(400)
+})
 it('会话绑定真实 HTTP 解析共享合同，合法范围保持身份，篡改与无效字段返回 400', async () => {
   await using f = setup()
   const response = await f.handle(f.request('/autoops/thread-bindings', binding))

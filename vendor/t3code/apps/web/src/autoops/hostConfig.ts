@@ -13,6 +13,7 @@ export {
   readKnownAutoOpsThreadScope,
   sameAutoOpsThreadScope,
   scopeFromAssistant,
+  scopeForDirectQuestion,
   readAutoOpsThreadScope,
   setAutoOpsThreadScope,
   inheritAutoOpsThreadScope,

@@ -9,7 +9,7 @@ export interface AutoOpsT3Bootstrap {
   readonly gatewayBasePath: string
   readonly csrfToken: string
   /** 保留协议字段名；允许模型选择时，此值仅为默认模型。 */
-  readonly fixedModel: { readonly instanceId: string; readonly model: string }
+  readonly fixedModel: { readonly instanceId: string; readonly model: string; readonly reasoningEffort?: import('../../../../../../autoops/contracts/assistants.ts').QuestionConfiguration['model']['reasoningEffort'] }
   readonly canCreateProject?: boolean
   readonly canManageDeploymentNodes?: boolean
   readonly canManageAccounts?: boolean

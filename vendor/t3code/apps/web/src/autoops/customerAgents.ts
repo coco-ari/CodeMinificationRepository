@@ -1,7 +1,7 @@
 import { autoOpsRequest, AutoOpsRequestError, isAutoOpsAccessError } from './apiClient'
 import { decodeContract } from '../../../../../../autoops/contracts/index.ts'
 import { CustomerAssistantRuntimeRequest, type CustomerAssistantRuntime } from '../../../../../../autoops/contracts/customer-assistant-runtime.ts'
-import type { AssistantSelection } from '../../../../../../autoops/contracts/assistants.ts'
+import type { QuestionSelection } from '../../../../../../autoops/contracts/assistants.ts'
 import { ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import type { ProviderInstanceEntry } from "~/providerInstances";
@@ -66,7 +66,7 @@ export async function loadCustomerCapabilities(target: CustomerTarget, signal?: 
     )
   ).capabilities;
 }
-export async function loadCustomerAssistantRuntime(projectId: string, question: AssistantSelection, signal?: AbortSignal) {
+export async function loadCustomerAssistantRuntime(projectId: string, question: QuestionSelection, signal?: AbortSignal) {
   const actorId = readAutoOpsHost()?.principal.id
   const input = decodeContract(CustomerAssistantRuntimeRequest, { projectId, question })
   const target = question.configuration.executionBinding

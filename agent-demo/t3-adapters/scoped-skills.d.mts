@@ -1,5 +1,5 @@
 import type { AutoOpsAccess, AutoOpsPrincipal, ThreadBinding } from './access.mjs';
-export interface SkillScope {assistantId?:string;skillIds?:readonly string[];question?: {assistantId?:string;configuration:{skillIds:readonly string[]}};projectId:string;agentId:string;workspaceType?:'internal'|'external';workspaceVersionId?:string;environmentId?:string|null;threadId?:string;nativeParentThreadId?:string}
+export interface SkillScope {assistantId?:string;skillIds?:readonly string[];question?: {assistantId?:string|null;configuration:{skillIds:readonly string[]}};projectId:string;agentId:string;workspaceType?:'internal'|'external';workspaceVersionId?:string;environmentId?:string|null;threadId?:string;nativeParentThreadId?:string}
 export interface ScopedSkill {id:string;skillId:string;name:string;versionId:string;contentHash:string;packageRoot:string;path:string;description:string;displayName:string;enabled:true;readiness:'ready';files:{path:string;size:number;sha256:string;mime?:string;binary?:boolean}[];tools?:string[]}
 export interface SkillContext {snapshotId:string;scope:SkillScope;skills:ScopedSkill[];physicalCwd:string;cwd:string}
 export function prepareScopedBusinessSkills(directory:string,binding:SkillScope,options?:{lock?:boolean}):SkillContext;

@@ -126,6 +126,23 @@ it('唯一默认缺失时不选择列表首项，即使有一个候选也不能�
   expect(policy.questionSendDisabledReason(scope)).toBe('请管理员设置默认助手')
 })
 
+it('有调整权限者默认直接配置，不依赖助手目录就绪，收回权限后保留配置并阻止发送', async () => {
+  const host = await import('./hostConfig'), policy = await import('./questionConfiguration')
+  const value = bootstrap(true)
+  Object.assign(value.projects[0]!.assistants, { items: [], ready: false, defaultAssistantId: null })
+  host.installAutoOpsHost(value, 'https://work.test')
+  const scope = host.readAutoOpsThreadScope('direct-empty-directory', 'project')!
+  expect(scope).toMatchObject({ environmentId: null, workspaceType: 'internal', visibility: 'private',
+    question: { assistantId: null, presetRevision: null, configuration: { executionBinding: { kind: 'platform' }, skillIds: [] } } })
+  expect(policy.questionSendDisabledReason(scope)).toBeNull()
+  expect(policy.questionSendDisabledReason({ ...scope, scopeState: 'submitting' })).toBeNull()
+  value.projects[0]!.capabilities['chat.configure'] = false
+  host.installAutoOpsHost(value, 'https://work.test')
+  expect(policy.questionSendDisabledReason({ ...scope, scopeState: 'locked' })).toContain('须使用已分配的助手预设')
+  expect(() => host.scopeForDirectQuestion('project')).toThrow('须使用已分配的助手预设')
+  expect(scope.question?.assistantId).toBeNull()
+})
+
 it('新建发送带入实际调整后的模型和强度，既不覆盖为预设，也不取平台默认', async () => {
   vi.stubGlobal('window', { localStorage: storage(), location: { origin: 'https://work.test' } })
   const host = await import('./hostConfig'),

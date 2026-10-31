@@ -17,7 +17,8 @@ import { configuredRuntimeAccounts } from './account-runtime.ts'
 const fail = (status, code, message) => { throw new AutoOpsAccessError(status, code, message) }
 const configuration = () => {
   const model = process.env.AUTOOPS_T3_MODEL || process.env.AGENT_DEMO_MODEL || ''
-  return { profile: resolveProductProfile(), model, modelSelectionEnabled: Boolean(model) && configuredBusinessModels().discovered, customerAgentsEnabled: isCustomerAgentsEnabled() }
+  const models = configuredBusinessModels()
+  return { profile: resolveProductProfile(), model, reasoningEffort: models.models.find(entry => entry.id === model)?.defaultReasoning ?? null, modelSelectionEnabled: Boolean(model) && models.discovered, customerAgentsEnabled: isCustomerAgentsEnabled() }
 }
 export function createAutoOpsAccess({ catalog = { users, projects, agents }, deploymentEnabled = () => process.env.AUTOOPS_DEPLOYMENT_ENABLED === '1', ...options }) {
   return createAccessService({ ...options, catalog, deploymentEnabled, configuration })

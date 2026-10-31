@@ -123,6 +123,16 @@ export const AssistantSelection = S.Struct({
   presetRevision: S.Number.check(S.isInt(), S.isGreaterThanOrEqualTo(1)),
   configuration: QuestionConfiguration,
 })
+/** 空来源明确表示直接配置；执行位置与调整权限仍由服务端核验。 */
+export const QuestionSelection = S.Union([
+  AssistantSelection,
+  S.Struct({
+    assistantId: S.Null,
+    presetRevision: S.Null,
+    configuration: QuestionConfiguration,
+  }),
+])
+export type QuestionSelection = typeof QuestionSelection.Type
 export interface AssistantAvailability {
   preset: AssistantPreset
   available: boolean
@@ -168,7 +178,7 @@ export const ThreadBindingRequest = S.Struct({
   executionBinding: S.optionalKey(AssistantSource),
   workspaceType: S.optionalKey(S.Literals(['internal', 'external'])),
   workspaceVersionId: S.optionalKey(DirectoryId),
-  question: S.optionalKey(AssistantSelection),
+  question: S.optionalKey(QuestionSelection),
 })
 
 /** 可见性是会话属性，独立于首次接受后固定的执行参数。 */

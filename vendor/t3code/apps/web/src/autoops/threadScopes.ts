@@ -1,5 +1,5 @@
 import type {
-  AssistantSelection,
+  QuestionSelection,
   AssistantPreset,
   ThreadVisibilityRequest,
 } from '../../../../../../autoops/contracts/assistants.ts'
@@ -19,7 +19,7 @@ export type AutoOpsExecutionBinding =
 export interface AutoOpsThreadScope {
   threadId?: string
   ownerId?: string
-  question?: AssistantSelection
+  question?: QuestionSelection
   executionBinding?: AutoOpsExecutionBinding
   projectId: string
   environmentId: string | null
@@ -117,12 +117,18 @@ export function readAutoOpsThreadScope(
     }
   }
   const project = readAutoOpsHost()?.projects.find((entry) => entry.id === projectId)
-  if (selected && project && scopeAllowed(selected, project)) return selected
+  if (selected && project && scopeAllowed(selected, project)) {
+    if (readAutoOpsHost()?.assistantDirectoryEnabled && !selected.question && !selected.scopeLocked &&
+        selected.scopeState !== 'locked' && selected.scopeState !== 'submitting' && project.capabilities?.['chat.configure'] === true)
+      return { ...selected, ...scopeForDirectQuestion(projectId, selected) }
+    return selected
+  }
   const environment = project?.environments.find(
     (entry) => !project.membership || project.membership.environmentIds.includes(entry.id),
   )
   if (!project || !project.agents[0]) return undefined
   if (readAutoOpsHost()?.assistantDirectoryEnabled) {
+    if (project.capabilities?.['chat.configure'] === true) return scopeForDirectQuestion(projectId)
     const preset = project.assistants?.items.find(
       (item) => item.preset.id === project.assistants?.defaultAssistantId && item.available,
     )?.preset
@@ -194,7 +200,7 @@ export async function authorizeThreadLaunch({
   const scope = readAutoOpsThreadScope(threadId, projectId)
   if (!scope) throw new Error('请先选择有权使用的项目、环境和助手。')
   if (host.assistantDirectoryEnabled && !scope.question)
-    throw new Error('请选择当前项目已配置的可用助手。')
+    throw new Error('请完成本次问答配置，受限成员需使用已分配助手。')
   const actual =
     scope.question && modelSelection
       ? {
@@ -209,7 +215,7 @@ export async function authorizeThreadLaunch({
                 reasoningEffort: (modelSelection.options?.find(
                   (option) => option.id === 'reasoningEffort',
                 )?.value ??
-                  null) as AssistantSelection['configuration']['model']['reasoningEffort'],
+                  null) as QuestionSelection['configuration']['model']['reasoningEffort'],
               },
             },
           },
@@ -357,5 +363,36 @@ export function scopeFromAssistant(preset: AssistantPreset): AutoOpsThreadScope 
     visibility: config.visibility,
     ...(config.workspaceType === null ? {} : { workspaceType: config.workspaceType }),
     question: { assistantId: preset.id, presetRevision: preset.revision, configuration: config },
+  }
+}
+
+/** 直接配置不继承助手专属技能或指令，也不能携带电脑执行身份。 */
+export function scopeForDirectQuestion(projectId: string, previous?: AutoOpsThreadScope): AutoOpsThreadScope {
+  const host = readAutoOpsHost()
+  const project = host?.projects.find(project => project.id === projectId)
+  if (!host || !project || project.capabilities?.['chat.configure'] !== true)
+    throw new Error('当前成员须使用已分配的助手预设。')
+  const platform = previous?.projectId === projectId && previous.executionBinding?.kind !== 'customer'
+    ? previous : undefined
+  const configuration = {
+    agentId: 'a-project',
+    executionBinding: { kind: 'platform' as const },
+    environmentId: platform?.environmentId ?? null,
+    workspaceType: platform?.workspaceType ?? project.membership?.workspaceAccess ?? 'internal',
+    visibility: platform?.visibility ?? 'private' as const,
+    model: platform?.question?.configuration.model ?? {
+      ...host.fixedModel,
+      reasoningEffort: host.fixedModel.reasoningEffort ?? null,
+    },
+    skillIds: [],
+  }
+  return {
+    projectId,
+    agentId: configuration.agentId,
+    executionBinding: configuration.executionBinding,
+    environmentId: configuration.environmentId,
+    workspaceType: configuration.workspaceType,
+    visibility: configuration.visibility,
+    question: { assistantId: null, presetRevision: null, configuration },
   }
 }

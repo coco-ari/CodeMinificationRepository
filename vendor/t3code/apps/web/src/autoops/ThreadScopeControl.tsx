@@ -35,6 +35,7 @@ import {
   setAutoOpsThreadScope,
   type AutoOpsThreadScope,
   scopeFromAssistant,
+  scopeForDirectQuestion,
 } from "./hostConfig";
 
 export function AutoOpsThreadScopeControl({
@@ -74,10 +75,7 @@ export function AutoOpsThreadScopeControl({
   useEffect(() => {
     if (!isDraft || !scope?.question) return;
     const store = useComposerDraftStore.getState();
-    store.setModelSelection(draftTarget, questionModelSelection(scope.question), {
-      replaceOptions: true,
-    });
-    return useComposerDraftStore.subscribe(() => {
+    const syncModel = () => {
       const current = readAutoOpsThreadScope(threadId, projectId);
       if (!current?.question || current.scopeState === "locked" || !questionCanAdjust(current))
         return;
@@ -100,7 +98,15 @@ export function AutoOpsThreadScopeControl({
             configuration: { ...current.question.configuration, model },
           },
         });
+    };
+    const saved = store.getComposerDraft(draftTarget)?.modelSelectionByProvider?.[
+      ProviderInstanceId.make(scope.question.configuration.model.instanceId)
+    ];
+    if (scope.question.assistantId === null && saved) syncModel();
+    else store.setModelSelection(draftTarget, questionModelSelection(scope.question), {
+      replaceOptions: true,
     });
+    return useComposerDraftStore.subscribe(syncModel);
   }, [
     threadId,
     projectId,
@@ -381,19 +387,20 @@ export function AutoOpsThreadScopeControl({
               summary={
                 project.assistants?.items.find(
                   (item) => item.preset.id === scope.question?.assistantId,
-                )?.preset.name ?? (locked ? (scope.executionBinding?.kind === "customer" ? "本机助手" : agent?.name ?? "项目助手") : "选择助手")
+                )?.preset.name ?? (scope.question?.assistantId === null ? "直接配置" : locked ? (scope.executionBinding?.kind === "customer" ? "本机助手" : agent?.name ?? "项目助手") : "选择助手")
               }
               icon={BotIcon}
-              value={scope.question?.assistantId ?? ""}
-              options={
-                project.assistants?.items.filter((item) => item.preset.enabled).map((item) => ({
+              value={scope.question?.assistantId === null ? "__direct__" : scope.question?.assistantId ?? ""}
+              options={[
+                ...(canAdjust ? [{ value: "__direct__", label: "直接配置" }] : []),
+                ...(project.assistants?.items.filter((item) => item.preset.enabled).map((item) => ({
                   value: item.preset.id,
                   label: item.available
                     ? item.preset.name
                     : `${item.preset.name} · ${item.reason?.message ?? "暂不可用"}`,
                   disabled: !item.available,
-                })) ?? []
-              }
+                })) ?? []),
+              ]}
               locked={
                 locked ||
                 (!canAdjust &&
@@ -417,6 +424,10 @@ export function AutoOpsThreadScopeControl({
                 </>
               }
               onChange={(id) => {
+                if (id === "__direct__" && canAdjust) {
+                  void apply(scopeForDirectQuestion(projectId, scope), true);
+                  return;
+                }
                 const preset = project.assistants?.items.find(
                   (item) => item.preset.id === id && item.available,
                 )?.preset;

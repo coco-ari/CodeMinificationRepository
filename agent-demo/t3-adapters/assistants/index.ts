@@ -516,8 +516,9 @@ export function createAssistantDirectory(options: Options) {
       const row = db.prepare('SELECT value_json FROM assistant_execution_grants WHERE thread_id=? AND run_id=?').get(threadId,runId)
       return row ? this.requireExecutionScope(decode(SharedExecutionScope,JSON.parse(String(row.value_json)))) : undefined
     },
-    executionScope(actor: string, project: string, input: C.AssistantSelection, context: {threadId:string;runId:string}): SharedExecutionScope | undefined {
-      const selected = this.validateSelection(actor,project,input,true)
+    executionScope(actor: string, project: string, input: C.QuestionSelection, context: {threadId:string;runId:string}): SharedExecutionScope | undefined {
+      const selected = this.validateQuestion(actor,project,input,true)
+      if (selected.assistantId === null) return undefined
       const item = preset(project,selected.assistantId), provider = item.providedBy
       if (!provider || (provider.id === actor && provider.sourceProjectId === project && !selected.configuration.customerProfile)) return undefined
       const target = selected.configuration.executionBinding
@@ -1127,13 +1128,26 @@ export function createAssistantDirectory(options: Options) {
           '受限成员需要先分配有效默认助手，且预设须符合新的资料和环境范围',
         )
     },
-    instructions(actor: string, project: string, input: C.AssistantSelection): string {
-      const selected = this.validateSelection(actor, project, input, true)
+    instructions(actor: string, project: string, input: C.QuestionSelection): string {
+      const selected = this.validateQuestion(actor, project, input, true)
+      if (selected.assistantId === null) return ''
       const row = db
         .prepare('SELECT value_json FROM assistant_versions WHERE assistant_id=? AND revision=?')
         .get(selected.assistantId, selected.presetRevision)
       if (!row) return fail(409, 'ASSISTANT_PRESET_CHANGED', '原助手修订不存在')
       return decode(C.AssistantDetails, JSON.parse(String(row.value_json))).instructions
+    },
+    validateQuestion(actor: string, project: string, input: unknown, accepted = false): C.QuestionSelection {
+      const selection = decode(C.QuestionSelection, input)
+      if (selection.assistantId !== null) return this.validateSelection(actor, project, selection, accepted)
+      const member = membership(actor, project)
+      if (!adjustable(member))
+        return fail(403, 'QUESTION_CONFIGURATION_FORBIDDEN', '当前成员须使用已分配的助手预设')
+      const configuration = selection.configuration
+      if (configuration.executionBinding.kind !== 'platform' || configuration.agentId !== 'a-project' || configuration.customerProfile !== undefined)
+        return fail(403, 'QUESTION_SOURCE_FORBIDDEN', '直接配置仅支持平台问答，使用电脑请选择对应助手')
+      options.validate(actor, project, configuration, member, accepted)
+      return selection
     },
     validateSelection(
       actor: string,

@@ -297,11 +297,11 @@ export function createAccessService({ sessionDb, bindingDb, catalog: sourceCatal
     bindingAudienceForUser(current.id, binding)
     if (binding.workspaceVersionId) workspaceForUser(current.id, binding.projectId, binding.workspaceType, binding.workspaceVersionId, binding.environmentId)
     validateBinding(binding)
-    if (questions && input.question === undefined && !getThreadBinding(binding.threadId)) fail(409, 'QUESTION_ASSISTANT_REQUIRED', '请选择当前项目已配置的可用助手')
+    if (questions && input.question === undefined && !getThreadBinding(binding.threadId)) fail(409, 'QUESTION_ASSISTANT_REQUIRED', '请完成本次问答配置，受限成员需使用已分配助手')
     if (input.question !== undefined) {
       if (!questions) fail(503, 'QUESTIONS_NOT_CONFIGURED', '助手授权尚未就绪')
       const previous = getThreadBinding(binding.threadId)
-      binding.question = questions().validateSelection(current.id, binding.projectId, input.question, previous?.ownerId === current.id && previous.scopeState !== 'draft')
+      binding.question = questions().validateQuestion(current.id, binding.projectId, input.question, previous?.ownerId === current.id && previous.scopeState !== 'draft')
       assertQuestionBinding(binding.question, binding)
     }
     if (binding.executionBinding.kind === 'customer') requireCustomerSource(binding, current.id)
@@ -359,7 +359,7 @@ export function createAccessService({ sessionDb, bindingDb, catalog: sourceCatal
     assertQuestionBinding(binding.question, binding)
     const selection = modelSelection === undefined ? binding.question : { ...binding.question, configuration: { ...binding.question.configuration, model: nativeQuestionModel(modelSelection) } }
     requireProjectActionForUser(actorId, binding.projectId, 'chat.use')
-    return questions().validateSelection(questionActor(binding,actorId), binding.projectId, selection, binding.scopeState !== 'draft')
+    return questions().validateQuestion(questionActor(binding,actorId), binding.projectId, selection, binding.scopeState !== 'draft')
   }
   const requireThreadExecution = (principal, threadId, options = {}) => {
     const binding = requireThread(principal, threadId)

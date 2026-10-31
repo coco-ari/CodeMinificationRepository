@@ -1,4 +1,4 @@
-import type { AssistantSelection } from '../../autoops/contracts/assistants.ts';
+import type { QuestionSelection } from '../../autoops/contracts/assistants.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProjectCapabilities, ProjectMembership, RuntimeProject as AutoOpsProject, RuntimeAgent as AutoOpsAgent } from '../../autoops/contracts/runtime.ts';
 export type { ProjectMembership, RuntimeProject as AutoOpsProject, RuntimeAgent as AutoOpsAgent } from '../../autoops/contracts/runtime.ts';
@@ -18,7 +18,7 @@ export interface AutoOpsPrincipal {
 }
 export interface ThreadBinding {
   readonly threadId: string;
-  readonly question?: AssistantSelection;
+  readonly question?: QuestionSelection;
   readonly executionBinding: ExecutionBinding;
   readonly projectId: string;
   readonly environmentId: string | null;
@@ -50,7 +50,7 @@ export interface InputResourceSnapshot {
   readonly claims:Array<{threadId:string;inputId:string;commandId:string;inputOwnerId:string;callerId:string;kind:'context'|'fork';messageId:string|null;runId:string|null;sourceThreadId:string|null;createdAt:string}>;
 }
 export class AutoOpsAccessError extends Error { constructor(status:number,code:string,message:string);status: number; code: string }
-export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding;question?: AssistantSelection};
+export type ThreadBindingInput = Pick<ThreadBinding, 'threadId'|'projectId'|'environmentId'|'agentId'|'visibility'|'workspaceType'|'workspaceVersionId'> & {executionBinding?: ExecutionBinding;question?: QuestionSelection};
 export interface ResourceThread { binding: ThreadBinding; attachments: Array<{id:string;name?:string;mimeType?:string;sizeBytes?:number}> }
 export interface AutoOpsAccess {
   /** 仅同步授权读取共用目录；调用结束后立即释放。 */
@@ -61,7 +61,7 @@ export interface AutoOpsAccess {
   stopAccepting(): void;
   readonly customerRegistry: CustomerRegistry;
   questionInstructions(actorId:string, threadId:string, modelSelection?:unknown):string;
-  requireQuestionForActor(actorId:string, threadId:string, modelSelection?: unknown): AssistantSelection | undefined;
+  requireQuestionForActor(actorId:string, threadId:string, modelSelection?: unknown): QuestionSelection | undefined;
   requireThreadExecution(principal: AutoOpsPrincipal, threadId: string, options?: {requireOnline?: boolean}): ThreadBinding;
   customerAssistantRuntime(principal:AutoOpsPrincipal,input:import('../../autoops/contracts/customer-assistant-runtime.ts').CustomerAssistantRuntimeRequest):import('../../autoops/contracts/customer-assistant-runtime.ts').CustomerAssistantRuntime;
   visibleCustomerProviderInstances(principal:AutoOpsPrincipal):{owned:string[];shared:string[]};

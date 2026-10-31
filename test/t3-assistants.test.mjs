@@ -12,7 +12,7 @@ import { createCustomerRegistry } from '../agent-demo/t3-adapters/customer-regis
 import { readBusinessModels } from '../agent-demo/t3-adapters/models.mjs'
 import { prepareScopedBusinessSkills } from '../agent-demo/t3-adapters/scoped-skills.mjs'
 import { resolveBusinessSkillMentions } from '../agent-demo/t3-adapters/skills.mjs'
-import { resolveSkillLibrary } from '../agent-demo/t3-adapters/skill-library.mjs'
+import { createSkillLibrary, resolveSkillLibrary } from '../agent-demo/t3-adapters/skill-library.mjs'
 
 function fixture(t) {
   const dataDir = mkdtempSync(join(tmpdir(), 'assistant-directory-'))
@@ -49,6 +49,56 @@ const details = patch => ({ name: '测试排障', description: '已登记来源'
 const save = (requestId, value = details(), expectedRevision = 0) => ({ requestId, expectedRevision, value })
 const select = preset => ({ assistantId: preset.id, presetRevision: preset.revision, configuration: preset.configuration })
 const allocate = (requestId, assistantIds, defaultAssistantId, target = { kind: 'role', id: 'reader' }, expectedRevision = 0) => ({ requestId, assistantIds, defaultAssistantId, target, expectedRevision })
+
+test('有调整权限的成员无任何助手也能直接问答，保存原配置且收回权限立即阻止继续', t => {
+  const f = fixture(t), principal = f.access.authenticateCookie('demo_session=developer')
+  const question = { assistantId: null, presetRevision: null, configuration: config({ environmentId: null }) }
+  const input = { threadId: 'direct-question', projectId: 'project', environmentId: null, agentId: 'a-project', workspaceType: 'internal', visibility: 'private', question }
+  assert.deepEqual(f.assistants.catalog('developer', 'project').items, [])
+  assert.deepEqual(f.assistants.validateQuestion('developer', 'project', question), question)
+  const binding = f.access.reserveThread(principal, input)
+  assert.deepEqual(binding.question, question)
+  assert.equal(f.access.questionInstructions('developer', input.threadId), '')
+  f.access.markThreadAccepted(input.threadId)
+  assert.equal(f.access.requireQuestionForActor('developer', input.threadId, { instanceId: 'codex', model: 'actual-model', options: [{ id: 'reasoningEffort', value: 'high' }] }).configuration.model.reasoningEffort, 'high')
+  f.assistants.close(); f.open()
+  assert.deepEqual(f.access.requireThread(principal, input.threadId).question, question)
+  f.developer.canAdjustChat = false
+  assert.throws(() => f.access.requireQuestionForActor('developer', input.threadId), { code: 'QUESTION_CONFIGURATION_FORBIDDEN' })
+  assert.throws(() => f.access.reserveThread(principal, { ...input, threadId: 'direct-after-revocation' }), { code: 'QUESTION_CONFIGURATION_FORBIDDEN' })
+  assert.equal(f.access.requireThread(principal, input.threadId).threadId, input.threadId)
+})
+
+test('直接配置不绕过受限预设、环境、资料及模型校验，不能伪造电脑来源或不完整预设身份', t => {
+  const f = fixture(t), direct = { assistantId: null, presetRevision: null, configuration: config() }
+  assert.throws(() => f.assistants.validateQuestion('reader', 'project', direct), { code: 'QUESTION_CONFIGURATION_FORBIDDEN' })
+  for (const [patch, code] of [
+    [{ environmentId: 'production' }, 'ASSISTANT_ENVIRONMENT_FORBIDDEN'],
+    [{ model: { ...config().model, model: 'unknown' } }, 'ASSISTANT_MODEL_FORBIDDEN'],
+    [{ model: { ...config().model, reasoningEffort: 'ultra' } }, 'ASSISTANT_REASONING_FORBIDDEN'],
+    [{ agentId: 'other-agent' }, 'QUESTION_SOURCE_FORBIDDEN'],
+    [{ executionBinding: { kind: 'customer', deviceId: 'forged', registeredWorkspaceId: 'root', workspaceBindingRevision: 1, runtimeId: 'codex' } }, 'QUESTION_SOURCE_FORBIDDEN'],
+  ]) assert.throws(() => f.assistants.validateQuestion('developer', 'project', { ...direct, configuration: config(patch) }), { code })
+  assert.throws(() => f.assistants.validateQuestion('developer', 'project', { ...direct, presetRevision: 1 }), { code: 'ASSISTANT_INPUT_INVALID' })
+  f.external.canAdjustChat = true
+  assert.throws(() => f.assistants.validateQuestion('external', 'project', { ...direct, configuration: config({ environmentId: null }) }), { code: 'ASSISTANT_WORKSPACE_FORBIDDEN' })
+  assert.doesNotThrow(() => f.assistants.validateQuestion('external', 'project', { ...direct, configuration: config({ environmentId: null, workspaceType: 'external' }) }))
+})
+
+test('直接配置只继承平台和项目skill，不继承助手专属分配', t => {
+  const f = fixture(t), preset = f.assistants.save('admin', 'project', null, save('exclusive-skill'))
+  const library = createSkillLibrary(f.dataDir)
+  const imported = library.importMarkdown({ revision: library.catalog().revision, contents: '---\nname: exclusive-review\ndescription: 仅用于分配边界验收\n---\n读取已授权资料。\n' })
+  const skill = imported.skills.find(skill => skill.name === 'exclusive-review')
+  const assignment = { revision: library.catalog().revision, skillId: skill.id, versionId: skill.latestVersionId, targetType: 'assistant', targetId: preset.id, projectId: 'project', workspaceTypes: ['internal'], enabled: true }
+  library.assign(assignment)
+  const scope = { projectId: 'project', agentId: 'a-project', workspaceType: 'internal', question: select(preset) }
+  assert.ok(resolveSkillLibrary(f.dataDir, scope).some(entry => entry.id === skill.id))
+  const direct = { ...scope, question: { assistantId: null, presetRevision: null, configuration: config() } }
+  assert.ok(!resolveSkillLibrary(f.dataDir, direct).some(entry => entry.id === skill.id))
+  library.assign({ ...assignment, revision: library.catalog().revision, targetType: 'project', targetId: 'project' })
+  assert.ok(resolveSkillLibrary(f.dataDir, direct).some(entry => entry.id === skill.id))
+})
 
 test('助手配置持久化与原请求恢复，不用夹具覆盖，重放篡改和普通成员管理被拒绝', t => {
   const f = fixture(t), command = save('create-preset')

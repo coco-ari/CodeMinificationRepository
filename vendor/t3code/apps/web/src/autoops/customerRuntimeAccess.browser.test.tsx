@@ -149,7 +149,7 @@ describe('项目获分配助手的候选目录', () => {
     await using screen = await render(<Harness value={assignedScope} />)
     await vi.waitFor(() => expect(complete).toBeTypeOf('function'))
     const nextScope: AutoOpsThreadScope = { ...assignedScope, projectId: 'second-project',
-      question: { ...assignedScope.question!, assistantId: 'second-assistant' } }
+      question: { ...assignedScope.question!, assistantId: 'second-assistant', presetRevision: 1 } }
     mocks.request.mockResolvedValue({ ...assignedRuntime, capabilities: { ...catalog,
       models: [{ id: '新项目模型', supportedReasoningEfforts: [] }], skills: [] } })
     await screen.rerender(<Harness value={nextScope} />)

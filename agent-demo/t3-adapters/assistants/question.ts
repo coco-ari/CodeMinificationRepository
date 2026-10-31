@@ -1,12 +1,12 @@
 import * as S from 'effect/Schema'
-import { AssistantModel, type AssistantSelection } from '../../../autoops/contracts/assistants.ts'
+import { AssistantModel, type QuestionSelection } from '../../../autoops/contracts/assistants.ts'
 import type { ExecutionBinding } from '../../../autoops/contracts/runtime.ts'
 
 const fail = (code: string, message: string): never => {
   throw Object.assign(new Error(message), { status: 403, code })
 }
 export function assertQuestionBinding(
-  question: AssistantSelection,
+  question: QuestionSelection,
   binding: {
     agentId: string
     environmentId: string | null

@@ -227,6 +227,23 @@ it('默认缺失不常驻提示，保留候选且不会把首个助手当成可�
   )
 })
 
+it('直接配置可载入预设并返回，保留合法范围和模型，清除助手来源与专属skill', async () => {
+  const id = 'direct-preset-roundtrip', f = setup(true, id, true)
+  await using screen = await render(f.ui)
+  const assistant = screen.getByRole('button', { name: '助手', exact: true })
+  await expect.element(assistant).toHaveTextContent('直接配置')
+  expect(readAutoOpsThreadScope(id, 'assistant-project')?.question?.assistantId).toBeNull()
+  await assistant.click()
+  await page.getByRole('menuitemradio', { name: '测试排障', exact: true }).click()
+  expect(readAutoOpsThreadScope(id, 'assistant-project')?.question?.assistantId).toBe('first')
+  await assistant.click()
+  await page.getByRole('menuitemradio', { name: '直接配置', exact: true }).click()
+  expect(readAutoOpsThreadScope(id, 'assistant-project')).toMatchObject({ environmentId: 'test', workspaceType: 'internal',
+    question: { assistantId: null, presetRevision: null, configuration: { model: { model: 'first-model', reasoningEffort: 'high' }, skillIds: [] } } })
+  expect(questionSendDisabledReason(readAutoOpsThreadScope(id, 'assistant-project'))).toBeNull()
+  expect(mock.createThread).not.toHaveBeenCalled()
+})
+
 it.each([true, false])('移除重复skill控件后保留配置、正文与预览，草稿=%s', async (isDraft) => {
   const id = `inline-only-${isDraft}`, f = setup(true, id, false, isDraft)
   const preset = f.host.projects[0]!.assistants!.items[0]!.preset

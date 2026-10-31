@@ -60,7 +60,7 @@ const keybindings = compileResolvedKeybindingsConfig([
   { key: "ctrl+alt+arrowdown", command: "composer.decreaseEffort" },
 ]);
 const noop = () => {};
-function setup(id: string, adjust: boolean, customer = false, assistantName = "当前助手") {
+function setup(id: string, adjust: boolean, customer = false, assistantName = "当前助手", direct = false) {
   mocks.createThread
     .mockReset()
     .mockResolvedValue({ threadId: `${id}-clean`, draftId: DraftId.make(`${id}-clean`) });
@@ -108,7 +108,7 @@ function setup(id: string, adjust: boolean, customer = false, assistantName = "�
       principal: { id: "actual-composer-user", displayName: "真实输入器验收" },
       gatewayBasePath: "/api/agent-demo/t3",
       csrfToken: "composer-csrf",
-      fixedModel: { instanceId: "codex", model: "wrong-platform-default" },
+      fixedModel: { instanceId: "codex", model: direct ? "selected-actual-model" : "wrong-platform-default", ...(direct ? { reasoningEffort: "high" as const } : {}) },
       runtimeMode: "approval-required",
       assistantDirectoryEnabled: true,
       customerAgentsEnabled: true,
@@ -135,10 +135,10 @@ function setup(id: string, adjust: boolean, customer = false, assistantName = "�
             canAdjustChat: adjust,
           },
           assistants: {
-            items: [preset, second].map((preset) => ({ preset, available: true })),
+            items: direct ? [] : [preset, second].map((preset) => ({ preset, available: true })),
             canAdjust: adjust,
             ready: true,
-            defaultAssistantId: preset.id,
+            defaultAssistantId: direct ? null : preset.id,
           },
         },
       ],
@@ -153,7 +153,7 @@ function setup(id: string, adjust: boolean, customer = false, assistantName = "�
     model: preset.configuration.model.model,
     options: [{ id: "reasoningEffort", value: "high" }],
   };
-  setAutoOpsThreadScope(id, scopeFromAssistant(preset));
+  setAutoOpsThreadScope(id, direct ? readAutoOpsThreadScope(id, preset.projectId)! : scopeFromAssistant(preset));
   useComposerDraftStore.getState().clearComposerContent(draftId);
   useComposerDraftStore.getState().setModelSelection(draftId, selected, { replaceOptions: true });
   const models: ServerProvider["models"] = ["selected-actual-model", "surviving-first-model"].map(
@@ -434,6 +434,22 @@ function Harness({
   );
 }
 const editor = () => page.getByTestId("composer-editor");
+
+it.each([1280, 390])("无任何助手时直接配置可发送中文问题，宽度 %s", async (width) => {
+  await page.viewport(width, 600);
+  const f = setup(`direct-composer-${width}`, true, false, "", true);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} />);
+  await expect.element(screen.getByRole("button", { name: "助手", exact: true })).toHaveTextContent("直接配置");
+  await editor().fill("直接分析当前资料，不使用助手预设");
+  await screen.getByRole("button", { name: "发送消息", exact: true }).click();
+  await vi.waitFor(() => expect(f.bindings).toHaveLength(1));
+  expect(f.bindings[0]).toMatchObject({ question: { assistantId: null, presetRevision: null,
+    configuration: { executionBinding: { kind: "platform" }, environmentId: null, workspaceType: "internal",
+      model: { instanceId: "codex", model: "selected-actual-model", reasoningEffort: "high" }, skillIds: [] } } });
+  expect(f.errors).toEqual([]);
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+});
 
 function ConnectedHarness({ fixture }: { fixture: Fixture }) {
   const scope = useAutoOpsThreadScope(fixture.id);
@@ -876,7 +892,7 @@ it.each([1280, 390])("无助手不显示额外提示，刷新归入菜单，宽�
   });
   await using screen = await render(<Harness fixture={f} reason={reason} />);
   const assistant = screen.getByRole("button", { name: "助手", exact: true });
-  await expect.element(assistant).toHaveTextContent("选择助手");
+  await expect.element(assistant).toHaveTextContent("直接配置");
   await expect.element(screen.getByLabelText("会话可见范围", { exact: true })).not.toBeInTheDocument();
   await expect.element(screen.getByText(reason, { exact: true })).not.toBeInTheDocument();
   expect(assistant.element().getBoundingClientRect().width).toBeLessThanOrEqual(140);
