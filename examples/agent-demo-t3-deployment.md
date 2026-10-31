@@ -2,6 +2,12 @@
 
 实施基线：T3 Code v0.1.1 / `fe27e8e3dc12dcbb108e9a28fd9b8cb65f34ae92`。现行应用运行于测试服务器的 28887 入口；2026-10-24 经用户确认，旧主站、技能预览和上游对照环境已退役。早期构建、数据迁移与恢复记录保留在历史章节，不再代表可用的旧服务或恢复点。
 
+## 当前 workbench 发行（2026-10-31）
+
+当前机器为 workbench 101，Ubuntu 24.04，内网 `10.2.2.115:28887`，公网入口为 [AutoOps 工作台](https://auto.996788.xyz/)。前端源码固定为 `4f591884`，运行镜像 `autoops:frontend-native-4f591884`；后端和两类 Agent 沿用 `autoops:env-file-36e7df04` 的发行内容。本批只替换网页目录并更新清单，精简模式、模型、业务配置及版本链保持，内外网健康与实际页面已验。完整摘要、证据目录和验证边界见[原生组件统一记录](../docs/validation/frontend-native-ui.md#workbench-发布)。
+
+下方独立验证及“当前验证发行”等章节中的 `192.168.31.157`、`/home/tao` 和旧版本仅为早期现场记录，不作为现行机器的发版、连接或恢复命令；后续操作先核对上述 workbench 发行。
+
 ## 独立验证：工作区部署发布（28887）
 
 2026-10-22，在独立 worktree `deployment-validation`、分支 `feat/workspace-deployment-validation` 实现。访问 `http://172.29.22.6:28887/agent-demo.html#/deployments?projectId=p-autoops`，在顶部选择项目，进入“部署发布 → 服务发布 → 前端部署验证”。LAN 地址为 `192.168.31.157:28887`。示例站点为 `http://172.29.22.6:28890/`。这是独立数据的验证环境，未复制原会话或切换原 8787/18887 服务。
