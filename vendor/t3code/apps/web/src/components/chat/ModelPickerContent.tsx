@@ -137,9 +137,10 @@ export function adjacentModelPickerProvider(input: {
   direction: 1 | -1;
   disabledInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
   selectableUnavailableInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
+  showFavorites?: boolean;
 }) {
   const providers: Array<ProviderInstanceId | "favorites"> = [
-    "favorites",
+    ...(input.showFavorites === false ? [] : ["favorites" as const]),
     ...input.entries
       .filter(
         (entry) =>
@@ -149,6 +150,7 @@ export function adjacentModelPickerProvider(input: {
       )
       .map((entry) => entry.instanceId),
   ];
+  if (providers.length === 0) return input.selectedInstanceId;
   const index = providers.indexOf(input.selectedInstanceId);
   return providers[
     index < 0
@@ -356,6 +358,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   terminalOpen: boolean;
+  favoritesEnabled?: boolean;
   onRequestClose?: () => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
@@ -376,7 +379,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const modelListRef = useRef<LegendListRef | null>(null);
   const pickerContentRef = useRef<HTMLDivElement>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
-  const { favorites } = useEnvironmentModelPreferences(props.environmentId);
+  const modelPreferences = useEnvironmentModelPreferences(props.environmentId);
+  const favoritesEnabled = props.favoritesEnabled ?? true;
+  const favorites = favoritesEnabled ? modelPreferences.favorites : [];
   const activeEntry = props.instanceEntries.find(
     (entry) => entry.instanceId === props.activeInstanceId,
   );
@@ -617,7 +622,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return [...available, ...disabled];
   })();
-  const showSidebar = !isSearching && sidebarInstanceEntries.length > 0;
+  const showSidebar = !isSearching && sidebarInstanceEntries.length > (favoritesEnabled ? 0 : 1);
   const instanceOrder = instanceEntries.map((entry) => entry.instanceId);
 
   const filteredModels = (() => {
@@ -773,6 +778,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         direction: command === "modelPicker.nextProvider" ? 1 : -1,
         disabledInstanceIds: lockedDisabledInstanceIds,
         selectableUnavailableInstanceIds,
+        showFavorites: favoritesEnabled,
       });
       setSearchQuery("");
       handleSelectInstance(next);
@@ -811,7 +817,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onSelectInstance={handleSelectInstance}
             onFocusSearch={focusSearchInput}
             instanceEntries={sidebarInstanceEntries}
-            showFavorites
+            showFavorites={favoritesEnabled}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
               ? {
@@ -993,7 +999,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
-                    onToggleFavorite={toggleFavorite}
+                    onToggleFavorite={favoritesEnabled ? toggleFavorite : undefined}
                   />
                 );
               }}

@@ -9051,6 +9051,7 @@ export default function ChatView(props: ChatViewProps) {
       {rightPanelPresent && !shouldUsePlanSidebarSheet && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
+          showUnavailableSurfaces={!isAutoOpsHosted()}
           open={rightPanelOpen}
           keybindings={keybindings}
           getShortcutContext={getShortcutContextStable}
@@ -9087,13 +9088,13 @@ export default function ChatView(props: ChatViewProps) {
           terminalAvailable={
             activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")
           }
-          diffAvailable={isServerThread && isGitRepo}
+          diffAvailable={autoOpsFeature("workspace") && isServerThread && isGitRepo}
           filesAvailable={
             activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))
           }
-          pullRequestAvailable={pullRequestSurfaceAvailable}
-          pullRequestsAvailable={pullRequestsSurfaceAvailable}
-          deviceAvailable={activeThreadRef !== null}
+          pullRequestAvailable={autoOpsFeature("workspace") && pullRequestSurfaceAvailable}
+          pullRequestsAvailable={autoOpsFeature("workspace") && pullRequestsSurfaceAvailable}
+          deviceAvailable={autoOpsFeature("workspace") && activeThreadRef !== null}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -9109,6 +9110,7 @@ export default function ChatView(props: ChatViewProps) {
         >
           <RightPanelTabs
             mode="sheet"
+            showUnavailableSurfaces={!isAutoOpsHosted()}
             open={rightPanelOpen}
             keybindings={keybindings}
             getShortcutContext={getShortcutContextStable}
@@ -9149,13 +9151,13 @@ export default function ChatView(props: ChatViewProps) {
             terminalAvailable={
               activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")
             }
-            diffAvailable={isServerThread && isGitRepo}
+            diffAvailable={autoOpsFeature("workspace") && isServerThread && isGitRepo}
             filesAvailable={
               activeProject !== null && (businessFilesAvailable || autoOpsFeature("workspace"))
             }
-            pullRequestAvailable={pullRequestSurfaceAvailable}
-            pullRequestsAvailable={pullRequestsSurfaceAvailable}
-            deviceAvailable={activeThreadRef !== null}
+            pullRequestAvailable={autoOpsFeature("workspace") && pullRequestSurfaceAvailable}
+            pullRequestsAvailable={autoOpsFeature("workspace") && pullRequestsSurfaceAvailable}
+            deviceAvailable={autoOpsFeature("workspace") && activeThreadRef !== null}
           >
             {rightPanelContent}
           </RightPanelTabs>

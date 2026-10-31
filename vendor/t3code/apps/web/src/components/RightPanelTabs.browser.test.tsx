@@ -1,6 +1,8 @@
 import type { DesktopPreviewFavicon, PreviewSessionSnapshot } from "@t3tools/contracts";
+import type { ComponentProps } from "react";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../test/render";
 
@@ -87,6 +89,7 @@ function tabs(
   second?: DesktopPreviewFavicon,
   audio?: { audible?: boolean; audioMuted?: boolean },
   previewRuntimeTabId: ((tabId: string) => string) | null = (tabId) => `runtime:${tabId}`,
+  overrides: Partial<ComponentProps<typeof RightPanelTabs>> = {},
 ) {
   return (
     <RightPanelTabs
@@ -133,6 +136,7 @@ function tabs(
       pullRequestAvailable={false}
       pullRequestsAvailable={false}
       deviceAvailable={false}
+      {...overrides}
     >
       <div>content</div>
     </RightPanelTabs>
@@ -151,6 +155,23 @@ const imageSources = (container: HTMLElement) =>
   [...container.querySelectorAll("img")].map((image) => image.src);
 const button = (container: HTMLElement, name: string) =>
   [...container.querySelectorAll("button")].find((element) => element.ariaLabel === name);
+
+it.each([false, true])("按实际能力隐藏不可用面板，空态为 %s 时仍可打开文件", async (empty) => {
+  const addFiles = vi.fn();
+  await using screen = await renderTabs(null, undefined, undefined, undefined, {
+    surfaces: empty ? [] : [previewSurface], activeSurfaceId: empty ? null : previewSurface.id,
+    filesAvailable: true, browserAvailable: false,
+    showUnavailableSurfaces: false, onAddFiles: addFiles,
+  });
+  if (!empty) await screen.getByRole("button", { name: "添加面板", exact: true }).click();
+  for (const name of ["终端", "差异", "拉取请求", "关联的拉取请求", "设备", "浏览器"]) {
+    await expect.element(page.getByRole(empty ? "button" : "menuitem", { name: new RegExp(`^${name}`) })).not.toBeInTheDocument();
+  }
+  const files = page.getByRole(empty ? "button" : "menuitem", { name: /^文件/ });
+  await expect.element(files).toBeVisible();
+  await userEvent.click(files);
+  expect(addFiles).toHaveBeenCalledOnce();
+});
 
 describe("preview tab favicon", () => {
   it("prefers a live capture and never asks a public provider about a private hostname", async () => {

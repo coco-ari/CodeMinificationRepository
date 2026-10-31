@@ -41,6 +41,7 @@ function PopoverPopup({
   collisionAvoidance,
   tooltipStyle = false,
   keepMounted = false,
+  animatedViewport = true,
   anchor,
   touchBackdrop = false,
   ...props
@@ -54,13 +55,15 @@ function PopoverPopup({
   collisionAvoidance?: PopoverPrimitive.Positioner.Props["collisionAvoidance"];
   tooltipStyle?: boolean;
   keepMounted?: PopoverPrimitive.Portal.Props["keepMounted"];
+  animatedViewport?: boolean;
   anchor?: PopoverPrimitive.Positioner.Props["anchor"];
   width?: keyof typeof popoverPopupWidthClassName;
   touchBackdrop?: boolean;
 }) {
   // Viewport rekeys its children when the active trigger clears on close. Persistent
   // single-trigger forms need a stable container to retain drafts and submit guards.
-  const Viewport = keepMounted ? "div" : PopoverPrimitive.Viewport;
+  // 单触发器的受限高度虚拟列表按可见尺寸定位，避免切换动画测出未裁剪的列表高度。
+  const Viewport = keepMounted || !animatedViewport ? "div" : PopoverPrimitive.Viewport;
   return (
     <PopoverPrimitive.Portal keepMounted={keepMounted}>
       {touchBackdrop ? (

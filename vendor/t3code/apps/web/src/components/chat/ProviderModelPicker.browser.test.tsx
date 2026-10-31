@@ -310,3 +310,57 @@ it("切换长短模型名称时预留同一槽位，不推挤相邻控件", asyn
   await screen.rerender(view("long"));
   expect(screen.getByRole("button", { name: "模型后面的操作" }).element().getBoundingClientRect().x).toBe(before);
 });
+
+it.each([600, 900])("长模型列表在高度 %s 的窗口贴近触发按钮，搜索后仍保持位置", async (height) => {
+  await page.viewport(1440, height);
+  const entry = providerEntry("codex", "codex");
+  const options = Array.from({ length: 40 }, (_, index) => ({ slug: `model-${index}`, name: `模型 ${index}` }));
+  await using screen = await renderUi(
+    <div style={{ position: "fixed", bottom: 80, left: 800 }}>
+      <ProviderModelPicker environmentId={null} activeInstanceId={entry.instanceId} model="model-0"
+        lockedProvider={null} instanceEntries={[entry]} modelOptionsByInstance={new Map([[entry.instanceId, options]])}
+        onInstanceModelChange={() => {}} />
+    </div>,
+  );
+  const trigger = screen.container.querySelector<HTMLElement>("[data-chat-provider-model-picker]")!;
+  await userEvent.click(trigger);
+  const search = page.getByPlaceholder("搜索模型…");
+  await expect.element(search).toHaveFocus();
+  const measure = () => {
+    const popup = document.querySelector<HTMLElement>('[data-slot="popover-popup"]')!;
+    const bounds = popup.getBoundingClientRect(), anchor = trigger.getBoundingClientRect();
+    return { side: popup.closest<HTMLElement>('[data-slot="popover-positioner"]')!.dataset.side,
+      gap: Math.round(anchor.top - bounds.bottom), top: bounds.top };
+  };
+  await expect.poll(() => measure().side).toBe("top");
+  await expect.poll(() => measure().gap).toBe(4);
+  expect(measure().top).toBeGreaterThanOrEqual(0);
+  await search.fill("模型 3");
+  await expect.element(page.getByRole("option", { name: /模型 3/ }).first()).toBeVisible();
+  await expect.poll(() => measure().gap).toBe(4);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(search).not.toBeInTheDocument();
+});
+
+it("未开放收藏时不显示星号或收藏分类，原有收藏偏好不阻止选择模型", async () => {
+  const entry = providerEntry("codex", "codex"), onChange = vi.fn();
+  const registry = AtomRegistry.make();
+  using _registry = { [Symbol.dispose]: () => registry.dispose() };
+  registry.set(favoritesAtom, [{ provider: entry.instanceId, model: "two" }]);
+  await using screen = await renderUi(
+    <RegistryContext.Provider value={registry}>
+      <ProviderModelPicker environmentId={null} activeInstanceId={entry.instanceId} model="one"
+        favoritesEnabled={false} lockedProvider={null} instanceEntries={[entry]}
+        modelOptionsByInstance={new Map([[entry.instanceId, [{ slug: "one", name: "模型一" }, { slug: "two", name: "模型二" }]]])}
+        onInstanceModelChange={onChange} />
+    </RegistryContext.Provider>,
+  );
+  await userEvent.click(screen.container.querySelector<HTMLElement>("[data-chat-provider-model-picker]")!);
+  await expect.element(page.getByPlaceholder("搜索模型…")).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "收藏", exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByRole("button", { name: "加入收藏", exact: true }).first()).not.toBeInTheDocument();
+  await expect.element(page.getByRole("button", { name: "取消收藏", exact: true }).first()).not.toBeInTheDocument();
+  await expect.element(page.getByRole("option", { name: /模型一/ })).toBeVisible();
+  await page.getByRole("option", { name: /模型二/ }).click();
+  expect(onChange).toHaveBeenCalledExactlyOnceWith(entry.instanceId, "two");
+});

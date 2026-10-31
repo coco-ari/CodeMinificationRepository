@@ -225,6 +225,12 @@ describe("adjacentModelPickerProvider", () => {
     selectableUnavailableInstanceIds: undefined,
   };
 
+  it("关闭收藏时快捷键只在可用运行器间循环，空目录保持当前选择", () => {
+    expect(adjacentModelPickerProvider({ ...input, showFavorites: false, selectedInstanceId: claude.instanceId, direction: 1 })).toBe(codex.instanceId);
+    expect(adjacentModelPickerProvider({ ...input, showFavorites: false, selectedInstanceId: codex.instanceId, direction: -1 })).toBe(claude.instanceId);
+    expect(adjacentModelPickerProvider({ ...input, entries: [], showFavorites: false, selectedInstanceId: codex.instanceId, direction: 1 })).toBe(codex.instanceId);
+  });
+
   it("wraps through favorites and ready instances, skipping unavailable providers", () => {
     expect(
       adjacentModelPickerProvider({ ...input, selectedInstanceId: codex.instanceId, direction: 1 }),

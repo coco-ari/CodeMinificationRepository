@@ -44,6 +44,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   compact?: boolean;
   isComposerOwned?: boolean;
   disabled?: boolean;
+  favoritesEnabled?: boolean;
   terminalOpen?: boolean;
   open?: boolean;
   triggerClassName?: string;
@@ -280,10 +281,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         align="start"
         className="before:hidden"
         padding="none"
+        animatedViewport={false}
         touchBackdrop
       >
         <ModelPickerContent
           environmentId={props.environmentId}
+          favoritesEnabled={props.favoritesEnabled ?? true}
           activeInstanceId={activeInstanceId}
           model={props.model}
           {...(props.selectedModels !== undefined ? { selectedModels: props.selectedModels } : {})}

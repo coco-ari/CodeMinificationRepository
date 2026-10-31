@@ -5407,6 +5407,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ) : (
         <ProviderModelPicker
           environmentId={environmentId}
+          favoritesEnabled={!isAutoOpsHosted()}
           compact={false}
           isComposerOwned
           disabled={providerCatalogPending || isSendBusy}

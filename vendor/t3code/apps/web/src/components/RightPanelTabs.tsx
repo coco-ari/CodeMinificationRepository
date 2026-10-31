@@ -145,6 +145,7 @@ interface RightPanelTabsProps {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
+  showUnavailableSurfaces?: boolean | undefined;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
 }
@@ -325,10 +326,11 @@ function RightPanelEmptyState(props: {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
+  showUnavailableSurfaces?: boolean | undefined;
 }) {
   const [highlight, setHighlight] = useState(-1);
 
-  const actions = [
+  const actions = ([
     {
       label: "浏览器",
       icon: Globe2,
@@ -386,7 +388,7 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
     },
-  ] as const;
+  ] as const).filter((action) => props.showUnavailableSurfaces !== false || action.available);
 
   type SurfaceAction = (typeof actions)[number];
 
@@ -979,6 +981,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
   const onNewSurfaceKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.isComposing) return;
+    if (addSurfaceActions.length === 0) return;
     if (
       resolveShortcutCommand(event, props.keybindings, {
         context: { ...props.getShortcutContext(), rightPanelOpen: true },
@@ -1030,7 +1033,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     });
   };
 
-  const addSurfaceActions = [
+  const addSurfaceActions = ([
     {
       label: "浏览器",
       icon: Globe2,
@@ -1087,7 +1090,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.device,
       onClick: props.onAddDevice,
     },
-  ] as const;
+  ] as const).filter((action) => props.showUnavailableSurfaces !== false || action.available);
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
@@ -1317,7 +1320,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 );
               })}
             </SortableTabList>
-            {props.open !== false ? (
+            {props.open !== false && addSurfaceActions.length > 0 ? (
               <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
                 <MenuTrigger
                   ref={addSurfaceTriggerRef}
@@ -1467,6 +1470,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestAvailable={props.pullRequestAvailable}
             pullRequestsAvailable={props.pullRequestsAvailable}
             deviceAvailable={props.deviceAvailable}
+            showUnavailableSurfaces={props.showUnavailableSurfaces}
           />
         ) : (
           props.children

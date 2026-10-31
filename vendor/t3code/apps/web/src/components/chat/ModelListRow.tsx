@@ -39,7 +39,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   unavailable?: boolean;
   jumpLabel?: string | null;
   disabledReason?: string | null;
-  onToggleFavorite: (instanceId: ProviderInstanceId, slug: string) => void;
+  onToggleFavorite?: ((instanceId: ProviderInstanceId, slug: string) => void) | undefined;
 }) {
   const model = {
     slug: props.slug,
@@ -107,7 +107,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
 
       <div className="flex shrink-0 items-center gap-1.5">
         {props.jumpLabel ? <Kbd>{props.jumpLabel}</Kbd> : null}
-        <Tooltip>
+        {props.onToggleFavorite ? <Tooltip>
           <TooltipTrigger
             render={
               <Button
@@ -116,7 +116,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 className="-mr-1 shrink-0"
                 onClick={(event) => {
                   event.stopPropagation();
-                  props.onToggleFavorite(props.instanceId, props.slug);
+                  props.onToggleFavorite?.(props.instanceId, props.slug);
                 }}
                 onKeyDown={(event) => {
                   event.stopPropagation();
@@ -136,7 +136,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
           <TooltipPopup side="top" align="center">
             {props.isFavorite ? "取消收藏" : "加入收藏"}
           </TooltipPopup>
-        </Tooltip>
+        </Tooltip> : null}
       </div>
     </ComboboxItem>
   );
