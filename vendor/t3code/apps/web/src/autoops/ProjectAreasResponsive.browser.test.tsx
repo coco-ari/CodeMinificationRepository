@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   workspace: vi.fn(),
   external: vi.fn(),
   deployment: vi.fn(),
+  history: vi.fn(),
+  refs: vi.fn(),
   task: vi.fn(),
   releases: vi.fn(),
 }))
@@ -89,6 +91,8 @@ vi.mock(import('./apiClient'), async original => ({
 vi.mock(import('./deployments'), async (original) => ({
   ...(await original()),
   loadDeployments: mocks.deployment,
+  loadDeploymentRepositoryHistory: mocks.history,
+  loadDeploymentRepositoryRefs: mocks.refs,
   loadDeploymentTask: mocks.task,
   loadDeploymentReleases: mocks.releases,
 }))
@@ -143,7 +147,23 @@ const workspace = (): WorkspaceOverview => ({
 })
 const deployment = (): DeploymentOverview => ({
   enabled: true,
+  capabilities: {
+    serviceManage: mocks.host()?.projects?.[0]?.capabilities?.['workspace.manage'] === true && mocks.host()?.projects?.[0]?.capabilities?.['deployment.execute'] === true,
+    environments: {
+      'env-test': {
+        read: true,
+        configure: mocks.host()?.projects?.[0]?.capabilities?.['workspace.manage'] === true && mocks.host()?.projects?.[0]?.capabilities?.['deployment.execute'] === true,
+        publish: mocks.host()?.projects?.[0]?.capabilities?.['deployment.execute'] === true,
+        restart: mocks.host()?.projects?.[0]?.capabilities?.['deployment.execute'] === true,
+        rollback: mocks.host()?.projects?.[0]?.capabilities?.['deployment.execute'] === true,
+        sourceDownload: true,
+        sourceClear: mocks.host()?.projects?.[0]?.capabilities?.['workspace.manage'] === true,
+        nodeBind: mocks.host()?.projects?.[0]?.capabilities?.['workspace.manage'] === true,
+      },
+    },
+  },
   services: [{id:'service-one',name:'前端部署验证',kind:'static',module:config.module,configKey:'service-config'}],
+  serviceSources: [{ serviceId: 'service-one', environmentId: 'env-test', sources: [{ sourceId: 'source-one', refKind: 'branch', ref: 'main', mountPath: 'repository' }], contexts: [{ service: 'frontend', root: 'repository', workingDirectory: 'frontend' }], configKey: 'source-key' }],
   environments: [{ id: 'env-test', name: '测试环境' }],
   servers: [
     {
@@ -213,6 +233,7 @@ beforeEach(() => {
         capabilities: {
           'workspace.read': true,
           'workspace.manage': true,
+          'workspace.external.publish': true,
           'deployment.read': true,
           'deployment.execute': true,
         },
@@ -246,6 +267,8 @@ beforeEach(() => {
   mocks.external.mockReset()
   const data = deployment()
   mocks.deployment.mockResolvedValue(data)
+  mocks.history.mockResolvedValue({ sourceId: 'source-one', refKind: 'branch', ref: 'main', commit: 'a'.repeat(40), commits: [{ revision: 'a'.repeat(40), subject: '前端发布版本', authoredAt: '2026-10-29T12:00:00Z' }], truncated: false })
+  mocks.refs.mockResolvedValue({ sourceId: 'source-one', defaultRef: 'main', branches: [{ name: 'main', commit: 'a'.repeat(40) }], tags: [], truncated: false })
   mocks.releases.mockResolvedValue({
     releases: [{ ...data.targets[0]!.currentRelease, current: true }],
   })
@@ -259,6 +282,19 @@ beforeEach(() => {
     nextSeq: 31,
   })
 })
+
+async function viewTask() {
+  await page.getByRole('button', { name: '发布记录', exact: true }).click()
+  await page.getByRole('combobox', { name: '查看部署任务', exact: true }).click()
+  await page.getByRole('option').first().click()
+}
+
+async function packageEntry() {
+  const direct = page.getByRole('button', { name: '生成部署包', exact: true })
+  if (await direct.query()) return direct
+  await page.getByRole('button', { name: '服务操作', exact: true }).click()
+  return page.getByRole('menuitem', { name: '生成部署包', exact: true })
+}
 
 describe('现有模块的公共框架响应式布局', () => {
   for (const [width, height] of [
@@ -282,8 +318,10 @@ describe('现有模块的公共框架响应式布局', () => {
         if (area === 'workspaces') {
           await screen.getByRole('button', { name: '工作区操作', exact: true }).click()
           await expect
-            .element(page.getByRole('menuitem', { name: '新建对话', exact: true }))
+            .element(page.getByRole('menuitem', { name: '新建目录', exact: true }))
             .toBeVisible()
+          // 当前资料页按现行规范管理文件，问答从独立模块创建。
+          await expect.element(page.getByRole('menuitem', { name: '新建对话', exact: true })).not.toBeInTheDocument()
           await userEvent.keyboard('{Escape}')
           await expect
             .element(screen.getByRole('button', { name: '上传资料', exact: true }))
@@ -298,30 +336,31 @@ describe('现有模块的公共框架响应式布局', () => {
             await page.getByText('关闭', { exact: true }).click()
           }
         } else {
-          await expect
-            .element(screen.getByRole('button', { name: '发布', exact: true }))
-            .toBeVisible()
+          await viewTask()
           await vi.waitFor(() =>
             expect(screen.container.textContent).toContain('站点检查失败，已恢复上一版本'),
           )
-          await screen.getByRole('button', { name: '发布', exact: true }).click()
+          await screen.getByRole('button', { name: '选择其他提交', exact: true }).click()
+          await screen.getByRole('button', { name: /前端发布版本/ }).click()
+          const publish = screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true })
+          await publish.click()
           await expect
             .element(page.getByRole('dialog', { name: '确认发布', exact: true }))
             .toBeVisible()
           await page.getByRole('button', { name: '取消', exact: true }).click()
           await expect
-            .element(screen.getByRole('button', { name: '发布', exact: true }))
+            .element(publish)
             .toHaveFocus()
           if (width < 640) {
             const title = screen
               .getByRole('heading', { name: '前端部署验证', exact: true })
               .element()
             expect(title.clientWidth).toBeGreaterThanOrEqual(title.scrollWidth)
-            const more = screen.getByRole('button', { name: '部署更多操作', exact: true })
-            await more.click()
+            const more = screen.getByRole('button', { name: '服务操作', exact: true })
             await expect
-              .element(page.getByRole('menuitem', { name: '刷新部署状态', exact: true }))
+              .element(screen.getByRole('button', { name: '刷新部署状态', exact: true }))
               .toBeVisible()
+            await more.click()
             await expect
               .element(page.getByRole('menuitem', { name: '源码包任务记录', exact: true }))
               .toBeDisabled()
@@ -339,9 +378,8 @@ describe('现有模块的公共框架响应式布局', () => {
         expect(body.getBoundingClientRect().right).toBeLessThanOrEqual(width + 1)
         expect(screen.container.querySelector('[data-module-error]')).toBeNull()
         if (area === 'deployments') {
-          const picker = screen.container.querySelector<HTMLElement>(
-            '[data-deployment-task-picker] [data-slot="select-trigger"]',
-          )!
+          await screen.getByRole('button', { name: '发布记录', exact: true }).click()
+          const picker = screen.getByRole('combobox', { name: '查看部署任务', exact: true }).element()
           const icon = picker.querySelector<HTMLElement>('[data-slot="select-icon"]')!
           expect(icon.getBoundingClientRect().right).toBeLessThanOrEqual(
             picker.getBoundingClientRect().right + 1,
@@ -372,7 +410,7 @@ describe('部署运行记录与所选详情分离', () => {
       </AppSidebarLayout>,
       { router: '/deployments?projectId=p-one' },
     )
-    await expect.element(screen.getByText('运行状态待核对', { exact: true })).toBeVisible()
+    await expect.element(screen.getByText('自动恢复失败，当前运行状态待核对。', { exact: true })).toBeVisible()
     const confirmedVersion = screen.getByRole('region', { name: '已确认部署版本', exact: true })
     await expect
       .element(confirmedVersion.getByText(data.targets[0]!.currentRelease!.revision!, { exact: true }))
@@ -382,10 +420,12 @@ describe('部署运行记录与所选详情分离', () => {
       .element(page.getByLabelText('部署运行记录').getByText(data.targets[0]!.currentRelease!.revision!, { exact: true }))
       .toBeVisible()
     await userEvent.keyboard('{Escape}')
-    for (const name of ['配置', '发布记录', '任务日志']) {
-      await screen.getByRole('radio', { name, exact: true }).click()
-      await expect.element(screen.getByText('运行状态待核对', { exact: true })).toBeVisible()
+    for (const name of ['配置', '发布记录']) {
+      await screen.getByRole('button', { name, exact: true }).click()
+      await expect.element(screen.getByText('自动恢复失败，当前运行状态待核对。', { exact: true })).toBeVisible()
     }
+    await viewTask()
+    await expect.element(screen.getByText('自动恢复失败，当前运行状态待核对。', { exact: true })).toBeVisible()
     await screen.getByRole('button', { name: '查看待核对任务', exact: true }).click()
     const release = {
       ...data.targets[0]!.currentRelease!,
@@ -415,7 +455,7 @@ describe('部署运行记录与所选详情分离', () => {
     await screen.getByRole('button', { name: '运行信息', exact: true }).click()
     await expect.element(page.getByLabelText('部署运行记录').getByText('recovered1234', { exact: true })).toBeVisible()
     await expect
-      .element(screen.getByText('运行状态待核对', { exact: true }))
+      .element(screen.getByText('自动恢复失败，当前运行状态待核对。', { exact: true }))
       .not.toBeInTheDocument()
   })
 })
@@ -434,12 +474,13 @@ describe('部署与源码包分别使用服务端写权限', () => {
         .element(screen.getByRole('heading', { name: '前端部署验证', exact: true }))
         .toBeVisible()
       if (view === '源码包') {
-        await screen.getByRole('button', { name: '源码包', exact: true }).click()
+        await screen.getByRole('button', { name: '服务操作', exact: true }).click()
+        await page.getByRole('menuitem', { name: '源码包', exact: true }).click()
         await expect
           .element(screen.getByRole('button', { name: /^示例前端源码包\s/ }))
           .toBeVisible()
       }
-      const generate = page.getByRole('button', { name: '生成部署包', exact: true })
+      const generate = await packageEntry()
       await expect.element(generate).toBeEnabled()
       mocks.repositories.mockRejectedValue(
         new AutoOpsRequestError('源码读取权限已撤回', 'FORBIDDEN', 403),
@@ -468,17 +509,21 @@ describe('部署与源码包分别使用服务端写权限', () => {
       const host = mocks.host()
       host.projects[0].capabilities[capability] = false
       mocks.host.mockReturnValue(host)
+      mocks.deployment.mockResolvedValue(deployment())
       await using screen = await render(
         <AppSidebarLayout>
           <AutoOpsDeploymentsPage />
         </AppSidebarLayout>,
         { router: '/deployments?projectId=p-one' },
       )
+      await viewTask()
       await vi.waitFor(() =>
         expect(screen.container.textContent).toContain('站点检查失败，已恢复上一版本'),
       )
-      const release = page.getByRole('button', { name: '发布', exact: true })
-      const packages = page.getByRole('button', { name: '生成部署包', exact: true })
+      await page.getByRole('button', { name: '选择其他提交', exact: true }).click()
+      await page.getByRole('button', { name: /前端发布版本/ }).click()
+      const release = page.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true })
+      const packages = await packageEntry()
       if (capability === 'deployment.execute') {
         await expect.element(release).toBeDisabled()
         await expect
@@ -688,15 +733,16 @@ for (const width of [390, 1440]) {
     expect(mocks.authoringSend.mock.calls[0]![1].command).toEqual({ kind: 'sync' })
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
     if (width < 768) await page.getByRole('button', { name: '切换主侧栏', exact: true }).click()
-    await page.getByRole('radio', { name: '外部工作区', exact: true }).click()
+    await page.getByRole('button', { name: '外部工作区', exact: true }).click()
     if (width < 768) await userEvent.keyboard('{Escape}')
     await page.getByRole('button', { name: '更新外部工作区', exact: true }).click()
     expect(mocks.external).toHaveBeenCalledTimes(1)
-    expect(mocks.external.mock.calls[0]![2]).toEqual([])
+    // 不传替换规则表示继续使用服务端已保存的脱敏设置。
+    expect(mocks.external.mock.calls[0]).toEqual(['p-one', undefined, undefined, expect.any(String)])
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
     await page.getByRole('button', { name: '外部工作区操作' }).click()
-    await page.getByRole('menuitem', { name: '自定义脱敏' }).click()
-    await expect.element(page.getByRole('dialog', { name: '更新外部工作区' })).toBeVisible()
+    await page.getByRole('menuitem', { name: '更新设置与脱敏规则' }).click()
+    await expect.element(page.getByRole('dialog', { name: '外部更新设置' })).toBeVisible()
     await userEvent.keyboard('{Escape}')
     await expect.element(page.getByRole('button', { name: '外部工作区操作' })).toHaveFocus()
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
@@ -706,7 +752,7 @@ for (const width of [390, 1440]) {
 it('部署页只读取项目仓库目录，无工作区使用配置仍可生成源码包', async () => {
   mocks.authoring.mockRejectedValue(new Error('此流程不应访问工作区资料'))
   await using screen = await render(<AppSidebarLayout><AutoOpsDeploymentsPage /></AppSidebarLayout>, { router: '/deployments?projectId=p-one' })
-  const generate = page.getByRole('button', { name: '生成部署包', exact: true })
+  const generate = await packageEntry()
   await expect.element(generate).toBeEnabled(); await generate.click()
   await expect.element(page.getByRole('dialog', { name: '生成部署包', exact: true })).toBeVisible()
   await expect.element(page.getByRole('textbox', { name: '前端源码部署挂载目录', exact: true })).toHaveValue('repository')

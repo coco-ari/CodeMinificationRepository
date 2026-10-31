@@ -3,8 +3,10 @@ import { expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { render, stubGlobal } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
+import { AppSidebarLayout } from '~/components/AppSidebarLayout'
 import { ModuleSidebarProvider, ModuleSidebarOutlet } from './ModuleWorkspace'
 import { AutoOpsProjectsPage } from './ProjectsPage'
+import { PlatformNodesPage } from './PlatformNodesPage'
 import { installAutoOpsHost } from './hostConfig'
 import '../index.css'
 
@@ -24,7 +26,7 @@ function setup({ platform = false, manage = true, empty = false } = {}) {
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>
       writes.push({ path, body })
-      if (path.endsWith('/autoops/deployment-servers')) return Response.json({ server, registrationToken: 'isolated-token', expiresAt: '2026-10-26T09:00:00Z', installCommand: 'echo isolated-node-install' })
+      if (path.endsWith('/autoops/deployment-servers')) return Response.json({ server, registrationToken: 'isolated-token', expiresAt: new Date(Date.now() + 600_000).toISOString(), installCommand: 'echo isolated-node-install' })
       if (path.endsWith('/node-one/bind')) { bound = true; return Response.json({ ok: true }) }
       return Response.json({ error: '隔离夹具未提供此写入' }, { status: 400 })
     }
@@ -46,23 +48,25 @@ function App() {
   return <StrictMode><SidebarProvider><ModuleSidebarProvider><ModuleSidebarOutlet /><AutoOpsProjectsPage /></ModuleSidebarProvider></SidebarProvider></StrictMode>
 }
 
-it('平台在没有项目与环境时直接接入节点，关闭后恢复平台入口焦点', async () => {
+it('平台在没有项目与环境时从全局节点整页接入，返回列表后恢复接入入口焦点', async () => {
   await page.viewport(1440, 600)
   const f = setup({ platform: true, empty: true })
   using _fetch = stubGlobal('fetch', f.fetch)
-  await using screen = await render(<App />, { router: '/projects' })
-  const trigger = screen.getByRole('button', { name: '平台节点', exact: true })
+  await using screen = await render(<AppSidebarLayout><PlatformNodesPage /></AppSidebarLayout>, { router: '/nodes' })
+  await expect.element(screen.getByRole('heading', { name: '平台节点', level: 1, exact: true })).toBeVisible()
+  const trigger = screen.getByRole('button', { name: '接入节点', exact: true })
   await expect.element(trigger).toBeEnabled()
-  await trigger.click()
-  await expect.element(page.getByRole('dialog', { name: '平台节点', exact: true })).toBeVisible()
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   await expect.element(page.getByRole('button', { name: '接入节点', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: '接入节点', exact: true }).click()
+  await expect.element(page.getByRole('textbox', { name: '节点名称', exact: true })).toBeVisible()
   await page.getByRole('textbox', { name: '节点名称', exact: true }).fill('平台独立节点')
+  await expect.element(page.getByRole('button', { name: '生成安装命令', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: '生成安装命令', exact: true }).click()
   await expect.element(page.getByText('echo isolated-node-install', { exact: true })).toBeVisible()
   expect(f.writes).toEqual([{ path: '/api/agent-demo/t3/autoops/deployment-servers', body: { name: '平台独立节点', requestId: expect.any(String) } }])
   expect(f.fetch.mock.calls.some(([url]) => String(url).includes('/projects/') && String(url).includes('/deployments/servers'))).toBe(false)
-  await userEvent.keyboard('{Escape}')
+  await page.getByRole('button', { name: '返回节点列表', exact: true }).click()
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument()
   await expect.element(trigger).toHaveFocus()
   expect(JSON.stringify(sessionStorage)).not.toContain('isolated-token')

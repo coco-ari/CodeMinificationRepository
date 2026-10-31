@@ -351,7 +351,7 @@ async function cleared() {
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
   await expect
-    .element(page.getByRole('button', { name: '发布', exact: true }))
+    .element(page.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true }))
     .not.toBeInTheDocument()
   await expect.element(page.getByRole('button', { name: '添加服务', exact: true })).toBeDisabled()
 }

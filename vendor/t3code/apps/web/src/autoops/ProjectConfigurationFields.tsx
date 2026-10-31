@@ -64,7 +64,7 @@ function Check({
   return (
     <Label className="flex items-center gap-2">
       <Checkbox
-        aria-label={label}
+
         checked={checked}
         disabled={disabled}
         onCheckedChange={onChange}

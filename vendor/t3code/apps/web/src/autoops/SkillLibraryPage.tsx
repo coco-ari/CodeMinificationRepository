@@ -535,7 +535,7 @@ function SkillLibraryContent({
             className={cn('flex min-h-0 min-w-0 flex-1 flex-col', showDetail && 'hidden')}
             aria-label="skill列表"
           >
-            <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+            <ScrollArea radius="none" className="min-h-0 flex-1">
               <WorkspacePageContainer width="wide" className="gap-3">
                 <div
                   className="flex min-w-0 flex-wrap items-center gap-2"

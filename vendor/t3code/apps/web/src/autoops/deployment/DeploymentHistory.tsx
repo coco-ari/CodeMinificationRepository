@@ -191,7 +191,7 @@ function History({
           </Button>
         </div>
       ) : null}
-      <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+      <ScrollArea radius="none" className="min-h-0 flex-1">
         <div className="divide-y divide-border/60">
           {page.releases.map((release) => (
             <div key={release.id} className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-3">

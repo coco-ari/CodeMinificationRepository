@@ -52,7 +52,7 @@ describe('部署仓库版本选择', () => {
     )
     await expect.element(page.getByRole('button', { name: /release bbbbbbbb/ })).toBeVisible()
     expect(api.history).not.toHaveBeenCalled()
-    await page.getByRole('radio', { name: '标签', exact: true }).click()
+    await page.getByRole('button', { name: '标签', exact: true }).click()
     await page.getByRole('button', { name: /v1.0.0 cccccccc/ }).click()
     expect(onSelect).toHaveBeenCalledExactlyOnceWith({ refKind: 'tag', ref: 'v1.0.0' })
     expect(props.onOpenChange).toHaveBeenCalledWith(false)

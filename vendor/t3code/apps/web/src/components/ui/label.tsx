@@ -1,9 +1,9 @@
 "use client";
 
-import type { useRender } from "@base-ui/react/use-render";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
 
 import { cn } from "~/lib/utils";
-import { renderWithSlot } from "./radix-compat";
 
 function Label({ className, render, ...props }: useRender.ComponentProps<"label">) {
   const defaultProps = {
@@ -12,10 +12,13 @@ function Label({ className, render, ...props }: useRender.ComponentProps<"label"
       className,
     ),
     "data-slot": "label",
-    "data-ui": "label",
   };
 
-  return renderWithSlot("label", { ...defaultProps, ...props }, render, {});
+  return useRender({
+    defaultTagName: "label",
+    props: mergeProps<"label">(defaultProps, props),
+    render,
+  });
 }
 
 export { Label };

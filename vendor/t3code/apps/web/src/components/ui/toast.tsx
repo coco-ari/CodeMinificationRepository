@@ -2,8 +2,7 @@
 
 import { Spinner } from "~/components/ui/spinner";
 
-import type { Toast } from "@base-ui/react/toast";
-import { Toast as ToastRuntime } from "./radix-toast";
+import { Toast } from "@base-ui/react/toast";
 import {
   useEffect,
   useState,
@@ -65,8 +64,8 @@ export type ThreadToastData = {
     | "secondary";
 };
 
-const toastManager = ToastRuntime.createToastManager<ThreadToastData>();
-const anchoredToastManager = ToastRuntime.createToastManager<ThreadToastData>();
+const toastManager = Toast.createToastManager<ThreadToastData>();
+const anchoredToastManager = Toast.createToastManager<ThreadToastData>();
 type ToastId = ReturnType<typeof toastManager.add>;
 const threadToastVisibleTimeoutRemainingMs = new Map<ToastId, number>();
 
@@ -185,13 +184,13 @@ function ToastDescriptionAndExpandable({
   const [open, setOpen] = useState(false);
 
   if (!expandableContent) {
-    return <ToastRuntime.Description className={descriptionClassName} data-slot="toast-description" />;
+    return <Toast.Description className={descriptionClassName} data-slot="toast-description" />;
   }
 
   if (!descriptionTrigger) {
     return (
       <>
-        <ToastRuntime.Description className={descriptionClassName} data-slot="toast-description" />
+        <Toast.Description className={descriptionClassName} data-slot="toast-description" />
         <ToastExpandableSection labels={labels}>{expandableContent}</ToastExpandableSection>
       </>
     );
@@ -229,7 +228,7 @@ function ToastDescriptionAndExpandable({
           }
         >
           <div className="min-w-0 flex-1">
-            <ToastRuntime.Description
+            <Toast.Description
               className={cn(
                 "min-w-0 select-none wrap-break-word text-muted-foreground",
                 errorDescriptionClampClass(toastType, toastDescription),
@@ -349,7 +348,7 @@ function ToastBodyContent({
               <Icon className="in-data-[type=error]:text-destructive in-data-[type=info]:text-info in-data-[type=success]:text-success in-data-[type=warning]:text-warning in-data-[type=loading]:opacity-80" />
             </div>
           ) : null}
-          <ToastRuntime.Title className="min-w-0 wrap-break-word font-medium" data-slot="toast-title" />
+          <Toast.Title className="min-w-0 wrap-break-word font-medium" data-slot="toast-title" />
         </div>
         <ToastDescriptionAndExpandable
           toastData={toastData}
@@ -385,12 +384,12 @@ function ToastBodyContent({
             />
           ) : null}
           {hasVisibleToastAction(actionProps) ? (
-            <ToastRuntime.Action
+            <Toast.Action
               className={cn(buttonVariants({ size: "xs", variant: actionVariant }), "shrink-0")}
               data-slot="toast-action"
             >
               {actionProps?.children}
-            </ToastRuntime.Action>
+            </Toast.Action>
           ) : null}
         </div>
       ) : null}
@@ -508,15 +507,15 @@ function ThreadToastVisibleAutoDismiss({
 
 function ToastProvider({ children, position = "top-right", ...props }: ToastProviderProps) {
   return (
-    <ToastRuntime.Provider toastManager={toastManager} {...props}>
+    <Toast.Provider toastManager={toastManager} {...props}>
       {children}
       <Toasts position={position} />
-    </ToastRuntime.Provider>
+    </Toast.Provider>
   );
 }
 
 function Toasts({ position }: { position: ToastPosition }) {
-  const { toasts } = ToastRuntime.useToastManager<ThreadToastData>();
+  const { toasts } = Toast.useToastManager<ThreadToastData>();
   const activeThreadRef = useActiveThreadRefFromRoute();
   const isTop = position.startsWith("top");
   const visibleToasts = toasts.filter((toast) =>
@@ -534,8 +533,8 @@ function Toasts({ position }: { position: ToastPosition }) {
   }, [toasts]);
 
   return (
-    <ToastRuntime.Portal data-slot="toast-portal">
-      <ToastRuntime.Viewport
+    <Toast.Portal data-slot="toast-portal">
+      <Toast.Viewport
         className={cn(
           "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 [--toast-header-offset:var(--workspace-topbar-height)] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
           "data-[position*=top]:top-[calc(var(--toast-inset)+var(--toast-header-offset))]",
@@ -561,7 +560,7 @@ function Toasts({ position }: { position: ToastPosition }) {
           const { stackedActionLayout, inlineContentEndPad } = bodyDescriptor;
 
           return (
-            <ToastRuntime.Root
+            <Toast.Root
               className={cn(
                 "dropdown-glass absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg text-popover-foreground shadow-xl shadow-black/25 [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s]",
                 "data-[position*=right]:right-0 data-[position*=right]:left-auto",
@@ -637,7 +636,7 @@ function Toasts({ position }: { position: ToastPosition }) {
                   <XIcon className="size-3" strokeWidth={2.25} />
                 </button>
               </div>
-              <ToastRuntime.Content
+              <Toast.Content
                 className={cn(
                   // `overflow-x: clip` avoids the CSS quirk where pairing `hidden` + `y: visible`
                   // forces `y` to `auto`. Expandable detail panels can extend below without being cut off.
@@ -656,31 +655,31 @@ function Toasts({ position }: { position: ToastPosition }) {
                   toastDescription={toast.description}
                   toastType={toast.type}
                 />
-              </ToastRuntime.Content>
-            </ToastRuntime.Root>
+              </Toast.Content>
+            </Toast.Root>
           );
         })}
-      </ToastRuntime.Viewport>
-    </ToastRuntime.Portal>
+      </Toast.Viewport>
+    </Toast.Portal>
   );
 }
 
 function AnchoredToastProvider({ children, ...props }: Toast.Provider.Props) {
   return (
-    <ToastRuntime.Provider toastManager={anchoredToastManager} {...props}>
+    <Toast.Provider toastManager={anchoredToastManager} {...props}>
       {children}
       <AnchoredToasts />
-    </ToastRuntime.Provider>
+    </Toast.Provider>
   );
 }
 
 function AnchoredToasts() {
-  const { toasts } = ToastRuntime.useToastManager<ThreadToastData>();
+  const { toasts } = Toast.useToastManager<ThreadToastData>();
   const activeThreadRef = useActiveThreadRefFromRoute();
 
   return (
-    <ToastRuntime.Portal data-slot="toast-portal-anchored">
-      <ToastRuntime.Viewport className="outline-none" data-slot="toast-viewport-anchored">
+    <Toast.Portal data-slot="toast-portal-anchored">
+      <Toast.Viewport className="outline-none" data-slot="toast-viewport-anchored">
         {toasts
           .filter((toast) => shouldRenderThreadScopedToast(toast.data, activeThreadRef))
           .map((toast) => {
@@ -694,14 +693,14 @@ function AnchoredToasts() {
             }
 
             return (
-              <ToastRuntime.Positioner
+              <Toast.Positioner
                 className="z-100 max-w-[min(--spacing(64),var(--available-width))]"
                 data-slot="toast-positioner"
                 key={toast.id}
                 sideOffset={positionerProps.sideOffset ?? 4}
                 toast={toast}
               >
-                <ToastRuntime.Root
+                <Toast.Root
                   className={cn(
                     "dropdown-glass relative overflow-visible text-balance text-popover-foreground text-xs shadow-xl shadow-black/25 transition-[scale,opacity] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
                     tooltipStyle ? "rounded-md" : "rounded-lg",
@@ -710,9 +709,9 @@ function AnchoredToasts() {
                   toast={toast}
                 >
                   {tooltipStyle ? (
-                    <ToastRuntime.Content className="pointer-events-auto px-2 py-1">
-                      <ToastRuntime.Title data-slot="toast-title" />
-                    </ToastRuntime.Content>
+                    <Toast.Content className="pointer-events-auto px-2 py-1">
+                      <Toast.Title data-slot="toast-title" />
+                    </Toast.Content>
                   ) : (
                     <>
                       <div className={toastCornerDismissClass}>
@@ -732,7 +731,7 @@ function AnchoredToasts() {
                           <XIcon className="size-3" strokeWidth={2.25} />
                         </button>
                       </div>
-                      <ToastRuntime.Content
+                      <Toast.Content
                         className={cn(
                           "pointer-events-auto min-h-0 overflow-y-visible pl-3.5 text-sm [overflow-x:clip]",
                           stackedActionLayout
@@ -751,15 +750,15 @@ function AnchoredToasts() {
                           toastDescription={toast.description}
                           toastType={toast.type}
                         />
-                      </ToastRuntime.Content>
+                      </Toast.Content>
                     </>
                   )}
-                </ToastRuntime.Root>
-              </ToastRuntime.Positioner>
+                </Toast.Root>
+              </Toast.Positioner>
             );
           })}
-      </ToastRuntime.Viewport>
-    </ToastRuntime.Portal>
+      </Toast.Viewport>
+    </Toast.Portal>
   );
 }
 

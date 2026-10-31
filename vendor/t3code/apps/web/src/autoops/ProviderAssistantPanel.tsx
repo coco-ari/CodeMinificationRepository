@@ -552,7 +552,7 @@ export function ProviderAssistantPanel() {
           ].map((skill) => (
             <Label key={skill.id} className="flex items-center gap-2">
               <Checkbox
-                aria-label={skill.name}
+
                 checked={editor.draft.skillIds.includes(skill.id)}
                 disabled={disabled || !directory.available}
                 onCheckedChange={(checked) =>
@@ -883,7 +883,7 @@ export function ProviderAssistantPanel() {
                   />
                   <Label className="flex items-center gap-2">
                     <Checkbox
-                      aria-label="共享给此项目"
+
                       checked={editor.enabled}
                       disabled={disabled}
                       onCheckedChange={(enabled) => setEditor({ ...editor, enabled })}

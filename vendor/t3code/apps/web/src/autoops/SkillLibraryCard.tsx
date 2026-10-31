@@ -211,7 +211,7 @@ export function SkillLibraryCard({
                   value={query}
                   onChange={(event) => setQuery(event.currentTarget.value)}
                 />
-                <ScrollArea contentSizing="viewport" className="max-h-72" radius="none">
+                <ScrollArea className="max-h-72" radius="none">
                   <div className="flex min-w-0 flex-col gap-1" aria-label="指定助手列表">
                     {filtered.map((entry) => target('assistant', entry.id, entry.name))}
                     {!filtered.length ? (

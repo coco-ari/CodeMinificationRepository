@@ -1,6 +1,5 @@
-import { mergeProps } from "~/components/ui/radix-compat";
-import type { useRender } from "@base-ui/react/use-render";
-import { useRender as useRenderRuntime } from "~/components/ui/radix-compat";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
 import { ChevronDownIcon, XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 
@@ -200,7 +199,7 @@ function Row({
     "data-composer-banner-row": "true",
     "data-composer-banner-layout": layout,
   };
-  return useRenderRuntime({
+  return useRender({
     defaultTagName: "div",
     render,
     props: mergeProps<"div">(rowProps, props),
@@ -266,7 +265,7 @@ function Actions({ className, ...props }: ComponentProps<"span">) {
 }
 
 function Children({ className, render, ...props }: useRender.ComponentProps<"div">) {
-  return useRenderRuntime({
+  return useRender({
     defaultTagName: "div",
     render,
     props: mergeProps<"div">(

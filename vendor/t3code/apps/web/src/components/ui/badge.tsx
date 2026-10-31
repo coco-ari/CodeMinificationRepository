@@ -1,10 +1,10 @@
 "use client";
 
-import type { useRender } from "@base-ui/react/use-render";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "~/lib/utils";
-import { renderWithSlot } from "./radix-compat";
 
 const badgeVariants = cva(
   "relative inline-flex shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-sm border border-transparent font-medium outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-3.5 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0 [button&,a&]:cursor-pointer [button&,a&]:pointer-coarse:after:absolute [button&,a&]:pointer-coarse:after:size-full [button&,a&]:pointer-coarse:after:min-h-11 [button&,a&]:pointer-coarse:after:min-w-11",
@@ -20,8 +20,7 @@ const badgeVariants = cva(
         default:
           "h-5.5 min-w-5.5 px-[calc(--spacing(1)-1px)] text-sm sm:h-4.5 sm:min-w-4.5 sm:text-xs",
         lg: "h-6.5 min-w-6.5 px-[calc(--spacing(1.5)-1px)] text-base sm:h-5.5 sm:min-w-5.5 sm:text-sm",
-        // leading-none: with the inherited fractional leading the rounded font metrics
-        // leave the label sitting high in the fixed-height box, worse under renderer zoom.
+        // 使用单倍行高，使固定高度中的文字在缩放时仍保持垂直居中。
         sm: "h-5 min-w-5 rounded-[.25rem] px-[calc(--spacing(1)-1px)] text-xs leading-none sm:h-4 sm:min-w-4 sm:text-[.625rem]",
       },
       variant: {
@@ -50,10 +49,13 @@ function Badge({ className, variant, size, render, ...props }: BadgeProps) {
   const defaultProps = {
     className: cn(badgeVariants({ className, size, variant })),
     "data-slot": "badge",
-    "data-ui": "badge",
   };
 
-  return renderWithSlot("span", { ...defaultProps, ...props }, render, {});
+  return useRender({
+    defaultTagName: "span",
+    props: mergeProps<"span">(defaultProps, props),
+    render,
+  });
 }
 
 export { Badge, badgeVariants };

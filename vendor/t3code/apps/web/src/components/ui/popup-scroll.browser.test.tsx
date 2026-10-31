@@ -111,13 +111,14 @@ it('长列表滚动箭头的渐变只覆盖边缘，不遮住整个分支列表'
     </div>,
   )
   await screen.getByRole('combobox', { name: '分支', exact: true }).click()
+  const viewport = document.querySelector<HTMLElement>('[data-slot="select-list"]')!
+  await act(() => { viewport.scrollTop = viewport.scrollHeight / 2 })
   await expect.poll(() => document.querySelectorAll('[data-slot^="select-scroll-"]').length).toBe(2)
   for (const arrow of document.querySelectorAll<HTMLElement>('[data-slot^="select-scroll-"]')) {
     const gradientHeight = parseFloat(getComputedStyle(arrow, '::before').height)
     expect(gradientHeight).toBeGreaterThan(0)
     expect(gradientHeight).toBeLessThanOrEqual(arrow.clientHeight * 2 + 1)
   }
-  const viewport = document.querySelector<HTMLElement>('[data-slot="select-list"]')!
   await act(() => { viewport.scrollTop = viewport.scrollHeight })
   await page.getByRole('option', { name: '分支-59', exact: true }).click()
   await screen.getByRole('combobox', { name: '分支', exact: true }).click()
@@ -164,7 +165,7 @@ it('长搜索选择列表可滚动且筛选后仍能选择', async () => {
       </ComboboxPopup>
     </Combobox>,
   )
-  await screen.getByRole('button', { name: '搜索分支', exact: true }).click()
+  await screen.getByRole('combobox', { name: '搜索分支', exact: true }).click()
   await checkScrollable('[data-slot="combobox-popup"] [data-slot="scroll-area-viewport"]')
   await page.getByRole('combobox', { name: '搜索分支名称', exact: true }).fill('分支-59')
   await expect.element(page.getByRole('option', { name: '分支-59', exact: true })).toBeVisible()

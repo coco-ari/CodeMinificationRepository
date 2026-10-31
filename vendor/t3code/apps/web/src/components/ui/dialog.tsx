@@ -1,7 +1,6 @@
-import type { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 "use client";
 
-import { DialogAdapter as DialogPrimitiveRuntime } from "./radix-overlays";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
@@ -14,16 +13,16 @@ import {
 } from "~/components/ui/dialog-styles";
 import { ScrollArea } from "~/components/ui/scroll-area";
 
-const Dialog = DialogPrimitiveRuntime.Root;
+const Dialog = DialogPrimitive.Root;
 
-const DialogPortal = DialogPrimitiveRuntime.Portal;
+const DialogPortal = DialogPrimitive.Portal;
 
 function DialogTrigger(props: DialogPrimitive.Trigger.Props) {
-  return <DialogPrimitiveRuntime.Trigger data-slot="dialog-trigger" {...props} />;
+  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
 }
 
 function DialogClose(props: DialogPrimitive.Close.Props) {
-  return <DialogPrimitiveRuntime.Close data-slot="dialog-close" {...props} />;
+  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
 function DialogBackdrop({
@@ -32,7 +31,7 @@ function DialogBackdrop({
   ...props
 }: DialogPrimitive.Backdrop.Props & { variant?: "default" | "media" }) {
   return (
-    <DialogPrimitiveRuntime.Backdrop
+    <DialogPrimitive.Backdrop
       forceRender
       className={cn(
         variant === "media" ? DIALOG_MEDIA_BACKDROP_CLASS : DIALOG_BACKDROP_CLASS,
@@ -46,7 +45,7 @@ function DialogBackdrop({
 
 function DialogViewport({ className, ...props }: DialogPrimitive.Viewport.Props) {
   return (
-    <DialogPrimitiveRuntime.Viewport
+    <DialogPrimitive.Viewport
       className={cn(
         "fixed inset-0 z-50 grid grid-rows-[1fr_auto_1fr] justify-items-center p-4",
         className,
@@ -80,7 +79,7 @@ function DialogPopup({
             "z-[60] grid-rows-1 place-items-center px-4 pb-6 pt-[calc(var(--native-titlebar-height,0px)+1.5rem)] [-webkit-app-region:no-drag]",
         )}
       >
-        <DialogPrimitiveRuntime.Popup
+        <DialogPrimitive.Popup
           className={cn(
             variant === "media" ? DIALOG_MEDIA_POPUP_CLASS : DIALOG_POPUP_CLASS,
             "row-start-2 text-popover-foreground",
@@ -93,15 +92,15 @@ function DialogPopup({
         >
           {children}
           {showCloseButton && (
-            <DialogPrimitiveRuntime.Close
+            <DialogPrimitive.Close
               aria-label="关闭"
               className="absolute end-2 top-2"
               render={<Button size="icon" variant="ghost" />}
             >
               <XIcon />
-            </DialogPrimitiveRuntime.Close>
+            </DialogPrimitive.Close>
           )}
-        </DialogPrimitiveRuntime.Popup>
+        </DialogPrimitive.Popup>
       </DialogViewport>
     </DialogPortal>
   );
@@ -143,7 +142,7 @@ function DialogFooter({
 
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
-    <DialogPrimitiveRuntime.Title
+    <DialogPrimitive.Title
       className={cn("wrap-anywhere font-semibold text-xl leading-none", className)}
       data-slot="dialog-title"
       {...props}
@@ -153,7 +152,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
 
 function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {
   return (
-    <DialogPrimitiveRuntime.Description
+    <DialogPrimitive.Description
       className={cn("text-muted-foreground text-sm", className)}
       data-slot="dialog-description"
       {...props}

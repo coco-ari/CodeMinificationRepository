@@ -1,21 +1,20 @@
-import type { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 "use client";
 
-import { DialogAdapter as SheetPrimitiveRuntime } from "./radix-overlays";
+import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 
-const Sheet = SheetPrimitiveRuntime.Root;
+const Sheet = SheetPrimitive.Root;
 
-const SheetPortal = SheetPrimitiveRuntime.Portal;
+const SheetPortal = SheetPrimitive.Portal;
 
 function SheetBackdrop({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   return (
-    <SheetPrimitiveRuntime.Backdrop
+    <SheetPrimitive.Backdrop
       className={cn(
-        "fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 data-[state=closed]:opacity-0 data-[state=closed]:opacity-0",
+        "fixed inset-0 z-(--z-sheet) bg-background/60 backdrop-blur-xs transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
       data-slot="sheet-backdrop"
@@ -34,7 +33,7 @@ function SheetViewport({
   variant?: "default" | "inset";
 }) {
   return (
-    <SheetPrimitiveRuntime.Viewport
+    <SheetPrimitive.Viewport
       className={cn(
         "fixed inset-0 z-(--z-sheet) grid",
         side === "bottom" && "grid grid-rows-[1fr_auto] pt-12",
@@ -78,27 +77,27 @@ function SheetPopup({
       <SheetBackdrop
         className={
           instant
-            ? "transition-none! data-[state=closed]:opacity-100! data-[state=closed]:opacity-100!"
+            ? "transition-none! data-ending-style:opacity-100! data-starting-style:opacity-100!"
             : undefined
         }
         style={transitionStyle}
       />
       <SheetViewport side={side} variant={variant}>
-        <SheetPrimitiveRuntime.Popup
+        <SheetPrimitive.Popup
           className={cn(
-            "relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 transition-[opacity,translate] duration-200 ease-in-out will-change-transform before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-[state=closed]:opacity-0 data-[state=closed]:opacity-0 max-sm:before:hidden dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            "relative flex max-h-full min-h-0 w-full min-w-0 flex-col bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 transition-[opacity,translate] duration-200 ease-in-out will-change-transform before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:opacity-0 data-starting-style:opacity-0 max-sm:before:hidden dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             side === "bottom" &&
-              "row-start-2 border-t data-[state=closed]:translate-y-8 data-[state=closed]:translate-y-8",
+              "row-start-2 border-t data-ending-style:translate-y-8 data-starting-style:translate-y-8",
             side === "top" &&
-              "data-[state=closed]:-translate-y-8 data-[state=closed]:-translate-y-8 border-b",
+              "data-ending-style:-translate-y-8 data-starting-style:-translate-y-8 border-b",
             side === "left" &&
-              "data-[state=closed]:-translate-x-8 data-[state=closed]:-translate-x-8 w-[calc(100%-(--spacing(12)))] max-w-md border-e",
+              "data-ending-style:-translate-x-8 data-starting-style:-translate-x-8 w-[calc(100%-(--spacing(12)))] max-w-md border-e",
             side === "right" &&
-              "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-[state=closed]:translate-x-8 data-[state=closed]:translate-x-8",
+              "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-ending-style:translate-x-8 data-starting-style:translate-x-8",
             variant === "inset" &&
               "before:hidden sm:rounded-2xl sm:border sm:before:rounded-[calc(var(--radius-2xl)-1px)] sm:**:data-[slot=sheet-footer]:rounded-b-[calc(var(--radius-2xl)-1px)]",
             instant &&
-              "transition-none! will-change-auto! data-[state=closed]:translate-x-0! data-[state=closed]:translate-x-0! data-[state=closed]:translate-y-0! data-[state=closed]:translate-y-0! data-[state=closed]:opacity-100! data-[state=closed]:opacity-100!",
+              "transition-none! will-change-auto! data-ending-style:translate-x-0! data-starting-style:translate-x-0! data-ending-style:translate-y-0! data-starting-style:translate-y-0! data-ending-style:opacity-100! data-starting-style:opacity-100!",
             className,
           )}
           data-slot="sheet-popup"
@@ -107,15 +106,15 @@ function SheetPopup({
         >
           {children}
           {showCloseButton && (
-            <SheetPrimitiveRuntime.Close
+            <SheetPrimitive.Close
               aria-label="关闭"
               className="absolute end-2 top-2"
               render={<Button size="icon" variant="ghost" />}
             >
               <XIcon />
-            </SheetPrimitiveRuntime.Close>
+            </SheetPrimitive.Close>
           )}
-        </SheetPrimitiveRuntime.Popup>
+        </SheetPrimitive.Popup>
       </SheetViewport>
     </SheetPortal>
   );
@@ -136,7 +135,7 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
 
 function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
   return (
-    <SheetPrimitiveRuntime.Title
+    <SheetPrimitive.Title
       className={cn("font-semibold text-xl leading-none", className)}
       data-slot="sheet-title"
       {...props}
@@ -146,7 +145,7 @@ function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
 
 function SheetDescription({ className, ...props }: SheetPrimitive.Description.Props) {
   return (
-    <SheetPrimitiveRuntime.Description
+    <SheetPrimitive.Description
       className={cn("text-muted-foreground text-sm", className)}
       data-slot="sheet-description"
       {...props}

@@ -1,8 +1,6 @@
-import type { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 "use client";
 
-import { AlertDialogAdapter as AlertDialogPrimitiveRuntime } from "./radix-overlays";
-
+import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 import { cn } from "~/lib/utils";
 import {
   DIALOG_BACKDROP_CLASS,
@@ -10,13 +8,13 @@ import {
   DIALOG_POPUP_CLASS,
 } from "~/components/ui/dialog-styles";
 
-const AlertDialog = AlertDialogPrimitiveRuntime.Root;
+const AlertDialog = AlertDialogPrimitive.Root;
 
-const AlertDialogPortal = AlertDialogPrimitiveRuntime.Portal;
+const AlertDialogPortal = AlertDialogPrimitive.Portal;
 
 function AlertDialogBackdrop({ className, ...props }: AlertDialogPrimitive.Backdrop.Props) {
   return (
-    <AlertDialogPrimitiveRuntime.Backdrop
+    <AlertDialogPrimitive.Backdrop
       forceRender
       className={cn(DIALOG_BACKDROP_CLASS, className)}
       data-slot="alert-dialog-backdrop"
@@ -27,7 +25,7 @@ function AlertDialogBackdrop({ className, ...props }: AlertDialogPrimitive.Backd
 
 function AlertDialogViewport({ className, ...props }: AlertDialogPrimitive.Viewport.Props) {
   return (
-    <AlertDialogPrimitiveRuntime.Viewport
+    <AlertDialogPrimitive.Viewport
       className={cn(
         "fixed inset-0 z-50 grid grid-rows-[1fr_auto_1fr] justify-items-center p-4",
         className,
@@ -53,7 +51,7 @@ function AlertDialogPopup({
       <AlertDialogViewport
         className={cn(bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12")}
       >
-        <AlertDialogPrimitiveRuntime.Popup
+        <AlertDialogPrimitive.Popup
           className={cn(
             DIALOG_POPUP_CLASS,
             "row-start-2 max-h-full max-w-lg text-popover-foreground",
@@ -104,7 +102,7 @@ function AlertDialogFooter({
 
 function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Props) {
   return (
-    <AlertDialogPrimitiveRuntime.Title
+    <AlertDialogPrimitive.Title
       className={cn("wrap-anywhere shrink-0 font-semibold text-xl leading-none", className)}
       data-slot="alert-dialog-title"
       {...props}
@@ -114,7 +112,7 @@ function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Pr
 
 function AlertDialogDescription({ className, ...props }: AlertDialogPrimitive.Description.Props) {
   return (
-    <AlertDialogPrimitiveRuntime.Description
+    <AlertDialogPrimitive.Description
       className={cn(
         "wrap-anywhere max-h-[min(24rem,60dvh)] min-h-0 overflow-y-auto overscroll-contain text-muted-foreground text-sm select-text",
         className,
@@ -126,7 +124,7 @@ function AlertDialogDescription({ className, ...props }: AlertDialogPrimitive.De
 }
 
 function AlertDialogClose(props: AlertDialogPrimitive.Close.Props) {
-  return <AlertDialogPrimitiveRuntime.Close data-slot="alert-dialog-close" {...props} />;
+  return <AlertDialogPrimitive.Close data-slot="alert-dialog-close" {...props} />;
 }
 
 export {

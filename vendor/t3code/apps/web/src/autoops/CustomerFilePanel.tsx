@@ -1,4 +1,5 @@
 import { useMemo, useRef } from 'react'
+import { flushSync } from 'react-dom'
 import {
   customerFileReference,
   customerFilePathForTarget,
@@ -134,8 +135,9 @@ export function CustomerFilePanel(props: FilePreviewPanelProps & { scope: AutoOp
         props.onNavigateFolder(canonical(path), canonical(nextTrail), keepSource)
       }
       onReferenceAdded={() => {
-        if (sheet) useRightPanelStore.getState().close(threadRef)
-        requestAnimationFrame(() => composer?.current?.focusAtEnd())
+        // 先提交抽屉关闭和输入框展开，原生浮层归还焦点时才能保留本次输入目标。
+        if (sheet) flushSync(() => useRightPanelStore.getState().close(threadRef))
+        flushSync(() => composer?.current?.focusAtEnd())
       }}
     />
   )

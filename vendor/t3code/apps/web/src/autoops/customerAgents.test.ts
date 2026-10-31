@@ -180,13 +180,14 @@ describe("customer workspace UI boundary", () => {
       true,
     );
   });
-  it("allows an external project member to select their private customer target without platform internal fields", async () => {
+  it("外部成员显式调整会话可见范围时保持客户目标，仍拒绝平台内部资料和越权环境", async () => {
     const host = await import("./hostConfig");
     host.installAutoOpsHost(bootstrap, "https://work.test");
     host.setAutoOpsThreadScope("draft", scope);
     expect(host.readAutoOpsThreadScope("draft", "p-autoops")).toEqual(scope);
+    host.setAutoOpsThreadScope("draft", { ...scope, visibility: "project" });
+    expect(host.readAutoOpsThreadScope("draft", "p-autoops")).toEqual({ ...scope, visibility: "project" });
     for (const patch of [
-      { visibility: "project" as const },
       { workspaceType: "internal" as const },
       { workspaceVersionId: "platform-version" },
       { environmentId: "production" },

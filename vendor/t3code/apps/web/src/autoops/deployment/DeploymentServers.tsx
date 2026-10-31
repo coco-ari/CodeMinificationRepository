@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { Link, useBlocker } from '@tanstack/react-router'
 import { ProjectId } from '@t3tools/contracts'
 import {
@@ -297,6 +297,13 @@ function DeploymentServersScope(props: Props & { identity: string }) {
   const mutationController = useRef<AbortController | null>(null)
   const handledLocation = useRef('')
   const allowNavigation = useRef(false)
+  const primaryAction = useRef<HTMLButtonElement>(null)
+  const restoreEntryFocus = useRef(false)
+  useLayoutEffect(() => {
+    if (!restoreEntryFocus.current || view.kind !== 'list' || busy) return
+    restoreEntryFocus.current = false
+    primaryAction.current?.focus({ preventScroll: true })
+  }, [view.kind, busy])
   const dirty =
     view.kind === 'details' &&
     platform &&
@@ -664,7 +671,11 @@ function DeploymentServersScope(props: Props & { identity: string }) {
         : platform
           ? '平台节点'
           : '部署节点'
-  const back = () => go({ kind: 'list' })
+  const back = () => {
+    // 整页返回列表后恢复原操作入口，弹窗继续由原生 finalFocus 处理。
+    restoreEntryFocus.current = props.embedded === true
+    go({ kind: 'list' })
+  }
   const confirmDisabled =
     disabled ||
     view.kind === 'list' ||
@@ -901,6 +912,7 @@ function DeploymentServersScope(props: Props & { identity: string }) {
             <div className="flex flex-wrap items-center gap-2">
               {platform ? (
                 <Button
+                  ref={primaryAction}
                   size="sm"
                   onClick={() => {
                     setName('')
@@ -914,6 +926,7 @@ function DeploymentServersScope(props: Props & { identity: string }) {
               ) : null}
               {!platform && data?.canBind ? (
                 <Button
+                  ref={primaryAction}
                   variant="outline"
                   size="sm"
                   disabled={disabled || !available.length}

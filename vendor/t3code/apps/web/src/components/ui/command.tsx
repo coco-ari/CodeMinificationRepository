@@ -1,7 +1,6 @@
-import type { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
 "use client";
 
-import { DialogAdapter as CommandDialogPrimitiveRuntime } from "./radix-overlays";
+import { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
 import { SearchIcon } from "lucide-react";
 import type * as React from "react";
 import { cn } from "~/lib/utils";
@@ -19,17 +18,17 @@ import {
 import { DIALOG_BACKDROP_CLASS, DIALOG_POPUP_CLASS } from "~/components/ui/dialog-styles";
 import { Button } from "~/components/ui/button";
 
-const CommandDialog = CommandDialogPrimitiveRuntime.Root;
+const CommandDialog = CommandDialogPrimitive.Root;
 
-const CommandDialogPortal = CommandDialogPrimitiveRuntime.Portal;
+const CommandDialogPortal = CommandDialogPrimitive.Portal;
 
 function CommandDialogTrigger(props: CommandDialogPrimitive.Trigger.Props) {
-  return <CommandDialogPrimitiveRuntime.Trigger data-slot="command-dialog-trigger" {...props} />;
+  return <CommandDialogPrimitive.Trigger data-slot="command-dialog-trigger" {...props} />;
 }
 
 function CommandDialogBackdrop({ className, ...props }: CommandDialogPrimitive.Backdrop.Props) {
   return (
-    <CommandDialogPrimitiveRuntime.Backdrop
+    <CommandDialogPrimitive.Backdrop
       className={cn(DIALOG_BACKDROP_CLASS, className)}
       data-slot="command-dialog-backdrop"
       {...props}
@@ -39,7 +38,7 @@ function CommandDialogBackdrop({ className, ...props }: CommandDialogPrimitive.B
 
 function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.Viewport.Props) {
   return (
-    <CommandDialogPrimitiveRuntime.Viewport
+    <CommandDialogPrimitive.Viewport
       className={cn(
         "pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(--spacing(4),4vh)] sm:py-[10vh]",
         className,
@@ -62,7 +61,7 @@ function CommandDialogPopup({
     <CommandDialogPortal>
       <CommandDialogBackdrop onPointerDown={onBackdropPointerDown} />
       <CommandDialogViewport>
-        <CommandDialogPrimitiveRuntime.Popup
+        <CommandDialogPrimitive.Popup
           className={cn(
             DIALOG_POPUP_CLASS,
             "pointer-events-auto max-h-105 max-w-xl text-foreground",
@@ -72,7 +71,7 @@ function CommandDialogPopup({
           {...props}
         >
           {children}
-        </CommandDialogPrimitiveRuntime.Popup>
+        </CommandDialogPrimitive.Popup>
       </CommandDialogViewport>
     </CommandDialogPortal>
   );

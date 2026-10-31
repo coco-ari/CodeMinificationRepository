@@ -1,6 +1,5 @@
-import { mergeProps } from "~/components/ui/radix-compat";
-import type { useRender } from "@base-ui/react/use-render";
-import { useRender as useRenderRuntime } from "~/components/ui/radix-compat";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeft, PanelLeftClose } from "lucide";
 import * as React from "react";
@@ -648,7 +647,6 @@ function SidebarContent({
         // Base UI's viewport out of the tab order lets its presentational role
         // flatten in WebKit instead of becoming a VoiceOver interaction group.
         viewportTabIndex={-1}
-        contentSizing="viewport"
         className="h-auto min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]]:[--fade-size:0.75rem]"
       >
         <div
@@ -751,7 +749,7 @@ function SidebarMenuButton({
 
   const buttonProps = mergeProps<"button">(defaultProps, props);
 
-  const buttonElement = useRenderRuntime({
+  const buttonElement = useRender({
     defaultTagName: "button",
     props: buttonProps,
     render,
@@ -831,7 +829,7 @@ function SidebarMenuSubButton({
     "data-slot": "sidebar-menu-sub-button",
   };
 
-  return useRenderRuntime({
+  return useRender({
     defaultTagName: "a",
     props: mergeProps<"a">(defaultProps, props),
     render,

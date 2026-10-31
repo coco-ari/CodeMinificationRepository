@@ -95,7 +95,17 @@ const browserTestApiPort = 61_000 + ((Hash.string(import.meta.dirname) >>> 0) % 
 const browserTestProject = {
   extends: true,
   // Pre-bundled so the first test importing userEvent does not trigger a mid-run reload.
-  optimizeDeps: { include: ["vite-plus/test/browser", "@base-ui/react/autocomplete"] },
+  optimizeDeps: {
+    include: [
+      "vite-plus/test/browser",
+      ...[
+        "alert-dialog", "autocomplete", "checkbox", "collapsible", "combobox", "dialog",
+        "field", "input", "menu", "merge-props", "number-field", "popover", "preview-card",
+        "radio-group", "radio", "scroll-area", "select", "separator", "switch", "toast",
+        "toggle-group", "toggle", "toolbar", "tooltip", "use-render",
+      ].map((component) => `@base-ui/react/${component}`),
+    ],
+  },
   test: {
     name: "browser",
     include: ["src/**/*.browser.test.{ts,tsx}"],

@@ -5,7 +5,7 @@ import {
   AuthMcpClientAccess,
   type AuthMcpAuthorizationRequest,
 } from "@t3tools/contracts";
-import { RadioPrimitive } from "~/components/ui/radio-group";
+import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import { EyeIcon, type LucideIcon } from "lucide-react";
 import type * as Context from "effect/Context";

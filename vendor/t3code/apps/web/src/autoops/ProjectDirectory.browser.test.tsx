@@ -1,6 +1,6 @@
 import { StrictMode, useLayoutEffect } from 'react'
 import { useLocation } from '@tanstack/react-router'
-import { expect, it, vi } from 'vite-plus/test'
+import { beforeEach, expect, it, vi } from 'vite-plus/test'
 import { page, userEvent } from 'vite-plus/test/browser'
 import { fakeTimers, render, stubGlobal } from '../../test/render'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -117,15 +117,12 @@ function setup({ manage = true, failFirst = false, loseResponse = false, manageN
 function App() {
   return (
     <StrictMode>
-      <SidebarProvider>
-        <ModuleSidebarProvider>
-          <ModuleSidebarOutlet />
-          <AutoOpsProjectsPage />
-        </ModuleSidebarProvider>
-      </SidebarProvider>
+      <AppSidebarLayout><AutoOpsProjectsPage /></AppSidebarLayout>
     </StrictMode>
   );
 }
+
+beforeEach(async () => { await page.viewport(1440, 600) })
 
 function ThemedProjectPage({ dark }: { dark: boolean }) {
   const { setAppearanceMode } = useTheme()
@@ -163,7 +160,8 @@ it.each([{ width: 1440, dark: false }, { width: 390, dark: true }])('配置概�
   await summary.getByRole('button', { name: '配置仓库', exact: true }).click()
   await expect.element(screen.getByRole('region', { name: '仓库与凭证' })).toHaveFocus()
   expect(f.fetch.mock.calls.filter(([input]) => String(input).endsWith('/repositories'))).toHaveLength(repositoryReads)
-  await screen.getByRole('navigation', { name: '项目配置分组' }).getByRole('button', { name: '基本信息' }).click()
+  if (width < 768) await screen.getByRole('button', { name: '切换主侧栏' }).click()
+  await page.getByRole('navigation', { name: '项目配置分组' }).getByRole('button', { name: '基本信息' }).click()
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width + 1)
   expect(f.bodies).toHaveLength(0)
   await page.screenshot({ path: `../../.test-artifacts/ui-refinement/project-overview-${width}.png` })
@@ -259,12 +257,16 @@ it('从生产环境的指定服务配置仓库后返回，恢复原环境与服�
       const environmentId = url.searchParams.get('environmentId') ?? 'test'
       return Response.json({
         enabled: true, environments: f.project.environments,
+        capabilities: { serviceManage: true, environments: Object.fromEntries(f.project.environments.map(({ id }) => [id, { read: true, configure: true, publish: true, restart: true, rollback: true, sourceDownload: true, sourceClear: true, nodeBind: true }])) },
         services: [{ id: 'api', name: '接口服务', kind: 'static', module: '.', configKey: 'api-config' }, { id: 'portal', name: '用户门户', kind: 'static', module: '.', configKey: 'portal-config' }],
+        serviceSources: ['api', 'portal'].map((serviceId) => ({ serviceId, environmentId, sources: [{ sourceId: 'new-repository', refKind: 'branch', ref: 'main', mountPath: 'repository' }], contexts: [{ service: 'frontend', root: 'repository', workingDirectory: '.' }], configKey: 'source-key' })),
         targets: ['api', 'portal'].map((serviceId) => ({ id: `${serviceId}-${environmentId}`, name: serviceId, serviceId, environmentId, serverId: 'server', configKey: `${serviceId}-config`, config })),
         servers: [{ id: 'server', name: '隔离部署节点', environmentId, online: true, capabilities: ['static-site-v1'] }], tasks: [],
       })
     }
     if (url.pathname.endsWith('/releases')) return Response.json({ releases: [], total: 0, nextOffset: null })
+    if (url.pathname.endsWith('/refs')) return Response.json({ sourceId: 'new-repository', defaultRef: 'main', branches: [{ name: 'main', commit: 'a'.repeat(40) }], tags: [], truncated: false })
+    if (url.pathname.endsWith('/history')) return Response.json({ sourceId: 'new-repository', refKind: 'branch', ref: 'main', commit: 'a'.repeat(40), commits: [{ revision: 'a'.repeat(40), subject: '门户源码', authoredAt: '2026-10-29T12:00:00Z' }], truncated: false })
     return original(input, init)
   })
   using _fetch = stubGlobal('fetch', f.fetch)
@@ -273,10 +275,13 @@ it('从生产环境的指定服务配置仓库后返回，恢复原环境与服�
     return <AppSidebarLayout>{location.pathname === '/projects' ? <AutoOpsProjectsPage /> : <DeploymentsPanel projectId={f.project.id} packages={[]} sources={repositories} sourcesError={null} navigation={null} packageActions={null} onRefreshPackages={() => {}} />}</AppSidebarLayout>
   }
   await using screen = await render(<Flow />, { router: '/deployments?projectId=directory-project' })
+  await expect.element(screen.getByRole('combobox', { name: '部署环境', exact: true })).toBeVisible()
   await screen.getByRole('combobox', { name: '部署环境', exact: true }).click()
   await page.getByRole('option', { name: '生产环境', exact: true }).click()
-  await screen.getByText('用户门户', { exact: true }).click()
+  await expect.element(screen.getByRole('button', { name: /^用户门户/ })).toBeVisible()
+  await screen.getByRole('button', { name: /^用户门户/ }).click()
   await expect.element(screen.getByRole('heading', { name: '用户门户', exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('link', { name: '配置项目仓库', exact: true })).toBeVisible()
   await screen.getByRole('link', { name: '配置项目仓库', exact: true }).click()
   const git = screen.getByRole('region', { name: '仓库与凭证', exact: true })
   await expect.element(git).toHaveFocus()
@@ -289,7 +294,8 @@ it('从生产环境的指定服务配置仓库后返回，恢复原环境与服�
   await screen.getByRole('link', { name: '返回部署', exact: true }).click()
   await expect.element(screen.getByRole('combobox', { name: '部署环境', exact: true })).toHaveTextContent('生产环境')
   await expect.element(screen.getByRole('heading', { name: '用户门户', exact: true })).toBeVisible()
-  await expect.element(screen.getByRole('button', { name: '发布', exact: true })).toBeEnabled()
+  await screen.getByRole('button', { name: /门户源码/ }).filter({ hasText: 'aaaaaaaaaaaa' }).click()
+  await expect.element(screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true })).toBeEnabled()
   expect(writes).toHaveLength(1)
   expect(writes[0]!.body.value).toEqual({ name: '门户源码', url: 'https://isolated.invalid/portal.git' })
   expect(f.fetch.mock.calls.some(([input, init]) => String(input).includes('/deployments/tasks') && init?.method === 'POST')).toBe(false)
@@ -318,16 +324,17 @@ it.each([{ width: 1440, dark: false }, { width: 390, dark: true }])(
     const f = setup({ manageNodes: true, projectName: '华东区域生产服务项目', lite: true })
     using _fetch = stubGlobal('fetch', f.fetch)
     await using screen = await render(<ThemedProjectPage dark={dark} />, { router: '/projects?projectId=directory-project' })
-    await expect.element(screen.getByText('暂无助手', { exact: true })).toBeVisible()
+    await expect.element(screen.getByRole('link', { name: '管理助手', exact: true })).toBeVisible()
     await expect.element(screen.getByRole('button', { name: '添加仓库', exact: true })).toBeEnabled()
     const configReads = () => f.fetch.mock.calls.filter(([input]) => String(input).includes('/projects/')).length
     const initialReads = configReads()
-    const navigation = screen.getByRole('navigation', { name: '项目配置分组' })
+    if (width < 768) await screen.getByRole('button', { name: '切换主侧栏' }).click()
+    const navigation = page.getByRole('navigation', { name: '项目配置分组' })
     await navigation.getByRole('button', { name: '仓库与凭证' }).click()
     const repository = screen.getByRole('region', { name: '仓库与凭证' })
     await expect.element(repository).toHaveFocus()
-    const navBottom = navigation.element().getBoundingClientRect().bottom
-    expect(repository.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(navBottom)
+    const headerBottom = screen.container.querySelector('[data-module-header]')!.getBoundingClientRect().bottom
+    expect(repository.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(headerBottom)
     const addRepository = repository.getByRole('button', { name: '添加仓库', exact: true })
     await userEvent.keyboard('{Tab}')
     await expect.element(addRepository).toHaveFocus()
@@ -335,11 +342,13 @@ it.each([{ width: 1440, dark: false }, { width: 390, dark: true }])(
     await expect.element(page.getByRole('dialog', { name: '添加仓库', exact: true })).toBeVisible()
     await userEvent.keyboard('{Escape}')
     await expect.element(addRepository).toHaveFocus()
+    if (width < 768) await screen.getByRole('button', { name: '切换主侧栏' }).click()
     await navigation.getByRole('button', { name: '助手与成员' }).click()
     await expect.element(screen.getByRole('region', { name: '助手与成员' })).toHaveFocus()
     await expect.element(screen.getByText('待管理员分配')).toBeVisible()
     expect(configReads()).toBe(initialReads)
     expect(f.bodies).toHaveLength(0)
+    if (width < 768) await screen.getByRole('button', { name: '切换主侧栏' }).click()
     await navigation.getByRole('button', { name: '环境', exact: true }).click()
     await expect.element(screen.getByRole('region', { name: '环境', exact: true })).toHaveFocus()
     await expect.element(screen.getByRole('button', { name: '管理测试环境 MCP' })).toBeEnabled()
@@ -507,7 +516,8 @@ it('项目A保存未知后关闭表单继续保存B，返回A只核原收据且�
   await expect.element(dialog).not.toBeInTheDocument()
   await expect.element(screen.getByRole('button', { name: '刷新项目', exact: true })).toHaveFocus()
   expect(readPendingProjectWrite({ projectId: 'directory-project' })).toEqual(original)
-  await userEvent.click(screen.getByRole('button', { name: '另一项目', exact: true }))
+  await screen.getByRole('combobox', { name: '切换项目', exact: true }).click()
+  await page.getByRole('option', { name: '另一项目', exact: true }).click()
   await vi.waitFor(() =>
     expect(screen.router?.state.location.search).toMatchObject({ projectId: 'other-project' }),
   )
@@ -519,7 +529,8 @@ it('项目A保存未知后关闭表单继续保存B，返回A只核原收据且�
   expect(secondWrites).toHaveLength(1)
   expect(readPendingProjectWrite({ projectId: 'directory-project' })).toEqual(original)
   f.setReceiptMode('completed')
-  await userEvent.click(screen.getByRole('button', { name: '待核对的项目A', exact: true }))
+  await screen.getByRole('combobox', { name: '切换项目', exact: true }).click()
+  await page.getByRole('option', { name: '待核对的项目A', exact: true }).click()
   await userEvent.click(screen.getByRole('button', { name: '重试', exact: true }))
   await vi.waitFor(() =>
     expect(readPendingProjectWrite({ projectId: 'directory-project' })).toBeNull(),
@@ -689,7 +700,7 @@ it('页面重开原项目已退出活动目录时，核原收据后仍能显式�
   }))
   await expect(submitProjectWrite(original)).rejects.toMatchObject({ uncertain: true })
   await using screen = await render(<App />, { router: '/projects' })
-  await expect.element(screen.getByText('没有可见项目', { exact: true })).toBeVisible()
+  await expect.element(screen.getByRole('region', { name: '开始使用项目', exact: true })).toBeVisible()
   await screen.getByRole('button', { name: '重试', exact: true }).click()
   await expect.element(page.getByRole('dialog', { name: '删除项目', exact: true })).toBeVisible()
   await expect.element(page.getByRole('button', { name: '继续删除', exact: true })).toBeEnabled()

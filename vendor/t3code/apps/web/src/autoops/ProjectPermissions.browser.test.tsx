@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { page } from 'vite-plus/test/browser'
+import { useLocation } from '@tanstack/react-router'
 import { render } from '../../test/render'
 import { SidebarProvider } from '~/components/ui/sidebar'
-import { ProjectAreaTopbar } from './ProjectAreaNavigation'
+import { AutoOpsProjectRouteSync, ProjectAreaTopbar } from './ProjectAreaNavigation'
 import { WorkspaceScopeControl } from './WorkspaceScopeControl'
 import { ConversationWorkspaceControl } from './ConversationWorkspaceControl'
 import type { AutoOpsThreadScope } from './hostConfig'
@@ -23,7 +24,7 @@ vi.mock(import('./hostConfig'), async (original) => ({
 }))
 vi.mock(import('./projectNavigation'), async (original) => ({
   ...(await original()),
-  useAutoOpsProjectId: () => 'p-one',
+  useAutoOpsProjectId: () => useLocation({ select: (location) => location.search.projectId ?? 'p-one' }),
   selectAutoOpsProject: mocks.selectProject,
   autoOpsProjectHref: (area: string, projectId: string) =>
     (area === 'chat' ? '/' : '/' + area) + '?projectId=' + projectId,
@@ -118,11 +119,12 @@ describe('项目入口使用服务端 capabilities', () => {
     mocks.readHost.mockReturnValue(value)
     await using screen = await render(
       <SidebarProvider>
+        <AutoOpsProjectRouteSync />
         <ProjectAreaTopbar />
       </SidebarProvider>,
       { router: '/deployments?projectId=p-one' },
     )
-    await screen.getByRole('button', { name: '切换项目' }).click()
+    await screen.getByRole('combobox', { name: '切换项目' }).click()
     await page.getByRole('option', { name: '目标项目', exact: true }).click()
     await vi.waitFor(() => expect(screen.router?.state.location.pathname).toBe('/'))
     expect(screen.router?.state.location.search).toEqual({ projectId: 'p-two' })
@@ -135,11 +137,12 @@ describe('项目入口使用服务端 capabilities', () => {
     mocks.readHost.mockReturnValue(value)
     await using screen = await render(
       <SidebarProvider>
+        <AutoOpsProjectRouteSync />
         <ProjectAreaTopbar />
       </SidebarProvider>,
       { router: '/deployments?projectId=p-one' },
     )
-    await screen.getByRole('button', { name: '切换项目' }).click()
+    await screen.getByRole('combobox', { name: '切换项目' }).click()
     await page.getByRole('option', { name: '目标项目', exact: true }).click()
     await vi.waitFor(() => expect(screen.router?.state.location.pathname).toBe('/deployments'))
     expect(screen.router?.state.location.search).toEqual({ projectId: 'p-two' })

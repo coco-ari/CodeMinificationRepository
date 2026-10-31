@@ -46,7 +46,7 @@ export function DeploymentRevisionPicker({
   const complete =
     source.sources.length > 0 && source.sources.every((row) => !!choices[row.sourceId])
   return (
-    <div className="min-w-0 space-y-4 p-4" aria-label="发布版本选择">
+    <div className="min-w-0 space-y-4 p-4" role="group" aria-label="发布版本选择">
       {source.sources.map((row) => (
         <section key={row.sourceId} className="min-w-0 border-b border-border/60 pb-4">
           <Button

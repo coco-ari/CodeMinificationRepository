@@ -1,7 +1,6 @@
 'use client'
 
-import type { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
-import { ComboboxAdapter as ComboboxRuntime } from './radix-search'
+import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox';
 import { ChevronsUpDownIcon, SearchIcon, XIcon } from 'lucide-react'
 import * as React from 'react'
 
@@ -24,7 +23,7 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
   const value = { chipsRef, multiple: !!props.multiple }
   return (
     <ComboboxContext value={value}>
-      <ComboboxRuntime.Root {...props} />
+      <ComboboxPrimitive.Root {...props} />
     </ComboboxContext>
   )
 }
@@ -58,7 +57,7 @@ function ComboboxInput({
           {startAddon}
         </div>
       )}
-      <ComboboxRuntime.Input
+      <ComboboxPrimitive.Input
         className={cn(
           startAddon &&
             'data-[size=sm]:*:data-[slot=combobox-input]:ps-[calc(--spacing(7.5)-1px)] *:data-[slot=combobox-input]:ps-[calc(--spacing(8.5)-1px)] sm:data-[size=sm]:*:data-[slot=combobox-input]:ps-[calc(--spacing(7)-1px)] sm:*:data-[slot=combobox-input]:ps-[calc(--spacing(8)-1px)]',
@@ -88,9 +87,9 @@ function ComboboxInput({
             sizeValue === 'sm' ? 'end-0' : 'end-0.5',
           )}
         >
-          <ComboboxRuntime.Icon data-slot="combobox-icon">
+          <ComboboxPrimitive.Icon data-slot="combobox-icon">
             <ChevronsUpDownIcon />
-          </ComboboxRuntime.Icon>
+          </ComboboxPrimitive.Icon>
         </ComboboxTrigger>
       )}
       {showClear && (
@@ -127,11 +126,16 @@ function ComboboxSearchInput(props: React.ComponentProps<typeof ComboboxInput>) 
   )
 }
 
-function ComboboxTrigger({ className, children, ...props }: ComboboxPrimitive.Trigger.Props) {
+function ComboboxTrigger({ className, children, 'aria-label': ariaLabel, ...props }: ComboboxPrimitive.Trigger.Props) {
   return (
-    <ComboboxRuntime.Trigger className={className} data-slot="combobox-trigger" {...props}>
+    <ComboboxPrimitive.Trigger
+      className={className}
+      data-slot="combobox-trigger"
+      aria-label={ariaLabel ?? (typeof children === 'string' ? children : undefined)}
+      {...props}
+    >
       {children}
-    </ComboboxRuntime.Trigger>
+    </ComboboxPrimitive.Trigger>
   )
 }
 
@@ -155,8 +159,8 @@ function ComboboxPopup({
   const anchor = anchorProp ?? (multiple ? chipsRef : undefined)
 
   return (
-    <ComboboxRuntime.Portal>
-      <ComboboxRuntime.Positioner
+    <ComboboxPrimitive.Portal>
+      <ComboboxPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
@@ -165,7 +169,7 @@ function ComboboxPopup({
         side={side}
         sideOffset={sideOffset}
       >
-        <ComboboxRuntime.Popup
+        <ComboboxPrimitive.Popup
           className={cn(
             'dropdown-glass relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] transition-[scale,opacity] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]',
             className,
@@ -175,9 +179,9 @@ function ComboboxPopup({
           {...props}
         >
           {children}
-        </ComboboxRuntime.Popup>
-      </ComboboxRuntime.Positioner>
-    </ComboboxRuntime.Portal>
+        </ComboboxPrimitive.Popup>
+      </ComboboxPrimitive.Positioner>
+    </ComboboxPrimitive.Portal>
   )
 }
 
@@ -190,9 +194,9 @@ function ComboboxItem({
   hideIndicator?: boolean
 }) {
   return (
-    <ComboboxRuntime.Item
+    <ComboboxPrimitive.Item
       className={cn(
-        "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none not-data-[disabled=true]:hover:bg-accent data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-value-selected:bg-foreground/[0.08] data-value-selected:text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground [&[data-highlighted][data-value-selected]]:bg-accent [&[data-highlighted][data-value-selected]]:text-accent-foreground data-[disabled=true]:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none not-data-disabled:hover:bg-accent data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-value-selected:bg-foreground/[0.08] data-value-selected:text-foreground data-highlighted:bg-accent data-highlighted:text-accent-foreground [&[data-highlighted][data-value-selected]]:bg-accent [&[data-highlighted][data-value-selected]]:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="combobox-item"
@@ -204,13 +208,13 @@ function ComboboxItem({
       >
         {children}
       </div>
-    </ComboboxRuntime.Item>
+    </ComboboxPrimitive.Item>
   )
 }
 
 function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
   return (
-    <ComboboxRuntime.Empty
+    <ComboboxPrimitive.Empty
       className={cn(
         'not-empty:p-2 text-center text-base text-muted-foreground sm:text-sm',
         className,
@@ -224,7 +228,7 @@ function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
 function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (
     <ScrollArea scrollbarGutter scrollFade>
-      <ComboboxRuntime.List
+      <ComboboxPrimitive.List
         className={cn('not-empty:scroll-py-1 not-empty:px-1 not-empty:py-1', className)}
         data-slot="combobox-list"
         {...props}
@@ -239,11 +243,9 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
  */
 function ComboboxListVirtualized({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (
-    <ComboboxRuntime.List
-      // cmdk adds a sizing wrapper; it must pass the bounded height through to
-      // LegendList so the virtualizer, rather than an outer clip, owns scrolling.
+    <ComboboxPrimitive.List
       className={cn(
-        'size-full min-w-0 not-empty:px-1 not-empty:py-1 [&>[cmdk-list-sizer]]:h-full',
+        'size-full min-w-0 not-empty:px-1 not-empty:py-1',
         className,
       )}
       data-slot="combobox-list"
@@ -253,12 +255,12 @@ function ComboboxListVirtualized({ className, ...props }: ComboboxPrimitive.List
 }
 
 function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
-  return <ComboboxRuntime.Clear className={className} data-slot="combobox-clear" {...props} />
+  return <ComboboxPrimitive.Clear className={className} data-slot="combobox-clear" {...props} />
 }
 
 function ComboboxStatus({ className, ...props }: ComboboxPrimitive.Status.Props) {
   return (
-    <ComboboxRuntime.Status
+    <ComboboxPrimitive.Status
       className={cn(
         'px-3 py-2 font-medium text-muted-foreground text-xs empty:m-0 empty:p-0',
         className,
@@ -269,7 +271,7 @@ function ComboboxStatus({ className, ...props }: ComboboxPrimitive.Status.Props)
   )
 }
 
-const useComboboxFilter = ComboboxRuntime.useFilter
+const useComboboxFilter = ComboboxPrimitive.useFilter
 
 export {
   Combobox,

@@ -135,7 +135,7 @@ describe("ProviderModelPicker", () => {
     const legacyFavorite = page.getByRole("option", { name: /Legacy favorite/ });
     const currentFavorite = page.getByRole("option", { name: /Current favorite/ });
     const current = page.getByRole("option", { name: /Current model/ });
-    const legacySection = page.getByRole("option", { name: /Legacy models/ });
+    const legacySection = page.getByRole("option", { name: /旧版模型/ });
 
     await expect.element(legacyFavorite).toBeVisible();
     await expect.element(currentFavorite).toBeVisible();
@@ -147,7 +147,7 @@ describe("ProviderModelPicker", () => {
       current.element().getBoundingClientRect().top,
     );
 
-    await click(legacyFavorite.getByRole("button", { name: "Remove from favorites" }));
+    await click(legacyFavorite.getByRole("button", { name: "取消收藏" }));
     await expect.element(legacyFavorite).not.toBeInTheDocument();
     await click(legacySection);
     await expect.element(legacyFavorite).toBeVisible();
@@ -156,7 +156,7 @@ describe("ProviderModelPicker", () => {
       legacySection.element().getBoundingClientRect().top,
     );
     await expect
-      .element(legacyFavorite.getByRole("button", { name: "Add to favorites" }))
+      .element(legacyFavorite.getByRole("button", { name: "加入收藏" }))
       .toBeVisible();
   });
 
@@ -167,7 +167,7 @@ describe("ProviderModelPicker", () => {
     await expect
       .element(page.getByRole("option", { name: /Other legacy/ }))
       .not.toBeInTheDocument();
-    await click(page.getByRole("option", { name: /Legacy models/ }));
+    await click(page.getByRole("option", { name: /旧版模型/ }));
     await expect.element(page.getByRole("option", { name: /Other legacy/ })).toBeVisible();
   });
 
@@ -194,7 +194,7 @@ describe("ProviderModelPicker", () => {
         options: [],
       });
 
-      expect(label).toContain("Choose model");
+      expect(label).toContain("选择模型");
       expect(label).not.toContain(ANTIGRAVITY_DEFAULT_MODEL);
     },
   );

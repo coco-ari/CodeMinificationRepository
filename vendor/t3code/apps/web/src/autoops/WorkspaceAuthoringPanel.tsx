@@ -396,7 +396,7 @@ export function WorkspaceAuthoring({
               }}
             />
           ) : (
-            <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+            <ScrollArea radius="none" className="min-h-0 flex-1">
               <WorkspacePageContainer>
                 <SettingsSection
                   title="Git 仓库来源"

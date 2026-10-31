@@ -250,7 +250,7 @@ it('从环境服务选择具体提交，一次确认后固定 SHA 并显示真�
   await using screen = await render(f.ui, { router: '/deployments?projectId=p-one' })
   await expect.element(screen.getByRole('button', { name: /修复订单/ })).toBeVisible()
   await screen.getByRole('button', { name: /修复订单/ }).click()
-  await screen.getByRole('button', { name: '发布', exact: true }).click()
+  await screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true }).click()
   await expect.element(page.getByRole('dialog')).toBeVisible()
   expect(mocks.submit).not.toHaveBeenCalled()
   await page.getByText('查看本次采用的配置', { exact: true }).click()
@@ -289,7 +289,7 @@ it('同仓同分支跨服务复用查询，手动刷新分别更新列表且保�
   await expect.poll(() => mocks.refs.mock.calls.length).toBe(2)
   await expect.element(commit()).toHaveAttribute('aria-pressed', 'true')
   expect(mocks.history).toHaveBeenCalledTimes(2)
-  await screen.getByRole('button', { name: '发布', exact: true }).click()
+  await screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true }).click()
   await expect.element(page.getByRole('dialog')).toBeVisible()
   await page.getByRole('button', { name: '确认发布', exact: true }).click()
   await expect.poll(() => mocks.submit.mock.calls.length).toBe(1)
@@ -429,7 +429,7 @@ it('发布响应丢失后只查询原请求，不在刷新或核对时重复发�
     router: '/deployments?projectId=p-one&deploymentEnvironmentId=test',
   })
   await screen.getByRole('button', { name: /修复订单/ }).click()
-  await screen.getByRole('button', { name: '发布', exact: true }).click()
+  await screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true }).click()
   await page.getByRole('button', { name: '确认发布', exact: true }).click()
   await expect.element(page.getByRole('button', { name: '确认发布', exact: true })).toBeDisabled()
   await page.getByRole('button', { name: '取消', exact: true }).click()
@@ -478,12 +478,12 @@ it('多仓库分别选择完整提交，刷新分支不把其他仓库改成最�
     router: '/deployments?projectId=p-one&deploymentEnvironmentId=test',
   })
   await screen.getByRole('button', { name: /修复订单/ }).click()
-  await expect.element(screen.getByRole('button', { name: '发布', exact: true })).toBeDisabled()
+  await expect.element(screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true })).toBeDisabled()
   await screen.getByRole('button', { name: /组件仓库/ }).click()
   await screen.getByRole('button', { name: /更新组件/ }).click()
   await screen.getByRole('button', { name: '刷新分支列表' }).click()
-  await expect.element(screen.getByRole('button', { name: '发布', exact: true })).toBeEnabled()
-  await screen.getByRole('button', { name: '发布', exact: true }).click()
+  await expect.element(screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true })).toBeEnabled()
+  await screen.getByRole('group', { name: '发布版本选择' }).getByRole('button', { name: '发布', exact: true }).click()
   await page.getByRole('button', { name: '确认发布', exact: true }).click()
   await expect.poll(() => mocks.submit.mock.calls.length).toBe(1)
   expect(
@@ -564,4 +564,23 @@ it('删除当前部署位置后保留服务定位及来源，不跳到其他服�
   await expect.element(screen.getByRole('heading', { name: '第二服务', exact: true })).toBeVisible()
   expect(f.state.targets.some((row) => row.id === 'target-api')).toBe(true)
   expect(f.state.serviceSources!.some((row) => row.serviceId === second.id)).toBe(true)
+})
+
+it.each([
+  '/deployments?projectId=p-one',
+  '/deployments?projectId=p-one&deploymentEnvironmentId=test&serviceId=service-api&tab=publish',
+])('恢复浏览位置不读取失效服务或任务，显式定位优先：%s', async (router) => {
+  const f = setup()
+  sessionStorage.setItem('autoops:deployments:workbench-test:p-one:selection', JSON.stringify({
+    environmentId: 'test', serviceId: 'revoked-service', targetId: 'foreign-target',
+    taskId: 'foreign-task', tab: 'history',
+  }))
+  await using screen = await render(f.ui, { router })
+  await expect.element(screen.getByRole('heading', { name: '后端服务', exact: true })).toBeVisible()
+  if (router.includes('tab=publish'))
+    await expect.element(screen.getByRole('button', { name: /修复订单/ })).toBeVisible()
+  else
+    await expect.element(screen.getByRole('combobox', { name: '查看部署任务', exact: true })).toBeVisible()
+  expect(mocks.logs).not.toHaveBeenCalled()
+  expect(mocks.submit).not.toHaveBeenCalled()
 })

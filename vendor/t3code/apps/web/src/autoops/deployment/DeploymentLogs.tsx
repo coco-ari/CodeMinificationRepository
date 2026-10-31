@@ -351,7 +351,6 @@ function DeploymentTaskLog({
       ) : null}
       <div ref={surface} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <ScrollArea
-          contentSizing="viewport"
           radius="none"
           className="min-h-0 flex-1"
           viewportTabIndex={0}

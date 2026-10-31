@@ -1,3 +1,4 @@
+import '../../index.css';
 import { act, render } from "../../../test/render";
 import { useState, createRef } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -10,9 +11,9 @@ import { ToggleGroup, Toggle } from "./toggle-group";
 import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "./collapsible";
 import { ScrollArea } from "./scroll-area";
 import { NumberField, NumberFieldInput, NumberFieldGroup, NumberFieldIncrement } from "./number-field";
-import { Toast } from "./radix-toast";
+import { Toast } from "@base-ui/react/toast";
 
-describe("T3 Radix compatibility", () => {
+describe("T3 原生控件", () => {
   it("composes a render callback's ref and click once", async () => {
     const ref = createRef<HTMLButtonElement>(); const clicked = vi.fn();
     await using screen = await render(<Button ref={ref} onClick={clicked} render={(props) => <button {...props} />}>Run</Button>);
@@ -44,7 +45,7 @@ describe("T3 Radix compatibility", () => {
     await screen.getByRole("radio", { name: "one" }).click(); await userEvent.keyboard("{ArrowDown>}");
     await vi.waitFor(() => expect(selected.mock.calls.at(-1)?.[0]).toBe("two"));
     await userEvent.keyboard("{/ArrowDown}");
-    await screen.getByRole("radio", { name: "B" }).click();
+    await screen.getByRole("button", { name: "B" }).click();
     expect(toggled.mock.calls.at(-1)?.[0]).toEqual(["b"]);
   });
   it("reveals retained collapsed contents for browser find", async () => {
@@ -64,28 +65,29 @@ describe("T3 Radix compatibility", () => {
     expect(viewport.scrollTop).toBe(200);
     expect(viewport.style.getPropertyValue("--scroll-area-overflow-y-start")).toBe("200px");
   });
-  it("commits bounded numeric steps and blur edits", async () => {
+  it.each([false, true])("数值提交保留边界与显式越界设置：%s", async (allowOutOfRange) => {
     const changed = vi.fn(); const committed = vi.fn();
-    await using screen = await render(<NumberField defaultValue={2} min={0} max={3} onValueChange={changed} onValueCommitted={committed}><NumberFieldGroup><NumberFieldInput aria-label="count" /><NumberFieldIncrement aria-label="increase" /></NumberFieldGroup></NumberField>);
+    await using screen = await render(<NumberField defaultValue={2} min={0} max={3} allowOutOfRange={allowOutOfRange} onValueChange={changed} onValueCommitted={committed}><NumberFieldGroup><NumberFieldInput aria-label="count" /><NumberFieldIncrement aria-label="increase" /></NumberFieldGroup></NumberField>);
     await screen.getByRole("button", { name: "increase" }).click();
     expect(changed.mock.calls.at(-1)?.[0]).toBe(3); expect(committed.mock.calls.at(-1)?.[0]).toBe(3);
-    await screen.getByRole("spinbutton").fill("12"); await act(() => screen.container.querySelector<HTMLInputElement>('[role="spinbutton"]')!.blur());
-    expect(committed.mock.calls.at(-1)?.[0]).toBe(3);
+    await screen.getByRole("textbox").fill("12"); await act(() => screen.container.querySelector<HTMLInputElement>('[data-slot="number-field-input"]')!.blur());
+    expect(committed.mock.calls.at(-1)?.[0]).toBe(allowOutOfRange ? 12 : 3);
   });
-  it("updates and dismisses Radix notifications without losing action or text", async () => {
+  it("updates and dismisses native notifications without losing action or text", async () => {
     const manager = Toast.createToastManager(); const action = vi.fn();
     function Notifications() { const { toasts } = Toast.useToastManager(); return <Toast.Viewport>{toasts.map((toast) => <Toast.Root key={toast.id} toast={toast}><Toast.Content><Toast.Title /><Toast.Description /><Toast.Action /></Toast.Content></Toast.Root>)}</Toast.Viewport>; }
     await using screen = await render(<Toast.Provider toastManager={manager} timeout={0}><Notifications /></Toast.Provider>);
     let id = ""; await act(() => { id = manager.add({ title: "Working", description: "Details", actionProps: { children: "Retry", onClick: action } }); });
     await vi.waitFor(() => expect(screen.container.textContent).toContain("Working"));
-    await act(() => manager.update(id, { title: "Done", actionProps: undefined }));
+    await act(() => manager.update(id, { title: "Done" }));
     expect(screen.container.textContent).toContain("Done");
     await screen.getByRole("button", { name: "Retry" }).click(); expect(action).toHaveBeenCalledTimes(1);
+    await act(() => manager.close(id));
     await vi.waitFor(() => expect(screen.container.textContent).not.toContain("Done"));
   });
   it("positions anchored notifications beside the real anchor without stealing focus", async () => {
     const manager = Toast.createToastManager();
-    function Notifications() { const { toasts } = Toast.useToastManager(); return <Toast.Viewport>{toasts.map((toast) => <Toast.Positioner key={toast.id} toast={toast}><Toast.Root toast={toast}><Toast.Content><Toast.Title /></Toast.Content></Toast.Root></Toast.Positioner>)}</Toast.Viewport>; }
+    function Notifications() { const { toasts } = Toast.useToastManager(); return <Toast.Viewport>{toasts.map((toast) => <Toast.Positioner data-slot="toast-positioner" key={toast.id} toast={toast}><Toast.Root toast={toast}><Toast.Content><Toast.Title /></Toast.Content></Toast.Root></Toast.Positioner>)}</Toast.Viewport>; }
     await using screen = await render(<Toast.Provider toastManager={manager} timeout={0}><button style={{ position: "fixed", top: 300, left: 200 }}>Anchor</button><Notifications /></Toast.Provider>);
     const anchor = screen.container.querySelector("button")!;
     await act(() => { anchor.focus(); manager.add({ title: "Anchored hint", positionerProps: { anchor, side: "bottom", sideOffset: 8 } }); });
@@ -103,7 +105,7 @@ describe("T3 Radix compatibility", () => {
     await act(() => { manager.add({ title: "Timed notification" }); });
     await userEvent.hover(screen.getByText("Timed notification"));
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(screen.container.querySelector('[data-state="open"]')).not.toBeNull();
+    await expect.element(screen.getByText("Timed notification")).toBeVisible();
     await userEvent.unhover(screen.getByText("Timed notification"));
     await vi.waitFor(() => expect(screen.container.textContent).not.toContain("Timed notification"), { timeout: 1600 });
   });

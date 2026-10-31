@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, pathToFileURL, URL } from 'node:url'
@@ -10,6 +10,15 @@ const t3Require = createRequire(new URL('./vendor/t3code/apps/web/package.json',
 const { tanstackRouter } = await import(pathToFileURL(t3Require.resolve('@tanstack/router-plugin/vite')).href)
 const t3RuntimeModule = 'virtual:autoops-t3-runtime'
 const t3HostModule = 'virtual:autoops-t3-host'
+
+function mountWorkbenchEntry(server: Pick<ViteDevServer, 'middlewares'>) {
+  server.middlewares.use((request, _response, next) => {
+    if (request.url === '/' || request.url?.startsWith('/?')) {
+      request.url = '/agent-demo.html' + request.url.slice(1)
+    }
+    next()
+  })
+}
 
 export default defineConfig({
   root: 'web',
@@ -28,6 +37,8 @@ export default defineConfig({
     }),
     {
       name: 'autoops-t3-runtime',
+      configureServer: mountWorkbenchEntry,
+      configurePreviewServer: mountWorkbenchEntry,
       resolveId(id) {
         if (id === t3RuntimeModule || id === t3HostModule) return '\0' + id
       },
@@ -41,28 +52,13 @@ export default defineConfig({
             ),
           ].join('\n')
         if (id !== '\0' + t3RuntimeModule) return
-        // Keep the upstream app in its own TypeScript project while bundling
-        // its real router/runtime into the existing same-origin Demo entry.
+        // 上游保持独立类型工程，真实路由与运行时统一打入同源工作台入口。
         return [
           `export { AppRoot } from ${JSON.stringify(t3WebRoot + '/src/AppRoot.tsx')};`,
           `export { getRouter, createHashHistory } from ${JSON.stringify(t3WebRoot + '/src/router.ts')};`,
           `import ${JSON.stringify(t3WebRoot + '/src/index.css')};`,
           `import ${JSON.stringify(t3WebRoot + '/src/autoops/theme.css')};`,
         ].join('\n')
-      },
-    },
-    {
-      name: 'sonner-csp-nonce',
-      enforce: 'pre',
-      transform(code, id) {
-        if (!/sonner[\\/]dist[\\/]index\.mjs$/.test(id)) return
-        // Sonner 在模块加载时注入样式，必须先使用当前页面的受信任 nonce。
-        const marker = "style.type = 'text/css'"
-        if (!code.includes(marker)) throw new Error('Sonner 样式入口已变化，请检查 CSP 兼容处理')
-        return code.replace(
-          marker,
-          `${marker}\n  style.nonce = document.querySelector('meta[name="csp-nonce"]')?.content || ''`,
-        )
       },
     },
     tanstackRouter({
@@ -74,7 +70,6 @@ export default defineConfig({
     react({ compiler: true }),
     tailwindcss(),
   ],
-  optimizeDeps: { exclude: ['sonner'] },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./web/src', import.meta.url)),
@@ -97,9 +92,7 @@ export default defineConfig({
     emptyOutDir: true,
     rolldownOptions: {
       input: {
-        main: fileURLToPath(new URL('./web/index.html', import.meta.url)),
         agentDemo: fileURLToPath(new URL('./web/agent-demo.html', import.meta.url)),
-        prototype: fileURLToPath(new URL('./web/prototype.html', import.meta.url)),
       },
     },
   },

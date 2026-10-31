@@ -1,6 +1,7 @@
 data/
 .env
 node_modules/
+.pnpm-store/
 coverage/
 *.log
 .test-artifacts/

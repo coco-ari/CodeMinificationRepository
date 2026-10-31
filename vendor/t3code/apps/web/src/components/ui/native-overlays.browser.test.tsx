@@ -21,7 +21,7 @@ function key(element: Element, key: string) {
   element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
 }
 
-describe('T3 Radix interaction adapters', () => {
+describe('T3 原生浮层交互', () => {
   it('anchors a popup search field to its trigger above a positioned application shell', async () => {
     await using screen = await render(
       <div style={{ position: 'relative', zIndex: 30, background: 'white', height: 500 }}>
@@ -110,7 +110,7 @@ describe('T3 Radix interaction adapters', () => {
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
     await expect.element(screen.getByRole('textbox', { name: '返回输入框', exact: true })).toHaveFocus()
   })
-  it('retains non-string select values across the Radix string value boundary', async () => {
+  it('原生选择器保留对象选项及其业务身份', async () => {
     const a = { id: 'a' },
       b = { id: 'b' }
     const change = vi.fn()
@@ -149,7 +149,7 @@ describe('T3 Radix interaction adapters', () => {
     })
     await vi.waitFor(() => expect(change).toHaveBeenCalledWith(b))
   })
-  it('keeps detached popover trigger payloads and closes through Radix escape', async () => {
+  it('独立触发点保留弹窗输入，Esc 关闭后恢复焦点', async () => {
     const handle = PopoverCreateHandle<{ name: string }>()
     await using screen = await render(
       <>
@@ -224,6 +224,11 @@ describe('T3 Radix interaction adapters', () => {
       input.focus()
       key(input, 'ArrowDown')
     })
+    expect(highlighted).toHaveBeenLastCalledWith(
+      'a',
+      expect.objectContaining({ reason: 'keyboard', index: 0 }),
+    )
+    await act(() => key(input, 'ArrowDown'))
     expect(highlighted).toHaveBeenLastCalledWith(
       'b',
       expect.objectContaining({ reason: 'keyboard', index: 1 }),

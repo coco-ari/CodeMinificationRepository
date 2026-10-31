@@ -456,7 +456,7 @@ function WorkspacePackages({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" aria-label="部署交付">
       <ModuleSidebar label="部署交付" header={navigation}>
-        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+        <ScrollArea radius="none" className="min-h-0 flex-1">
           <div className="px-[var(--sidebar-content-inset)]">
             {releases.map((release) => (
               <ModuleSidebarItem

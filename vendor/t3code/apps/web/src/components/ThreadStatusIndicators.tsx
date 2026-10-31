@@ -27,8 +27,7 @@ import {
   type ThreadPullRequestBadge,
   visibleThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
-import type { useRender } from "@base-ui/react/use-render";
-import { useRender as useRenderRuntime } from "~/components/ui/radix-compat";
+import { useRender } from "@base-ui/react/use-render";
 import {
   type ReactNode,
   type AnimationEvent,
@@ -274,7 +273,7 @@ function PullRequestBadge({
   ) : (
     <a href={url} target="_blank" rel="noopener noreferrer" />
   );
-  const control = useRenderRuntime({
+  const control = useRender({
     render,
     props: {
       render: element,

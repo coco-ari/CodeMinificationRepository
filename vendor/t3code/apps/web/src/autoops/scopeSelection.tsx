@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   ComposerControl,
@@ -64,7 +64,8 @@ export function ScopeComposerChoice({
   labelWidth?: number
   size?: ComposerControlSize
 }) {
-  const floating = useComposerMenuProps()
+  const trigger = useRef<HTMLButtonElement>(null)
+  const floating = useComposerMenuProps(trigger)
   const content = (
     <>
       <ComposerControlIcon icon={Icon} size={size} />
@@ -96,7 +97,7 @@ export function ScopeComposerChoice({
             </ComposerControl>
           }
         />
-        <TooltipPopup>
+        <TooltipPopup role="tooltip">
           {summary} · {lockReason ?? '首条消息已接受，切换范围请新建对话。'}
         </TooltipPopup>
       </Tooltip>
@@ -107,6 +108,7 @@ export function ScopeComposerChoice({
         <TooltipTrigger
           render={
             <MenuTrigger
+              ref={trigger}
               render={<ComposerControl size={size} />}
               aria-label={label}
               aria-description={summary}

@@ -205,7 +205,8 @@ export function DeploymentRepositoryVersionDialog({
                 <Button
                   key={entry.id}
                   variant="ghost"
-                  className="h-auto min-h-9 w-full justify-start py-2 text-left"
+                  size="row"
+                  className="w-full justify-start"
                   onClick={() => choose({ refKind: tab, ref: entry.id })}
                 >
                   <span className="min-w-0 flex-1">

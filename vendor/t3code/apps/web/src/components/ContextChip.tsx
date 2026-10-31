@@ -1,6 +1,5 @@
-import { mergeProps } from "~/components/ui/radix-compat";
-import type { useRender } from "@base-ui/react/use-render";
-import { useRender as useRenderRuntime } from "~/components/ui/radix-compat";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 
@@ -77,7 +76,7 @@ function ContextChip({ className, kind, state, render, ...props }: ContextChipPr
     "data-slot": "context-chip",
     "data-state": state,
   };
-  return useRenderRuntime({
+  return useRender({
     defaultTagName: "span",
     props: mergeProps<"span">(defaultProps, props),
     render,
@@ -103,7 +102,7 @@ function ContextChipAction({ className, render, ...props }: useRender.ComponentP
     "data-slot": "context-chip-action",
     type: render ? undefined : ("button" as const),
   };
-  return useRenderRuntime({
+  return useRender({
     defaultTagName: "button",
     props: mergeProps<"button">(defaultProps, props),
     render,

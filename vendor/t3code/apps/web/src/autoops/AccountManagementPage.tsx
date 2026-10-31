@@ -100,7 +100,7 @@ export function AccountManagementPage() {
             />
           ) : null}
         </ModuleSidebar>
-        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+        <ScrollArea radius="none" className="min-h-0 flex-1">
           <WorkspacePageContainer>
             {host ? (
               <AccountPanel key={host.principal.id} view={view} />
@@ -594,6 +594,7 @@ function AccountPanel({ view }: { view: "self" | "manage" }) {
                         <Label>账号类型</Label>
                         <Select
                           value={editor.kind}
+                          items={[{ value: "internal", label: "内部成员" }, { value: "external", label: "外部成员" }]}
                           onValueChange={(value) => {
                             if (value === "internal" || value === "external")
                               setEditor({ ...editor, kind: value, platformAdmin: false });

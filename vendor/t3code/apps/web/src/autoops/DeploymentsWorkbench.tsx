@@ -34,7 +34,6 @@ import { readAutoOpsHost } from './hostConfig'
 import { AutoOpsRequestError } from './apiClient'
 import type { WorkspaceRelease } from './workspaces'
 import type { ProjectRepositoryConnection } from './workspaceAuthoring'
-import { createDeploymentRepositoryQueries } from './deployment/repositoryQueries'
 import {
   loadDeployments,
   loadDeploymentReleases,
@@ -72,6 +71,7 @@ import {
   DeploymentRuntimeSummary,
   RepositorySetupNotice,
   DeploymentRevisionPicker,
+  createDeploymentRepositoryQueries,
   type DeploymentCandidate,
   deploymentHref,
   deploymentNavigation,
@@ -163,7 +163,10 @@ export function DeploymentsPanel({
     (environments.some((row) => row.id === last?.environmentId)
       ? last!.environmentId!
       : (environments[0]?.id ?? ''))
-  const tab = route.tab ?? 'publish'
+  // 无显式定位时恢复浏览位置，具体服务、目标与任务仍在当前授权列表中重新匹配。
+  const restoreSelection = Object.keys(route).length === 0 && last?.environmentId === environmentId
+  const restoredTab = restoreSelection && (last?.tab === 'history' || last?.tab === 'config') ? last.tab : 'publish'
+  const tab = route.tab ?? restoredTab
   const step = route.setupStep
   const host = readAutoOpsHost()
   const repositoryScope = JSON.stringify([
@@ -258,6 +261,7 @@ export function DeploymentsPanel({
   const autoChecked = useRef(new Set<string>())
   const allowNavigation = useRef(false)
   const trigger = useRef<HTMLButtonElement | null>(null)
+  const serviceMenuTrigger = useRef<HTMLButtonElement | null>(null)
   const returnFocus = useRef<HTMLElement | null>(null)
   const context = useRef('')
   const identity = `${readAutoOpsHost()?.principal.id}:${projectId}:${environmentId}:${route.serviceId ?? ''}:${route.targetId ?? ''}:${step ?? ''}`
@@ -284,7 +288,8 @@ export function DeploymentsPanel({
   const manage = overview?.capabilities?.serviceManage === true
   const configure = permits?.configure === true
   const services = permits?.read ? (overview?.services ?? []) : []
-  const serviceId = route.serviceId ?? (step ? '' : (services[0]?.id ?? ''))
+  const restoredService = restoreSelection ? services.find((row) => row.id === last?.serviceId) : undefined
+  const serviceId = route.serviceId ?? (step ? '' : (restoredService?.id ?? services[0]?.id ?? ''))
   const service =
     services.find((row) => row.id === serviceId) ??
     (step ? catalog.find((row) => row.id === serviceId) : undefined)
@@ -292,7 +297,9 @@ export function DeploymentsPanel({
     overview?.targets.filter(
       (row) => row.serviceId === service?.id && row.environmentId === environmentId,
     ) ?? []
-  const target = route.targetId ? targets.find((row) => row.id === route.targetId) : targets[0]
+  const target = route.targetId
+    ? targets.find((row) => row.id === route.targetId)
+    : (restoreSelection ? targets.find((row) => row.id === last?.targetId) : undefined) ?? targets[0]
   const source = overview?.serviceSources?.find(
     (row) => row.serviceId === service?.id && row.environmentId === environmentId,
   )
@@ -300,7 +307,8 @@ export function DeploymentsPanel({
   const activeTask = tasks.find(
     (row) => !['succeeded', 'failed', 'rolled_back', 'interrupted'].includes(row.status),
   )
-  const taskId = route.taskId ?? activeTask?.id ?? ''
+  const restoredTask = restoreSelection ? tasks.find((row) => row.id === last?.taskId) : undefined
+  const taskId = route.taskId ?? restoredTask?.id ?? activeTask?.id ?? ''
   const server = overview?.servers.find(
     (row) => row.id === target?.serverId && row.environmentId === environmentId,
   )
@@ -636,7 +644,7 @@ export function DeploymentsPanel({
           </Button>
         }
       >
-        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+        <ScrollArea radius="none" className="min-h-0 flex-1">
           <div className="px-[var(--sidebar-content-inset)]">
             {services
               .filter((row) => row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
@@ -727,7 +735,7 @@ export function DeploymentsPanel({
               <ServerIcon />
             </Button>
             <Menu>
-              <MenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="服务操作" />}>
+              <MenuTrigger render={<Button ref={serviceMenuTrigger} size="icon-sm" variant="ghost" aria-label="服务操作" />}>
                 <MoreHorizontalIcon />
               </MenuTrigger>
               <MenuPopup align="end">
@@ -759,14 +767,14 @@ export function DeploymentsPanel({
                   <>
                     <MenuItem
                       disabled={packageActions.tasksDisabled}
-                      onClick={() => packageActions.onTasks(trigger.current)}
+                      onClick={() => packageActions.onTasks(serviceMenuTrigger.current)}
                     >
                       <HistoryIcon />
                       {packageActions.tasksLabel}
                     </MenuItem>
                     <MenuItem
                       disabled={packageActions.generateDisabled}
-                      onClick={() => packageActions.onGenerate(trigger.current)}
+                      onClick={() => packageActions.onGenerate(serviceMenuTrigger.current)}
                     >
                       <PackageIcon />
                       生成部署包
@@ -1000,7 +1008,7 @@ export function DeploymentsPanel({
       ) : !canRead ? (
         <DeploymentEmpty title="无权访问此环境部署" description="请选择其他获授权的环境。" />
       ) : step ? (
-        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+        <ScrollArea radius="none" className="min-h-0 flex-1">
           <div className="mx-auto max-w-3xl py-3">
             <div className="flex flex-wrap items-center justify-between gap-2 px-4">
               <ol className="flex flex-wrap gap-2" aria-label="服务配置步骤">
@@ -1217,7 +1225,7 @@ export function DeploymentsPanel({
           ) : null}
         </div>
       ) : tab === 'config' ? (
-        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+        <ScrollArea radius="none" className="min-h-0 flex-1">
           <div className="space-y-4 p-4">
             <section className="space-y-2 border-b pb-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1358,7 +1366,7 @@ export function DeploymentsPanel({
               />
             </>
           ) : (
-            <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+            <ScrollArea radius="none" className="min-h-0 flex-1">
               {!source || !target ? (
                 <div className="space-y-3 p-4">
                   <p className="text-sm">

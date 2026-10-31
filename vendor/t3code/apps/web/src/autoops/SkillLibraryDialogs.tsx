@@ -343,6 +343,7 @@ export function SkillAssignmentDialog({
           <Field label="skill">
             <Select
               value={skillId}
+              items={catalog.skills.map((entry) => ({ value: entry.id, label: entry.displayName + (!entry.enabled ? ' · 已停用' : '') }))}
               disabled={busy || !!assignment}
               onValueChange={(value) => {
                 if (typeof value === 'string') {
@@ -398,6 +399,7 @@ export function SkillAssignmentDialog({
             <Field label="当前项目的助手">
               <Select
                 value={assistantId}
+                items={assistants.map((entry) => ({ value: entry.id, label: entry.name }))}
                 disabled={busy || !!assignment || !assistants.length}
                 onValueChange={(value) => {
                   if (typeof value === 'string') setAssistantId(value)
@@ -430,6 +432,7 @@ export function SkillAssignmentDialog({
           <Field label="固定版本">
             <Select
               value={version?.id ?? ''}
+              items={versions.map((entry) => ({ value: entry.id, label: skillVersionName(entry) + (entry.id === skill?.latestVersionId ? ' · 最新' : '') }))}
               disabled={busy || !!inherited || !versions.length}
               onValueChange={(value) => {
                 if (typeof value === 'string') setVersionId(value)

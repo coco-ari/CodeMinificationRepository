@@ -16,6 +16,7 @@ import {
   EmptyContent,
 } from "~/components/ui/empty";
 import { Label } from "~/components/ui/label";
+import { Field as FieldPrimitive } from "@base-ui/react/field";
 import { Checkbox } from "~/components/ui/checkbox";
 import {
   Select,
@@ -80,7 +81,7 @@ export function AssistantManagementPage() {
             onClick={() => {}}
           />
         </ModuleSidebar>
-        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+        <ScrollArea radius="none" className="min-h-0 flex-1">
           <WorkspacePageContainer>
             {host ? (
               provided ? (
@@ -678,6 +679,10 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
                     <Label>分配对象</Label>
                     <Select
                       value={`${editor.target.kind}:${editor.target.id}`}
+                      items={[
+                        ...Object.entries(projectRoleNames).map(([id, name]) => ({ value: `role:${id}`, label: `角色 · ${name}` })),
+                        ...editor.context.project.candidates.map((user) => ({ value: `member:${user.id}`, label: `成员 · ${user.name}` })),
+                      ]}
                       disabled={busy || !!pending}
                       onValueChange={(value) => {
                         if (typeof value !== "string") return;
@@ -714,9 +719,9 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
                   <fieldset className="space-y-2">
                     <legend className="mb-2 text-sm font-medium">可用助手</legend>
                     {editor.context.assistants.presets.map((preset) => (
-                      <Label key={preset.id} className="flex items-center gap-2">
+                      <FieldPrimitive.Root key={preset.id} className="flex items-center gap-2">
                         <Checkbox
-                          aria-label={preset.name}
+
                           checked={editor.assistantIds.includes(preset.id)}
                           disabled={busy || !!pending}
                           onCheckedChange={(checked) =>
@@ -732,17 +737,21 @@ function ProjectAssistantPanel({ projectId }: { projectId: string }) {
                             })
                           }
                         />
-                        {preset.name}
+                        <FieldPrimitive.Label render={<Label />}>{preset.name}</FieldPrimitive.Label>
                         {!availableDefault(preset) ? (
-                          <span className="text-xs text-muted-foreground">不可作为有效默认</span>
+                          <FieldPrimitive.Description className="text-xs text-muted-foreground">不可作为有效默认</FieldPrimitive.Description>
                         ) : null}
-                      </Label>
+                      </FieldPrimitive.Root>
                     ))}
                   </fieldset>
                   <div className="space-y-2">
                     <Label>默认助手</Label>
                     <Select
                       value={editor.defaultAssistantId ?? "none"}
+                      items={[
+                        { value: "none", label: editor.target.kind === "member" ? "跟随角色默认" : "不设置默认" },
+                        ...editor.context.assistants.presets.filter((preset) => editor.assistantIds.includes(preset.id)).map((preset) => ({ value: preset.id, label: preset.name })),
+                      ]}
                       disabled={busy || !!pending}
                       onValueChange={(value) =>
                         typeof value === "string" &&

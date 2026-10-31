@@ -1,5 +1,4 @@
-import type { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import { TooltipAdapter as TooltipPrimitiveRuntime } from "./radix-overlays";
+import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import {
   createContext,
   use,
@@ -16,7 +15,7 @@ import { useNativeTitlebarHeight } from "~/lib/windowControlsOverlay";
 // Base UI's default, restated because a padding object zeroes the sides it omits.
 const COLLISION_PADDING = 5;
 
-const TooltipProvider = TooltipPrimitiveRuntime.Provider;
+const TooltipProvider = TooltipPrimitive.Provider;
 
 type TooltipActionsRef = RefObject<TooltipPrimitive.Root.Actions | null>;
 
@@ -68,10 +67,10 @@ function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
   const actionsRef = props.actionsRef ?? localActionsRef;
   useEffect(() => () => tracker?.release(actionsRef), [actionsRef, tracker]);
 
-  if (!tracker) return <TooltipPrimitiveRuntime.Root {...props} />;
+  if (!tracker) return <TooltipPrimitive.Root {...props} />;
   return (
     <TooltipHoverContext value={actionsRef}>
-      <TooltipPrimitiveRuntime.Root
+      <TooltipPrimitive.Root
         {...props}
         actionsRef={actionsRef}
         onOpenChange={(open, details) => {
@@ -87,10 +86,10 @@ function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
   const tracker = use(TooltipScrollContext);
   const actionsRef = use(TooltipHoverContext);
   if (!tracker || !actionsRef) {
-    return <TooltipPrimitiveRuntime.Trigger data-slot="tooltip-trigger" {...props} />;
+    return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
   }
   return (
-    <TooltipPrimitiveRuntime.Trigger
+    <TooltipPrimitive.Trigger
       data-slot="tooltip-trigger"
       {...props}
       onMouseEnter={(event) => {
@@ -104,7 +103,7 @@ function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
 function TooltipPositioner(props: TooltipPrimitive.Positioner.Props) {
   const titlebarHeight = useNativeTitlebarHeight();
   return (
-    <TooltipPrimitiveRuntime.Positioner
+    <TooltipPrimitive.Positioner
       className="pointer-events-none z-[140] h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-[top,left,right,bottom,transform] data-instant:transition-none"
       collisionPadding={{
         top: COLLISION_PADDING + titlebarHeight,
@@ -135,11 +134,11 @@ function TooltipPopup({
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
 }) {
   return (
-    <TooltipPrimitiveRuntime.Portal>
+    <TooltipPrimitive.Portal>
       <TooltipPositioner align={align} anchor={anchor} side={side} sideOffset={sideOffset}>
-        <TooltipPrimitiveRuntime.Popup
+        <TooltipPrimitive.Popup
           className={cn(
-            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-popover-foreground text-xs transition-[width,height,scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-[state=closed]:scale-98 data-[state=closed]:scale-98 data-[state=closed]:opacity-0 data-[state=closed]:opacity-0 data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) text-balance rounded-md text-popover-foreground text-xs transition-[width,height,scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
             variant === "glass"
               ? "dropdown-glass shadow-xl shadow-black/25 before:hidden"
               : "border bg-popover not-dark:bg-clip-padding shadow-md/5",
@@ -151,15 +150,15 @@ function TooltipPopup({
           data-slot="tooltip-popup"
           {...props}
         >
-          <TooltipPrimitiveRuntime.Viewport
-            className="relative size-full overflow-clip px-(--viewport-inline-padding) py-1 [--viewport-inline-padding:--spacing(2)] data-instant:transition-none **:data-current:data-[state=closed]:opacity-0 **:data-current:data-[state=closed]:opacity-0 **:data-previous:data-[state=closed]:opacity-0 **:data-previous:data-[state=closed]:opacity-0 **:data-current:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:truncate **:data-current:opacity-100 **:data-previous:opacity-100 **:data-current:transition-opacity **:data-previous:transition-opacity"
+          <TooltipPrimitive.Viewport
+            className="relative size-full overflow-clip px-(--viewport-inline-padding) py-1 [--viewport-inline-padding:--spacing(2)] data-instant:transition-none **:data-current:data-ending-style:opacity-0 **:data-current:data-starting-style:opacity-0 **:data-previous:data-ending-style:opacity-0 **:data-previous:data-starting-style:opacity-0 **:data-current:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:truncate **:data-current:opacity-100 **:data-previous:opacity-100 **:data-current:transition-opacity **:data-previous:transition-opacity"
             data-slot="tooltip-viewport"
           >
             {children}
-          </TooltipPrimitiveRuntime.Viewport>
-        </TooltipPrimitiveRuntime.Popup>
+          </TooltipPrimitive.Viewport>
+        </TooltipPrimitive.Popup>
       </TooltipPositioner>
-    </TooltipPrimitiveRuntime.Portal>
+    </TooltipPrimitive.Portal>
   );
 }
 

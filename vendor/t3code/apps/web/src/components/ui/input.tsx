@@ -1,8 +1,7 @@
 "use client";
 
-import type { Input as InputPrimitive } from "@base-ui/react/input";
+import { Input as InputPrimitive } from "@base-ui/react/input";
 import type * as React from "react";
-import { compatibleEvent, createChangeDetails, renderWithSlot, resolveStateValue, useControllableState, useFieldState } from "./radix-compat";
 
 import { cn } from "~/lib/utils";
 
@@ -19,12 +18,8 @@ function Input({
   font = "default",
   unstyled = false,
   nativeInput = false,
-  value: controlledValue, defaultValue, onValueChange, onChange, onFocus, onBlur, render, style,
   ...props
 }: InputProps) {
-  const [value, setValue] = useControllableState({ prop: controlledValue, defaultProp: defaultValue ?? "", caller: "T3Input" });
-  const field = useFieldState(value, props.disabled);
-  const state = field.state;
   const inputClassName = cn(
     "h-8.5 w-full min-w-0 rounded-[inherit] px-[calc(--spacing(3)-1px)] leading-8.5 outline-none placeholder:text-placeholder sm:h-7.5 sm:leading-7.5 [transition:background-color_5000000s_ease-in-out_0s]",
     size === "compact" && "h-7 px-[calc(--spacing(2.5)-1px)] text-xs leading-7 sm:h-7 sm:leading-7",
@@ -37,22 +32,33 @@ function Input({
     props.type === "file" &&
       "text-muted-foreground file:me-3 file:bg-transparent file:font-medium file:text-foreground file:text-sm",
   );
-  const inputElement = renderWithSlot("input", {
-    "data-slot": "input",
-    ...props, ...(props.type === "file" ? {} : { value }),
-    className: inputClassName, "data-ui": "input",
-    size: typeof size === "number" ? size : undefined,
-    style: resolveStateValue(style, state),
-    onFocus: (event: React.FocusEvent<HTMLInputElement>) => { onFocus?.(compatibleEvent(event)); field.onFocus(); },
-    onBlur: (event: React.FocusEvent<HTMLInputElement>) => { onBlur?.(compatibleEvent(event)); field.onBlur(); },
-    onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
-      onChange?.(compatibleEvent(event));
-      if (event.defaultPrevented) return;
-      const details = createChangeDetails("none", event.nativeEvent);
-      if (!nativeInput) onValueChange?.(event.currentTarget.value, details);
-      if (!details.isCanceled) setValue(event.currentTarget.value);
-    },
-  }, render, state);
+  let inputElement: React.ReactElement;
+
+  if (nativeInput) {
+    const { style, onValueChange: _onValueChange, ...nativeInputProps } = props;
+    const nativeStyle = typeof style === "function" ? undefined : style;
+
+    inputElement = (
+      <input
+        className={inputClassName}
+        data-slot="input"
+        data-ui="input"
+        size={typeof size === "number" ? size : undefined}
+        style={nativeStyle}
+        {...(nativeInputProps as React.ComponentProps<"input">)}
+      />
+    );
+  } else {
+    inputElement = (
+      <InputPrimitive
+        className={inputClassName}
+        data-slot="input"
+        data-ui="input"
+        size={typeof size === "number" ? size : undefined}
+        {...props}
+      />
+    );
+  }
 
   return (
     <span
@@ -64,7 +70,7 @@ function Input({
             size === "compact" &&
             "rounded-md before:rounded-[calc(var(--radius-md)-1px)]",
           font === "mono" && "font-mono tabular-nums",
-          resolveStateValue(className, state),
+          className,
         ) || undefined
       }
       data-size={size}

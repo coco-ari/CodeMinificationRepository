@@ -1,8 +1,6 @@
-import { mergeProps } from "~/components/ui/radix-compat";
-import type { Select as SelectPrimitive } from "@base-ui/react/select";
-import { SelectAdapter as SelectRuntime } from "~/components/ui/radix-select";
-import type { useRender } from "@base-ui/react/use-render";
-import { useRender as useRenderRuntime } from "~/components/ui/radix-compat";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { Select as SelectPrimitive } from "@base-ui/react/select";
+import { useRender } from "@base-ui/react/use-render";
 import type { ComponentProps, ComponentType, SVGProps } from "react";
 import { ChevronDownIcon } from "lucide-react";
 
@@ -37,7 +35,7 @@ export function ComposerControl({
     className: composerControlClassName(size, className),
     type: render ? undefined : ("button" as const),
   };
-  return useRenderRuntime({
+  return useRender({
     defaultTagName: "button",
     props: mergeProps<"button">(defaultProps, props),
     render,
@@ -115,11 +113,11 @@ export function ComposerSelectControl({
   size?: ComposerControlSize;
 }) {
   return (
-    <SelectRuntime.Trigger className={composerControlClassName(size, className)} {...props}>
+    <SelectPrimitive.Trigger className={composerControlClassName(size, className)} {...props}>
       {children}
-      <SelectRuntime.Icon>
+      <SelectPrimitive.Icon>
         <ComposerControlChevron size={size} />
-      </SelectRuntime.Icon>
-    </SelectRuntime.Trigger>
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
   );
 }

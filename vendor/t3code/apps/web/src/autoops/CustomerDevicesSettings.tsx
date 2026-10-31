@@ -92,7 +92,7 @@ function DeviceBody({ embedded, children }: { embedded: boolean; children: React
   return embedded ? (
     <div className="min-w-0">{children}</div>
   ) : (
-    <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+    <ScrollArea radius="none" className="min-h-0 flex-1">
       {children}
     </ScrollArea>
   );
@@ -308,7 +308,7 @@ export function CustomerDevicesContent({ embedded = false }: { embedded?: boolea
         label="个人电脑"
         search={{ value: query, onChange: setQuery, label: "搜索电脑" }}
       >
-        <ScrollArea contentSizing="viewport" radius="none" className="min-h-0 flex-1">
+        <ScrollArea radius="none" className="min-h-0 flex-1">
           <div className="px-[var(--sidebar-content-inset)]">
             {visibleDevices.map((device) => (
                 <ModuleSidebarItem
@@ -691,7 +691,7 @@ export function CustomerDeviceDetailsPanel({
   const [removing, setRemoving] = useState<string | null>(null)
   const registered = workspaces.filter((entry) => entry.deviceId === device.id)
   return (
-    <ScrollArea contentSizing="viewport" scrollFade className="min-w-0 max-w-full">
+    <ScrollArea scrollFade className="min-w-0 max-w-full">
       <div data-slot="dialog-panel" className="w-full min-w-0 max-w-full space-y-3 p-6 pt-1">
         <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
           <dt className="text-muted-foreground">电脑</dt>

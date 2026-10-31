@@ -1,8 +1,6 @@
 "use client";
 
-import type { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
-import { Toggle as RadixToggle } from "radix-ui";
-import { composeEventHandlers, createChangeDetails, renderWithPrimitive, resolveStateValue, stateDataAttributes, useControllableState, useInteractionEvent } from "./radix-compat";
+import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "~/lib/utils";
@@ -39,23 +37,19 @@ const toggleVariants = cva(
   },
 );
 
-function Toggle({ className, style, render, variant, size, pressed: controlled, defaultPressed = false,
-  onPressedChange, disabled = false, nativeButton: _nativeButton, onClickCapture, ...props
+function Toggle({
+  className,
+  variant,
+  size,
+  ...props
 }: TogglePrimitive.Props & VariantProps<typeof toggleVariants>) {
-  const [pressed, setPressed] = useControllableState({ prop: controlled, defaultProp: defaultPressed, caller: "T3Toggle" });
-  const interaction = useInteractionEvent();
-  const state = { pressed, disabled };
-  return renderWithPrimitive(RadixToggle.Root, {
-    ...props, ...stateDataAttributes(state), pressed, disabled,
-    className: cn(toggleVariants({ size, variant }), resolveStateValue(className, state)),
-    style: resolveStateValue(style, state), "data-slot": "toggle",
-    onClickCapture: composeEventHandlers(onClickCapture, interaction.capture),
-    onPressedChange: (next: boolean) => {
-      const details = createChangeDetails("none", interaction.event.current);
-      onPressedChange?.(next, details);
-      if (!details.isCanceled) setPressed(next);
-    },
-  }, render, state);
+  return (
+    <TogglePrimitive
+      className={cn(toggleVariants({ className, size, variant }))}
+      data-slot="toggle"
+      {...props}
+    />
+  );
 }
 
 export { Toggle, toggleVariants };
