@@ -22,6 +22,8 @@ import { prepareHostThreadLaunch } from "@t3tools/client-runtime/host-integratio
 import { fakeTimers, render, stubGlobal } from "../../../test/render";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { makeThreadFixture } from "~/test-fixtures";
+import { applyThemeColorPreview, applyThemePalette, getStandardThemeColors } from "~/themePalette";
+import { syncBrowserChromeTheme } from "~/hooks/useTheme";
 import { ComposerHandleContext } from "~/composerHandleContext";
 import {
   installAutoOpsHost,
@@ -240,11 +242,13 @@ function Harness({
   providers = [f.provider],
   reason = null,
   customerRuntime,
+  existing = false,
 }: {
   fixture: Fixture;
   providers?: ServerProvider[];
   reason?: string | null;
   customerRuntime?: CustomerRuntime | undefined;
+  existing?: boolean;
 }) {
   const promptRef = useRef("");
   const thread = makeThreadFixture({
@@ -283,6 +287,16 @@ function Harness({
     },
   });
   const props: ChatComposerProps = {
+    contextControls: <AutoOpsThreadScopeControl
+      threadId={f.id}
+      projectId="composer-project"
+      isDraft={!existing}
+      runtimeEnvironmentId={f.environmentId}
+      draftTarget={f.draftId}
+      submitting={false}
+      hasAcceptedMessage={existing}
+      customerRuntime={customerRuntime}
+    />,
     composerDraftTarget: f.draftId,
     environmentId: f.environmentId,
     canOperateThread: true,
@@ -290,7 +304,7 @@ function Harness({
     supportsAttachmentUploads: true,
     supportsQuestionAttachments: false,
     maxFileAttachmentBytes: 1024 * 1024,
-    routeKind: "draft",
+    routeKind: existing ? "server" : "draft",
     routeThreadRef: scopeThreadRef(f.environmentId, f.threadId),
     draftId: f.draftId,
     multipleModelSelections: null,
@@ -301,9 +315,9 @@ function Harness({
     activeThread: thread,
     activeThreadShell: thread,
     promptHistoryMessages: [],
-    isServerThread: false,
-    isLocalDraftThread: true,
-    forceExpandedOnMobile: true,
+    isServerThread: existing,
+    isLocalDraftThread: !existing,
+    forceExpandedOnMobile: !existing,
     projectSelectionRequired: false,
     phase: "ready",
     canInterrupt: false,
@@ -347,7 +361,7 @@ function Harness({
     compactThreadUnavailable: true,
     compactDisabled: true,
     compactDisabledReason: null,
-    resolvedTheme: "light",
+    resolvedTheme: existing ? "dark" : "light",
     settings: DEFAULT_UNIFIED_SETTINGS,
     keybindings,
     terminalOpen: false,
@@ -360,7 +374,7 @@ function Harness({
     onRestingControlsVisibilityChange: noop,
     getTimelineScrollableNode: () => null,
     isTimelineAtLogicalEnd: () => true,
-    timelineOverflows: false,
+    timelineOverflows: existing,
     onComposerOverlayHeightChange: noop,
     onRestingChange: noop,
     promptRef,
@@ -413,21 +427,11 @@ function Harness({
   };
   return (
     <ComposerHandleContext value={f.handle}>
-      <div className="mx-auto w-full max-w-2xl p-4">
-        <ComposerSurface.Shell contextStrip>
+      <div className="mx-auto w-full max-w-4xl p-4">
+        <ComposerSurface.Shell>
           <ComposerSurface.Host>
             <ChatComposer {...props} />
           </ComposerSurface.Host>
-          <AutoOpsThreadScopeControl
-            threadId={f.id}
-            projectId="composer-project"
-            isDraft
-            runtimeEnvironmentId={f.environmentId}
-            draftTarget={f.draftId}
-            submitting={false}
-            hasAcceptedMessage={false}
-            customerRuntime={customerRuntime}
-          />
         </ComposerSurface.Shell>
       </div>
     </ComposerHandleContext>
@@ -440,7 +444,20 @@ it.each([1280, 390])("无任何助手时直接配置可发送中文问题，宽�
   const f = setup(`direct-composer-${width}`, true, false, "", true);
   using _fetch = stubGlobal("fetch", f.fetcher);
   await using screen = await render(<Harness fixture={f} />);
-  await expect.element(screen.getByRole("button", { name: "助手", exact: true })).toHaveTextContent("直接配置");
+  await expect.element(screen.getByRole("button", { name: "助手预设", exact: true })).toHaveTextContent("助手预设");
+  const host = screen.container.querySelector<HTMLElement>('[data-slot="composer-host"]')!;
+  const scope = screen.container.querySelector<HTMLElement>('[data-autoops-thread-scope]')!;
+  const models = screen.container.querySelector<HTMLElement>('[data-chat-composer-controls="left"]')!;
+  const actions = screen.container.querySelector<HTMLElement>('[data-chat-composer-actions="right"]')!;
+  expect(host.contains(scope)).toBe(true);
+  expect(screen.container.querySelector('[data-slot="composer-context-strip"]')).toBeNull();
+  const scopeBounds = scope.getBoundingClientRect(), modelBounds = models.getBoundingClientRect(), actionBounds = actions.getBoundingClientRect();
+  expect(scopeBounds.right).toBeLessThanOrEqual(host.getBoundingClientRect().right);
+  if (width > 720) expect(Math.abs(scopeBounds.top + scopeBounds.height / 2 - modelBounds.top - modelBounds.height / 2)).toBeLessThan(3);
+  else expect(scopeBounds.bottom).toBeLessThanOrEqual(modelBounds.top);
+  expect(Math.abs(actionBounds.top + actionBounds.height / 2 - modelBounds.top - modelBounds.height / 2)).toBeLessThan(3);
+  expect([...scope.querySelectorAll('[data-composer-context-control]')].map(element => element.getAttribute('aria-label'))).toEqual(['业务环境', '资料范围', '助手预设']);
+  await page.screenshot({ path: `__screenshots__/composer-layout-${width}.png` });
   await editor().fill("直接分析当前资料，不使用助手预设");
   await screen.getByRole("button", { name: "发送消息", exact: true }).click();
   await vi.waitFor(() => expect(f.bindings).toHaveLength(1));
@@ -470,6 +487,46 @@ function ConnectedHarness({ fixture }: { fixture: Fixture }) {
     />
   );
 }
+
+it.each([1280, 390])("已有对话在 %s px 折叠和展开时持续显示固定范围，不重复读取或显示发送按钮", async (width) => {
+  await page.viewport(width, 600);
+  const root = document.documentElement, previousClass = root.className,
+    previousStyle = root.getAttribute('style'), previousBodyStyle = document.body.getAttribute('style'), previousTheme = root.dataset.themeId;
+  using _theme = { [Symbol.dispose]() {
+    applyThemePalette('light'); root.className = previousClass;
+    if (previousTheme === undefined) delete root.dataset.themeId; else root.dataset.themeId = previousTheme;
+    if (previousStyle === null) root.removeAttribute('style'); else root.setAttribute('style', previousStyle);
+    if (previousBodyStyle === null) document.body.removeAttribute('style'); else document.body.setAttribute('style', previousBodyStyle);
+  } };
+  const f = setup(`existing-composer-layout-${width}`, true);
+  const binding = { ...readAutoOpsThreadScope(f.id, 'composer-project')!, threadId: f.id,
+    ownerId: readAutoOpsHost()!.principal.id, scopeState: 'locked', scopeLocked: true };
+  let reads = 0;
+  using _fetch = stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/autoops/thread-bindings/') && init?.method !== 'POST') {
+      reads++;
+      return Promise.resolve(Response.json({ binding }));
+    }
+    return f.fetcher(input, init);
+  });
+  await using screen = await render(<Harness fixture={f} existing />);
+  await expect.element(screen.getByLabelText('业务环境', { exact: true })).toHaveTextContent('无环境');
+  await expect.element(screen.getByLabelText('助手预设', { exact: true })).toHaveTextContent(f.preset.name);
+  applyThemeColorPreview(getStandardThemeColors('dark'), 'dark');
+  syncBrowserChromeTheme();
+  const visibleActions = () => [...screen.container.querySelectorAll<HTMLElement>('[data-chat-composer-transition-actions]')].filter(element => element.checkVisibility()).length;
+  await expect.poll(visibleActions).toBe(1);
+  if (width === 390) {
+    await screen.getByRole('button', { name: '展开输入框', exact: true }).click();
+    await expect.element(editor()).toBeVisible();
+    await expect.element(editor()).toHaveFocus();
+    await expect.poll(visibleActions).toBe(1);
+  }
+  expect(reads).toBe(1);
+  expect(screen.container.querySelector('[data-slot="composer-host"]')?.contains(screen.container.querySelector('[data-autoops-thread-scope]'))).toBe(true);
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  await page.screenshot({ path: `__screenshots__/composer-existing-${width}.png` });
+});
 
 it("受限参数在实际输入器可见，/model 与真实快捷键不能调整，点击发送带入原助手模型合同", async () => {
   await page.viewport(1280, 800);
@@ -570,7 +627,7 @@ it("有调整权者使用实际思考快捷键，点击发送使用改后的值�
     },
   });
   expect(f.preset.configuration.model.reasoningEffort).toBe("high");
-  await page.getByRole("button", { name: "助手", exact: true }).click();
+  await page.getByRole("button", { name: "助手预设", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "当前助手", exact: true }).click();
   await vi.waitFor(() =>
     expect(f.handle.current?.getSendContext().selectedModelSelection.options).toContainEqual({
@@ -626,7 +683,7 @@ it("管理员选择助手后仍可调整资料范围，停用助手不出现在�
   } }] }, window.location.origin);
   using _fetch = stubGlobal("fetch", f.fetcher);
   await using screen = await render(<Harness fixture={f} providers={[provider]} />);
-  await page.getByRole("button", { name: "助手", exact: true }).click();
+  await page.getByRole("button", { name: "助手预设", exact: true }).click();
   await expect.element(page.getByRole("menuitemradio", { name: "暂停助手 · 助手已停用", exact: true }))
     .not.toBeInTheDocument();
   await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
@@ -655,10 +712,10 @@ it("紧凑问答栏仍显示当前助手，菜单明确标记已选项并可重�
     "当前已选的项目助手与长名称验收".repeat(4));
   using _fetch = stubGlobal("fetch", f.fetcher);
   await using screen = await render(<Harness fixture={f} />);
-  const assistant = screen.getByRole("button", { name: "助手", exact: true });
+  const assistant = screen.getByRole("button", { name: "助手预设", exact: true });
   const label = assistant.element().querySelector<HTMLElement>("[data-composer-label]")!;
-  await expect.poll(() => assistant.element().closest("[data-autoops-thread-scope]")?.hasAttribute("data-compact"))
-    .toBe(true);
+  expect(assistant.element().closest('[data-chat-composer-context-controls]')).not.toBeNull();
+  expect(assistant.element().getAttribute('aria-description')).toBe(f.preset.name);
   await expect.poll(() => label.getBoundingClientRect().width).toBeGreaterThan(0);
   await expect.poll(() => getComputedStyle(label.firstElementChild!).opacity).toBe("1");
   const strip = assistant.element().closest<HTMLElement>("[data-autoops-thread-scope]")!;
@@ -708,7 +765,7 @@ it("实际输入器已有文本和未上传图片时切换来源新建干净草�
   const originalImage = useComposerDraftStore.getState().getComposerDraft(f.draftId)!.images[0];
   const originalPrompt = f.handle.current!.getSendContext().prompt;
   expect(originalPrompt).toContain("原来源的必要输入");
-  await page.getByRole("button", { name: "助手", exact: true }).click();
+  await page.getByRole("button", { name: "助手预设", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
   await vi.waitFor(() => expect(mocks.createThread).toHaveBeenCalledOnce());
   const clean = useComposerDraftStore.getState().getComposerDraft(DraftId.make(`${f.id}-clean`));
@@ -831,7 +888,7 @@ it.each([{ width: 1280, dark: false }, { width: 390, dark: true }])("$width px �
   await using screen = await render(<Harness fixture={f} />);
   await expect.element(editor()).toBeVisible();
   await editor().fill("保留当前草稿");
-  const assistant = screen.getByRole("button", { name: "助手", exact: true });
+  const assistant = screen.getByRole("button", { name: "助手预设", exact: true });
   const controls = () => [...screen.container.querySelectorAll<HTMLElement>('[data-composer-context-control]')]
     .filter((element) => element.checkVisibility({ visibilityProperty: true }))
     .map((element) => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width }; });
@@ -891,8 +948,8 @@ it.each([1280, 390])("无助手不显示额外提示，刷新归入菜单，宽�
     return f.fetcher(input, init);
   });
   await using screen = await render(<Harness fixture={f} reason={reason} />);
-  const assistant = screen.getByRole("button", { name: "助手", exact: true });
-  await expect.element(assistant).toHaveTextContent("直接配置");
+  const assistant = screen.getByRole("button", { name: "助手预设", exact: true });
+  await expect.element(assistant).toHaveTextContent("助手预设");
   await expect.element(screen.getByLabelText("会话可见范围", { exact: true })).not.toBeInTheDocument();
   await expect.element(screen.getByText(reason, { exact: true })).not.toBeInTheDocument();
   expect(assistant.element().getBoundingClientRect().width).toBeLessThanOrEqual(140);
@@ -929,7 +986,7 @@ it("助手候选隐藏停用项，保留启用但离线的真实状态，选中�
   })) }, window.location.origin);
   using _fetch = stubGlobal("fetch", f.fetcher);
   await using screen = await render(<Harness fixture={f} />);
-  await screen.getByRole("button", { name: "助手", exact: true }).click();
+  await screen.getByRole("button", { name: "助手预设", exact: true }).click();
   await expect.element(page.getByRole("menuitemradio", { name: "另一个来源", exact: true })).not.toBeInTheDocument();
   await expect.element(page.getByRole("menuitemradio", { name: "离线助手 · 设备离线", exact: true })).toHaveAttribute("aria-disabled", "true");
   const selected = page.getByRole("menuitemradio", { name: "当前助手", exact: true });
@@ -953,7 +1010,7 @@ it("刷新助手失败保留草稿，菜单可再次刷新恢复", async () => {
   await using screen = await render(<Harness fixture={f} />);
   await editor().fill("错误后保留草稿");
   for (let attempt = 1; attempt <= 2; attempt++) {
-    await screen.getByRole("button", { name: "助手", exact: true }).click();
+    await screen.getByRole("button", { name: "助手预设", exact: true }).click();
     await page.getByRole("menuitem", { name: "刷新助手", exact: true }).click();
     await expect.poll(() => requests).toBe(attempt);
     await expect.element(editor()).toHaveTextContent("错误后保留草稿");

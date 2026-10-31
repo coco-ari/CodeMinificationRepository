@@ -1620,6 +1620,7 @@ export interface ChatComposerProps {
   pullRequestProjectId: ProjectId | null;
   pullRequestRepository: string | null;
   threadPullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined;
+  contextControls?: ReactNode;
   restingControlsHost: HTMLDivElement | null;
   restingControlsHaveLeadingContext: boolean;
   onRestingControlsVisibilityChange: (visible: boolean) => void;
@@ -1881,6 +1882,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestProjectId,
     pullRequestRepository,
     threadPullRequests,
+    contextControls,
     restingControlsHost,
     restingControlsHaveLeadingContext,
     onRestingControlsVisibilityChange,
@@ -5095,11 +5097,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const expandedComposerImages = isComposerResting
     ? standaloneComposerImages.filter((image) => pendingSnapShotIdSet.has(image.id))
     : standaloneComposerImages;
-  const composerControlsCollapsed = isComposerResting || isComposerCollapsedMobile;
+  const composerControlsCollapsed = !contextControls && (isComposerResting || isComposerCollapsedMobile);
   const showInlineRestingControls = composerControlsCollapsed && restingControlsHost === null;
   const composerControlsVisibleInStrip =
     composerControlsCollapsed && restingControlsHost !== null && restingControlsVisible;
   const composerControlsHidden = composerControlsCollapsed && !restingControlsVisible;
+  const contextControlsOnly = !!contextControls &&
+    (isComposerCollapsedMobile || isComposerApprovalState || showMobilePendingAnswerActions);
   if (composerControlsHidden && isComposerModelPickerOpen) {
     setIsComposerModelPickerOpen(false);
   }
@@ -6897,7 +6901,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       <div className="relative">
         <ComposerSurface.Main
           ref={composerMainSurfaceRef}
-          data-inline-resting-controls={restingControlsHost === null ? "true" : undefined}
+          data-inline-resting-controls={!contextControls && restingControlsHost === null ? "true" : undefined}
           data-model-only-strip={
             restingControlsHost?.closest("[data-composer-model-strip]") ? "true" : undefined
           }
@@ -7569,28 +7573,37 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               message={providerInputSubmissionError ?? composerSubmissionError}
             />
 
-            {isComposerCollapsedMobile || isComposerApprovalState ? null : (
+            {(isComposerCollapsedMobile || isComposerApprovalState) && !contextControls ? null : (
               <div
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
-                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:px-4 sm:pb-4",
+                  contextControls
+                    ? "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)_auto] items-center gap-2 overflow-visible px-3 pb-3 @max-[720px]/composer-surface:grid-cols-[minmax(0,1fr)_auto] sm:px-4 sm:pb-4"
+                    : "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:px-4 sm:pb-4",
                   pendingUserInputs.length > 0 && "pt-2",
-                  isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
-                  showMobilePendingAnswerActions && "hidden sm:flex",
-                  isComposerResting &&
+                  !contextControls && (isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0"),
+                  showMobilePendingAnswerActions && !contextControls && "hidden sm:flex",
+                  isComposerResting && !contextControls &&
                     "absolute right-px z-10 h-12 w-auto gap-0 py-0 sm:gap-0 sm:py-0",
-                  isComposerResting &&
+                  isComposerResting && !contextControls &&
                     (showInlineRestingControls ? "bottom-[calc(2rem+1px)]" : "bottom-px"),
                 )}
               >
+                {contextControls ? (
+                  <div className={cn("min-w-0 @max-[720px]/composer-surface:col-span-2", contextControlsOnly && "col-span-full")} data-chat-composer-context-controls>
+                    {contextControls}
+                  </div>
+                ) : null}
                 <div
                   ref={attachExpandedComposerControls}
                   data-chat-composer-controls="left"
                   data-chat-composer-footer-controls="true"
                   className={cn(
-                    "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-                    isComposerResting && "hidden",
+                    contextControls
+                      ? "relative flex min-w-0 items-center gap-1 overflow-x-auto border-s border-border p-1 ps-3 @max-[720px]/composer-surface:border-s-0 @max-[720px]/composer-surface:ps-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                      : "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                    ((isComposerResting && !contextControls) || contextControlsOnly) && "hidden",
                   )}
                 >
                   {composerControlsCollapsed ? null : composerControls}
@@ -7603,7 +7616,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                  className={cn("flex shrink-0 flex-nowrap items-center justify-end gap-2", contextControlsOnly && "hidden")}
                 >
                   {showComposerAttachAction ? (
                     <>

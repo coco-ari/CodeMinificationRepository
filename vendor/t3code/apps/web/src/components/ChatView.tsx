@@ -8606,7 +8606,7 @@ export default function ChatView(props: ChatViewProps) {
                   >
                     <ComposerSurface.Shell
                       contextStrip={
-                        isAutoOpsHosted() || showComposerContextStrip || showComposerModelStrip
+                        showComposerContextStrip || showComposerModelStrip
                       }
                     >
                       <ComposerSurface.Host
@@ -8775,6 +8775,22 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               threadPullRequests={(activeThreadShell ?? activeThread)?.pullRequests}
                               restingControlsHost={restingComposerControlsHost}
+                              contextControls={isAutoOpsHosted() ? (
+                                <AutoOpsThreadScopeControl
+                                  key={activeThread.id}
+                                  threadId={activeThread.id}
+                                  projectId={activeThread.projectId}
+                                  runtimeEnvironmentId={activeThread.environmentId}
+                                  isDraft={isLocalDraftThread}
+                                  draftTarget={composerDraftTarget}
+                                  submitting={isSendBusy}
+                                  customerRuntime={customerRuntime}
+                                  hasAcceptedMessage={
+                                    committedServerMessageIds.size > 0 ||
+                                    serverProjection?.messages.some(message => message.role === "user") === true
+                                  }
+                                />
+                              ) : undefined}
                               restingControlsHaveLeadingContext={
                                 isAutoOpsHosted() ||
                                 (mountComposerContextStrip &&
@@ -8852,25 +8868,6 @@ export default function ChatView(props: ChatViewProps) {
                                 className="min-w-0 flex-1"
                               />
                             </ComposerSurface.ContextStrip>
-                          ) : null}
-                          {isAutoOpsHosted() ? (
-                            <AutoOpsThreadScopeControl
-                              key={activeThread.id}
-                              threadId={activeThread.id}
-                              projectId={activeThread.projectId}
-                              runtimeEnvironmentId={activeThread.environmentId}
-                              isDraft={isLocalDraftThread}
-                              draftTarget={composerDraftTarget}
-                              submitting={isSendBusy}
-                              customerRuntime={customerRuntime}
-                              hasAcceptedMessage={
-                                committedServerMessageIds.size > 0 ||
-                                serverProjection?.messages.some(
-                                  (message) => message.role === "user",
-                                ) === true
-                              }
-                              composerControlsHostRef={setRestingComposerControlsHost}
-                            />
                           ) : null}
                           {mountComposerContextStrip && (
                             <div className="pointer-events-auto">

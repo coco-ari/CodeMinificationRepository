@@ -49,6 +49,7 @@ export function ScopeComposerChoice({
   keepSummaryVisible = false,
   labelWidth = 5,
   size = 'sm',
+  tone,
 }: {
   label: string
   summary: string
@@ -63,6 +64,7 @@ export function ScopeComposerChoice({
   keepSummaryVisible?: boolean
   labelWidth?: number
   size?: ComposerControlSize
+  tone?: 'default' | undefined
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const floating = useComposerMenuProps(trigger)
@@ -85,6 +87,7 @@ export function ScopeComposerChoice({
             <ComposerControl
               render={<span />}
               size={size}
+              tone={tone}
               tabIndex={0}
               aria-label={label}
               aria-description={summary}
@@ -109,7 +112,7 @@ export function ScopeComposerChoice({
           render={
             <MenuTrigger
               ref={trigger}
-              render={<ComposerControl size={size} />}
+              render={<ComposerControl size={size} tone={tone} />}
               aria-label={label}
               aria-description={summary}
               disabled={disabled}

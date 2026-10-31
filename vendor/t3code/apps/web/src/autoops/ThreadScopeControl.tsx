@@ -10,8 +10,6 @@ import {
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import { ProjectId, ThreadId, ProviderInstanceId, type EnvironmentId } from "@t3tools/contracts";
-import { ComposerSurface } from "~/components/chat/ComposerSurface";
-import { useComposerContextLabelsOverflow } from "~/components/BranchToolbar";
 import {
   composerDraftHasUserContent,
   useComposerDraftStore,
@@ -47,7 +45,6 @@ export function AutoOpsThreadScopeControl({
   submitting,
   hasAcceptedMessage,
   customerRuntime,
-  composerControlsHostRef,
 }: {
   threadId: string;
   projectId: string;
@@ -57,13 +54,10 @@ export function AutoOpsThreadScopeControl({
   submitting: boolean;
   hasAcceptedMessage: boolean;
   customerRuntime?: CustomerRuntime | undefined;
-  composerControlsHostRef?: (element: HTMLDivElement | null) => void;
 }) {
   const host = readAutoOpsHost();
   const scope = useAutoOpsThreadScope(threadId) ?? readAutoOpsThreadScope(threadId, projectId);
   const createThread = useNewThreadHandler();
-  const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
-  const compact = useComposerContextLabelsOverflow(stripElement);
   const [loading, setLoading] = useState(!isDraft);
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -197,14 +191,14 @@ export function AutoOpsThreadScopeControl({
   if (!host) return null;
   if (!scope)
     return error ? (
-      <ComposerSurface.ContextStrip>
+      <div>
         <ScopeReadError
           label="对话范围读取失败"
           error={error}
           busy={loading}
           onRetry={() => setReadAttempt((value) => value + 1)}
         />
-      </ComposerSurface.ContextStrip>
+      </div>
     ) : null;
   const project = host.projects.find((entry) => entry.id === projectId);
   if (!project) return null;
@@ -370,77 +364,39 @@ export function AutoOpsThreadScopeControl({
     }
   };
   return (
-    <ComposerSurface.ContextStrip
-      className="flex-col items-stretch gap-1"
-      data-compact={compact ? "" : undefined}
+    <div
+      className="group/composer-context flex min-w-0 flex-col items-stretch gap-1"
       data-autoops-thread-scope
       data-scope-state={locked ? "locked" : disabled ? "submitting" : "draft"}
     >
-      <div ref={setStripElement} className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <div className="flex min-w-0 max-w-full flex-initial flex-wrap items-center gap-1">
-          {host.assistantDirectoryEnabled ? (
-            <ScopeComposerChoice
-              label="助手"
-              size="xs"
-              labelWidth={5}
-              keepSummaryVisible
-              summary={
-                project.assistants?.items.find(
-                  (item) => item.preset.id === scope.question?.assistantId,
-                )?.preset.name ?? (scope.question?.assistantId === null ? "直接配置" : locked ? (scope.executionBinding?.kind === "customer" ? "本机助手" : agent?.name ?? "项目助手") : "选择助手")
-              }
-              icon={BotIcon}
-              value={scope.question?.assistantId === null ? "__direct__" : scope.question?.assistantId ?? ""}
-              options={[
-                ...(canAdjust ? [{ value: "__direct__", label: "直接配置" }] : []),
-                ...(project.assistants?.items.filter((item) => item.preset.enabled).map((item) => ({
-                  value: item.preset.id,
-                  label: item.available
-                    ? item.preset.name
-                    : `${item.preset.name} · ${item.reason?.message ?? "暂不可用"}`,
-                  disabled: !item.available,
-                })) ?? []),
-              ]}
-              locked={
-                locked ||
-                (!canAdjust &&
-                  !!scope.question &&
-                  (project.assistants?.items.filter((item) => item.available).length ?? 0) <= 1)
-              }
-              lockReason={!canAdjust && !locked ? "由项目管理员分配" : undefined}
-              disabled={disabled}
-              footer={
-                <>
-                  {refreshError ? <div role="alert" className="max-w-72 break-words px-2 py-1 text-xs text-destructive-foreground">{refreshError}</div> : null}
-                  {assistantReason && !["ASSISTANT_REQUIRED", "DEFAULT_ASSISTANT_REQUIRED"].includes(assistantReason.code) ? (
-                    <div role="status" className="max-w-72 break-words px-2 py-1 text-xs text-muted-foreground">
-                      {assistantReason.message}
-                    </div>
-                  ) : null}
-                  <MenuItem disabled={refreshingAssistants} closeOnClick onClick={() => void refreshAssistants()}>
-                    <RefreshCwIcon />
-                    {refreshingAssistants ? "正在刷新助手" : "刷新助手"}
-                  </MenuItem>
-                </>
-              }
-              onChange={(id) => {
-                if (id === "__direct__" && canAdjust) {
-                  void apply(scopeForDirectQuestion(projectId, scope), true);
-                  return;
-                }
-                const preset = project.assistants?.items.find(
-                  (item) => item.preset.id === id && item.available,
-                )?.preset;
-                if (preset) void apply(scopeFromAssistant(preset), true);
-              }}
-            />
-          ) : null}
+          <ScopeComposerChoice
+            label="业务环境"
+            size="xs"
+            labelWidth={3.5}
+            tone="default"
+            keepSummaryVisible
+            summary={scope.environmentId === null ? "无环境" : (environment?.name ?? "环境不可用")}
+            icon={ServerIcon}
+            value={scope.environmentId ?? "__none__"}
+            options={[
+              { value: "__none__", label: "无环境" },
+              ...project.environments.map((entry) => ({ value: entry.id, label: entry.name })),
+            ]}
+            locked={configLocked || scope.executionBinding?.kind === "customer"}
+            lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
+            disabled={disabled}
+            onChange={(value) => void apply({ environmentId: value === "__none__" ? null : value })}
+          />
           {host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
             <ScopeComposerChoice
               label="资料范围"
               size="xs"
-              labelWidth={5}
-              summary={scope.workspaceType === "external" ? "外部当前资料" : "内部当前资料"}
+              labelWidth={3.5}
+              tone="default"
+              keepSummaryVisible
+              summary={scope.workspaceType === "external" ? "外部资料" : "内部资料"}
               icon={EyeIcon}
               value={scope.workspaceType ?? "internal"}
               options={
@@ -465,6 +421,9 @@ export function AutoOpsThreadScopeControl({
             <ScopeComposerChoice
               label="运行位置"
               size="xs"
+              labelWidth={3.5}
+              tone="default"
+              keepSummaryVisible
               summary="已登记电脑目录"
               icon={EyeIcon}
               value="customer"
@@ -496,22 +455,64 @@ export function AutoOpsThreadScopeControl({
               )}
             </>
           )}
-          <ScopeComposerChoice
-            label="业务环境"
-            size="xs"
-            labelWidth={5}
-            summary={scope.environmentId === null ? "无环境" : (environment?.name ?? "环境不可用")}
-            icon={ServerIcon}
-            value={scope.environmentId ?? "__none__"}
-            options={[
-              { value: "__none__", label: "无环境" },
-              ...project.environments.map((entry) => ({ value: entry.id, label: entry.name })),
-            ]}
-            locked={configLocked || scope.executionBinding?.kind === "customer"}
-            lockReason={!canAdjust && !locked ? "由项目管理员设置" : undefined}
-            disabled={disabled}
-            onChange={(value) => void apply({ environmentId: value === "__none__" ? null : value })}
-          />
+          {host.assistantDirectoryEnabled ? (
+            <ScopeComposerChoice
+              label="助手预设"
+              size="xs"
+              labelWidth={3.5}
+              tone="default"
+              keepSummaryVisible
+              summary={
+                project.assistants?.items.find(
+                  (item) => item.preset.id === scope.question?.assistantId,
+                )?.preset.name ?? (scope.question?.assistantId === null ? "助手预设" : locked ? (scope.executionBinding?.kind === "customer" ? "本机助手" : agent?.name ?? "项目助手") : "选择预设")
+              }
+              icon={BotIcon}
+              value={scope.question?.assistantId ?? ""}
+              options={[
+                ...(project.assistants?.items.filter((item) => item.preset.enabled).map((item) => ({
+                  value: item.preset.id,
+                  label: item.available
+                    ? item.preset.name
+                    : `${item.preset.name} · ${item.reason?.message ?? "暂不可用"}`,
+                  disabled: !item.available,
+                })) ?? []),
+              ]}
+              locked={
+                locked ||
+                (!canAdjust &&
+                  !!scope.question &&
+                  (project.assistants?.items.filter((item) => item.available).length ?? 0) <= 1)
+              }
+              lockReason={!canAdjust && !locked ? "由项目管理员分配" : undefined}
+              disabled={disabled}
+              footer={
+                <>
+                  {canAdjust && scope.question?.assistantId ? (
+                    <MenuItem closeOnClick onClick={() => void apply(scopeForDirectQuestion(projectId, scope), true)}>
+                      {scope.executionBinding?.kind === "customer" ? "改用平台问答" : "取消使用预设"}
+                    </MenuItem>
+                  ) : null}
+                  {refreshError ? <div role="alert" className="max-w-72 break-words px-2 py-1 text-xs text-destructive-foreground">{refreshError}</div> : null}
+                  {assistantReason && !["ASSISTANT_REQUIRED", "DEFAULT_ASSISTANT_REQUIRED"].includes(assistantReason.code) ? (
+                    <div role="status" className="max-w-72 break-words px-2 py-1 text-xs text-muted-foreground">
+                      {assistantReason.message}
+                    </div>
+                  ) : null}
+                  <MenuItem disabled={refreshingAssistants} closeOnClick onClick={() => void refreshAssistants()}>
+                    <RefreshCwIcon />
+                    {refreshingAssistants ? "正在刷新助手" : "刷新助手"}
+                  </MenuItem>
+                </>
+              }
+              onChange={(id) => {
+                const preset = project.assistants?.items.find(
+                  (item) => item.preset.id === id && item.available,
+                )?.preset;
+                if (preset) void apply(scopeFromAssistant(preset), true);
+              }}
+            />
+          ) : null}
           {!host.assistantDirectoryEnabled && scope.executionBinding?.kind !== "customer" ? (
             <ScopeComposerChoice
               label="项目助手"
@@ -529,14 +530,6 @@ export function AutoOpsThreadScopeControl({
         {locked && scope.executionBinding?.kind === "customer" ? (
           <CustomerExecutionStatus threadId={threadId} />
         ) : null}
-        {composerControlsHostRef ? (
-          <div
-            ref={composerControlsHostRef}
-            data-composer-context-control
-            data-chat-resting-composer-controls-host="true"
-            className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
-          />
-        ) : null}
         {error ? (
           <ScopeReadError
             label="对话范围读取失败"
@@ -549,6 +542,6 @@ export function AutoOpsThreadScopeControl({
           />
         ) : null}
       </div>
-    </ComposerSurface.ContextStrip>
+    </div>
   );
 }

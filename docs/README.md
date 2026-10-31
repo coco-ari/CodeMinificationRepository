@@ -18,6 +18,7 @@
 | [T3 UI 规范](../examples/t3-ui-standard.md) | 外壳、呈现、原生组件、密度、交互和可视验收 |
 | [原生组件统一与旧前端退出](validation/frontend-native-ui.md) | 全站 Base UI 迁移、旧入口清理、焦点及浏览位置恢复、必要回归与 workbench 虚拟机发布证据 |
 | [平台问答直接配置](validation/direct-question.md) | 有调整权限者无需助手即可问答、可选预设、受限与电脑来源授权及对应验证 |
+| [问答输入区与可选助手预设](validation/composer-layout.md) | 单层输入表面、内部工具栏、预设取消、窄屏及菜单焦点与发布证据 |
 | [工作台导航与配置体验](../examples/workbench-navigation-design.md) | 五个活跃开源项目调研、全局工作台与项目导航分层、助手整页编辑；[本批验证](validation/workbench-navigation.md) |
 | [创建与删除闭环](../examples/resource-deletion-design.md) | 删除入口、级联归属、共享资源与失败恢复；[本批验证](validation/resource-deletion.md) |
 | [当前业务需求](../examples/workbench-v2-requirements.md) | 产品要实现什么、谁可以操作什么 |
