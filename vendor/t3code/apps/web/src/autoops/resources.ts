@@ -125,7 +125,7 @@ export function isAutoOpsResourceCwd(value: string | null): boolean {
   return (
     !!readAutoOpsHost() &&
     !!value &&
-    /^autoops:\/\/projects\/[a-zA-Z0-9_-]+\/environments\/[a-zA-Z0-9_-]+\/threads\/[a-zA-Z0-9_-]+(?:\?workspaceType=(?:internal|external)(?:&workspaceVersionId=[a-zA-Z0-9_-]+|&inputId=[a-zA-Z0-9_-]+)?)?$/.test(
+    /^autoops:\/\/projects\/[a-zA-Z0-9_-]+\/environments\/(?:~|[a-zA-Z0-9_-]+)\/threads\/[a-zA-Z0-9_-]+(?:\?workspaceType=(?:internal|external)(?:&workspaceVersionId=[a-zA-Z0-9_-]+|&inputId=[a-zA-Z0-9_-]+)?)?$/.test(
       value,
     )
   )

@@ -1,6 +1,7 @@
 import { AuthFilesystemReadScope, EnvironmentId, type AuthSessionState } from "@t3tools/contracts";
 import { beforeEach, expect, it, vi } from "vite-plus/test";
 import { installAutoOpsHost } from "../autoops/hostConfig";
+import { autoOpsResourceCwd } from "../autoops/resources";
 
 const state = vi.hoisted(() => ({
   session: null as Pick<AuthSessionState, "authenticated" | "scopes"> | null,
@@ -165,6 +166,22 @@ it("keeps bare @ in a native host directory idle even with a filesystem grant", 
     entries: [], error: null, isPending: false,
   });
   expect(state.searchRequests).not.toHaveBeenCalled();
+});
+
+it.each(["internal", "external"] as const)("无环境时仍可列出和补全已授权的 %s 资料，不请求宿主文件权限", (workspaceType) => {
+  state.session = { authenticated: true, scopes: [] };
+  const cwd = autoOpsResourceCwd("draft", "p-autoops", {
+    projectId: "p-autoops", environmentId: null, agentId: "a-project", visibility: "private", workspaceType,
+  });
+  for (const query of ["", "src", "src/"]) {
+    state.searchRequests.mockClear();
+    expect(useComposerPathSearch({ ...target, cwd, query })).toMatchObject({
+      entries: [{ path: "src/index.ts", kind: "file" }], error: null, isPending: false,
+    });
+    expect(state.searchRequests).toHaveBeenCalledExactlyOnceWith({
+      environmentId: target.environmentId, input: { cwd, query: `./${query}`, limit: 80 },
+    });
+  }
 });
 
 const workspaceCwd = "autoops://projects/p-autoops/environments/env-test/threads/thread-1?workspaceType=external&workspaceVersionId=version-1";

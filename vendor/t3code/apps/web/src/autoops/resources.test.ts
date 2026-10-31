@@ -144,7 +144,7 @@ it('shows workspace-relative candidate directories without changing resource ide
   )
 })
 
-it('recognizes fixed workspace browsing independently of legacy business resource paths', async () => {
+it.each(['env-test', '~'])('识别独立于旧业务路径的工作区目录，环境标识 %s', async (environment) => {
   const { installAutoOpsHost } = await import('./hostConfig')
   installAutoOpsHost(
     {
@@ -159,7 +159,7 @@ it('recognizes fixed workspace browsing independently of legacy business resourc
     'https://work.test',
   )
   const { isAutoOpsWorkspaceResourceCwd } = await import('./resources')
-  const base = 'autoops://projects/p-autoops/environments/env-test/threads/thread-1'
+  const base = `autoops://projects/p-autoops/environments/${environment}/threads/thread-1`
   expect(
     isAutoOpsWorkspaceResourceCwd(base + '?workspaceType=internal&workspaceVersionId=version-1'),
   ).toBe(true)
@@ -175,6 +175,9 @@ it('recognizes fixed workspace browsing independently of legacy business resourc
     base + '?workspaceType=internal&inputId=bad/id',
     base + '?workspaceVersionId=version-1',
     base + '?workspaceType=internal&workspaceVersionId=version-1&extra=x',
+    base.replace(`/environments/${environment}/`, '/environments/~env/') + '?workspaceType=internal',
+    base.replace('/projects/p-autoops/', '/projects/~/') + '?workspaceType=internal',
+    base.replace('/threads/thread-1', '/threads/~') + '?workspaceType=internal',
   ]) {
     expect(isAutoOpsWorkspaceResourceCwd(cwd)).toBe(false)
   }
