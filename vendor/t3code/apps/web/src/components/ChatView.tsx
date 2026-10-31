@@ -9084,7 +9084,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
-          browserAvailable={canOperatePreview && browserAvailable}
+          browserAvailable={autoOpsFeature("workspace") && canOperatePreview && browserAvailable}
           terminalAvailable={
             activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")
           }
@@ -9147,7 +9147,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurfaceStable}
             onAddPullRequests={addPullRequestsSurfaceStable}
             onAddDevice={addDeviceSurfaceStable}
-            browserAvailable={canOperatePreview && browserAvailable}
+            browserAvailable={autoOpsFeature("workspace") && canOperatePreview && browserAvailable}
             terminalAvailable={
               activeProject !== null && canOperateTerminal && autoOpsFeature("workspace")
             }
