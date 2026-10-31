@@ -34,6 +34,7 @@ import {
   type PreparedConnection,
 } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import { installClientHostIntegration } from "../hostIntegration.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { v2Now, v2Projection, v2ThreadId } from "../state/orchestrationV2TestFixtures.ts";
@@ -76,12 +77,18 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
   readonly commands: OrchestrationV2Command[];
   readonly projects: ProjectMutation[];
   readonly launches?: OrchestrationV2ThreadLaunchInput[];
+  readonly attachmentUploads?: unknown[];
   readonly projection?: OrchestrationV2ThreadProjection;
   readonly projectionRequests?: ThreadId[];
   readonly advertiseServerResolvedCommandContext?: boolean;
   readonly advertiseThreadStop?: boolean;
 }) {
   const client = {
+    [WS_METHODS.assetsPersistChatAttachments]: (uploadInput: unknown) =>
+      Effect.sync(() => {
+        input.attachmentUploads?.push(uploadInput);
+        return { attachments: [] };
+      }),
     [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
       Effect.sync(() => {
         input.commands.push(command);
@@ -317,6 +324,90 @@ describe("V2 environment commands", () => {
         deliveryIntent: "auto",
         dispatchMode: { type: "start_immediately" },
       });
+    }).pipe(Effect.provide(layerTestCrypto)),
+  );
+
+  it.effect("发送前宿主拒绝保留具体错误与未知提交语义，不上传附件或启动问答", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const launches: OrchestrationV2ThreadLaunchInput[] = [];
+      const attachmentUploads: unknown[] = [];
+      const supervisor = yield* makeSupervisor({
+        commands,
+        projects: [],
+        launches,
+        attachmentUploads,
+      });
+      for (const failure of [
+        Object.assign(new Error("当前成员须使用已分配的助手预设。"), {
+          code: "QUESTION_CONFIGURATION_FORBIDDEN",
+          status: 403,
+          uncertain: false,
+        }),
+        Object.assign(new Error("无法确认前次发送状态读取超时，请重试。"), {
+          code: "REQUEST_TIMEOUT",
+          status: undefined,
+          uncertain: false,
+        }),
+        Object.assign(new Error("提交结果尚未确认，请刷新核对后再操作。"), {
+          code: "CONNECTION_FAILED",
+          status: undefined,
+          uncertain: true,
+        }),
+        null,
+      ]) {
+        yield* Effect.acquireUseRelease(
+          Effect.sync(() =>
+            installClientHostIntegration({
+              beforeThreadLaunch: () => Promise.reject(failure),
+            }),
+          ),
+          () => Effect.gen(function* () {
+            const error = yield* startThreadTurn({
+              commandId: CommandId.make("rejected-host-launch"),
+              threadId: v2ThreadId,
+              message: {
+                messageId: MessageId.make("rejected-host-message"),
+                role: "user",
+                text: "保留未发送的输入",
+                attachments: [{
+                  type: "image",
+                  name: "附件.png",
+                  mimeType: "image/png",
+                  sizeBytes: 1,
+                  dataUrl: "data:image/png;base64,AA==",
+                }],
+              },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              bootstrap: {
+                createThread: {
+                  projectId: ProjectId.make("project-1"),
+                  title: "保留草稿",
+                  modelSelection: v2Projection.thread.modelSelection,
+                  runtimeMode: "full-access",
+                  interactionMode: "default",
+                  branch: null,
+                  worktreePath: null,
+                  createdAt: "2026-06-20T00:00:00.000Z",
+                },
+              },
+            }).pipe(
+              Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+              Effect.flip,
+            );
+            expect(error).toMatchObject({
+              _tag: "HostThreadLaunchError",
+              message: failure?.message ?? "无法完成发送前校验，请重试。",
+            });
+            expect(error.cause).toBe(failure);
+            expect(attachmentUploads).toEqual([]);
+            expect(commands).toEqual([]);
+            expect(launches).toEqual([]);
+          }),
+          () => Effect.sync(() => installClientHostIntegration({})),
+        );
+      }
     }).pipe(Effect.provide(layerTestCrypto)),
   );
 

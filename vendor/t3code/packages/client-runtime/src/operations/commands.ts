@@ -1,4 +1,8 @@
-import { prepareHostThreadLaunch, readHostTurnConfiguration } from "../hostIntegration.ts";
+import {
+  HostThreadLaunchError,
+  prepareHostThreadLaunch,
+  readHostTurnConfiguration,
+} from "../hostIntegration.ts";
 import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
 import {
   type ThreadLinkedPullRequest,
@@ -622,16 +626,23 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,
 ) {
-  // The host owns execution permissions; catalog-backed hosts leave model and
-  // reasoning selections to T3's existing draft/turn configuration.
-  input = { ...input, ...readHostTurnConfiguration({threadId:input.threadId}) };
+  // 宿主裁决执行权限；模型目录模式保留 T3 草稿及本轮的模型与思考强度选择。
+  input = { ...input, ...readHostTurnConfiguration({ threadId: input.threadId }) };
   const commandId = yield* allocateCommandId(input);
   if (input.bootstrap?.createThread) {
-    yield* Effect.tryPromise(() => prepareHostThreadLaunch({
-      threadId: input.threadId,
-      projectId: input.bootstrap!.createThread!.projectId,
-      ...(input.modelSelection === undefined ? {} : {modelSelection:input.modelSelection}),
-    }));
+    yield* Effect.tryPromise({
+      try: () =>
+        prepareHostThreadLaunch({
+          threadId: input.threadId,
+          projectId: input.bootstrap!.createThread!.projectId,
+          ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+        }),
+      catch: (cause) =>
+        new HostThreadLaunchError({
+          message: cause instanceof Error ? cause.message : "无法完成发送前校验，请重试。",
+          cause,
+        }),
+    });
   }
   const attachments = yield* persistAttachments(
     input.threadId,

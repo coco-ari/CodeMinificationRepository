@@ -1,4 +1,10 @@
 import type { ModelSelection, RuntimeMode } from '@t3tools/contracts'
+import * as Schema from 'effect/Schema'
+
+export class HostThreadLaunchError extends Schema.TaggedError<HostThreadLaunchError>()(
+  'HostThreadLaunchError',
+  { message: Schema.String, cause: Schema.Unknown },
+) {}
 /** Optional application boundary. Standalone T3 has no business host. */
 export interface HostThreadLaunch {
   readonly threadId: string
