@@ -5,8 +5,8 @@ import {
   installAutoOpsHost,
   type AutoOpsT3Bootstrap,
 } from 'virtual:autoops-t3-host'
+import { loadHostBootstrap } from './bootstrap'
 
-const bootstrapPath = '/api/agent-demo/t3/autoops/bootstrap'
 let applicationPromise: Promise<ComponentType> | undefined
 
 function loadApplication(bootstrap: AutoOpsT3Bootstrap): Promise<ComponentType> {
@@ -46,17 +46,11 @@ export function T3Host({ onAuthRequired }: { onAuthRequired?: () => void }) {
     const controller = new AbortController()
     setError(false)
     void (async () => {
-      const response = await fetch(bootstrapPath, {
-        credentials: 'same-origin',
-        signal: controller.signal,
-        headers: { Accept: 'application/json' },
-      })
-      if (response.status === 401) {
+      const bootstrap = await loadHostBootstrap(controller.signal)
+      if (bootstrap === null) {
         onAuthRequired?.()
         return
       }
-      if (!response.ok) throw new Error('对话不可用')
-      const bootstrap = (await response.json()) as AutoOpsT3Bootstrap
       if (controller.signal.aborted) return
       const Application = await loadApplication(bootstrap)
       if (!controller.signal.aborted) setApplication(() => Application)
