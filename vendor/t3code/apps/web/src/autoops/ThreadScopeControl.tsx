@@ -4,18 +4,14 @@ import { MenuItem } from "~/components/ui/menu";
 import { useEffect, useRef, useState } from "react";
 import { ScopeReadError } from "./ScopeReadError";
 import { BotIcon, EyeIcon, RefreshCwIcon, ServerIcon } from "lucide-react";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { ThreadId, ProviderInstanceId, type EnvironmentId } from "@t3tools/contracts";
 import {
-  scopeProjectRef,
-  scopeThreadRef,
-  scopedThreadKey,
-} from "@t3tools/client-runtime/environment";
-import { ProjectId, ThreadId, ProviderInstanceId, type EnvironmentId } from "@t3tools/contracts";
-import {
-  composerDraftHasUserContent,
   useComposerDraftStore,
   type ComposerThreadTarget,
 } from "~/composerDraftStore";
-import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
+import { collectComposerPromptInlineTokens } from "~/composer-editor-mentions";
+import { requestConfirmDialog } from "~/confirmDialog";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { toastManager } from "~/components/ui/toast";
 import { ConversationWorkspaceControl } from "./ConversationWorkspaceControl";
@@ -57,7 +53,6 @@ export function AutoOpsThreadScopeControl({
 }) {
   const host = readAutoOpsHost();
   const scope = useAutoOpsThreadScope(threadId) ?? readAutoOpsThreadScope(threadId, projectId);
-  const createThread = useNewThreadHandler();
   const [loading, setLoading] = useState(!isDraft);
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +61,11 @@ export function AutoOpsThreadScopeControl({
   const [refreshingAssistants, setRefreshingAssistants] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const wasSubmitting = useRef(false);
+  const selectionRevision = useRef(0);
+  useEffect(() => {
+    selectionRevision.current += 1;
+    return () => { selectionRevision.current += 1; };
+  }, [threadId, projectId, hasAcceptedMessage, submitting]);
   useEffect(() => {
     if (!isDraft || !scope?.question) return;
     const store = useComposerDraftStore.getState();
@@ -219,6 +219,10 @@ export function AutoOpsThreadScopeControl({
   const apply = async (patch: Partial<AutoOpsThreadScope>, loadPresetModel = false) => {
     if (locked || disabled || (!canAdjust && !patch.question)) return;
     const next = { ...scope, ...patch, scopeState: "draft" as const, scopeLocked: false };
+    if (loadPresetModel && patch.question) {
+      delete next.workspaceVersionId;
+      if (patch.question.configuration.workspaceType === null) delete next.workspaceType;
+    }
     if (next.question)
       next.question = {
         ...next.question,
@@ -280,12 +284,51 @@ export function AutoOpsThreadScopeControl({
     setError(null);
     try {
       const store = useComposerDraftStore.getState();
+      const materialChanged = executionChanged || next.workspaceType !== scope.workspaceType ||
+        next.workspaceVersionId !== scope.workspaceVersionId;
+      const skillsChanged = executionChanged ||
+        JSON.stringify(next.question?.configuration.skillIds) !== JSON.stringify(scope.question?.configuration.skillIds);
+      // 输入身份不携带可重写的资料范围，无法证明兼容时保留原稿并要求重新选择。
+      const referencesAllowChange = () => {
+        const draft = store.getComposerDraft(draftTarget);
+        const tokens = collectComposerPromptInlineTokens(draft?.prompt ?? "");
+        if (
+          (materialChanged && (tokens.some(token => token.type === "mention") ||
+            draft?.files.some(file => file.id.startsWith("autoops-resource:")) ||
+            draft?.terminalContexts.length || draft?.reviewComments.length ||
+            draft?.previewAnnotations.length || draft?.threadContexts.length)) ||
+          (skillsChanged && tokens.some(token => token.type === "skill"))
+        ) {
+          toastManager.add({ type: "info", title: "请先处理原资料引用",
+            description: "本次选择会改变引用的适用范围。请先移除文件、skill 或上下文引用，切换后重新选择；文字和原配置已保留。" });
+          return false;
+        }
+        return true;
+      };
+      if (!referencesAllowChange()) return;
+      if (executionChanged) {
+        const revision = selectionRevision.current;
+        const principalId = host.principal.id;
+        const target = next.executionBinding;
+        const presetName = project.assistants?.items.find(item => item.preset.id === next.question?.assistantId)?.preset.name;
+        const destination = target?.kind === "customer"
+          ? `用户电脑的已登记工作区${presetName ? `（${presetName}）` : ""}`
+          : "平台问答";
+        const confirmed = await requestConfirmDialog(
+          `后续消息将交给${destination}处理。当前文字和上传附件保留，确认切换执行位置。`,
+        );
+        const latest = readAutoOpsThreadScope(threadId, projectId);
+        if (!confirmed || selectionRevision.current !== revision ||
+          readAutoOpsHost()?.principal.id !== principalId || !latest ||
+          latest.scopeLocked || latest.scopeState === "locked" || latest.scopeState === "submitting" ||
+          !sameAutoOpsThreadScope(latest, scope)) return;
+        if (!referencesAllowChange()) return;
+      }
       const updateModel = async (
         target: ComposerThreadTarget,
         targetThreadId: string,
-        initialize = false,
       ) => {
-        if (!executionChanged && !loadPresetModel && !initialize) return;
+        if (!executionChanged && !loadPresetModel) return;
         if (next.question) {
           store.setModelSelection(target, questionModelSelection(next.question), {
             replaceOptions: true,
@@ -307,44 +350,15 @@ export function AutoOpsThreadScopeControl({
         );
       };
       const threadRef = scopeThreadRef(runtimeEnvironmentId, ThreadId.make(threadId));
-      const hasPreview =
-        (useRightPanelStore.getState().byThreadKey[scopedThreadKey(threadRef)]?.surfaces.length ??
-          0) > 0;
-      if (
-        boundaryChanged &&
-        (composerDraftHasUserContent(store.getComposerDraft(draftTarget)) || hasPreview || !isDraft)
-      ) {
-        const created = await createThread(
-          scopeProjectRef(runtimeEnvironmentId, ProjectId.make(projectId)),
-          { envMode: "local", forceNew: true },
-        );
-        if (created) {
-          setAutoOpsThreadScope(created.threadId, {
-            ...(next.executionBinding ? { executionBinding: next.executionBinding } : {}),
-            ...(next.question ? { question: next.question } : {}),
-            projectId: next.projectId,
-            environmentId: next.environmentId,
-            agentId: next.agentId,
-            visibility: next.visibility,
-            ...(next.workspaceType ? { workspaceType: next.workspaceType } : {}),
-          });
-          await updateModel(created.draftId, created.threadId, true);
-          toastManager.add({
-            type: "info",
-            title: "已新建干净草稿",
-            description: "原草稿及其资料引用保留在侧栏，可随时返回。",
-          });
-        }
-      } else {
-        if (!isDraft) await reserveAutoOpsThreadScope(threadId, next);
-        else setAutoOpsThreadScope(threadId, next);
-        await updateModel(draftTarget, threadId);
-        if (boundaryChanged) useRightPanelStore.getState().closeAllSurfaces(threadRef);
-      }
+      if (!isDraft) await reserveAutoOpsThreadScope(threadId, next);
+      else setAutoOpsThreadScope(threadId, next);
+      await updateModel(draftTarget, threadId);
+      if (boundaryChanged) useRightPanelStore.getState().closeAllSurfaces(threadRef);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "无法切换对话范围，请重试。");
+    } finally {
+      setChanging(false);
     }
-    setChanging(false);
   };
   const environment = project.environments.find((entry) => entry.id === scope.environmentId);
   const agent = project.agents.find((entry) => entry.id === scope.agentId);

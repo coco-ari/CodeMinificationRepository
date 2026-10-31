@@ -20,7 +20,10 @@ import { compileResolvedKeybindingsConfig } from "@t3tools/shared/keybindings";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { prepareHostThreadLaunch } from "@t3tools/client-runtime/host-integration";
 import { fakeTimers, render, stubGlobal } from "../../../test/render";
-import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import { DraftId, useComposerDraftStore, type ComposerThreadTarget } from "~/composerDraftStore";
+import { useRightPanelStore } from "~/rightPanelStore";
+import { ConfirmDialogHost } from "../ConfirmDialogHost";
+import { toastManager } from "../ui/toast";
 import { makeThreadFixture } from "~/test-fixtures";
 import { applyThemeColorPreview, applyThemePalette, getStandardThemeColors } from "~/themePalette";
 import { syncBrowserChromeTheme } from "~/hooks/useTheme";
@@ -243,12 +246,14 @@ function Harness({
   reason = null,
   customerRuntime,
   existing = false,
+  draftTarget = f.draftId,
 }: {
   fixture: Fixture;
   providers?: ServerProvider[];
   reason?: string | null;
   customerRuntime?: CustomerRuntime | undefined;
   existing?: boolean;
+  draftTarget?: ComposerThreadTarget;
 }) {
   const promptRef = useRef("");
   const thread = makeThreadFixture({
@@ -292,12 +297,12 @@ function Harness({
       projectId="composer-project"
       isDraft={!existing}
       runtimeEnvironmentId={f.environmentId}
-      draftTarget={f.draftId}
+      draftTarget={draftTarget}
       submitting={false}
       hasAcceptedMessage={existing}
       customerRuntime={customerRuntime}
     />,
-    composerDraftTarget: f.draftId,
+    composerDraftTarget: draftTarget,
     environmentId: f.environmentId,
     canOperateThread: true,
     attachmentUploadsCapabilityKnown: true,
@@ -771,9 +776,9 @@ it("紧凑问答栏仍显示当前助手，菜单明确标记已选项并可重�
   expect(f.bindings).toHaveLength(0);
 });
 
-it("实际输入器已有文本和未上传图片时切换来源新建干净草稿，原附件与选择保留", async () => {
-  await page.viewport(1280, 800);
-  const f = setup("actual-composer-dirty", true);
+it.each([1280, 390])("宽度 %s 的输入器已有文字、图片和预览时切换预设仍编辑原草稿", async (width) => {
+  await page.viewport(width, 800);
+  const f = setup(`actual-composer-dirty-${width}`, true);
   using _fetch = stubGlobal("fetch", f.fetcher);
   await using screen = await render(<Harness fixture={f} />);
   await editor().fill("原来源的必要输入");
@@ -792,22 +797,127 @@ it("实际输入器已有文本和未上传图片时切换来源新建干净草�
   const originalImage = useComposerDraftStore.getState().getComposerDraft(f.draftId)!.images[0];
   const originalPrompt = f.handle.current!.getSendContext().prompt;
   expect(originalPrompt).toContain("原来源的必要输入");
+  const threadRef = scopeThreadRef(f.environmentId, f.threadId);
+  useRightPanelStore.getState().openFile(threadRef, "autoops/composer-project/inputs/old/README.md");
   await page.getByRole("button", { name: "助手预设", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "另一个来源", exact: true }).click();
-  await vi.waitFor(() => expect(mocks.createThread).toHaveBeenCalledOnce());
-  const clean = useComposerDraftStore.getState().getComposerDraft(DraftId.make(`${f.id}-clean`));
-  expect(clean?.prompt ?? "").toBe("");
-  expect(clean?.images ?? []).toEqual([]);
+  await expect.element(page.getByRole("button", { name: "助手预设", exact: true })).toHaveTextContent("另一个来源");
+  expect(mocks.createThread).not.toHaveBeenCalled();
   expect(useComposerDraftStore.getState().getComposerDraft(f.draftId)?.images).toEqual([originalImage]);
   expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe(
-    "preset-one",
-  );
-  expect(readAutoOpsThreadScope(`${f.id}-clean`, "composer-project")?.question?.assistantId).toBe(
     "preset-two",
   );
   expect(f.handle.current?.getSendContext().prompt).toBe(originalPrompt);
   await expect.element(editor()).toBeVisible();
   await vi.waitFor(() => expect(editor().element().textContent).toContain("原来源的必要输入"));
+  await expect.element(editor()).toHaveFocus();
+  expect(f.handle.current?.getSendContext().selectedModelSelection).toMatchObject({model: "second-actual-model", options: [{id: "reasoningEffort", value: "low"}]});
+  expect(f.bindings).toHaveLength(0);
+  expect(f.sent).toHaveLength(0);
+});
+
+it("先写问题再选择与取消预设，正文和草稿身份保持", async () => {
+  await page.viewport(1280, 800);
+  const f = setup("typed-before-preset", true, false, "测试环境问答", true);
+  const host = readAutoOpsHost()!;
+  installAutoOpsHost({...host, projects: host.projects.map(project => ({...project,
+    environments: [{id: "test", name: "测试环境"}],
+    membership: {...project.membership!, environmentIds: ["test"]},
+    assistants: {...project.assistants!, items: [{available: true, preset: {...f.preset,
+      configuration: {...f.preset.configuration, environmentId: "test"}}}]},
+  }))}, window.location.origin);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} />);
+  await editor().fill("帮我看看今天的订单");
+  await page.getByRole("button", {name: "助手预设", exact: true}).click();
+  await page.getByRole("menuitemradio", {name: "测试环境问答", exact: true}).click();
+  await expect.element(page.getByRole("button", {name: "业务环境", exact: true})).toHaveTextContent("测试环境");
+  await expect.element(editor()).toHaveTextContent("帮我看看今天的订单");
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe("preset-one");
+  await page.getByRole("button", {name: "助手预设", exact: true}).click();
+  await page.getByRole("menuitem", {name: "取消使用预设", exact: true}).click();
+  await expect.element(editor()).toHaveTextContent("帮我看看今天的订单");
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBeNull();
+  expect(mocks.createThread).not.toHaveBeenCalled();
+  expect(f.bindings).toHaveLength(0);
+});
+
+it("资料引用跨范围时保留原文和配置，移除引用后能在同一草稿重选", async () => {
+  await page.viewport(1280, 800);
+  const f = setup("preset-with-reference", true);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<Harness fixture={f} />);
+  using toast = vi.spyOn(toastManager, "add");
+  await editor().fill('@"autoops/composer-project/inputs/private/README.md" 请分析 ');
+  const original = f.handle.current!.getSendContext().prompt;
+  await page.getByRole("button", {name: "助手预设", exact: true}).click();
+  await page.getByRole("menuitemradio", {name: "另一个来源", exact: true}).click();
+  await vi.waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({title: "请先处理原资料引用"})));
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.question?.assistantId).toBe("preset-one");
+  expect(f.handle.current!.getSendContext().prompt).toBe(original);
+  await editor().fill("请分析，重新选择资料");
+  await page.getByRole("button", {name: "助手预设", exact: true}).click();
+  await page.getByRole("menuitemradio", {name: "另一个来源", exact: true}).click();
+  await expect.element(page.getByRole("button", {name: "助手预设", exact: true})).toHaveTextContent("另一个来源");
+  await expect.element(editor()).toHaveTextContent("请分析，重新选择资料");
+  expect(mocks.createThread).not.toHaveBeenCalled();
+  expect(f.bindings).toHaveLength(0);
+});
+
+it("切换执行位置需确认，取消保留原配置，确认仍保留当前文字", async () => {
+  await page.viewport(1280, 800);
+  const f = setup("preset-execution-confirm", true);
+  const host = readAutoOpsHost()!;
+  installAutoOpsHost({...host, projects: host.projects.map(project => ({...project,
+    assistants: {...project.assistants!, items: project.assistants!.items.map(item => item.preset.id !== "preset-two" ? item : ({...item,
+      preset: {...item.preset, configuration: {...item.preset.configuration, executionBinding: f.target, workspaceType: null,
+        model: {...item.preset.configuration.model, instanceId: customerInstanceId(f.target)}}},
+    }))},
+  }))}, window.location.origin);
+  using _fetch = stubGlobal("fetch", f.fetcher);
+  await using screen = await render(<><ConfirmDialogHost /><Harness fixture={f} /></>);
+  await editor().fill("这段文字需要由我确认后交给电脑处理");
+  const choose = async () => {
+    await page.getByRole("button", {name: "助手预设", exact: true}).click();
+    await page.getByRole("menuitemradio", {name: "另一个来源", exact: true}).click();
+    await expect.element(page.getByRole("alertdialog")).toBeVisible();
+    expect(page.getByRole("alertdialog").element().textContent).toContain("用户电脑的已登记工作区");
+  };
+  await choose();
+  await page.getByRole("button", {name: "取消", exact: true}).click();
+  await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+  expect(readAutoOpsThreadScope(f.id, "composer-project")?.executionBinding?.kind).toBe("platform");
+  await choose();
+  await page.getByRole("button", {name: "确认", exact: true}).click();
+  await vi.waitFor(() => expect(readAutoOpsThreadScope(f.id, "composer-project")?.executionBinding).toEqual(f.target));
+  await expect.element(editor()).toHaveTextContent("这段文字需要由我确认后交给电脑处理");
+  expect(mocks.createThread).not.toHaveBeenCalled();
+  expect(f.bindings).toHaveLength(0);
+});
+
+it("旧会话的原生草稿分别保存，切到其他会话再返回恢复各自文字", async () => {
+  await page.viewport(1280, 800);
+  const first = setup("existing-draft-first", true), second = setup("existing-draft-second", true);
+  const targetA = scopeThreadRef(first.environmentId, first.threadId), targetB = scopeThreadRef(second.environmentId, second.threadId);
+  using _fetch = stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input), window.location.origin).pathname;
+    if (path.includes("/thread-bindings/")) return Response.json({binding: {...scopeFromAssistant(first.preset), scopeState: "locked", scopeLocked: true}});
+    return first.fetcher(input, init);
+  });
+  await using screen = await render(<Harness fixture={first} existing draftTarget={targetA} />);
+  await editor().fill("旧会话 A 未发送的问题");
+  await screen.rerender(<Harness fixture={second} existing draftTarget={targetB} />);
+  await editor().fill("旧会话 B 独立保存的问题");
+  await screen.rerender(<Harness fixture={first} existing draftTarget={targetA} />);
+  await expect.element(editor()).toHaveTextContent("旧会话 A 未发送的问题");
+  await expect.element(page.getByRole("button", {name: "助手预设", exact: true})).not.toBeInTheDocument();
+  await screen.rerender(<Harness fixture={second} existing draftTarget={targetB} />);
+  await expect.element(editor()).toHaveTextContent("旧会话 B 独立保存的问题");
+  expect(useComposerDraftStore.getState().getComposerDraft(targetA)?.prompt).toContain("旧会话 A");
+  expect(useComposerDraftStore.getState().getComposerDraft(targetB)?.prompt).toContain("旧会话 B");
+  expect(mocks.createThread).not.toHaveBeenCalled();
+  expect(first.sent).toHaveLength(0);
+  expect(second.sent).toHaveLength(0);
 });
 
 it("本机离线期间保留原模型及草稿，不选平台或其他本机来源", async () => {

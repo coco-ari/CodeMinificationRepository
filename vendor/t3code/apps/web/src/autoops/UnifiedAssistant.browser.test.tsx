@@ -6,6 +6,7 @@ import { fakeTimers, render, stubGlobal } from '../../test/render'
 import { DraftId, useComposerDraftStore } from '~/composerDraftStore'
 import { useRightPanelStore } from '~/rightPanelStore'
 import { AutoOpsThreadScopeControl } from './ThreadScopeControl'
+import { ConfirmDialogHost } from '~/components/ConfirmDialogHost'
 import {
   installAutoOpsHost,
   readAutoOpsThreadScope,
@@ -241,6 +242,39 @@ it('直接配置可载入预设并返回，保留合法范围和模型，清除�
   expect(readAutoOpsThreadScope(id, 'assistant-project')).toMatchObject({ environmentId: 'test', workspaceType: 'internal',
     question: { assistantId: null, presetRevision: null, configuration: { model: { model: 'first-model', reasoningEffort: 'high' }, skillIds: [] } } })
   expect(questionSendDisabledReason(readAutoOpsThreadScope(id, 'assistant-project'))).toBeNull()
+  expect(mock.createThread).not.toHaveBeenCalled()
+})
+
+it.each(['切换会话', '迟到引用'])('确认执行位置期间%s，不将过期选择应用到原稿', async (change) => {
+  const id = `pending-source-${change === '切换会话' ? 'route' : 'reference'}`, f = setup(true, id)
+  const first = f.host.projects[0]!.assistants!.items[0]!.preset
+  const initial = scopeFromAssistant(first)
+  setAutoOpsThreadScope(id, initial)
+  useComposerDraftStore.getState().setPrompt(DraftId.make(id), '保留原稿')
+  installAutoOpsHost({...f.host, projects: f.host.projects.map(project => ({...project,
+    assistants: {...project.assistants!, items: project.assistants!.items.map(item => item.preset.id !== 'second' ? item : ({...item,
+      preset: {...item.preset, configuration: {...item.preset.configuration,
+        workspaceType: null, executionBinding: {kind: 'customer' as const, deviceId: 'isolated-device', registeredWorkspaceId: 'isolated-directory', workspaceBindingRevision: 1, runtimeId: 'codex' as const},
+      }},
+    }))},
+  }))}, window.location.origin)
+  await using screen = await render(<><ConfirmDialogHost />{f.ui}</>)
+  await screen.getByRole('button', {name: '助手预设', exact: true}).click()
+  await page.getByRole('menuitemradio', {name: '外部资料', exact: true}).click()
+  await expect.element(page.getByRole('alertdialog')).toBeVisible()
+  if (change === '切换会话') {
+    await screen.rerender(<><ConfirmDialogHost /><AutoOpsThreadScopeControl
+      threadId={`${id}-other`} projectId="assistant-project" isDraft
+      runtimeEnvironmentId={EnvironmentId.make('assistant-runtime')} draftTarget={DraftId.make(`${id}-other`)}
+      submitting={false} hasAcceptedMessage={false}
+    /></>)
+  } else {
+    useComposerDraftStore.getState().setPrompt(DraftId.make(id), '@"autoops/assistant-project/inputs/private/README.md" 保留原稿 ')
+  }
+  await page.getByRole('button', {name: '确认', exact: true}).click()
+  await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument()
+  expect(readAutoOpsThreadScope(id, 'assistant-project')).toMatchObject(initial)
+  expect(useComposerDraftStore.getState().getComposerDraft(DraftId.make(id))?.prompt).toContain('保留原稿')
   expect(mock.createThread).not.toHaveBeenCalled()
 })
 
